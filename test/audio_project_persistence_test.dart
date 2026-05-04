@@ -48,14 +48,35 @@ void main() {
       );
 
       final loaded = await persistence.loadProjectState(projectDir);
-      expect(loaded['name'], 'Second Save');
-      expect((loaded['tracks'] as List), hasLength(1));
+      expect(loaded.projectState['name'], 'Second Save');
+      expect((loaded.projectState['tracks'] as List), hasLength(1));
 
       final rawFile = File('${projectDir.path}/project.json');
       expect(await rawFile.exists(), isTrue);
       final decoded =
           jsonDecode(await rawFile.readAsString()) as Map<String, dynamic>;
       expect(decoded['name'], 'Second Save');
+    });
+
+    test('falls back to newest recovery snapshot when project.json is corrupt',
+        () async {
+      await persistence.saveProjectState(
+        projectDir: projectDir,
+        projectState: <String, dynamic>{
+          'name': 'Recovery Save',
+          'tracks': <Map<String, dynamic>>[],
+        },
+        mode: AudioProjectSaveMode.autosave,
+      );
+
+      final rawFile = File('${projectDir.path}/project.json');
+      await rawFile.writeAsString('{broken json');
+
+      final loaded = await persistence.loadProjectState(projectDir);
+      expect(loaded.projectState['name'], 'Recovery Save');
+      expect(loaded.usedRecoveryBackup, isTrue);
+      expect(loaded.warningMessage, isNotNull);
+      expect(loaded.availableSnapshots, isNotEmpty);
     });
   });
 

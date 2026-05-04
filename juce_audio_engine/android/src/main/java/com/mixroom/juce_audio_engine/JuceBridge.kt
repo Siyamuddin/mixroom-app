@@ -39,8 +39,15 @@ object JuceBridge {
     @JvmStatic external fun unloadClipJNI(clipIndex: Int)
     @JvmStatic external fun endProjectClipLoadTransactionJNI()
     @JvmStatic external fun setClipGainJNI(clipIndex: Int, gain: Float)
+    @JvmStatic external fun setClipExtraGainLinearJNI(clipIndex: Int, gain: Float)
     @JvmStatic external fun muteClipJNI(clipIndex: Int, mute: Boolean)
     @JvmStatic external fun setClipPanJNI(clipIndex: Int, pan: Float)
+    @JvmStatic external fun setClipFadesJNI(
+        clipIndex: Int,
+        fadeInSec: Double,
+        fadeOutSec: Double,
+        fadeCurve: Int,
+    )
     @JvmStatic external fun setClipPitchJNI(clipIndex: Int, semitones: Float)
     @JvmStatic external fun setClipReversedJNI(clipIndex: Int, reversed: Boolean)
     @JvmStatic external fun setClipStretchOptionsJNI(

@@ -261,6 +261,7 @@ Globals:
         AUTH_SESSIONS_TABLE: !Ref AuthSessionsTable
         AUTH_RATE_LIMITS_TABLE: !Ref AuthRateLimitsTable
         CATALOG_MAPPINGS_TABLE: !Ref CatalogMappingsTable
+        COLLABORATION_TABLE: !Ref CollaborationTable
         CUSTOMER_LINKS_TABLE: !Ref CustomerLinksTable
         PURCHASE_TOKENS_TABLE: !Ref PurchaseTokensTable
         RECONCILIATION_JOBS_TABLE: !Ref ReconciliationJobsTable
@@ -299,6 +300,7 @@ Globals:
         POSTHOG_HOST: !Ref PostHogHost
         SENTRY_DSN: !Ref SentryDsn
         ENVIRONMENT: !Ref StageName
+        CLOUD_PROJECT_DOCUMENTS_BUCKET: !Ref CloudProjectDocumentsBucket
 
 Resources:
   BillingApi:
@@ -596,6 +598,66 @@ Resources:
         - AttributeName: provider_product_key
           KeyType: HASH
 
+  CollaborationTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub mixroom-collaboration-${StageName}
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: entity_id
+          AttributeType: S
+        - AttributeName: entity_type
+          AttributeType: S
+        - AttributeName: updated_at
+          AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
+        - AttributeName: organization_id
+          AttributeType: S
+        - AttributeName: workspace_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: entity_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: type_updated_idx
+          KeySchema:
+            - AttributeName: entity_type
+              KeyType: HASH
+            - AttributeName: updated_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: user_updated_idx
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+            - AttributeName: updated_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: organization_updated_idx
+          KeySchema:
+            - AttributeName: organization_id
+              KeyType: HASH
+            - AttributeName: updated_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: workspace_updated_idx
+          KeySchema:
+            - AttributeName: workspace_id
+              KeyType: HASH
+            - AttributeName: updated_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
   CustomerLinksTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -768,6 +830,26 @@ Resources:
         Rules:
           - ObjectOwnership: BucketOwnerEnforced
 
+  CloudProjectDocumentsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
   EntitlementApiFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -776,6 +858,10 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref EntitlementsCurrentTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CatalogMappingsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CollaborationTable
         - DynamoDBReadPolicy:
             TableName: !Ref AuthAccountsTable
         - DynamoDBCrudPolicy:
@@ -792,6 +878,82 @@ Resources:
             RestApiId: !Ref BillingApi
             Path: /v1/entitlements/me
             Method: get
+
+  BillingCatalogApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/api_billing_catalog.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref CatalogMappingsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref AuthAccountsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AuthSessionsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref AppAuthSecretArn
+      Events:
+        BillingCatalogGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/billing/catalog
+            Method: get
+
+  CollaborationApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/api_collaboration.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CollaborationTable
+        - S3CrudPolicy:
+            BucketName: !Ref CloudProjectDocumentsBucket
+        - DynamoDBReadPolicy:
+            TableName: !Ref AuthAccountsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AuthSessionsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref AppAuthSecretArn
+      Events:
+        OrganizationsMe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/organizations/me
+            Method: get
+        WorkspacesMe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/workspaces/me
+            Method: get
+        CloudProjectsMe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/cloud-projects/me
+            Method: get
+        CloudProjectDetailGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/cloud-projects/{project_id}
+            Method: get
+        CloudProjectDetailPut:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/cloud-projects/{project_id}
+            Method: put
 
   UsersApiFunction:
     Type: AWS::Serverless::Function
@@ -1193,6 +1355,93 @@ Resources:
           Properties:
             RestApiId: !Ref BillingApi
             Path: /v1/internal/admin/users/grant-prompts
+            Method: post
+
+  AdminBillingApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/api_admin_billing.handler
+      Environment:
+        Variables:
+          ADMIN_ALLOWLIST_TABLE: !Ref AdminAllowlistTable
+          ADMIN_COGNITO_APP_CLIENT_ID: !If
+            - HasAdminCognitoAppClientId
+            - !Ref AdminCognitoAppClientId
+            - !Ref CognitoAppClientId
+          ADMIN_COGNITO_USER_POOL_ID: !If
+            - HasAdminCognitoUserPoolId
+            - !Ref AdminCognitoUserPoolId
+            - !Ref CognitoUserPoolId
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref AdminAllowlistTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CatalogMappingsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CollaborationTable
+        - S3CrudPolicy:
+            BucketName: !Ref CloudProjectDocumentsBucket
+      Events:
+        AdminBillingCatalogGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/settings/billing-catalog
+            Method: get
+        AdminBillingCatalogPut:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/settings/billing-catalog
+            Method: put
+        AdminBillingOrganizationsGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/billing/organizations
+            Method: get
+        AdminBillingOrganizationsPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/billing/organizations
+            Method: post
+        AdminBillingMembershipsGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/billing/memberships
+            Method: get
+        AdminBillingMembershipsPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/billing/memberships
+            Method: post
+        AdminBillingWorkspacesGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/billing/workspaces
+            Method: get
+        AdminBillingWorkspacesPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/billing/workspaces
+            Method: post
+        AdminBillingCloudProjectsGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/billing/cloud-projects
+            Method: get
+        AdminBillingCloudProjectsPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/billing/cloud-projects
             Method: post
 
   AdminFeedbackApiFunction:
@@ -1942,6 +2191,9 @@ Outputs:
   TelemetryProjectSnapshotsBucketName:
     Description: Append-only bucket for project telemetry snapshots
     Value: !Ref TelemetryProjectSnapshotsBucket
+  CloudProjectDocumentsBucketName:
+    Description: Cloud project document storage bucket
+    Value: !Ref CloudProjectDocumentsBucket
   AppleWebhookUrl:
     Description: App Store Server Notifications endpoint
     Value: !Sub https://${BillingApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}/v1/webhooks/apple
@@ -1968,6 +2220,8 @@ Outputs:
     Value: !Ref AuthSessionsTable
   CatalogMappingsTableName:
     Value: !Ref CatalogMappingsTable
+  CollaborationTableName:
+    Value: !Ref CollaborationTable
   CustomerLinksTableName:
     Value: !Ref CustomerLinksTable
   PurchaseTokensTableName:

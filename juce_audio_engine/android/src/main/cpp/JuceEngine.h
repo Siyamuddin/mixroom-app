@@ -604,7 +604,9 @@ public:
     virtual void setTimeline(double startSec, double lengthSec, double inFileOffsetSec = 0.0) = 0;
     virtual void setMuted(bool m) = 0;
     virtual void setGainUi(float gainUi) = 0;
+    virtual void setExtraGainLinear(float gainLinear) = 0;
     virtual void setPanNormalized(float panNormalized) = 0;
+    virtual void setFades(double fadeInSec, double fadeOutSec, int fadeCurve) = 0;
     virtual void setPitchSemitones(float semitones) = 0;
     virtual void setReversed(bool shouldReverse) = 0;
     virtual void setStretchOptions(double tempoRatio, bool preservePitch) = 0;
@@ -643,13 +645,15 @@ inline float mixroomUiGainToLinear(float gainUi)
 
 inline void applyMixroomGainAndPan(juce::AudioBuffer<float> &buffer,
                                    float gainUi,
-                                   float panNormalized)
+                                   float panNormalized,
+                                   float extraGainLinear = 1.0f)
 {
     const int numChannels = buffer.getNumChannels();
     if (numChannels <= 0)
         return;
 
-    const float linearGain = mixroomUiGainToLinear(gainUi);
+    const float linearGain = mixroomUiGainToLinear(gainUi) *
+                             std::clamp(extraGainLinear, 0.0f, 64.0f);
     if (linearGain <= 0.0f)
     {
         buffer.clear();
@@ -671,6 +675,61 @@ inline void applyMixroomGainAndPan(juce::AudioBuffer<float> &buffer,
     {
         left[i] *= leftGain;
         right[i] *= rightGain;
+    }
+}
+
+inline void applyMixroomClipFades(juce::AudioBuffer<float> &buffer,
+                                  double firstTimelineSec,
+                                  double sampleRate,
+                                  double clipStartSec,
+                                  double clipLengthSec,
+                                  double fadeInSec,
+                                  double fadeOutSec,
+                                  int fadeCurve)
+{
+    const int numSamples = buffer.getNumSamples();
+    const int numChannels = buffer.getNumChannels();
+    if (numSamples <= 0 || numChannels <= 0 || sampleRate <= 0.0)
+        return;
+
+    const double safeFadeIn = juce::jlimit(0.0, clipLengthSec, fadeInSec);
+    const double safeFadeOut = juce::jlimit(0.0, clipLengthSec, fadeOutSec);
+    if (safeFadeIn <= 1.0e-6 && safeFadeOut <= 1.0e-6)
+        return;
+    const int safeCurve = juce::jlimit(0, 2, fadeCurve);
+    auto shapeFadeIn = [safeCurve](double t)
+    {
+        t = juce::jlimit(0.0, 1.0, t);
+        if (safeCurve == 1)
+            return std::sin(t * juce::MathConstants<double>::pi * 0.5);
+        if (safeCurve == 2)
+        {
+            const double s = t * t * (3.0 - (2.0 * t));
+            return std::sin(s * juce::MathConstants<double>::pi * 0.5);
+        }
+        return t;
+    };
+    auto shapeFadeOut = [safeCurve, &shapeFadeIn](double t)
+    {
+        t = juce::jlimit(0.0, 1.0, t);
+        if (safeCurve == 1 || safeCurve == 2)
+            return shapeFadeIn(t);
+        return t;
+    };
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const double localSec = (firstTimelineSec + ((double)i / sampleRate)) - clipStartSec;
+        double gain = 1.0;
+        if (safeFadeIn > 1.0e-6 && localSec < safeFadeIn)
+            gain = std::min(gain, shapeFadeIn(localSec / safeFadeIn));
+        if (safeFadeOut > 1.0e-6 && localSec > clipLengthSec - safeFadeOut)
+            gain = std::min(gain, shapeFadeOut((clipLengthSec - localSec) / safeFadeOut));
+        const float g = (float)juce::jlimit(0.0, 1.0, gain);
+        if (g >= 0.9999f)
+            continue;
+        for (int ch = 0; ch < numChannels; ++ch)
+            buffer.getWritePointer(ch)[i] *= g;
     }
 }
 
@@ -712,10 +771,21 @@ public:
                                     SimpleGainProcessor::kUiMax),
                          std::memory_order_relaxed);
     }
+    void setExtraGainLinear(float gainLinear) override
+    {
+        clipExtraGainLinear.store(std::clamp(gainLinear, 0.0f, 64.0f),
+                                  std::memory_order_relaxed);
+    }
     void setPanNormalized(float panNormalized) override
     {
         clipPanNormalized.store(std::clamp(panNormalized, -1.0f, 1.0f),
                                 std::memory_order_relaxed);
+    }
+    void setFades(double fadeInSec, double fadeOutSec, int fadeCurve) override
+    {
+        clipFadeInSec.store(juce::jmax(0.0, fadeInSec), std::memory_order_relaxed);
+        clipFadeOutSec.store(juce::jmax(0.0, fadeOutSec), std::memory_order_relaxed);
+        clipFadeCurve.store(juce::jlimit(0, 2, fadeCurve), std::memory_order_relaxed);
     }
     void setPitchSemitones(float semitones) override
     {
@@ -839,7 +909,16 @@ public:
 
         applyMixroomGainAndPan(temp,
                                clipGainUi.load(std::memory_order_relaxed),
-                               clipPanNormalized.load(std::memory_order_relaxed));
+                               clipPanNormalized.load(std::memory_order_relaxed),
+                               clipExtraGainLinear.load(std::memory_order_relaxed));
+        applyMixroomClipFades(temp,
+                              blockStart + ((double)writeStart / sr),
+                              sr,
+                              cs,
+                              cl,
+                              clipFadeInSec.load(std::memory_order_relaxed),
+                              clipFadeOutSec.load(std::memory_order_relaxed),
+                              clipFadeCurve.load(std::memory_order_relaxed));
 
         for (int ch = 0; ch < juce::jmin(2, buffer.getNumChannels()); ++ch)
             buffer.copyFrom(ch, writeStart, temp, ch, 0, framesToRead);
@@ -879,7 +958,11 @@ private:
     std::atomic<double> clipLengthSec{0.0};
     std::atomic<double> fileOffsetSec{0.0};
     std::atomic<float> clipGainUi{SimpleGainProcessor::kUiUnity};
+    std::atomic<float> clipExtraGainLinear{1.0f};
     std::atomic<float> clipPanNormalized{0.0f};
+    std::atomic<double> clipFadeInSec{0.0};
+    std::atomic<double> clipFadeOutSec{0.0};
+    std::atomic<int> clipFadeCurve{0};
     std::atomic<bool> muted{false};
 };
 
@@ -930,10 +1013,21 @@ public:
                                     SimpleGainProcessor::kUiMax),
                          std::memory_order_relaxed);
     }
+    void setExtraGainLinear(float gainLinear) override
+    {
+        clipExtraGainLinear.store(std::clamp(gainLinear, 0.0f, 64.0f),
+                                  std::memory_order_relaxed);
+    }
     void setPanNormalized(float panNormalized) override
     {
         clipPanNormalized.store(std::clamp(panNormalized, -1.0f, 1.0f),
                                 std::memory_order_relaxed);
+    }
+    void setFades(double fadeInSec, double fadeOutSec, int fadeCurve) override
+    {
+        clipFadeInSec.store(juce::jmax(0.0, fadeInSec), std::memory_order_relaxed);
+        clipFadeOutSec.store(juce::jmax(0.0, fadeOutSec), std::memory_order_relaxed);
+        clipFadeCurve.store(juce::jlimit(0, 2, fadeCurve), std::memory_order_relaxed);
     }
     void setPitchSemitones(float semitones) override
     {
@@ -1110,7 +1204,16 @@ public:
             applyRequestedPitchShift(temp);
             applyMixroomGainAndPan(temp,
                                    clipGainUi.load(std::memory_order_relaxed),
-                                   clipPanNormalized.load(std::memory_order_relaxed));
+                                   clipPanNormalized.load(std::memory_order_relaxed),
+                                   clipExtraGainLinear.load(std::memory_order_relaxed));
+            applyMixroomClipFades(temp,
+                                  readTimelineStart,
+                                  sr,
+                                  cs,
+                                  cl,
+                                  clipFadeInSec.load(std::memory_order_relaxed),
+                                  clipFadeOutSec.load(std::memory_order_relaxed),
+                                  clipFadeCurve.load(std::memory_order_relaxed));
 
             for (int ch = 0; ch < juce::jmin(2, buffer.getNumChannels()); ++ch)
                 buffer.copyFrom(ch, writeStart, temp, ch, 0, framesToRead);
@@ -1145,7 +1248,16 @@ public:
         applyRequestedPitchShift(temp);
         applyMixroomGainAndPan(temp,
                                clipGainUi.load(std::memory_order_relaxed),
-                               clipPanNormalized.load(std::memory_order_relaxed));
+                               clipPanNormalized.load(std::memory_order_relaxed),
+                               clipExtraGainLinear.load(std::memory_order_relaxed));
+        applyMixroomClipFades(temp,
+                              readTimelineStart,
+                              sr,
+                              cs,
+                              cl,
+                              clipFadeInSec.load(std::memory_order_relaxed),
+                              clipFadeOutSec.load(std::memory_order_relaxed),
+                              clipFadeCurve.load(std::memory_order_relaxed));
 
         for (int ch = 0; ch < juce::jmin(2, buffer.getNumChannels()); ++ch)
             buffer.copyFrom(ch, writeStart, temp, ch, 0, framesToRead);
@@ -1326,7 +1438,11 @@ private:
     std::atomic<double> clipLengthSec{0.0};
     std::atomic<double> fileOffsetSec{0.0};
     std::atomic<float> clipGainUi{SimpleGainProcessor::kUiUnity};
+    std::atomic<float> clipExtraGainLinear{1.0f};
     std::atomic<float> clipPanNormalized{0.0f};
+    std::atomic<double> clipFadeInSec{0.0};
+    std::atomic<double> clipFadeOutSec{0.0};
+    std::atomic<int> clipFadeCurve{0};
     std::atomic<float> pitchSemitones{0.0f};
     std::atomic<bool> reversed{false};
     std::atomic<double> tempoPlaybackRatio{1.0};
@@ -1376,10 +1492,20 @@ public:
                                     SimpleGainProcessor::kUiMax),
                          std::memory_order_relaxed);
     }
+    void setExtraGainLinear(float gainLinear) override
+    {
+        clipExtraGainLinear.store(std::clamp(gainLinear, 0.0f, 64.0f),
+                                  std::memory_order_relaxed);
+    }
     void setPanNormalized(float panNormalized) override
     {
         clipPanNormalized.store(std::clamp(panNormalized, -1.0f, 1.0f),
                                 std::memory_order_relaxed);
+    }
+
+    void setFades(double fadeInSec, double fadeOutSec, int fadeCurve) override
+    {
+        juce::ignoreUnused(fadeInSec, fadeOutSec, fadeCurve);
     }
 
     void setPitchSemitones(float semitones) override
@@ -1802,7 +1928,8 @@ public:
         {
             applyMixroomGainAndPan(buffer,
                                    clipGainUi.load(std::memory_order_relaxed),
-                                   clipPanNormalized.load(std::memory_order_relaxed));
+                                   clipPanNormalized.load(std::memory_order_relaxed),
+                                   clipExtraGainLinear.load(std::memory_order_relaxed));
             return;
         }
 
@@ -1954,7 +2081,8 @@ public:
 
         applyMixroomGainAndPan(buffer,
                                clipGainUi.load(std::memory_order_relaxed),
-                               clipPanNormalized.load(std::memory_order_relaxed));
+                               clipPanNormalized.load(std::memory_order_relaxed),
+                               clipExtraGainLinear.load(std::memory_order_relaxed));
     }
 
     const juce::String getName() const override { return "TimelineMidiClipProcessor"; }
@@ -3590,6 +3718,7 @@ private:
     std::atomic<double> clipLengthSec{0.0};
     std::atomic<double> fileOffsetSec{0.0};
     std::atomic<float> clipGainUi{SimpleGainProcessor::kUiUnity};
+    std::atomic<float> clipExtraGainLinear{1.0f};
     std::atomic<float> clipPanNormalized{0.0f};
     std::atomic<float> pitchSemitones{0.0f};
     std::atomic<double> tempoPlaybackRatio{1.0};
@@ -3759,8 +3888,10 @@ public:
 
     // CLIP-LEVEL
     void setClipGain(int clipIndex, float gain); // gain UI ∈ 0..3 (mapped to -60..+6 dB)
+    void setClipExtraGainLinear(int clipIndex, float gainLinear); // linear clip-only multiplier for normalization
     void muteClip(int clipIndex, bool shouldMute);
     void setClipPan(int clipIndex, float pan); // -1..1 where 0 = center
+    void setClipFades(int clipIndex, double fadeInSec, double fadeOutSec, int fadeCurve);
     void setClipPitch(int clipIndex, float semitones); // pitch ∈ -24..24
     void setClipReversed(int clipIndex, bool shouldReverse);
     void setClipStretchOptions(int clipIndex, double tempoRatio, bool preservePitch);
@@ -4029,7 +4160,11 @@ private:
         double tempoRatio = 1.0;
         bool preservePitch = false;
         float gainUi = kGainUiUnity;
+        float extraGainLinear = 1.0f;
         float panNormalized = 0.0f;
+        double fadeInSec = 0.0;
+        double fadeOutSec = 0.0;
+        int fadeCurve = 0;
 
         // authoritative source state used to rebuild fresh player nodes
         juce::String sourceFilePath;
@@ -4341,8 +4476,8 @@ public:
 
         if (!enabled || !isPlaying)
         {
-            engine.applyOutputSafetyGuard(outputChannelData, numOutputChannels, numSamples);
             engine.updateMasterMeterFromOutput(outputChannelData, numOutputChannels, numSamples);
+            engine.applyOutputSafetyGuard(outputChannelData, numOutputChannels, numSamples);
             return;
         }
 
@@ -4408,8 +4543,8 @@ public:
                 outputChannelData[ch][i] += out;
         }
 
-        engine.applyOutputSafetyGuard(outputChannelData, numOutputChannels, numSamples);
         engine.updateMasterMeterFromOutput(outputChannelData, numOutputChannels, numSamples);
+        engine.applyOutputSafetyGuard(outputChannelData, numOutputChannels, numSamples);
     }
 
     void setupClickFilter(bool accent)

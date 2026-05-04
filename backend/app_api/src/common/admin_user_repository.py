@@ -23,6 +23,9 @@ except ModuleNotFoundError:  # pragma: no cover - local dev/test fallback
         pass
 
 from . import config
+from .billing_catalog import catalog_plan_by_code, infer_plan_code
+from .billing_catalog_repository import BillingCatalogRepository
+from .collaboration_repository import CollaborationRepository
 from .models import (
     choose_primary_subscription,
     normalize_provider,
@@ -125,6 +128,8 @@ class AdminUserRepository:
         self._customer_links = None
         self._purchase_tokens = None
         self._tombstones = None
+        self._catalog_repo = BillingCatalogRepository()
+        self._collaboration_repo = CollaborationRepository()
         self._billing_repo = (
             BillingRepository()
             if boto3 is not None and BillingRepository is not None
@@ -571,6 +576,25 @@ class AdminUserRepository:
             subscription_tier in ("pro", "studio")
             and status_has_active_access(subscription_status)
         )
+        catalog_repo = getattr(self, "_catalog_repo", BillingCatalogRepository())
+        collaboration_repo = getattr(
+            self,
+            "_collaboration_repo",
+            CollaborationRepository(),
+        )
+        plan_code = infer_plan_code(
+            _safe_str(entitlement.get("plan_code")),
+            subscription_tier,
+        )
+        plan = catalog_plan_by_code(
+            plan_code,
+            catalog=catalog_repo.get_catalog(),
+        )
+        collaboration_summary = (
+            collaboration_repo.build_user_access_snapshot(user_id).get("summary") or {}
+            if collaboration_repo.is_configured()
+            else {}
+        )
 
         return {
             "user_id": user_id,
@@ -628,6 +652,18 @@ class AdminUserRepository:
             "subscription_provider": subscription_provider,
             "has_active_subscription": has_active_subscription,
             "subscription_count": len(subscriptions),
+            "plan_code": _safe_str(plan.get("code")),
+            "plan_label": _safe_str(plan.get("label")),
+            "plan_group": _safe_str(plan.get("group")),
+            "organization_count": _safe_int(
+                collaboration_summary.get("organization_count")
+            ),
+            "workspace_count": _safe_int(
+                collaboration_summary.get("workspace_count")
+            ),
+            "cloud_project_count": _safe_int(
+                collaboration_summary.get("cloud_project_count")
+            ),
             "ai_credits_used_today": _safe_int(ai_usage_state.get("ai_credits_used_today")),
             "ai_tokens_used_month": _safe_int(ai_usage_state.get("ai_tokens_used_month")),
             "ai_prompts_used_today": _safe_int(ai_usage_state.get("ai_prompts_used_today")),

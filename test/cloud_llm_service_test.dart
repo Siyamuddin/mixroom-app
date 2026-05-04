@@ -2395,6 +2395,41 @@ void main() {
       expect(result.meta?['soft_error']?['usage_refunded'], isTrue);
     });
 
+    test('does not describe upstream 429s as prompt limit exhaustion',
+        () async {
+      final client = MockClient((_) async {
+        return http.Response(
+          jsonEncode({
+            'error': {
+              'message': 'Rate limit reached for model.',
+              'type': 'rate_limit_exceeded',
+              'code': 'rate_limit_exceeded',
+            },
+          }),
+          429,
+        );
+      });
+
+      final service = CloudLlmService(
+        proxyApiBaseUrl: 'https://proxy.mixroom.test',
+        authTokenProvider: () async => 'session-token',
+        httpClient: client,
+      );
+      final result = await service.send(
+        conversation: const [],
+        userText: 'Add reverb to drums.',
+        projectSnapshot: 'Track 1: Drums',
+      );
+
+      expect(
+        result.text,
+        "I couldn't complete that request just now. Please try again in a moment.",
+      );
+      expect(result.text, isNot(contains('prompt limit')));
+      expect(result.meta?['soft_error']?['code'], 'request_failed');
+      expect(result.meta?['soft_error']?['usage_refunded'], isTrue);
+    });
+
     test(
         'retries proxy requests once after auth rejection with a refreshed token',
         () async {

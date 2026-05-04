@@ -1,11 +1,14 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:mixroom/ai/assistant_action_utils.dart';
+import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/instrument_picker_categories.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/models.dart';
@@ -18,8 +21,14 @@ typedef MidiCommitCallback = Future<void> Function({
 });
 
 typedef PianoKeyDownCallback = Future<void> Function(
-    int pitch, double velocity);
-typedef PianoKeyUpCallback = Future<void> Function(int pitch);
+  AudioTrack clip,
+  int pitch,
+  double velocity,
+);
+typedef PianoKeyUpCallback = Future<void> Function(
+  AudioTrack clip,
+  int pitch,
+);
 
 const Color _kPianoShellText = Color(0xFFF4F4F4);
 const Color _kPianoShellMutedText = Color(0xB8F4F4F4);
@@ -97,6 +106,7 @@ class PianoRollEditor extends StatefulWidget {
     this.onPreviewNote,
     this.onKeyboardNoteDown,
     this.onKeyboardNoteUp,
+    this.onOpenCurrentInstrumentUi,
   });
 
   final AudioTrack clip;
@@ -116,6 +126,7 @@ class PianoRollEditor extends StatefulWidget {
   final Future<void> Function(int pitch, double velocity)? onPreviewNote;
   final PianoKeyDownCallback? onKeyboardNoteDown;
   final PianoKeyUpCallback? onKeyboardNoteUp;
+  final Future<bool> Function()? onOpenCurrentInstrumentUi;
 
   @override
   State<PianoRollEditor> createState() => _PianoRollEditorState();
@@ -136,6 +147,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   static const double _maxPxPerBeat = 220.0;
   static const double _followPlayheadViewportAnchor = 0.42;
   static const double _rollExtensionChunkBeats = 16.0;
+  static const double _rulerHeight = 28.0;
   static const List<_PianoRollGridOption> _gridOptions = <_PianoRollGridOption>[
     _PianoRollGridOption(label: '1/4', divisionsPerBar: 4),
     _PianoRollGridOption(label: '1/8', divisionsPerBar: 8),
@@ -146,6 +158,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   final ScrollController _horizontalController = ScrollController();
   final ScrollController _gridVerticalController = ScrollController();
   final ScrollController _keysVerticalController = ScrollController();
+  final GlobalKey _gridViewportKey = GlobalKey();
 
   late final TabController _tabController;
   late final Ticker _followViewportTicker;
@@ -161,10 +174,13 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   bool _suppressNextGridTap = false;
   final Map<int, int> _pressedPreviewCounts = <int, int>{};
   final Set<int> _pressedKeyboardPitches = <int>{};
+  final Map<int, int> _pianoKeyPitchByPointer = <int, int>{};
   bool _pinchZoomActive = false;
   bool _lockGridScroll = false;
   bool _followPlayhead = false;
   bool _suppressFollowScrollScrub = false;
+  bool _initialNoteViewportSyncPending = false;
+  int _initialNoteViewportSyncAttempts = 0;
   double _rollViewportWidth = 0.0;
   bool _followScrubUserActive = false;
 
@@ -176,6 +192,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   late String _syncedInstrumentId;
   late String _instrumentName;
   late String _syncedInstrumentName;
+  late ({int min, int max}) _pinnedPitchRange;
   String _instrumentBrowserCategory = 'All';
 
   String? _selectedNoteId;
@@ -192,9 +209,13 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
   Offset? _boxSelectStartLocal;
   Offset? _boxSelectCurrentLocal;
+  int? _desktopBoxSelectPointer;
   DateTime _ignoreGridTapUntil = DateTime.fromMillisecondsSinceEpoch(0);
   final Map<int, Offset> _activeGridPointers = <int, Offset>{};
+  final Map<int, Offset> _activeGridGlobalPointers = <int, Offset>{};
   bool _manualPinchActive = false;
+  bool _manualPinchUpdateScheduled = false;
+  int _manualPinchUpdateToken = 0;
   Offset _pinchStartPointA = Offset.zero;
   Offset _pinchStartPointB = Offset.zero;
   double _pinchStartPxPerBeat = 56.0;
@@ -215,20 +236,40 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       _syncPlayheadViewport();
     })
       ..start();
-    _loadFromClip();
+    _loadFromClip(resetPitchRange: true);
     _gridVerticalController.addListener(_syncKeysWithGridScroll);
+    _scheduleInitialNoteViewportSync();
   }
 
   @override
   void didUpdateWidget(covariant PianoRollEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!oldWidget.isRecording && widget.isRecording) {
+      _commitDebounce?.cancel();
+      _commitQueued = false;
+      _activeDragNoteId = null;
+      _activeDragIsResize = false;
+      _dragStartNotesById = null;
+      _dragAccumDxBeat = 0.0;
+      _dragAccumDyRows = 0.0;
+      _didMoveDuringDrag = false;
+      _boxSelectStartLocal = null;
+      _boxSelectCurrentLocal = null;
+      _lockGridScroll = false;
+      _suppressNextGridTap = false;
+      _clearSelection();
+    }
     final clipIdentityChanged =
         oldWidget.clip.engineClipId != widget.clip.engineClipId;
     final clipContentChanged = _clipDataDiffersFromSyncedClip(widget.clip);
     if (clipIdentityChanged || clipContentChanged) {
-      _loadFromClip();
+      if (clipIdentityChanged) {
+        _releaseAllPianoKeys();
+      }
+      _loadFromClip(resetPitchRange: clipIdentityChanged);
       if (clipIdentityChanged) {
         _clearSelection();
+        _scheduleInitialNoteViewportSync();
       } else {
         _selectedNoteIds.removeWhere(
           (id) => !_notes.any((n) => n.id == id),
@@ -253,9 +294,12 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
   @override
   void dispose() {
+    _releaseAllPianoKeys();
     _commitDebounce?.cancel();
     _activeGridPointers.clear();
+    _activeGridGlobalPointers.clear();
     _manualPinchActive = false;
+    _manualPinchUpdateToken++;
     _followViewportTicker.dispose();
     _horizontalController.dispose();
     _gridVerticalController.removeListener(_syncKeysWithGridScroll);
@@ -266,7 +310,23 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     super.dispose();
   }
 
-  void _loadFromClip() {
+  void _releaseAllPianoKeys() {
+    if (_pressedKeyboardPitches.isEmpty && _pressedPreviewCounts.isEmpty) {
+      _pianoKeyPitchByPointer.clear();
+      return;
+    }
+    final keyboardPitches = _pressedKeyboardPitches.toList(growable: false);
+    _pianoKeyPitchByPointer.clear();
+    _pressedPreviewCounts.clear();
+    _pressedKeyboardPitches.clear();
+    final recordCallback = widget.onKeyboardNoteUp;
+    if (recordCallback == null) return;
+    for (final pitch in keyboardPitches) {
+      unawaited(recordCallback(widget.clip, pitch));
+    }
+  }
+
+  void _loadFromClip({required bool resetPitchRange}) {
     _notes = widget.clip.midiNotes.map((n) => n.copy()).toList();
     _syncedClipNotes = widget.clip.midiNotes.map((n) => n.copy()).toList();
     _params = Map<String, double>.from(widget.clip.instrumentParams);
@@ -284,9 +344,20 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     final categories = _instrumentBrowserCategories();
     _instrumentBrowserCategory =
         categories.contains(category) ? category : 'All';
+    if (resetPitchRange) {
+      _pinnedPitchRange = _pitchRangeForNotes(_notes);
+    }
   }
 
   void _ensureDefaultParams() {
+    final spec =
+        widget.availableInstruments.cast<Map<String, dynamic>?>().firstWhere(
+              (candidate) => (candidate?['id'] as String?) == _instrumentId,
+              orElse: () => null,
+            );
+    if (spec != null && _isExternalPluginInstrumentSpec(spec)) {
+      return;
+    }
     if (_isSampledInstrumentId(_instrumentId)) {
       _params.putIfAbsent('outputGain', () => 0.72);
       _params.putIfAbsent('attackMs', () => 6.0);
@@ -303,6 +374,15 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
   bool _isSampledInstrumentId(String id) {
     return id.trim().toLowerCase().startsWith('sfz.');
+  }
+
+  Map<String, dynamic>? _instrumentSpecForId(String id) {
+    for (final spec in widget.availableInstruments) {
+      if ((spec['id'] as String?) == id) {
+        return spec;
+      }
+    }
+    return null;
   }
 
   String _instrumentCategoryForSpec(Map<String, dynamic> spec) {
@@ -354,6 +434,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
         params[entry.key] = value.toDouble();
       }
     }
+    if (_isExternalPluginInstrumentSpec(spec)) {
+      return params;
+    }
     if (sampled) {
       params.putIfAbsent('outputGain', () => 0.72);
       params.putIfAbsent('attackMs', () => 6.0);
@@ -369,6 +452,16 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     params.putIfAbsent('releaseMs', () => 180.0);
     params.putIfAbsent('drive', () => 0.08);
     return params;
+  }
+
+  bool _isExternalPluginInstrumentSpec(Map<String, dynamic> spec) {
+    return spec['isExternalPlugin'] == true;
+  }
+
+  bool get _currentInstrumentIsExternalPlugin {
+    final spec = _instrumentSpecForId(_instrumentId);
+    if (spec == null) return false;
+    return _isExternalPluginInstrumentSpec(spec);
   }
 
   void _setInstrumentFromSpec(Map<String, dynamic> spec) {
@@ -446,19 +539,30 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     _syncingVerticalScroll = false;
   }
 
-  void _jumpBothVerticalControllers(double targetOffset) {
+  void _jumpBothVerticalControllers(
+    double targetOffset, {
+    double? contentHeight,
+  }) {
     _syncingVerticalScroll = true;
     if (_gridVerticalController.hasClients) {
+      final viewport = _gridVerticalController.position.viewportDimension;
+      final maxExtent = contentHeight == null
+          ? _gridVerticalController.position.maxScrollExtent
+          : math.max(0.0, contentHeight - viewport);
       final gridTarget = targetOffset.clamp(
         _gridVerticalController.position.minScrollExtent,
-        _gridVerticalController.position.maxScrollExtent,
+        maxExtent,
       );
       _gridVerticalController.jumpTo(gridTarget);
     }
     if (_keysVerticalController.hasClients) {
+      final viewport = _keysVerticalController.position.viewportDimension;
+      final maxExtent = contentHeight == null
+          ? _keysVerticalController.position.maxScrollExtent
+          : math.max(0.0, contentHeight - viewport);
       final keysTarget = targetOffset.clamp(
         _keysVerticalController.position.minScrollExtent,
-        _keysVerticalController.position.maxScrollExtent,
+        maxExtent,
       );
       _keysVerticalController.jumpTo(keysTarget);
     }
@@ -467,14 +571,14 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
   double get _msPerBeat => 60000.0 / widget.bpm.clamp(1.0, 400.0);
 
-  ({int min, int max}) get _visiblePitchRange {
-    if (_notes.isEmpty) {
+  ({int min, int max}) _pitchRangeForNotes(List<MidiNote> notes) {
+    if (notes.isEmpty) {
       return (min: _defaultMinPitch, max: _defaultMaxPitch);
     }
 
-    var minNotePitch = _notes.first.pitch;
-    var maxNotePitch = _notes.first.pitch;
-    for (final note in _notes.skip(1)) {
+    var minNotePitch = notes.first.pitch;
+    var maxNotePitch = notes.first.pitch;
+    for (final note in notes.skip(1)) {
       minNotePitch = math.min(minNotePitch, note.pitch);
       maxNotePitch = math.max(maxNotePitch, note.pitch);
     }
@@ -490,10 +594,15 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     return (min: minPitch, max: maxPitch);
   }
 
+  ({int min, int max}) get _visiblePitchRange => _pinnedPitchRange;
+
   int get _pitchCount {
     final pitchRange = _visiblePitchRange;
     return (pitchRange.max - pitchRange.min) + 1;
   }
+
+  List<MidiNote> get _displayNotes =>
+      widget.isRecording ? widget.clip.midiNotes : _notes;
 
   double get _contentHeight => _pitchCount * _rowHeight;
 
@@ -509,10 +618,10 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
   double get _maxBeat {
     var beat = math.max(32.0, _clipSpanBeat + 8.0);
-    for (final n in _notes) {
+    for (final n in _displayNotes) {
       beat = math.max(beat, n.startBeat + n.lengthBeats + 1.0);
     }
-    beat = math.max(beat, _playheadBeat + 8.0);
+    beat = math.max(beat, _clampedClipPlayheadBeat + 8.0);
     if (_horizontalController.hasClients) {
       final visibleEndBeat = (_horizontalController.offset +
               _horizontalController.position.viewportDimension) /
@@ -553,7 +662,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     final ids = _effectiveSelectedIds;
     if (ids.isEmpty) return const <MidiNote>[];
     final out = <MidiNote>[];
-    for (final n in _notes) {
+    for (final n in _displayNotes) {
       if (ids.contains(n.id)) out.add(n);
     }
     return out;
@@ -572,7 +681,28 @@ class _PianoRollEditorState extends State<PianoRollEditor>
           _msPerBeat)
       .toDouble();
 
-  double get _followScrubBeat => math.max(0.0, _playheadBeat);
+  double get _clampedClipPlayheadBeat =>
+      _playheadBeat.clamp(0.0, math.max(0.0, _clipSpanBeat)).toDouble();
+
+  double get _followScrubBeat => _clampedClipPlayheadBeat;
+
+  double get _visiblePlayheadBeat =>
+      _followPlayhead ? _followScrubBeat : _clampedClipPlayheadBeat;
+
+  double _projectMsForBeat(double beat) {
+    return math.max(
+      0.0,
+      (widget.clip.offset * 1000.0) -
+          widget.clip.trimStart.inMilliseconds +
+          (beat * _msPerBeat),
+    );
+  }
+
+  bool get _desktopSelectionModifierActive {
+    final keyboard = HardwareKeyboard.instance;
+    return PlatformCapabilities.current.isDesktop &&
+        (Platform.isMacOS ? keyboard.isMetaPressed : keyboard.isControlPressed);
+  }
 
   void _schedulePlayheadViewportSync({bool force = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -593,6 +723,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
   void _syncPlayheadViewport({bool force = false}) {
     if (!_followPlayhead || !_horizontalController.hasClients) return;
+    if (_pinchZoomActive) return;
     if (_followScrubUserActive) return;
     if (!_followScrubBeat.isFinite) return;
     final targetOffset = _followScrubBeat * _pxPerBeat;
@@ -604,16 +735,138 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   void _jumpHorizontalTo(
     double offset, {
     bool suppressFollowScrub = false,
+    double? contentWidth,
   }) {
     if (!_horizontalController.hasClients) return;
+    final viewport = _horizontalController.position.viewportDimension;
+    final maxExtent = contentWidth == null
+        ? _horizontalController.position.maxScrollExtent
+        : math.max(0.0, contentWidth - viewport);
     final clampedOffset = offset.clamp(
       _horizontalController.position.minScrollExtent,
-      _horizontalController.position.maxScrollExtent,
+      maxExtent,
     );
     if ((clampedOffset - _horizontalController.offset).abs() < 0.5) return;
     _suppressFollowScrollScrub = suppressFollowScrub;
     _horizontalController.jumpTo(clampedOffset);
     _suppressFollowScrollScrub = false;
+  }
+
+  void _scheduleInitialNoteViewportSync() {
+    if (_notes.isEmpty) return;
+    _initialNoteViewportSyncAttempts = 0;
+    if (_initialNoteViewportSyncPending) return;
+    _initialNoteViewportSyncPending = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _syncInitialNoteViewport();
+    });
+  }
+
+  void _syncInitialNoteViewport() {
+    if (!mounted) {
+      _initialNoteViewportSyncPending = false;
+      return;
+    }
+    if (_notes.isEmpty) {
+      _initialNoteViewportSyncPending = false;
+      return;
+    }
+    final verticalReady = _gridVerticalController.hasClients &&
+        _keysVerticalController.hasClients &&
+        _gridVerticalController.position.viewportDimension > 0.0;
+    final horizontalReady = _horizontalController.hasClients &&
+        _horizontalController.position.viewportDimension > 0.0;
+    if (!verticalReady || !horizontalReady) {
+      if (_initialNoteViewportSyncAttempts++ < 8) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _syncInitialNoteViewport();
+        });
+      } else {
+        _initialNoteViewportSyncPending = false;
+      }
+      return;
+    }
+
+    final pitchStats = _notePitchStats();
+    final beatStats = _noteBeatStats();
+    final verticalViewport = _gridVerticalController.position.viewportDimension;
+    final horizontalViewport = _horizontalController.position.viewportDimension;
+    final desiredRows = math.min(
+      _pitchCount.toDouble(),
+      math.max(12.0, pitchStats.span + 8.0),
+    );
+    final desiredRowHeight =
+        (verticalViewport / desiredRows).clamp(_minRowHeight, _maxRowHeight);
+    final desiredBeats = math.max(4.0, beatStats.span + 2.0);
+    final desiredPxPerBeat =
+        (horizontalViewport / desiredBeats).clamp(_minPxPerBeat, _maxPxPerBeat);
+    final nextRowHeight = math.min(_rowHeight, desiredRowHeight).toDouble();
+    final nextPxPerBeat = math.min(_pxPerBeat, desiredPxPerBeat).toDouble();
+    final zoomChanged = (nextRowHeight - _rowHeight).abs() > 0.2 ||
+        (nextPxPerBeat - _pxPerBeat).abs() > 0.2;
+    if (zoomChanged) {
+      setState(() {
+        _rowHeight = nextRowHeight;
+        _pxPerBeat = nextPxPerBeat;
+      });
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _centerInitialNoteViewport();
+      _initialNoteViewportSyncPending = false;
+    });
+  }
+
+  ({double average, double span}) _notePitchStats() {
+    if (_notes.isEmpty) return (average: 60.0, span: 1.0);
+    var minPitch = _notes.first.pitch;
+    var maxPitch = _notes.first.pitch;
+    var sum = 0.0;
+    for (final note in _notes) {
+      minPitch = math.min(minPitch, note.pitch);
+      maxPitch = math.max(maxPitch, note.pitch);
+      sum += note.pitch;
+    }
+    return (
+      average: sum / _notes.length,
+      span: (maxPitch - minPitch + 1).toDouble(),
+    );
+  }
+
+  ({double center, double span}) _noteBeatStats() {
+    if (_notes.isEmpty) return (center: 0.0, span: 4.0);
+    var minBeat = _notes.first.startBeat;
+    var maxBeat = _notes.first.startBeat + _notes.first.lengthBeats;
+    var centerSum = 0.0;
+    for (final note in _notes) {
+      minBeat = math.min(minBeat, note.startBeat);
+      maxBeat = math.max(maxBeat, note.startBeat + note.lengthBeats);
+      centerSum += note.startBeat + (note.lengthBeats * 0.5);
+    }
+    return (
+      center: centerSum / _notes.length,
+      span: math.max(0.0, maxBeat - minBeat),
+    );
+  }
+
+  void _centerInitialNoteViewport() {
+    if (!_gridVerticalController.hasClients ||
+        !_keysVerticalController.hasClients ||
+        !_horizontalController.hasClients ||
+        _notes.isEmpty) {
+      return;
+    }
+    final pitchStats = _notePitchStats();
+    final verticalViewport = _gridVerticalController.position.viewportDimension;
+    final targetRow = _visiblePitchRange.max - pitchStats.average + 0.5;
+    final targetV = (targetRow * _rowHeight) - (verticalViewport * 0.5);
+    _jumpBothVerticalControllers(targetV);
+
+    final horizontalViewport = _horizontalController.position.viewportDimension;
+    final targetH =
+        _xForBeat(_clampedClipPlayheadBeat) - (horizontalViewport * 0.5);
+    _jumpHorizontalTo(targetH);
   }
 
   bool _handleFollowModeScrollNotification(ScrollNotification notification) {
@@ -626,9 +879,6 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     }
     if (notification is ScrollEndNotification) {
       _followScrubUserActive = false;
-      if (mounted) {
-        setState(() {});
-      }
       return false;
     }
     if (notification is UserScrollNotification &&
@@ -651,14 +901,23 @@ class _PianoRollEditorState extends State<PianoRollEditor>
           (beat * _msPerBeat),
     );
     widget.onScrubRequested(targetMs);
+    return false;
+  }
+
+  void _setPlayheadFromBeat(double beat) {
+    final safeBeat = beat.clamp(0.0, 9999.0).toDouble();
+    widget.onScrubRequested(_projectMsForBeat(safeBeat));
     if (mounted) {
       setState(() {});
     }
-    return false;
   }
 
   void _queueCommit({bool immediate = false}) {
     _commitDebounce?.cancel();
+    if (widget.isRecording) {
+      _commitQueued = false;
+      return;
+    }
     if (immediate) {
       unawaited(_commitNow());
       return;
@@ -667,6 +926,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   }
 
   Future<void> _commitNow() async {
+    if (widget.isRecording) return;
     if (_commitInFlight) {
       _commitQueued = true;
       return;
@@ -748,6 +1008,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       setState(() {
         _boxSelectStartLocal = null;
         _boxSelectCurrentLocal = null;
+        _lockGridScroll = false;
       });
       return;
     }
@@ -772,6 +1033,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       _normalizeSelectionState();
       _boxSelectStartLocal = null;
       _boxSelectCurrentLocal = null;
+      _lockGridScroll = false;
     });
   }
 
@@ -791,6 +1053,26 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     return _snapBeat(
       ((x - _followLeadingPaddingPx) / _pxPerBeat).clamp(0.0, 9999.0),
     );
+  }
+
+  double _unsnappedBeatForViewportX(
+    double scrollOffset,
+    double localDx,
+    double pxPerBeat,
+  ) {
+    return ((scrollOffset + localDx - _followLeadingPaddingPx) / pxPerBeat)
+        .clamp(0.0, 9999.0)
+        .toDouble();
+  }
+
+  double _scrollOffsetForBeatAtViewportX(double beat, double localDx) {
+    return _followLeadingPaddingPx + (beat * _pxPerBeat) - localDx;
+  }
+
+  double _unsnappedBeatForContentX(double contentDx, double pxPerBeat) {
+    return ((contentDx - _followLeadingPaddingPx) / pxPerBeat)
+        .clamp(0.0, 9999.0)
+        .toDouble();
   }
 
   double _yForPitch(int pitch) {
@@ -842,6 +1124,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     double velocity = 0.9,
     bool keyboardSource = false,
   }) {
+    if (keyboardSource && _pressedKeyboardPitches.contains(pitch)) {
+      return;
+    }
     final safeVelocity = velocity.clamp(0.0, 1.0);
     setState(() {
       _incrementPreviewPitch(pitch);
@@ -856,7 +1141,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     if (keyboardSource) {
       final recordCallback = widget.onKeyboardNoteDown;
       if (recordCallback != null) {
-        unawaited(recordCallback(pitch, safeVelocity));
+        unawaited(recordCallback(widget.clip, pitch, safeVelocity));
       }
     }
   }
@@ -878,9 +1163,27 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     if (hadKeyboardPress) {
       final recordCallback = widget.onKeyboardNoteUp;
       if (recordCallback != null) {
-        unawaited(recordCallback(pitch));
+        unawaited(recordCallback(widget.clip, pitch));
       }
     }
+  }
+
+  void _handlePianoKeyPointerDown(PointerDownEvent event, int pitch) {
+    final previousPitch = _pianoKeyPitchByPointer[event.pointer];
+    if (previousPitch != null) {
+      _releasePianoKey(previousPitch, keyboardSource: true);
+    }
+    if (_pressedKeyboardPitches.contains(pitch)) {
+      _releasePianoKey(pitch, keyboardSource: true);
+    }
+    _pianoKeyPitchByPointer[event.pointer] = pitch;
+    _previewPianoKey(pitch, keyboardSource: true);
+  }
+
+  void _handlePianoKeyPointerRelease(PointerEvent event) {
+    final pitch = _pianoKeyPitchByPointer.remove(event.pointer);
+    if (pitch == null) return;
+    _releasePianoKey(pitch, keyboardSource: true);
   }
 
   void _adjustZoom({
@@ -906,34 +1209,41 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     final focalDy = _gridVerticalController.hasClients
         ? _gridVerticalController.position.viewportDimension * 0.5
         : 0.0;
-    final focalBeat = (currentHorizontalOffset + focalDx) / startX;
+    final focalBeat = _unsnappedBeatForViewportX(
+      currentHorizontalOffset,
+      focalDx,
+      startX,
+    );
     final focalRow = (currentVerticalOffset + focalDy) / startY;
 
     setState(() {
+      _followPlayhead = false;
       _pxPerBeat = nextX;
       _rowHeight = nextY;
     });
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (_followPlayhead) {
-        _syncPlayheadViewport(force: true);
-      } else if (_horizontalController.hasClients) {
-        final targetH = (focalBeat * _pxPerBeat) - focalDx;
-        _jumpHorizontalTo(targetH);
-      }
-      final targetV = (focalRow * _rowHeight) - focalDy;
-      _jumpBothVerticalControllers(targetV);
-    });
+    final nextContentWidth = _contentWidth;
+    final nextContentHeight = _contentHeight;
+    if (_horizontalController.hasClients) {
+      final targetH = _scrollOffsetForBeatAtViewportX(focalBeat, focalDx);
+      _jumpHorizontalTo(
+        targetH,
+        suppressFollowScrub: true,
+        contentWidth: nextContentWidth,
+      );
+    }
+    final targetV = (focalRow * _rowHeight) - focalDy;
+    _jumpBothVerticalControllers(targetV, contentHeight: nextContentHeight);
   }
 
   double _distance(Offset a, Offset b) => (a - b).distance;
 
   void _maybeStartManualPinch() {
-    if (_manualPinchActive || _activeGridPointers.length < 2) return;
-    final pts = _activeGridPointers.values.toList(growable: false);
-    _pinchStartPointA = pts[0];
-    _pinchStartPointB = pts[1];
+    if (_manualPinchActive || _activeGridGlobalPointers.length < 2) return;
+    final globalPts = _activeGridGlobalPointers.values.toList(growable: false);
+    final localPts = _activeGridPointers.values.toList(growable: false);
+    _pinchStartPointA = globalPts[0];
+    _pinchStartPointB = globalPts[1];
     _pinchStartPxPerBeat = _pxPerBeat;
     _pinchStartRowHeight = _rowHeight;
     _pinchStartHorizontalOffset =
@@ -941,21 +1251,34 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     _pinchStartVerticalOffset = _gridVerticalController.hasClients
         ? _gridVerticalController.offset
         : 0.0;
-    final focal = (_pinchStartPointA + _pinchStartPointB) / 2.0;
+    final focal = (localPts[0] + localPts[1]) / 2.0;
     _pinchStartFocalLocal = focal;
     _pinchStartFocalBeat =
-        (_pinchStartHorizontalOffset + focal.dx) / _pinchStartPxPerBeat;
+        _unsnappedBeatForContentX(focal.dx, _pinchStartPxPerBeat);
     _pinchStartFocalRow =
         (_pinchStartVerticalOffset + focal.dy) / _pinchStartRowHeight;
-    _manualPinchActive = true;
-    _pinchZoomActive = true;
-    _setGridScrollLocked(true);
+    setState(() {
+      _manualPinchActive = true;
+      _pinchZoomActive = true;
+      _lockGridScroll = true;
+    });
     _suppressGridTapFor(const Duration(milliseconds: 220));
   }
 
-  void _updateManualPinch() {
-    if (!_manualPinchActive || _activeGridPointers.length < 2) return;
-    final pts = _activeGridPointers.values.toList(growable: false);
+  void _scheduleManualPinchUpdate() {
+    if (_manualPinchUpdateScheduled) return;
+    _manualPinchUpdateScheduled = true;
+    final token = _manualPinchUpdateToken;
+    SchedulerBinding.instance.scheduleFrameCallback((_) {
+      _manualPinchUpdateScheduled = false;
+      if (!mounted || token != _manualPinchUpdateToken) return;
+      _applyManualPinchUpdate();
+    });
+  }
+
+  void _applyManualPinchUpdate() {
+    if (!_manualPinchActive || _activeGridGlobalPointers.length < 2) return;
+    final pts = _activeGridGlobalPointers.values.toList(growable: false);
     final p1 = pts[0];
     final p2 = pts[1];
 
@@ -968,7 +1291,6 @@ class _PianoRollEditorState extends State<PianoRollEditor>
         (_pinchStartPxPerBeat * scale).clamp(_minPxPerBeat, _maxPxPerBeat);
     final nextRowHeight =
         (_pinchStartRowHeight * scale).clamp(_minRowHeight, _maxRowHeight);
-    final focal = (p1 + p2) / 2.0;
 
     if ((_pxPerBeat - nextPxPerBeat).abs() < 0.001 &&
         (_rowHeight - nextRowHeight).abs() < 0.001) {
@@ -980,63 +1302,174 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       _rowHeight = nextRowHeight;
     });
 
+    final nextContentWidth = _contentWidth;
+    final nextContentHeight = _contentHeight;
     if (_horizontalController.hasClients) {
-      final targetH = _followPlayhead
-          ? (_followScrubBeat * _pxPerBeat)
-          : ((_pinchStartFocalBeat * _pxPerBeat) - focal.dx);
+      final targetH = _scrollOffsetForBeatAtViewportX(
+        _pinchStartFocalBeat,
+        _pinchStartFocalLocal.dx - _pinchStartHorizontalOffset,
+      );
       _jumpHorizontalTo(
         targetH,
-        suppressFollowScrub: _followPlayhead,
+        suppressFollowScrub: true,
+        contentWidth: nextContentWidth,
       );
     }
-    // Keep vertical zoom anchored to where the pinch began to avoid
-    // accidental upward/downward drift while users change scale.
     final targetV =
         (_pinchStartFocalRow * _rowHeight) - _pinchStartFocalLocal.dy;
-    _jumpBothVerticalControllers(targetV);
+    _jumpBothVerticalControllers(targetV, contentHeight: nextContentHeight);
   }
 
   void _endManualPinch() {
     if (!_manualPinchActive) return;
     _manualPinchActive = false;
+    _manualPinchUpdateToken++;
     _pinchZoomActive = false;
     _setGridScrollLocked(false);
     _suppressGridTapFor();
   }
 
+  void _handleDesktopWheelZoom(PointerScrollEvent event) {
+    final rawDelta = event.scrollDelta.dy.abs() >= event.scrollDelta.dx.abs()
+        ? event.scrollDelta.dy
+        : event.scrollDelta.dx;
+    if (rawDelta == 0) return;
+
+    final startX = _pxPerBeat;
+    final startY = _rowHeight;
+    final zoomFactor = math.exp(-rawDelta * 0.0025);
+    final nextX = (startX * zoomFactor).clamp(_minPxPerBeat, _maxPxPerBeat);
+    final nextY = (startY * zoomFactor).clamp(_minRowHeight, _maxRowHeight);
+    if ((nextX - startX).abs() < 0.001 && (nextY - startY).abs() < 0.001) {
+      return;
+    }
+
+    final currentHorizontalOffset =
+        _horizontalController.hasClients ? _horizontalController.offset : 0.0;
+    final currentVerticalOffset = _gridVerticalController.hasClients
+        ? _gridVerticalController.offset
+        : 0.0;
+    final rulerInset =
+        PlatformCapabilities.current.isDesktop ? _rulerHeight : 0.0;
+    final focalDx = event.localPosition.dx.clamp(0.0, double.infinity);
+    final focalDy =
+        (event.localPosition.dy - rulerInset).clamp(0.0, double.infinity);
+    final focalBeat = _unsnappedBeatForViewportX(
+      currentHorizontalOffset,
+      focalDx,
+      startX,
+    );
+    final focalRow = (currentVerticalOffset + focalDy) / startY;
+
+    setState(() {
+      _followPlayhead = false;
+      _pxPerBeat = nextX;
+      _rowHeight = nextY;
+    });
+
+    final nextContentWidth = _contentWidth;
+    final nextContentHeight = _contentHeight;
+    if (_horizontalController.hasClients) {
+      final targetH = _scrollOffsetForBeatAtViewportX(focalBeat, focalDx);
+      _jumpHorizontalTo(
+        targetH,
+        suppressFollowScrub: true,
+        contentWidth: nextContentWidth,
+      );
+    }
+    final targetV = (focalRow * _rowHeight) - focalDy;
+    _jumpBothVerticalControllers(targetV, contentHeight: nextContentHeight);
+  }
+
+  void _onGridPointerSignal(PointerSignalEvent event) {
+    if (!PlatformCapabilities.current.isDesktop) return;
+    if (event is! PointerScrollEvent) return;
+
+    final keyboard = HardwareKeyboard.instance;
+    final modifierPressed =
+        Platform.isMacOS ? keyboard.isMetaPressed : keyboard.isControlPressed;
+    if (!modifierPressed) return;
+
+    GestureBinding.instance.pointerSignalResolver.register(
+      event,
+      (PointerSignalEvent resolved) {
+        if (resolved is! PointerScrollEvent) return;
+        _handleDesktopWheelZoom(resolved);
+      },
+    );
+  }
+
   void _onGridPointerDown(PointerDownEvent event) {
     _activeGridPointers[event.pointer] = event.localPosition;
+    _activeGridGlobalPointers[event.pointer] = event.position;
+    final desktopBoxSelect = PlatformCapabilities.current.isDesktop &&
+        event.kind == PointerDeviceKind.mouse &&
+        event.buttons == kPrimaryMouseButton &&
+        _desktopSelectionModifierActive;
+    if (desktopBoxSelect) {
+      _setGridScrollLocked(true);
+      _desktopBoxSelectPointer = event.pointer;
+      _startBoxSelectionAt(
+        event.localPosition,
+        skipIfNoteHit: false,
+      );
+      _suppressGridTapFor(const Duration(milliseconds: 220));
+      return;
+    }
     _maybeStartManualPinch();
   }
 
   void _onGridPointerMove(PointerMoveEvent event) {
     if (!_activeGridPointers.containsKey(event.pointer)) return;
     _activeGridPointers[event.pointer] = event.localPosition;
-    _updateManualPinch();
+    _activeGridGlobalPointers[event.pointer] = event.position;
+    if (_desktopBoxSelectPointer == event.pointer &&
+        _boxSelectStartLocal != null) {
+      _updateBoxSelectionAt(event.localPosition);
+      return;
+    }
+    _scheduleManualPinchUpdate();
   }
 
   void _onGridPointerUp(PointerEvent event) {
     _activeGridPointers.remove(event.pointer);
+    _activeGridGlobalPointers.remove(event.pointer);
+    if (_desktopBoxSelectPointer == event.pointer) {
+      _desktopBoxSelectPointer = null;
+      _finishBoxSelection();
+      return;
+    }
     if (_activeGridPointers.length < 2) {
       _endManualPinch();
     }
   }
 
-  void _startBoxSelection(LongPressStartDetails details) {
+  void _startBoxSelectionAt(
+    Offset localPosition, {
+    bool skipIfNoteHit = true,
+  }) {
     if (_pinchZoomActive) return;
-    if (_hitNoteIdAt(details.localPosition) != null) return;
+    if (skipIfNoteHit && _hitNoteIdAt(localPosition) != null) return;
     setState(() {
-      _boxSelectStartLocal = details.localPosition;
-      _boxSelectCurrentLocal = details.localPosition;
+      _boxSelectStartLocal = localPosition;
+      _boxSelectCurrentLocal = localPosition;
       _suppressNextGridTap = true;
     });
   }
 
-  void _updateBoxSelection(LongPressMoveUpdateDetails details) {
+  void _updateBoxSelectionAt(Offset localPosition) {
     if (_boxSelectStartLocal == null) return;
     setState(() {
-      _boxSelectCurrentLocal = details.localPosition;
+      _boxSelectCurrentLocal = localPosition;
     });
+  }
+
+  void _startBoxSelection(LongPressStartDetails details) {
+    _startBoxSelectionAt(details.localPosition);
+  }
+
+  void _updateBoxSelection(LongPressMoveUpdateDetails details) {
+    _updateBoxSelectionAt(details.localPosition);
   }
 
   void _cancelBoxSelection() {
@@ -1044,6 +1477,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     setState(() {
       _boxSelectStartLocal = null;
       _boxSelectCurrentLocal = null;
+      _desktopBoxSelectPointer = null;
+      _lockGridScroll = false;
     });
   }
 
@@ -1067,6 +1502,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     required double width,
     required double handleWidth,
   }) {
+    if (widget.isRecording) return;
     final selectedIds = _effectiveSelectedIds;
     if (!selectedIds.contains(note.id)) {
       _selectSingle(note.id);
@@ -1093,6 +1529,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   }
 
   void _updateNoteDrag(MidiNote anchor, DragUpdateDetails details) {
+    if (widget.isRecording) return;
     if (_activeDragNoteId != anchor.id) return;
     if (_dragStartNotesById == null || _dragStartNotesById!.isEmpty) return;
 
@@ -1147,6 +1584,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   }
 
   void _addNoteAt(Offset local) {
+    if (widget.isRecording) return;
     if (DateTime.now().isBefore(_ignoreGridTapUntil)) return;
     if (_pinchZoomActive) return;
     if (_boxSelectStartLocal != null || _boxSelectCurrentLocal != null) return;
@@ -1201,19 +1639,14 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     _copiedNotes = copied;
   }
 
-  void _pasteNotes() {
+  void _pasteNotes({double? insertionBeatOverride}) {
     if (_copiedNotes == null || _copiedNotes!.isEmpty) return;
     final now = DateTime.now().microsecondsSinceEpoch;
     final minCopiedBeat =
         _copiedNotes!.map((n) => n.startBeat).reduce((a, b) => math.min(a, b));
-    final selected = _selectedNotes;
-    final insertionBeat = selected.isNotEmpty
-        ? _snapBeat(
-            selected.map((n) => n.startBeat + n.lengthBeats).reduce(math.max),
-          )
-        : (_notes.isEmpty
-            ? 0.0
-            : _snapBeat(_notes.map((n) => n.startBeat).reduce(math.max) + 1.0));
+    final insertionBeat = insertionBeatOverride != null
+        ? _snapBeat(insertionBeatOverride)
+        : _snapBeat(_visiblePlayheadBeat);
 
     final pastedIds = <String>{};
     setState(() {
@@ -1239,7 +1672,13 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
   void _duplicateSelectedNotes() {
     _copySelectedNotes();
-    _pasteNotes();
+    final selected = _selectedNotes;
+    final duplicateBeat = selected.isNotEmpty
+        ? _snapBeat(
+            selected.map((n) => n.startBeat + n.lengthBeats).reduce(math.max),
+          )
+        : _snapBeat(_visiblePlayheadBeat);
+    _pasteNotes(insertionBeatOverride: duplicateBeat);
   }
 
   void _setSelectedVelocity(double velocity) {
@@ -1288,7 +1727,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
   void _showPianoRollNotice(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+      SnackBar(content: Text(L10n.translate(context, message))),
     );
   }
 
@@ -2141,7 +2580,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
   @override
   Widget build(BuildContext context) {
-    final playheadBeat = _playheadBeat;
+    final playheadBeat = _clampedClipPlayheadBeat;
 
     return Material(
       color: Colors.transparent,
@@ -2180,7 +2619,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
         children: [
           Expanded(
             child: Text(
-              _instrumentName.isEmpty ? 'Instrument' : _instrumentName,
+              _instrumentName.isEmpty
+                  ? L10n.translate(context, 'Instrument')
+                  : _instrumentName,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
@@ -2193,6 +2634,17 @@ class _PianoRollEditorState extends State<PianoRollEditor>
             ),
           ),
           if (onMidiTab) ...[
+            if (_currentInstrumentIsExternalPlugin &&
+                widget.onOpenCurrentInstrumentUi != null) ...[
+              _toolbarIconButton(
+                icon: Icons.open_in_new_rounded,
+                tooltip: L10n.translate(context, 'Open instrument UI'),
+                onTap: () {
+                  unawaited(widget.onOpenCurrentInstrumentUi!.call());
+                },
+              ),
+              const SizedBox(width: 5),
+            ],
             _toolbarIconButton(
               icon: Icons.more_horiz_rounded,
               tooltip: widget.isRecording
@@ -2209,28 +2661,28 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                   ? Icons.lock_outline_rounded
                   : Icons.lock_open_rounded,
               tooltip: _followPlayhead
-                  ? 'Unlock piano roll from playhead'
-                  : 'Lock piano roll to playhead',
+                  ? L10n.translate(context, 'Unlock piano roll from playhead')
+                  : L10n.translate(context, 'Lock piano roll to playhead'),
               active: _followPlayhead,
               onTap: () => _setFollowPlayhead(!_followPlayhead),
             ),
             const SizedBox(width: 5),
             _toolbarIconButton(
               icon: Icons.zoom_out_rounded,
-              tooltip: 'Zoom out',
-              onTap: () => _adjustZoom(xFactor: 0.86, yFactor: 0.90),
+              tooltip: L10n.translate(context, 'Zoom out'),
+              onTap: () => _adjustZoom(xFactor: 0.76, yFactor: 0.82),
             ),
             const SizedBox(width: 5),
             _toolbarIconButton(
               icon: Icons.zoom_in_rounded,
-              tooltip: 'Zoom in',
-              onTap: () => _adjustZoom(xFactor: 1.16, yFactor: 1.12),
+              tooltip: L10n.translate(context, 'Zoom in'),
+              onTap: () => _adjustZoom(xFactor: 1.32, yFactor: 1.24),
             ),
             const SizedBox(width: 5),
           ],
           _toolbarIconButton(
             icon: Icons.help_outline,
-            tooltip: 'Piano roll help',
+            tooltip: L10n.translate(context, 'Piano roll help'),
             onTap: _showMidiHelpDialog,
           ),
           const SizedBox(width: 5),
@@ -2238,13 +2690,13 @@ class _PianoRollEditorState extends State<PianoRollEditor>
             icon: widget.fullscreen
                 ? Icons.fullscreen_exit_outlined
                 : Icons.fullscreen_outlined,
-            tooltip: 'Toggle fullscreen',
+            tooltip: L10n.translate(context, 'Toggle fullscreen'),
             onTap: () => widget.onFullscreenChanged(!widget.fullscreen),
           ),
           const SizedBox(width: 5),
           _toolbarIconButton(
             icon: Icons.close,
-            tooltip: 'Close',
+            tooltip: L10n.translate(context, 'Close'),
             onTap: widget.onClose,
           ),
         ],
@@ -2285,9 +2737,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
             unselectedLabelColor: _kPianoShellMutedText,
             dividerColor: Colors.transparent,
             splashBorderRadius: BorderRadius.circular(18),
-            tabs: const [
-              Tab(height: 34, text: 'MIDI'),
-              Tab(height: 34, text: 'Instrument'),
+            tabs: [
+              const Tab(height: 34, text: 'MIDI'),
+              Tab(height: 34, text: L10n.translate(context, 'Instrument')),
             ],
           ),
         ),
@@ -2306,7 +2758,13 @@ class _PianoRollEditorState extends State<PianoRollEditor>
             children: [
               SizedBox(
                 width: 74,
-                child: _buildPianoKeys(),
+                child: Column(
+                  children: [
+                    if (PlatformCapabilities.current.isDesktop)
+                      const SizedBox(height: _rulerHeight),
+                    Expanded(child: _buildPianoKeys()),
+                  ],
+                ),
               ),
               Expanded(
                 child: LayoutBuilder(
@@ -2426,25 +2884,25 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                   children: [
                     _trayAction(
                       icon: Icons.copy_rounded,
-                      tooltip: 'Copy',
+                      tooltip: L10n.translate(context, 'Copy'),
                       enabled: true,
                       onTap: _copySelectedNotes,
                     ),
                     _trayAction(
                       icon: Icons.content_paste_rounded,
-                      tooltip: 'Paste',
+                      tooltip: L10n.translate(context, 'Paste'),
                       enabled: hasCopiedNotes,
                       onTap: _pasteNotes,
                     ),
                     _trayAction(
                       icon: Icons.control_point_duplicate_rounded,
-                      tooltip: 'Duplicate',
+                      tooltip: L10n.translate(context, 'Duplicate'),
                       enabled: true,
                       onTap: _duplicateSelectedNotes,
                     ),
                     _trayAction(
                       icon: Icons.delete_outline_rounded,
-                      tooltip: 'Delete',
+                      tooltip: L10n.translate(context, 'Delete'),
                       enabled: true,
                       onTap: _deleteSelectedNotes,
                       danger: true,
@@ -2454,7 +2912,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                     ),
                     _trayAction(
                       icon: Icons.close_rounded,
-                      tooltip: 'Close',
+                      tooltip: L10n.translate(context, 'Close'),
                       enabled: true,
                       onTap: () => setState(_clearSelection),
                     ),
@@ -2572,6 +3030,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
   Color _instrumentVisualAccent(String category) {
     switch (category) {
+      case 'On Device':
+        return const Color(0xFF7CCBFF);
       case 'Strings':
         return const Color(0xFF6AA9FF);
       case 'Woodwinds':
@@ -2601,6 +3061,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
   IconData _instrumentVisualIcon(String category) {
     switch (category) {
+      case 'On Device':
+        return Icons.developer_board_rounded;
       case 'Strings':
         return Icons.multitrack_audio_rounded;
       case 'Woodwinds':
@@ -2628,10 +3090,15 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     }
   }
 
+  String _instrumentCategoryLabel(String category) {
+    return L10n.translate(context, category);
+  }
+
   Widget _buildInstrumentTab() {
     final category = _instrumentVisualCategory();
     final accent = _instrumentVisualAccent(category);
     final sampled = _isSampledInstrumentId(_instrumentId);
+    final externalPlugin = _currentInstrumentIsExternalPlugin;
     final categories = _instrumentBrowserCategories();
     final instruments = _visibleInstrumentSpecs();
 
@@ -2666,7 +3133,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Instrument',
+                        L10n.translate(context, 'Instrument'),
                         style: TextStyle(
                           color: _kPianoShellMutedText,
                           fontSize: 10.5,
@@ -2676,7 +3143,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                       ),
                       Text(
                         _instrumentName.isEmpty
-                            ? 'Instrument'
+                            ? L10n.translate(context, 'Instrument')
                             : _instrumentName,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -2690,6 +3157,49 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                     ],
                   ),
                 ),
+                if (externalPlugin && widget.onOpenCurrentInstrumentUi != null)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: InkWell(
+                      onTap: () {
+                        unawaited(widget.onOpenCurrentInstrumentUi!.call());
+                      },
+                      borderRadius: BorderRadius.circular(999),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _kPianoShellFillStrong,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.12),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.open_in_new_rounded,
+                              size: 13,
+                              color: accent,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              L10n.translate(context, 'Open UI'),
+                              style: TextStyle(
+                                color: _kPianoShellText,
+                                fontFamily: 'Pretendard',
+                                fontSize: 10.8,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -2700,7 +3210,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                         Border.all(color: Colors.white.withValues(alpha: 0.12)),
                   ),
                   child: Text(
-                    category,
+                    _instrumentCategoryLabel(category),
                     style: TextStyle(
                       color: accent,
                       fontSize: 10.5,
@@ -2758,7 +3268,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                           ),
                           const SizedBox(width: 5),
                           Text(
-                            c,
+                            _instrumentCategoryLabel(c),
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: selected
@@ -2786,7 +3296,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
             child: instruments.isEmpty
                 ? Center(
                     child: Text(
-                      'No instruments in this category.',
+                      L10n.translate(
+                          context, 'No instruments in this category.'),
                       style: TextStyle(
                         color: _kPianoShellMutedText,
                         fontFamily: 'Pretendard',
@@ -3221,12 +3732,10 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                   isPressed ? const Color(0xFF626B74) : const Color(0xFF454C54);
               return Listener(
                 behavior: HitTestBehavior.opaque,
-                onPointerDown: (_) =>
-                    _previewPianoKey(pitch, keyboardSource: true),
-                onPointerUp: (_) =>
-                    _releasePianoKey(pitch, keyboardSource: true),
-                onPointerCancel: (_) =>
-                    _releasePianoKey(pitch, keyboardSource: true),
+                onPointerDown: (event) =>
+                    _handlePianoKeyPointerDown(event, pitch),
+                onPointerUp: _handlePianoKeyPointerRelease,
+                onPointerCancel: _handlePianoKeyPointerRelease,
                 child: SizedBox(
                   height: _rowHeight,
                   child: Stack(
@@ -3350,6 +3859,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
         ? const NeverScrollableScrollPhysics()
         : const ClampingScrollPhysics();
     final pitchRange = _visiblePitchRange;
+    final showDesktopRuler = PlatformCapabilities.current.isDesktop;
+    final visiblePlayheadBeat =
+        _followPlayhead ? _followScrubBeat : playheadBeat;
     final followVisualShift =
         _followPlayhead && _horizontalController.hasClients
             ? (_horizontalController.offset - (_followScrubBeat * _pxPerBeat))
@@ -3367,102 +3879,134 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                 physics: physics,
                 child: SizedBox(
                   width: _contentWidth,
-                  child: SingleChildScrollView(
-                    controller: _gridVerticalController,
-                    physics: physics,
+                  child: Listener(
+                    behavior: HitTestBehavior.translucent,
+                    onPointerSignal: _onGridPointerSignal,
                     child: SizedBox(
-                      width: _contentWidth,
-                      height: _contentHeight,
-                      child: Listener(
-                        behavior: HitTestBehavior.opaque,
-                        onPointerDown: _onGridPointerDown,
-                        onPointerMove: _onGridPointerMove,
-                        onPointerUp: _onGridPointerUp,
-                        onPointerCancel: _onGridPointerUp,
-                        child: Transform.translate(
-                          offset: Offset(followVisualShift, 0),
-                          child: GestureDetector(
-                            key: const ValueKey<String>(
-                                'piano_roll_grid_canvas'),
-                            behavior: HitTestBehavior.opaque,
-                            dragStartBehavior: DragStartBehavior.down,
-                            onTapUp: (details) =>
-                                _addNoteAt(details.localPosition),
-                            onLongPressStart: _startBoxSelection,
-                            onLongPressMoveUpdate: _updateBoxSelection,
-                            onLongPressEnd: (_) => _finishBoxSelection(),
-                            onLongPressCancel: _cancelBoxSelection,
-                            child: Stack(
-                              children: [
-                                Positioned.fill(
-                                  child: CustomPaint(
-                                    painter: _PianoGridPainter(
-                                      rowHeight: _rowHeight,
-                                      pxPerBeat: _pxPerBeat,
-                                      leadingBeatPadPx: _followLeadingPaddingPx,
-                                      maxPitch: pitchRange.max,
-                                      minPitch: pitchRange.min,
-                                      maxBeat: _maxBeat,
-                                      beatsPerBar: widget.beatsPerBar,
-                                      quantizeDivisionsPerBar:
-                                          widget.quantizeDivisionsPerBar,
-                                      magnetEnabled: widget.magnetEnabled,
+                      height: _contentHeight +
+                          (showDesktopRuler ? _rulerHeight : 0.0),
+                      child: Column(
+                        children: [
+                          if (showDesktopRuler)
+                            _buildRollRuler(
+                              visiblePlayheadBeat,
+                              followVisualShift,
+                            ),
+                          Expanded(
+                            child: SingleChildScrollView(
+                              key: _gridViewportKey,
+                              controller: _gridVerticalController,
+                              physics: physics,
+                              child: SizedBox(
+                                width: _contentWidth,
+                                height: _contentHeight,
+                                child: Listener(
+                                  behavior: HitTestBehavior.opaque,
+                                  onPointerDown: _onGridPointerDown,
+                                  onPointerMove: _onGridPointerMove,
+                                  onPointerUp: _onGridPointerUp,
+                                  onPointerCancel: _onGridPointerUp,
+                                  child: Transform.translate(
+                                    offset: Offset(followVisualShift, 0),
+                                    child: GestureDetector(
+                                      key: const ValueKey<String>(
+                                          'piano_roll_grid_canvas'),
+                                      behavior: HitTestBehavior.opaque,
+                                      dragStartBehavior: DragStartBehavior.down,
+                                      onTapUp: (details) =>
+                                          _addNoteAt(details.localPosition),
+                                      onLongPressStart:
+                                          PlatformCapabilities.current.isDesktop
+                                              ? null
+                                              : _startBoxSelection,
+                                      onLongPressMoveUpdate:
+                                          PlatformCapabilities.current.isDesktop
+                                              ? null
+                                              : _updateBoxSelection,
+                                      onLongPressEnd:
+                                          PlatformCapabilities.current.isDesktop
+                                              ? null
+                                              : (_) => _finishBoxSelection(),
+                                      onLongPressCancel:
+                                          PlatformCapabilities.current.isDesktop
+                                              ? null
+                                              : _cancelBoxSelection,
+                                      child: Stack(
+                                        children: [
+                                          Positioned.fill(
+                                            child: CustomPaint(
+                                              painter: _PianoGridPainter(
+                                                rowHeight: _rowHeight,
+                                                pxPerBeat: _pxPerBeat,
+                                                leadingBeatPadPx:
+                                                    _followLeadingPaddingPx,
+                                                maxPitch: pitchRange.max,
+                                                minPitch: pitchRange.min,
+                                                maxBeat: _maxBeat,
+                                                beatsPerBar: widget.beatsPerBar,
+                                                quantizeDivisionsPerBar: widget
+                                                    .quantizeDivisionsPerBar,
+                                                magnetEnabled:
+                                                    widget.magnetEnabled,
+                                              ),
+                                            ),
+                                          ),
+                                          for (final pitch
+                                              in _pressedPreviewCounts.keys)
+                                            Positioned(
+                                              left: 0,
+                                              right: 0,
+                                              top: _yForPitch(pitch),
+                                              height: _rowHeight,
+                                              child: IgnorePointer(
+                                                child: Container(
+                                                  color: _kPianoWarmBorder
+                                                      .withValues(alpha: 0.18),
+                                                ),
+                                              ),
+                                            ),
+                                          for (final note in _displayNotes)
+                                            _buildNoteWidget(note),
+                                          if (_currentSelectionRect != null)
+                                            Positioned.fromRect(
+                                              rect: _currentSelectionRect!,
+                                              child: IgnorePointer(
+                                                child: Container(
+                                                  decoration: BoxDecoration(
+                                                    color:
+                                                        const Color(0x2B78A7FF),
+                                                    border: Border.all(
+                                                      color: const Color(
+                                                          0xFF8CB6FF),
+                                                      width: 1.2,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          if (visiblePlayheadBeat >= 0.0)
+                                            Positioned(
+                                              left: _xForBeat(
+                                                  visiblePlayheadBeat),
+                                              top: 0,
+                                              bottom: 0,
+                                              child: IgnorePointer(
+                                                child: Container(
+                                                  width: 2.0,
+                                                  color:
+                                                      const Color(0xFFFFD45A),
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
-                                for (final pitch in _pressedPreviewCounts.keys)
-                                  Positioned(
-                                    left: 0,
-                                    right: 0,
-                                    top: _yForPitch(pitch),
-                                    height: _rowHeight,
-                                    child: IgnorePointer(
-                                      child: Container(
-                                        color: _kPianoWarmBorder.withValues(
-                                            alpha: 0.18),
-                                      ),
-                                    ),
-                                  ),
-                                for (final note in _notes)
-                                  _buildNoteWidget(note),
-                                if (_currentSelectionRect != null)
-                                  Positioned.fromRect(
-                                    rect: _currentSelectionRect!,
-                                    child: IgnorePointer(
-                                      child: Container(
-                                        decoration: BoxDecoration(
-                                          color: const Color(0x2B78A7FF),
-                                          border: Border.all(
-                                            color: const Color(0xFF8CB6FF),
-                                            width: 1.2,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                if ((_followPlayhead
-                                        ? _followScrubBeat
-                                        : playheadBeat) >=
-                                    0.0)
-                                  Positioned(
-                                    left: _xForBeat(
-                                      _followPlayhead
-                                          ? _followScrubBeat
-                                          : playheadBeat,
-                                    ),
-                                    top: 0,
-                                    bottom: 0,
-                                    child: IgnorePointer(
-                                      child: Container(
-                                        width: 2.0,
-                                        color: const Color(0xFFFFD45A),
-                                      ),
-                                    ),
-                                  ),
-                              ],
+                              ),
                             ),
                           ),
-                        ),
+                        ],
                       ),
                     ),
                   ),
@@ -3470,7 +4014,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
               ),
             ),
           ),
-          if (_selectedNotes.isNotEmpty)
+          if (_selectedNotes.isNotEmpty && !widget.isRecording)
             Positioned(
               left: 0,
               right: 0,
@@ -3481,6 +4025,78 @@ class _PianoRollEditorState extends State<PianoRollEditor>
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildRollRuler(double playheadBeat, double followVisualShift) {
+    return SizedBox(
+      height: _rulerHeight,
+      child: Transform.translate(
+        offset: Offset(followVisualShift, 0),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: PlatformCapabilities.current.isDesktop
+              ? (details) {
+                  _setPlayheadFromBeat(_beatForX(details.localPosition.dx));
+                }
+              : null,
+          onHorizontalDragStart: PlatformCapabilities.current.isDesktop
+              ? (details) {
+                  _setPlayheadFromBeat(_beatForX(details.localPosition.dx));
+                }
+              : null,
+          onHorizontalDragUpdate: PlatformCapabilities.current.isDesktop
+              ? (details) {
+                  _setPlayheadFromBeat(_beatForX(details.localPosition.dx));
+                }
+              : null,
+          child: SizedBox(
+            width: _contentWidth,
+            height: _rulerHeight,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: _PianoRollRulerPainter(
+                      pxPerBeat: _pxPerBeat,
+                      leadingBeatPadPx: _followLeadingPaddingPx,
+                      maxBeat: _maxBeat,
+                      beatsPerBar: widget.beatsPerBar,
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: _xForBeat(playheadBeat) - 12,
+                  top: 0,
+                  child: IgnorePointer(
+                    child: SizedBox(
+                      width: 24,
+                      height: _rulerHeight,
+                      child: Column(
+                        children: [
+                          const Icon(
+                            Icons.arrow_drop_down_rounded,
+                            size: 24,
+                            color: Color(0xFFFFD45A),
+                          ),
+                          Container(
+                            width: 2,
+                            height: 6,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFD45A),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -3506,21 +4122,40 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       height: _rowHeight - 2,
       child: Listener(
         onPointerDown: (_) {
+          if (widget.isRecording) return;
           _setGridScrollLocked(true);
           _suppressGridTapFor();
         },
-        onPointerUp: (_) => _setGridScrollLocked(false),
-        onPointerCancel: (_) => _setGridScrollLocked(false),
+        onPointerUp: (_) {
+          if (!widget.isRecording) {
+            _setGridScrollLocked(false);
+          }
+        },
+        onPointerCancel: (_) {
+          if (!widget.isRecording) {
+            _setGridScrollLocked(false);
+          }
+        },
         child: GestureDetector(
           key: ValueKey<String>('piano_note_${note.id}'),
           behavior: HitTestBehavior.translucent,
           dragStartBehavior: DragStartBehavior.down,
           onTapDown: (_) {
+            if (widget.isRecording) return;
+            if (_desktopSelectionModifierActive) return;
             setState(() {
               _focusNoteSelection(note.id);
             });
           },
           onTapUp: (_) {
+            if (widget.isRecording) {
+              _setGridScrollLocked(false);
+              return;
+            }
+            if (_desktopSelectionModifierActive) {
+              _setGridScrollLocked(false);
+              return;
+            }
             _previewPianoKey(note.pitch, velocity: note.velocity);
             _suppressGridTapFor();
             Future<void>.delayed(const Duration(milliseconds: 90), () {
@@ -3530,10 +4165,19 @@ class _PianoRollEditorState extends State<PianoRollEditor>
             _setGridScrollLocked(false);
           },
           onTapCancel: () {
+            if (widget.isRecording) return;
             _releasePianoKey(note.pitch);
             _setGridScrollLocked(false);
           },
           onPanStart: (details) => setState(() {
+            if (widget.isRecording) {
+              _setGridScrollLocked(false);
+              return;
+            }
+            if (_desktopSelectionModifierActive) {
+              _setGridScrollLocked(false);
+              return;
+            }
             _releasePianoKey(note.pitch);
             _beginNoteDrag(
               note,
@@ -3859,5 +4503,85 @@ class _PianoGridPainter extends CustomPainter {
         beatsPerBar != oldDelegate.beatsPerBar ||
         quantizeDivisionsPerBar != oldDelegate.quantizeDivisionsPerBar ||
         magnetEnabled != oldDelegate.magnetEnabled;
+  }
+}
+
+class _PianoRollRulerPainter extends CustomPainter {
+  _PianoRollRulerPainter({
+    required this.pxPerBeat,
+    required this.leadingBeatPadPx,
+    required this.maxBeat,
+    required this.beatsPerBar,
+  });
+
+  final double pxPerBeat;
+  final double leadingBeatPadPx;
+  final double maxBeat;
+  final int beatsPerBar;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final backgroundPaint = Paint()
+      ..color = const Color(0xFF3A4047).withValues(alpha: 0.92);
+    final dividerPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.08)
+      ..strokeWidth = 1.0;
+    final majorPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.18)
+      ..strokeWidth = 1.2;
+    final minorPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.10)
+      ..strokeWidth = 0.9;
+    final labelStyle = TextStyle(
+      color: Colors.white.withValues(alpha: 0.74),
+      fontSize: 10,
+      fontWeight: FontWeight.w600,
+      fontFamily: 'Pretendard',
+    );
+
+    canvas.drawRect(Offset.zero & size, backgroundPaint);
+    canvas.drawLine(
+      Offset(0, size.height - 0.5),
+      Offset(size.width, size.height - 0.5),
+      dividerPaint,
+    );
+
+    final safeBeatsPerBar = math.max(1, beatsPerBar);
+    final maxBars = (maxBeat / safeBeatsPerBar).ceil() + 1;
+    for (int bar = 0; bar <= maxBars; bar++) {
+      final barBeat = bar * safeBeatsPerBar;
+      final barX = leadingBeatPadPx + (barBeat * pxPerBeat);
+      canvas.drawLine(
+        Offset(barX, 0),
+        Offset(barX, size.height),
+        majorPaint,
+      );
+
+      if (barBeat <= maxBeat) {
+        final labelPainter = TextPainter(
+          text: TextSpan(text: '${bar + 1}', style: labelStyle),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        labelPainter.paint(canvas, Offset(barX + 4, 4));
+      }
+
+      for (int beat = 1; beat < safeBeatsPerBar; beat++) {
+        final beatX = leadingBeatPadPx + ((barBeat + beat) * pxPerBeat);
+        if ((barBeat + beat) > maxBeat) break;
+        canvas.drawLine(
+          Offset(beatX, size.height * 0.46),
+          Offset(beatX, size.height),
+          minorPaint,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _PianoRollRulerPainter oldDelegate) {
+    return pxPerBeat != oldDelegate.pxPerBeat ||
+        leadingBeatPadPx != oldDelegate.leadingBeatPadPx ||
+        maxBeat != oldDelegate.maxBeat ||
+        beatsPerBar != oldDelegate.beatsPerBar;
   }
 }

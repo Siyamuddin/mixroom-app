@@ -41,7 +41,9 @@
                                    bpm:(double)bpm
                                  notes:(NSArray<NSDictionary *> *)notes
                                 params:(NSDictionary<NSString *, NSNumber *> *)params;
-+ (NSArray<NSDictionary *> *)scanPluginsObjC;
++ (NSArray<NSDictionary *> *)scanPluginsObjC:(NSArray<NSString *> * _Nullable)searchPaths;
++ (NSArray<NSDictionary *> *)rescanPluginsObjC:(NSArray<NSString *> * _Nullable)searchPaths;
++ (NSDictionary<NSString *, id> *)getEngineDiagnosticsObjC;
 + (void)bypassPluginObjC:(NSInteger)trackIndex
              effectIndex:(NSInteger)effectIndex
                   bypass:(BOOL)shouldBypass;
@@ -89,16 +91,30 @@
                     params:(NSDictionary<NSString *, NSNumber *> *)params
              sourceTempoBpm:(double)sourceTempoBpm;
 + (BOOL)setLiveMidiInputTargetClipObjC:(NSInteger)clipIndex;
++ (BOOL)sendLiveMidiInputEventObjC:(BOOL)noteOn
+                           channel:(NSInteger)channel
+                             pitch:(NSInteger)pitch
+                          velocity:(float)velocity;
 + (BOOL)playPreviewMidiNoteObjC:(NSInteger)clipIndex
                           pitch:(NSInteger)pitch
                        velocity:(float)velocity
                      durationMs:(NSInteger)durationMs;
++ (BOOL)openMidiClipPluginEditorObjC:(NSInteger)clipIndex;
++ (NSString *)getMidiClipPluginStateObjC:(NSInteger)clipIndex;
++ (BOOL)setMidiClipPluginStateObjC:(NSInteger)clipIndex
+                        stateBase64:(NSString *)stateBase64;
++ (void)setHostedPluginWindowsDetachedObjC:(BOOL)detached;
 + (NSArray<NSDictionary *> *)consumeLiveMidiInputEventsObjC;
 + (NSArray<NSDictionary *> *)getConnectedMidiInputDevicesObjC;
 + (void)unloadClipObjC:(NSInteger)clipIndex;
 + (void)setClipGainObjC:(NSInteger)clipIndex gain:(float)gain;
++ (void)setClipExtraGainLinearObjC:(NSInteger)clipIndex gain:(float)gain;
 + (void)muteClipObjC:(NSInteger)clipIndex shouldMute:(BOOL)shouldMute;
 + (void)setClipPanObjC:(NSInteger)clipIndex pan:(float)pan;
++ (void)setClipFadesObjC:(NSInteger)clipIndex
+               fadeInSec:(double)fadeInSec
+              fadeOutSec:(double)fadeOutSec
+               fadeCurve:(NSInteger)fadeCurve;
 + (void)setClipPitchObjC:(NSInteger)clipIndex semitones:(float)semitones;
 + (void)setClipReversedObjC:(NSInteger)clipIndex reversed:(BOOL)reversed;
 + (void)setClipStretchOptionsObjC:(NSInteger)clipIndex
@@ -133,6 +149,13 @@
 + (NSArray<NSString *> *)getTrackEffectsForRowObjC:(NSInteger)trackRow;
 + (NSArray<NSString *> *)getTrackEffectIdsForRowObjC:(NSInteger)trackRow;
 + (NSArray<NSString *> *)getTrackEffectInstanceIdsForRowObjC:(NSInteger)trackRow;
++ (NSString *)getTrackEffectStateObjC:(NSInteger)trackRow
+                          effectIndex:(NSInteger)effectIndex;
++ (BOOL)setTrackEffectStateObjC:(NSInteger)trackRow
+                    effectIndex:(NSInteger)effectIndex
+                    stateBase64:(NSString *)stateBase64;
++ (BOOL)openTrackPluginEditorObjC:(NSInteger)trackRow
+                     effectIndex:(NSInteger)effectIndex;
 + (NSArray<NSDictionary *> *)getTrackPluginParametersObjC:(NSInteger)row
                                               effectIndex:(NSInteger)effect;
 + (void)setTrackEffectObjC:(NSInteger)trackRow
@@ -160,6 +183,10 @@
                          toIndex:(NSInteger)toIndex;
 + (NSArray<NSString *> *)getMasterEffectsObjC;
 + (NSArray<NSString *> *)getMasterEffectIdsObjC;
++ (NSString *)getMasterEffectStateObjC:(NSInteger)effectIndex;
++ (BOOL)setMasterEffectStateObjC:(NSInteger)effectIndex
+                     stateBase64:(NSString *)stateBase64;
++ (BOOL)openMasterPluginEditorObjC:(NSInteger)effectIndex;
 + (NSArray<NSDictionary *> *)getMasterPluginParametersObjC:(NSInteger)effect;
 + (void)setMasterEffectObjC:(NSInteger)effectIndex
                     paramId:(NSString *)param
@@ -258,6 +285,7 @@
 + (NSArray<NSNumber *> *)getRowCompressorMeterObjC:(NSInteger)row effectIndex:(NSInteger)effectIndex;
 + (NSArray<NSNumber *> *)getMasterCompressorMeterObjC:(NSInteger)effectIndex;
 + (double)getHostSampleRateObjC;
++ (NSArray<NSNumber *> *)getRecentMasterWaveformObjC:(NSInteger)sampleCount;
 + (NSArray<NSNumber *> *)getRowEqWaveformObjC:(NSInteger)row effectIndex:(NSInteger)effectIndex sampleCount:(NSInteger)sampleCount;
 + (NSArray<NSNumber *> *)getMasterEqWaveformObjC:(NSInteger)effectIndex sampleCount:(NSInteger)sampleCount;
 + (NSArray<NSNumber *> *)getRowStereoScopeObjC:(NSInteger)row effectIndex:(NSInteger)effectIndex pointCount:(NSInteger)pointCount;

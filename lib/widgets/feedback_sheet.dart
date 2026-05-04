@@ -69,8 +69,14 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
     final message = FeedbackTextSanitizer.sanitize(_messageController.text);
     if (message.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Please enter your feedback or bug report first.')),
+        SnackBar(
+          content: Text(
+            L10n.translate(
+              context,
+              'Please enter your feedback or bug report first.',
+            ),
+          ),
+        ),
       );
       return;
     }
@@ -159,9 +165,12 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              _showDawOptions
-                                  ? 'Choose feedback or bug report, then describe it. You can also attach current editor context.'
-                                  : 'Choose feedback or bug report, then describe it. Account details are attached automatically.',
+                              L10n.translate(
+                                context,
+                                _showDawOptions
+                                    ? 'Choose feedback or bug report, then describe it. You can also attach current editor context.'
+                                    : 'Choose feedback or bug report, then describe it. Account details are attached automatically.',
+                              ),
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 fontFamily: 'Pretendard',
@@ -177,10 +186,12 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
                                 FeedbackCategory.feedback,
                                 FeedbackCategory.bugReport,
                               ],
-                              labelBuilder: (category) =>
-                                  category == FeedbackCategory.feedback
-                                      ? 'Feedback'
-                                      : 'Bug Report',
+                              labelBuilder: (category) => L10n.translate(
+                                context,
+                                category == FeedbackCategory.feedback
+                                    ? 'Feedback'
+                                    : 'Bug Report',
+                              ),
                               onChanged: (next) {
                                 HapticFeedback.selectionClick();
                                 setState(() => _category = next);
@@ -221,10 +232,16 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
                                 decoration: InputDecoration(
                                   border: InputBorder.none,
                                   isCollapsed: true,
-                                  hintText: _category ==
-                                          FeedbackCategory.feedback
-                                      ? 'Tell us what is working, missing, or would make this better.'
-                                      : 'Describe the bug, what you expected, and what happened.',
+                                  hintText:
+                                      _category == FeedbackCategory.feedback
+                                          ? L10n.translate(
+                                              context,
+                                              'Tell us what is working, missing, or would make this better.',
+                                            )
+                                          : L10n.translate(
+                                              context,
+                                              'Describe the bug, what you expected, and what happened.',
+                                            ),
                                   hintStyle: TextStyle(
                                     fontFamily: 'Pretendard',
                                     color: Colors.white.withValues(alpha: 0.48),
@@ -238,7 +255,10 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
                             Align(
                               alignment: Alignment.centerRight,
                               child: Text(
-                                '$remaining characters left',
+                                L10n.translate(
+                                  context,
+                                  '{count} characters left',
+                                ).replaceAll('{count}', '$remaining'),
                                 style: TextStyle(
                                   fontFamily: 'Pretendard',
                                   color: remaining < 120
@@ -252,9 +272,14 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
                             const SizedBox(height: 14),
                             _ShellCheckboxRow(
                               value: _allowEmailContact,
-                              title: 'Allow Mixroom to respond by email.',
-                              subtitle:
-                                  'Optional. We may follow up using your account email about this submission.',
+                              title: L10n.translate(
+                                context,
+                                'Allow Mixroom to respond by email.',
+                              ),
+                              subtitle: L10n.translate(
+                                context,
+                                'Optional. We may follow up using your account email about this submission.',
+                              ),
                               onChanged: (value) {
                                 setState(() => _allowEmailContact = value);
                               },
@@ -264,7 +289,10 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
                               Align(
                                 alignment: Alignment.centerLeft,
                                 child: Text(
-                                  'Include with this report',
+                                  L10n.translate(
+                                    context,
+                                    'Include with this report',
+                                  ),
                                   style: TextStyle(
                                     fontFamily: 'Pretendard',
                                     color: Colors.white.withValues(alpha: 0.88),
@@ -284,10 +312,14 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
                                   children: [
                                     _ShellCheckboxRow(
                                       value: _includeDawContext,
-                                      title:
-                                          'Include AI chat history and project settings.',
-                                      subtitle:
-                                          'Attach recent assistant messages and current DAW settings.',
+                                      title: L10n.translate(
+                                        context,
+                                        'Include AI chat history and project settings.',
+                                      ),
+                                      subtitle: L10n.translate(
+                                        context,
+                                        'Attach recent assistant messages and current DAW settings.',
+                                      ),
                                       padded: true,
                                       onChanged: (value) {
                                         setState(
@@ -303,9 +335,14 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
                                     ),
                                     _ShellCheckboxRow(
                                       value: _includeDawScreenshot,
-                                      title: 'Include a DAW screenshot.',
-                                      subtitle:
-                                          'Mixroom captures the editor view with chat closed.',
+                                      title: L10n.translate(
+                                        context,
+                                        'Include a DAW screenshot.',
+                                      ),
+                                      subtitle: L10n.translate(
+                                        context,
+                                        'Mixroom captures the editor view with chat closed.',
+                                      ),
                                       padded: true,
                                       onChanged: (value) {
                                         setState(
@@ -322,7 +359,7 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
                               children: [
                                 Expanded(
                                   child: _FeedbackDialogActionButton(
-                                    label: 'Cancel',
+                                    label: L10n.translate(context, 'Cancel'),
                                     fillColor: const Color.fromRGBO(
                                         244, 244, 244, 0.18),
                                     onTap: () => Navigator.of(context).pop(),
@@ -331,7 +368,7 @@ class _FeedbackSheetState extends State<_FeedbackSheet> {
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: _FeedbackDialogActionButton(
-                                    label: 'Submit',
+                                    label: L10n.translate(context, 'Submit'),
                                     fillColor: const Color.fromRGBO(
                                         244, 244, 244, 0.58),
                                     onTap: _submit,

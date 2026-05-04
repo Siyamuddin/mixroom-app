@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mixroom/ffmpeg/ffmpeg.dart';
+import 'package:mixroom/l10n/l10n.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -416,10 +417,9 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   List<double> _amplifyAndCapWaveform(List<double> data) {
     if (data.isEmpty) return const <double>[];
     return data.map((v) {
-      final amplified = v * 4.0;
-      if (amplified > 1.0) return 1.0;
-      if (amplified < 0.0) return 0.0;
-      return amplified;
+      if (v > 1.0) return 1.0;
+      if (v < 0.0) return 0.0;
+      return v;
     }).toList(growable: false);
   }
 
@@ -564,7 +564,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
               const SizedBox(width: 8),
               Flexible(
                 child: Text(
-                  'Remove "$label"',
+                  '${L10n.translate(context, 'Remove')} "$label"',
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: Color(0xFFFFD1D1)),
                 ),
@@ -586,47 +586,50 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
       builder: (ctx) {
         return AlertDialog(
           backgroundColor: const Color(0xFF7B7772),
-          title: const Text('File Browser Help',
-              style: TextStyle(color: Colors.white)),
+          title: Text(L10n.translate(ctx, 'File Browser Help'),
+              style: const TextStyle(color: Colors.white)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: const [
+            children: [
               _HelpRow(
                 icon: Icons.create_new_folder_outlined,
-                text: 'Load a folder into the browser.',
+                text: L10n.translate(ctx, 'Load a folder into the browser.'),
               ),
-              SizedBox(height: 8),
+              const SizedBox(height: 8),
               _HelpRow(
                 icon: Icons.folder_open_outlined,
-                text: 'Tap a folder button to switch the current folder.',
+                text: L10n.translate(
+                    ctx, 'Tap a folder button to switch the current folder.'),
               ),
-              SizedBox(height: 8),
+              const SizedBox(height: 8),
               _HelpRow(
                 icon: Icons.play_circle_outline,
-                text: 'Preview an audio file.',
+                text: L10n.translate(ctx, 'Preview an audio file.'),
               ),
-              SizedBox(height: 8),
+              const SizedBox(height: 8),
               _HelpRow(
                 icon: Icons.pan_tool_alt_outlined,
-                text: 'Hold and drag a file into the timeline.',
+                text: L10n.translate(
+                    ctx, 'Hold and drag a file into the timeline.'),
               ),
-              SizedBox(height: 8),
+              const SizedBox(height: 8),
               _HelpRow(
                 icon: Icons.delete_outline,
-                text: 'Hold a folder button to remove it.',
+                text: L10n.translate(ctx, 'Hold a folder button to remove it.'),
               ),
-              SizedBox(height: 8),
+              const SizedBox(height: 8),
               _HelpRow(
                 icon: Icons.multitrack_audio_outlined,
-                text: 'Use the bottom waveform to seek preview playback.',
+                text: L10n.translate(
+                    ctx, 'Use the bottom waveform to seek preview playback.'),
               ),
             ],
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('OK'),
+              child: Text(L10n.translate(ctx, 'OK')),
             ),
           ],
         );
@@ -783,7 +786,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                     ),
                   if (showInsertButton)
                     IconButton(
-                      tooltip: 'Insert at playhead',
+                      tooltip: L10n.translate(context, 'Insert at playhead'),
                       constraints:
                           const BoxConstraints(minWidth: 20, minHeight: 20),
                       padding: EdgeInsets.zero,
@@ -873,7 +876,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
         child: TextButton.icon(
           onPressed: widget.onAddFolder,
           icon: const Icon(Icons.create_new_folder_outlined),
-          label: const Text('Add a sample folder'),
+          label: Text(L10n.translate(context, 'Add a sample folder')),
         ),
       );
     }
@@ -893,15 +896,17 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
               const SizedBox(height: 8),
               Text(
                 rootError == null
-                    ? 'This folder is currently unavailable.'
+                    ? L10n.translate(
+                        context, 'This folder is currently unavailable.')
                     : rootError,
                 style: const TextStyle(color: Colors.white70),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Tip: choose local folders (not cloud-only placeholders).',
-                style: TextStyle(color: Colors.white54, fontSize: 12),
+              Text(
+                L10n.translate(context,
+                    'Tip: choose local folders (not cloud-only placeholders).'),
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 12),
@@ -913,19 +918,19 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                   if (showSettingsCta)
                     OutlinedButton(
                       onPressed: widget.onOpenSystemSettings,
-                      child: const Text('Open settings'),
+                      child: Text(L10n.translate(context, 'Open settings')),
                     ),
                   OutlinedButton(
                     onPressed: widget.onAddFolder,
-                    child: const Text('Pick folder'),
+                    child: Text(L10n.translate(context, 'Pick folder')),
                   ),
                   OutlinedButton(
                     onPressed: () => _ensureDirectoryLoaded(root, force: true),
-                    child: const Text('Retry'),
+                    child: Text(L10n.translate(context, 'Retry')),
                   ),
                   TextButton(
                     onPressed: () => widget.onRemoveFolder(root),
-                    child: const Text('Remove folder'),
+                    child: Text(L10n.translate(context, 'Remove folder')),
                   ),
                 ],
               ),
@@ -946,10 +951,10 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
       );
     }
     if (lines.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
-          'No files found.',
-          style: TextStyle(color: Colors.white70),
+          L10n.translate(context, 'No files found.'),
+          style: const TextStyle(color: Colors.white70),
         ),
       );
     }
@@ -1130,10 +1135,10 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                       padding: const EdgeInsets.fromLTRB(14, 8, 8, 2),
                       child: Row(
                         children: [
-                          const Expanded(
+                          Expanded(
                             child: Text(
-                              'File Browser',
-                              style: TextStyle(
+                              L10n.translate(context, 'File Browser'),
+                              style: const TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.w700,
                                 fontSize: 15,
@@ -1141,7 +1146,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                             ),
                           ),
                           IconButton(
-                            tooltip: 'How to use',
+                            tooltip: L10n.translate(context, 'How to use'),
                             onPressed: _showUsageInfo,
                             padding: EdgeInsets.zero,
                             visualDensity: const VisualDensity(
@@ -1152,7 +1157,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                                 color: Colors.white70, size: 19),
                           ),
                           IconButton(
-                            tooltip: 'Add folder',
+                            tooltip: L10n.translate(context, 'Add folder'),
                             onPressed: widget.onAddFolder,
                             padding: EdgeInsets.zero,
                             visualDensity: const VisualDensity(
@@ -1164,7 +1169,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                           ),
                           if (selectedRoot != null)
                             IconButton(
-                              tooltip: 'Refresh folder',
+                              tooltip:
+                                  L10n.translate(context, 'Refresh folder'),
                               onPressed: () => _ensureDirectoryLoaded(
                                   selectedRoot,
                                   force: true),
@@ -1179,8 +1185,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                           if (selectedRoot != null)
                             IconButton(
                               tooltip: widget.expanded
-                                  ? 'Collapse panel'
-                                  : 'Expand panel',
+                                  ? L10n.translate(context, 'Collapse panel')
+                                  : L10n.translate(context, 'Expand panel'),
                               onPressed: () =>
                                   widget.onExpandedChanged(!widget.expanded),
                               padding: EdgeInsets.zero,
@@ -1197,7 +1203,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                               ),
                             ),
                           IconButton(
-                            tooltip: 'Close',
+                            tooltip: L10n.translate(context, 'Close'),
                             onPressed: widget.onClose,
                             padding: EdgeInsets.zero,
                             visualDensity: const VisualDensity(

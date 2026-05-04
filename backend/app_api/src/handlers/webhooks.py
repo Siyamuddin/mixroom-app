@@ -248,16 +248,15 @@ def _handle_stibee_webhook(
             if not isinstance(profile, dict) or not profile:
                 continue
             next_profile = apply_user_profile_patch(profile, patch)
-            previous_username_lc = (
-                str(profile.get("username_lc") or "").strip().lower() or None
-            )
-            repo.upsert_user_profile(
-                next_profile,
-                previous_username_lc=previous_username_lc,
-            )
             user_id = str(next_profile.get("user_id") or "").strip()
-            if user_id:
-                updated_user_ids.append(user_id)
+            if not user_id:
+                continue
+            repo.update_user_newsletter_subscription(
+                user_id,
+                newsletter_opt_in=bool(next_profile.get("newsletter_opt_in")),
+                newsletter_opt_in_at=next_profile.get("newsletter_opt_in_at"),
+            )
+            updated_user_ids.append(user_id)
         except Exception as exc:
             failed_users += 1
             capture_exception(

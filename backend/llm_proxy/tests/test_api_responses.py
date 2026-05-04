@@ -698,6 +698,38 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertEqual(payload["prompt_rate_limit"]["daily"]["remaining"], 38)
         self.assertEqual(payload["prompt_rate_limit"]["weekly"]["remaining"], 270)
 
+    def test_handler_maps_upstream_429_to_service_unavailable(self) -> None:
+        provider = _FakeProvider(
+            status_code=429,
+            response_body={
+                "error": {
+                    "message": "Rate limit reached for model.",
+                    "type": "rate_limit_exceeded",
+                    "code": "rate_limit_exceeded",
+                }
+            },
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "ai_feature": "assistant_chat",
+                    "input": [{"role": "user", "content": "hello"}],
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 503)
+        self.assertEqual(len(self.fake_usage_repo.release_calls), 1)
+        self.assertEqual(self.fake_usage_repo.log_calls[-1]["status"], "failed")
+        self.assertEqual(self.fake_usage_repo.log_calls[-1]["error_code"], "rate_limit_exceeded")
+        payload = json.loads(result["body"])
+        self.assertEqual(payload["code"], "llm_upstream_rate_limited")
+        self.assertNotEqual(payload["error"], "prompt_rate_limit_hit")
+
     def test_handler_finalizes_actual_usage_after_success(self) -> None:
         provider = _FakeProvider(
             response_body={

@@ -4,6 +4,7 @@ import unittest
 from unittest import mock
 
 from support import FakeBillingRepo, decode_json_response
+from src.common.billing_catalog import default_catalog
 
 module = importlib.import_module("src.handlers.api_billing")
 
@@ -12,16 +13,21 @@ class ApiBillingTests(unittest.TestCase):
     def setUp(self):
         self.repo = FakeBillingRepo()
         self.original_repo = module.repo
+        self.original_catalog_repo = module.catalog_repo
         self.original_extract_user_id = module.extract_user_id_from_event
         self.original_capture_event = module.capture_event
         self.original_verify_apple_purchase = module.verify_apple_purchase
         self.original_verify_google_purchase = module.verify_google_purchase
         module.repo = self.repo
+        module.catalog_repo = mock.Mock()
+        module.catalog_repo.get_catalog.return_value = default_catalog()
+        module.catalog_repo.get_product.return_value = {}
         module.extract_user_id_from_event = lambda event: "user-1"
         module.capture_event = mock.Mock()
 
     def tearDown(self):
         module.repo = self.original_repo
+        module.catalog_repo = self.original_catalog_repo
         module.extract_user_id_from_event = self.original_extract_user_id
         module.capture_event = self.original_capture_event
         module.verify_apple_purchase = self.original_verify_apple_purchase

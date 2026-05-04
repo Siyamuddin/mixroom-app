@@ -1271,7 +1271,11 @@ bool JuceEngine::loadClip(int clipId, int rowId, const juce::File &file,
     c.tempoRatio = 1.0;
     c.preservePitch = false;
     c.gainUi = kGainUiUnity;
+    c.extraGainLinear = 1.0f;
     c.panNormalized = 0.0f;
+    c.fadeInSec = 0.0;
+    c.fadeOutSec = 0.0;
+    c.fadeCurve = 0;
     c.sourceFilePath = file.getFullPathName();
     c.midiInstrumentId = {};
     c.midiInstrumentName = {};
@@ -1366,6 +1370,7 @@ bool JuceEngine::loadMidiClip(int clipId,
     c.tempoRatio = 1.0;
     c.preservePitch = true;
     c.gainUi = kGainUiUnity;
+    c.extraGainLinear = 1.0f;
     c.panNormalized = 0.0f;
     c.sourceFilePath = {};
     c.midiInstrumentId = instrumentId;
@@ -1754,6 +1759,25 @@ bool JuceEngine::setClipTime(int clipId, double startSec, double lengthSec, doub
     return true;
 }
 
+void JuceEngine::setClipFades(int clipIndex, double fadeInSec, double fadeOutSec, int fadeCurve)
+{
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
+
+    if (clips.empty() || clipIndex < 0 || clipIndex >= (int)clips.size())
+        return;
+
+    ClipState &c = clips[clipIndex];
+    if (!c.alive || !c.playerNode)
+        return;
+
+    c.fadeInSec = juce::jmax(0.0, fadeInSec);
+    c.fadeOutSec = juce::jmax(0.0, fadeOutSec);
+    c.fadeCurve = juce::jlimit(0, 2, fadeCurve);
+
+    if (auto *p = asTimelineProcessor(c.playerNode))
+        p->setFades(c.fadeInSec, c.fadeOutSec, c.fadeCurve);
+}
+
 bool JuceEngine::moveClipToRow(int clipId, int newRowId)
 {
     GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
@@ -1950,7 +1974,11 @@ struct ExportClipSnapshot
     double tempoRatio = 1.0;
     bool preservePitch = false;
     float gainUi = SimpleGainProcessor::kUiUnity;
+    float extraGainLinear = 1.0f;
     float panNormalized = 0.0f;
+    double fadeInSec = 0.0;
+    double fadeOutSec = 0.0;
+    int fadeCurve = 0;
     juce::String sourceFilePath;
     juce::String midiInstrumentId;
     juce::String midiInstrumentName;
@@ -2268,7 +2296,9 @@ void applyClipSnapshotToProcessor(const ExportClipSnapshot &clip,
     processor.setReversed(clip.reversed);
     processor.setMuted(clip.muted);
     processor.setGainUi(clip.gainUi);
+    processor.setExtraGainLinear(clip.extraGainLinear);
     processor.setPanNormalized(clip.panNormalized);
+    processor.setFades(clip.fadeInSec, clip.fadeOutSec, clip.fadeCurve);
 }
 
 bool shouldUseOfflineStaticAudioClipProcessor(const ExportClipSnapshot &clip)
@@ -2427,7 +2457,14 @@ bool parseExportClipSnapshotJson(const juce::String &clipSnapshotJson,
             (double)SimpleGainProcessor::kUiMin,
             (double)SimpleGainProcessor::kUiMax,
             readJsonDoubleProperty(clipObject, "gainUi", SimpleGainProcessor::kUiUnity));
+        clip.extraGainLinear = (float)juce::jlimit(
+            0.0,
+            64.0,
+            readJsonDoubleProperty(clipObject, "extraGainLinear", 1.0));
         clip.panNormalized = (float)juce::jlimit(-1.0, 1.0, readJsonDoubleProperty(clipObject, "panNormalized", 0.0));
+        clip.fadeInSec = juce::jmax(0.0, readJsonDoubleProperty(clipObject, "fadeInSec", 0.0));
+        clip.fadeOutSec = juce::jmax(0.0, readJsonDoubleProperty(clipObject, "fadeOutSec", 0.0));
+        clip.fadeCurve = juce::jlimit(0, 2, (int)std::round(readJsonDoubleProperty(clipObject, "fadeCurve", 0.0)));
         clip.sourceFilePath = readJsonStringProperty(clipObject, "sourceFilePath");
         clip.midiInstrumentId = readJsonStringProperty(clipObject, "midiInstrumentId");
         clip.midiInstrumentName = readJsonStringProperty(clipObject, "midiInstrumentName");
@@ -3286,6 +3323,7 @@ void JuceEngine::reapplyClipProcessorStateLocked()
             processor->setReversed(clip.reversed);
             processor->setMuted(clip.muted);
             processor->setGainUi(clip.gainUi);
+            processor->setExtraGainLinear(clip.extraGainLinear);
             processor->setPanNormalized(clip.panNormalized);
         }
     }
@@ -3309,6 +3347,7 @@ void JuceEngine::rebuildClipProcessorsFromStoredStateLocked(
         processor.setReversed(clip.reversed);
         processor.setMuted(clip.muted);
         processor.setGainUi(clip.gainUi);
+        processor.setExtraGainLinear(clip.extraGainLinear);
         processor.setPanNormalized(clip.panNormalized);
     };
 
@@ -3558,7 +3597,11 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
             clipSnapshot.tempoRatio = clip.tempoRatio;
             clipSnapshot.preservePitch = clip.preservePitch;
             clipSnapshot.gainUi = clip.gainUi;
+            clipSnapshot.extraGainLinear = clip.extraGainLinear;
             clipSnapshot.panNormalized = clip.panNormalized;
+            clipSnapshot.fadeInSec = clip.fadeInSec;
+            clipSnapshot.fadeOutSec = clip.fadeOutSec;
+            clipSnapshot.fadeCurve = clip.fadeCurve;
             clipSnapshot.sourceFilePath = clip.sourceFilePath;
             clipSnapshot.midiInstrumentId = clip.midiInstrumentId;
             clipSnapshot.midiInstrumentName = clip.midiInstrumentName;
@@ -3763,7 +3806,11 @@ juce::String JuceEngine::exportTrack(int trackIndex,
             clipSnapshot.tempoRatio = clip.tempoRatio;
             clipSnapshot.preservePitch = clip.preservePitch;
             clipSnapshot.gainUi = clip.gainUi;
+            clipSnapshot.extraGainLinear = clip.extraGainLinear;
             clipSnapshot.panNormalized = clip.panNormalized;
+            clipSnapshot.fadeInSec = clip.fadeInSec;
+            clipSnapshot.fadeOutSec = clip.fadeOutSec;
+            clipSnapshot.fadeCurve = clip.fadeCurve;
             clipSnapshot.sourceFilePath = clip.sourceFilePath;
             clipSnapshot.midiInstrumentId = clip.midiInstrumentId;
             clipSnapshot.midiInstrumentName = clip.midiInstrumentName;
@@ -5747,6 +5794,21 @@ void JuceEngine::setClipGain(int clipIndex, float gain)
         p->setGainUi(c.gainUi);
 }
 
+void JuceEngine::setClipExtraGainLinear(int clipIndex, float gainLinear)
+{
+    if (clips.empty() || clipIndex < 0 || clipIndex >= (int)clips.size())
+        return;
+
+    auto &c = clips[(size_t)clipIndex];
+    if (!c.alive || c.playerNode == nullptr)
+        return;
+
+    c.extraGainLinear = juce::jlimit(0.0f, 64.0f, gainLinear);
+
+    if (auto *p = asTimelineProcessor(c.playerNode))
+        p->setExtraGainLinear(c.extraGainLinear);
+}
+
 void JuceEngine::muteClip(int clipIndex, bool shouldMute)
 {
     if (clips.empty() || clipIndex < 0 || clipIndex >= (int)clips.size())
@@ -6385,6 +6447,53 @@ double spectralFluxProxy(const std::vector<float> &x, double fs)
     return juce::jlimit(0.0, 1.0, fluxAcc / (double)count / 2.5);
 }
 
+std::vector<double> keyChroma16k(const std::vector<float> &x, double fs)
+{
+    constexpr int chromaBins = 12;
+    constexpr int minMidi = 36; // C2
+    constexpr int maxMidi = 84; // C6
+    std::vector<double> chroma((size_t)chromaBins, 0.0);
+    if (x.size() < 2048 || fs <= 0.0)
+        return chroma;
+
+    double sumSq = 0.0;
+    for (const float sample : x)
+        sumSq += (double)sample * (double)sample;
+    const double rms = std::sqrt(sumSq / (double)juce::jmax(1, (int)x.size()));
+    if (rms < 0.003)
+        return chroma;
+
+    for (int midi = minMidi; midi <= maxMidi; ++midi)
+    {
+        const double freq = 440.0 * std::pow(2.0, ((double)midi - 69.0) / 12.0);
+        if (freq <= 45.0 || freq >= fs * 0.45)
+            continue;
+        const double mag = goertzelMag(x, fs, freq);
+        chroma[(size_t)(midi % chromaBins)] += (mag * mag) / std::sqrt(freq);
+    }
+
+    const double floor = *std::min_element(chroma.begin(), chroma.end());
+    for (double &value : chroma)
+        value = std::max(0.0, value - floor * 0.75);
+
+    const double peak = *std::max_element(chroma.begin(), chroma.end());
+    if (peak <= 1.0e-12)
+        return std::vector<double>((size_t)chromaBins, 0.0);
+
+    double sum = 0.0;
+    for (double &value : chroma)
+    {
+        value = std::sqrt(value / peak);
+        sum += value;
+    }
+    if (sum <= 1.0e-12)
+        return std::vector<double>((size_t)chromaBins, 0.0);
+
+    for (double &value : chroma)
+        value = juce::jlimit(0.0, 1.0, value / sum);
+    return chroma;
+}
+
 int estimateOutputSamples(const juce::AudioFormatReader &reader, int inputSamples)
 {
     if (inputSamples <= 0)
@@ -6500,6 +6609,8 @@ juce::NamedValueSet analyzePromptStatsFromMono(const std::vector<float> &pcm, co
         out.set("high", 0.0);
         out.set("sibilance", 0.0);
         out.set("bassiness", 0.0);
+        for (int i = 0; i < 12; ++i)
+            out.set(juce::String("key_pc_") + juce::String(i), 0.0);
     };
 
     if (pcm.empty())
@@ -6618,6 +6729,9 @@ juce::NamedValueSet analyzePromptStatsFromMono(const std::vector<float> &pcm, co
     out.set("high", high);
     out.set("sibilance", sibilance);
     out.set("bassiness", bassiness);
+    const auto keyChroma = keyChroma16k(x, kPromptAnalysisSampleRate);
+    for (int i = 0; i < (int)keyChroma.size(); ++i)
+        out.set(juce::String("key_pc_") + juce::String(i), keyChroma[(size_t)i]);
     return out;
 }
 } // namespace
@@ -7324,8 +7438,10 @@ void JuceEngine::updateMasterMeterFromOutput(const float *const *out,
 
     for (int i = 0; i < numSamples; ++i)
     {
-        const float l = outL[i];
-        const float r = outR[i];
+        const float rawL = outL[i];
+        const float rawR = outR[i];
+        const float l = std::isfinite(rawL) ? rawL : 0.0f;
+        const float r = std::isfinite(rawR) ? rawR : 0.0f;
 
         const float al = std::abs(l);
         const float ar = std::abs(r);

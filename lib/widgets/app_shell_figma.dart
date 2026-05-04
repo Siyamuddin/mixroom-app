@@ -39,6 +39,10 @@ const String kMixroomShellAccountEditCheckAsset =
 
 const double kMixroomMainDockHeight = 80;
 const double kMixroomMainDockOverlapInset = 98;
+const double kMixroomDesktopRailWidth = 188;
+
+const double _kMixroomBrandMarkAspectRatio = 2616 / 1644;
+const double _kMixroomWordmarkAspectRatio = 4096 / 591;
 
 enum MixroomMainTab {
   home,
@@ -52,19 +56,49 @@ BoxDecoration mixroomShellSurfaceDecoration({
   Color color = const Color.fromRGBO(244, 244, 244, 0.18),
   bool strong = false,
 }) {
+  final topTone =
+      Color.lerp(color, Colors.white, strong ? 0.12 : 0.07)!.withValues(
+    alpha: strong ? 0.24 : 0.20,
+  );
+  final bottomTone =
+      Color.lerp(color, const Color(0xFF08111B), strong ? 0.68 : 0.56)!
+          .withValues(alpha: strong ? 0.78 : 0.68);
   return BoxDecoration(
-    color: color,
+    gradient: LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: [
+        topTone,
+        Color.lerp(color, const Color(0xFF0B1726), 0.42)!.withValues(
+          alpha: strong ? 0.46 : 0.38,
+        ),
+        bottomTone,
+      ],
+      stops: const [0.0, 0.38, 1.0],
+    ),
     borderRadius: BorderRadius.circular(radius),
     border: Border.all(
-      color: Colors.white.withValues(alpha: strong ? 0.18 : 0.14),
-      width: 0.9,
+      color: Color.lerp(
+        Colors.white.withValues(alpha: strong ? 0.17 : 0.13),
+        const Color(0xFF7FD4FF),
+        strong ? 0.18 : 0.08,
+      )!,
+      width: strong ? 1.0 : 0.9,
     ),
     boxShadow: [
       BoxShadow(
-        color: Colors.black.withValues(alpha: 0.28),
-        blurRadius: strong ? 24 : 18,
-        spreadRadius: strong ? 1 : 0,
-        offset: const Offset(0, 10),
+        color: Colors.black.withValues(alpha: strong ? 0.34 : 0.26),
+        blurRadius: strong ? 30 : 22,
+        spreadRadius: strong ? 2 : 0,
+        offset: const Offset(0, 14),
+      ),
+      BoxShadow(
+        color: const Color(0xFF2E9DFF).withValues(
+          alpha: strong ? 0.10 : 0.05,
+        ),
+        blurRadius: strong ? 28 : 20,
+        spreadRadius: 0,
+        offset: const Offset(0, 8),
       ),
     ],
   );
@@ -76,14 +110,15 @@ BoxDecoration mixroomShellDockDecoration() {
       begin: Alignment.topCenter,
       end: Alignment.bottomCenter,
       colors: <Color>[
-        Color.fromRGBO(32, 82, 132, 0.80),
+        Color.fromRGBO(39, 96, 156, 0.84),
+        Color.fromRGBO(27, 72, 121, 0.92),
         Color.fromRGBO(118, 170, 220, 0.98),
       ],
-      stops: <double>[0.10, 1.0],
+      stops: <double>[0.05, 0.42, 1.0],
     ),
     borderRadius: const BorderRadius.vertical(top: Radius.circular(39)),
     border: Border.all(
-      color: Colors.white.withValues(alpha: 0.12),
+      color: Colors.white.withValues(alpha: 0.14),
       width: 0.8,
     ),
     boxShadow: [
@@ -112,9 +147,9 @@ Widget _mixroomShellChromeOverlay({
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Colors.white.withValues(alpha: intense ? 0.045 : 0.03),
+                  Colors.white.withValues(alpha: intense ? 0.065 : 0.04),
                   Colors.white.withValues(alpha: 0.0),
-                  Colors.black.withValues(alpha: intense ? 0.06 : 0.045),
+                  Colors.black.withValues(alpha: intense ? 0.08 : 0.05),
                 ],
                 stops: const [0.0, 0.42, 1.0],
               ),
@@ -136,7 +171,7 @@ Widget _mixroomShellChromeOverlay({
                 center: const Alignment(-0.95, -0.95),
                 radius: 1.05,
                 colors: [
-                  Colors.white.withValues(alpha: intense ? 0.11 : 0.075),
+                  Colors.white.withValues(alpha: intense ? 0.15 : 0.10),
                   Colors.white.withValues(alpha: 0.0),
                 ],
               ),
@@ -149,6 +184,9 @@ Widget _mixroomShellChromeOverlay({
 }
 
 double mixroomShellBottomPadding(BuildContext context) {
+  if (mixroomUsesDesktopRailNavigation) {
+    return 28;
+  }
   return mixroomShellDockBottomInset(context) + kMixroomMainDockOverlapInset;
 }
 
@@ -165,21 +203,183 @@ double mixroomShellDockBottomInset(BuildContext context) {
   return 0.0;
 }
 
+bool get mixroomUsesDesktopRailNavigation =>
+    !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
+
 class MixroomShellBackground extends StatelessWidget {
   const MixroomShellBackground({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: const Color(0xFF090909),
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const ColoredBox(color: Color(0xFF06080D)),
+        Image.asset(
+          kMixroomShellBackgroundAsset,
+          width: double.infinity,
+          height: double.infinity,
+          fit: BoxFit.cover,
+          alignment: Alignment.topCenter,
+          filterQuality: FilterQuality.high,
+        ),
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Color.fromRGBO(3, 5, 9, 0.22),
+                Color.fromRGBO(6, 10, 17, 0.08),
+                Color.fromRGBO(4, 8, 14, 0.42),
+              ],
+              stops: [0.0, 0.38, 1.0],
+            ),
+          ),
+        ),
+        Positioned(
+          left: -120,
+          bottom: -180,
+          child: IgnorePointer(
+            child: Container(
+              width: 460,
+              height: 460,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    const Color(0xFF2D8CFF).withValues(alpha: 0.22),
+                    const Color(0xFF2D8CFF).withValues(alpha: 0.06),
+                    Colors.transparent,
+                  ],
+                  stops: const [0.0, 0.34, 1.0],
+                ),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          right: -100,
+          top: -120,
+          child: IgnorePointer(
+            child: Container(
+              width: 320,
+              height: 320,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    const Color(0xFF8FE0FF).withValues(alpha: 0.12),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+int _mixroomRasterCacheExtent(BuildContext context, double logicalExtent) {
+  final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
+  return (logicalExtent * devicePixelRatio).round().clamp(1, 8192);
+}
+
+class _MixroomShellRasterAsset extends StatelessWidget {
+  const _MixroomShellRasterAsset({
+    required this.assetPath,
+    required this.aspectRatio,
+    this.width,
+    this.height,
+    this.alignment = Alignment.center,
+    this.fit = BoxFit.contain,
+  });
+
+  final String assetPath;
+  final double aspectRatio;
+  final double? width;
+  final double? height;
+  final Alignment alignment;
+  final BoxFit fit;
+
+  @override
+  Widget build(BuildContext context) {
+    final effectiveWidth =
+        width ?? (height == null ? null : height! * aspectRatio);
+    final effectiveHeight =
+        height ?? (width == null ? null : width! / aspectRatio);
+    return RepaintBoundary(
       child: Image.asset(
-        kMixroomShellBackgroundAsset,
-        width: double.infinity,
-        height: double.infinity,
-        fit: BoxFit.cover,
-        alignment: Alignment.topCenter,
+        assetPath,
+        width: width,
+        height: height,
+        fit: fit,
+        alignment: alignment,
         filterQuality: FilterQuality.high,
+        isAntiAlias: true,
+        cacheWidth: effectiveWidth == null
+            ? null
+            : _mixroomRasterCacheExtent(context, effectiveWidth),
+        cacheHeight: effectiveHeight == null
+            ? null
+            : _mixroomRasterCacheExtent(context, effectiveHeight),
       ),
+    );
+  }
+}
+
+class MixroomShellBrandMark extends StatelessWidget {
+  const MixroomShellBrandMark({
+    super.key,
+    this.width,
+    this.height,
+    this.fit = BoxFit.contain,
+    this.alignment = Alignment.center,
+  });
+
+  final double? width;
+  final double? height;
+  final BoxFit fit;
+  final Alignment alignment;
+
+  @override
+  Widget build(BuildContext context) {
+    return _MixroomShellRasterAsset(
+      assetPath: kMixroomShellBrandMarkAsset,
+      aspectRatio: _kMixroomBrandMarkAspectRatio,
+      width: width,
+      height: height,
+      fit: fit,
+      alignment: alignment,
+    );
+  }
+}
+
+class MixroomShellWordmark extends StatelessWidget {
+  const MixroomShellWordmark({
+    super.key,
+    this.width,
+    this.height,
+    this.fit = BoxFit.contain,
+    this.alignment = Alignment.centerLeft,
+  });
+
+  final double? width;
+  final double? height;
+  final BoxFit fit;
+  final Alignment alignment;
+
+  @override
+  Widget build(BuildContext context) {
+    return _MixroomShellRasterAsset(
+      assetPath: kMixroomShellWordmarkAsset,
+      aspectRatio: _kMixroomWordmarkAspectRatio,
+      width: width,
+      height: height,
+      fit: fit,
+      alignment: alignment,
     );
   }
 }
@@ -205,7 +405,7 @@ class MixroomShellSurface extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
         child: Stack(
           children: [
             Container(
@@ -224,6 +424,109 @@ class MixroomShellSurface extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class MixroomShellDialog extends StatelessWidget {
+  const MixroomShellDialog({
+    super.key,
+    required this.child,
+    this.padding = const EdgeInsets.fromLTRB(20, 18, 20, 18),
+    this.radius = 26,
+    this.maxWidth = 420,
+    this.insetPadding = const EdgeInsets.symmetric(horizontal: 18),
+    this.alignment,
+    this.color = const Color.fromRGBO(244, 244, 244, 0.14),
+    this.strong = true,
+  });
+
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+  final double radius;
+  final double maxWidth;
+  final EdgeInsets insetPadding;
+  final AlignmentGeometry? alignment;
+  final Color color;
+  final bool strong;
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      alignment: alignment,
+      backgroundColor: Colors.transparent,
+      surfaceTintColor: Colors.transparent,
+      shadowColor: Colors.transparent,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(radius),
+      ),
+      clipBehavior: Clip.antiAlias,
+      insetPadding: insetPadding,
+      child: Material(
+        color: Colors.transparent,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxWidth),
+          child: MixroomShellSurface(
+            radius: radius,
+            strong: strong,
+            color: color,
+            padding: padding,
+            child: child,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class MixroomShellDialogButton extends StatelessWidget {
+  const MixroomShellDialogButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.accent = false,
+    this.danger = false,
+  });
+
+  final String label;
+  final VoidCallback onPressed;
+  final bool accent;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    final backgroundColor = accent
+        ? const Color.fromRGBO(0, 149, 255, 0.52)
+        : danger
+            ? const Color.fromRGBO(255, 119, 119, 0.18)
+            : Colors.white.withValues(alpha: 0.10);
+    final foregroundColor =
+        danger ? const Color(0xFFFFB4B4) : const Color(0xFFF4F4F4);
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onPressed,
+      child: MixroomShellSurface(
+        radius: 20,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        color: backgroundColor,
+        strong: accent,
+        child: SizedBox(
+          width: double.infinity,
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: 'Pretendard',
+              color: foregroundColor,
+              fontSize: 15,
+              height: 22 / 15,
+              fontWeight: accent ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
         ),
       ),
     );
@@ -353,20 +656,10 @@ class MixroomShellWordmarkHeader extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Image.asset(
-            kMixroomShellBrandMarkAsset,
-            width: 76,
-            fit: BoxFit.contain,
-            filterQuality: FilterQuality.high,
-          ),
+          const MixroomShellBrandMark(width: 76),
           if (showWordmark) ...[
             const SizedBox(height: 22),
-            Image.asset(
-              kMixroomShellWordmarkAsset,
-              width: 162,
-              fit: BoxFit.contain,
-              filterQuality: FilterQuality.high,
-            ),
+            const MixroomShellWordmark(width: 162, alignment: Alignment.center),
           ],
         ],
       ),
@@ -593,6 +886,271 @@ class MixroomMainBottomDock extends StatelessWidget {
               onTap: () => onTabSelected(MixroomMainTab.account),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class MixroomMainSideRail extends StatelessWidget {
+  const MixroomMainSideRail({
+    super.key,
+    required this.selectedTab,
+    required this.onTabSelected,
+    required this.onAddTap,
+  });
+
+  final MixroomMainTab selectedTab;
+  final ValueChanged<MixroomMainTab> onTabSelected;
+  final VoidCallback onAddTap;
+
+  String _iconForTab(MixroomMainTab tab, bool active) {
+    switch (tab) {
+      case MixroomMainTab.home:
+        return active ? kMixroomShellHomeActiveAsset : kMixroomShellHomeAsset;
+      case MixroomMainTab.platform:
+        return active
+            ? kMixroomShellPlatformActiveAsset
+            : kMixroomShellPlatformAsset;
+      case MixroomMainTab.projects:
+        return active
+            ? kMixroomShellProjectsActiveAsset
+            : kMixroomShellProjectsAsset;
+      case MixroomMainTab.account:
+        return active
+            ? kMixroomShellAccountActiveAsset
+            : kMixroomShellAccountAsset;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: kMixroomDesktopRailWidth,
+      child: MixroomShellSurface(
+        radius: 34,
+        padding: const EdgeInsets.fromLTRB(10, 14, 10, 12),
+        color: const Color.fromRGBO(244, 244, 244, 0.14),
+        strong: true,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(0, 2, 0, 4),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const MixroomShellBrandMark(width: 38, height: 38),
+                  const SizedBox(height: 10),
+                  const MixroomShellWordmark(
+                    width: 132,
+                    height: 19,
+                    alignment: Alignment.center,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _MixroomShellRailButton(
+                      label: L10n.translate(context, 'Home'),
+                      active: selectedTab == MixroomMainTab.home,
+                      assetPath: _iconForTab(
+                        MixroomMainTab.home,
+                        selectedTab == MixroomMainTab.home,
+                      ),
+                      onTap: () => onTabSelected(MixroomMainTab.home),
+                    ),
+                    const SizedBox(height: 8),
+                    _MixroomShellRailButton(
+                      label: L10n.translate(context, 'Platform'),
+                      active: selectedTab == MixroomMainTab.platform,
+                      assetPath: _iconForTab(
+                        MixroomMainTab.platform,
+                        selectedTab == MixroomMainTab.platform,
+                      ),
+                      onTap: () => onTabSelected(MixroomMainTab.platform),
+                    ),
+                    const SizedBox(height: 8),
+                    _MixroomShellRailButton(
+                      label: L10n.translate(context, 'Projects'),
+                      active: selectedTab == MixroomMainTab.projects,
+                      assetPath: _iconForTab(
+                        MixroomMainTab.projects,
+                        selectedTab == MixroomMainTab.projects,
+                      ),
+                      onTap: () => onTabSelected(MixroomMainTab.projects),
+                    ),
+                    const SizedBox(height: 8),
+                    _MixroomShellRailButton(
+                      label: L10n.translate(context, 'Account'),
+                      active: selectedTab == MixroomMainTab.account,
+                      assetPath: _iconForTab(
+                        MixroomMainTab.account,
+                        selectedTab == MixroomMainTab.account,
+                      ),
+                      onTap: () => onTabSelected(MixroomMainTab.account),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            _MixroomShellRailButton(
+              label: L10n.translate(context, 'New Project'),
+              active: true,
+              icon: const Icon(
+                Icons.add_rounded,
+                color: Color(0xFFF4F4F4),
+                size: 22,
+              ),
+              emphasize: true,
+              onTap: onAddTap,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MixroomShellRailButton extends StatelessWidget {
+  const _MixroomShellRailButton({
+    required this.label,
+    required this.active,
+    required this.onTap,
+    this.assetPath,
+    this.icon,
+    this.emphasize = false,
+  }) : assert(assetPath != null || icon != null);
+
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+  final String? assetPath;
+  final Widget? icon;
+  final bool emphasize;
+
+  @override
+  Widget build(BuildContext context) {
+    final topFill = emphasize
+        ? const Color.fromRGBO(45, 157, 255, 0.52)
+        : active
+            ? const Color.fromRGBO(106, 202, 255, 0.20)
+            : const Color.fromRGBO(255, 255, 255, 0.09);
+    final bottomFill = emphasize
+        ? const Color.fromRGBO(20, 98, 176, 0.82)
+        : active
+            ? const Color.fromRGBO(13, 28, 49, 0.72)
+            : const Color.fromRGBO(8, 14, 24, 0.68);
+    final borderColor = emphasize
+        ? const Color(0xFF8CD8FF).withValues(alpha: 0.38)
+        : Colors.white.withValues(alpha: active ? 0.18 : 0.09);
+
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(24),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(24),
+        splashFactory: InkRipple.splashFactory,
+        overlayColor: WidgetStateProperty.resolveWith<Color?>((states) {
+          if (states.contains(WidgetState.pressed)) {
+            return Colors.white.withValues(alpha: 0.12);
+          }
+          if (states.contains(WidgetState.hovered)) {
+            return Colors.white.withValues(alpha: 0.06);
+          }
+          return Colors.transparent;
+        }),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(
+              height: 50,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [topFill, bottomFill],
+                ),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: borderColor),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: active ? 0.24 : 0.18),
+                    blurRadius: active ? 18 : 14,
+                    offset: const Offset(0, 8),
+                  ),
+                  if (active || emphasize)
+                    BoxShadow(
+                      color: const Color(0xFF2D8CFF).withValues(alpha: 0.10),
+                      blurRadius: 22,
+                      offset: const Offset(0, 6),
+                    ),
+                ],
+              ),
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(24),
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            Colors.white.withValues(
+                              alpha: active || emphasize ? 0.06 : 0.03,
+                            ),
+                            Colors.transparent,
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: icon ??
+                            SvgPicture.asset(
+                              assetPath!,
+                              width: 18,
+                              height: 18,
+                            ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: const Color(0xFFF4F4F4),
+                            fontSize: 13,
+                            fontWeight: active || emphasize
+                                ? FontWeight.w700
+                                : FontWeight.w600,
+                            letterSpacing: active || emphasize ? -0.08 : -0.04,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );

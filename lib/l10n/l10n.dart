@@ -163,6 +163,28 @@ class L10n {
           'Please don\'t close the app or lock your screen.':
               'Please don\'t close the app or lock your screen.',
           'Track': 'Track',
+          'Row': 'Row',
+          'Add Row': 'Add Row',
+          'Type...': 'Type...',
+          'Copy': 'Copy',
+          'Paste': 'Paste',
+          'Copy range': 'Copy range',
+          'Paste here': 'Paste here',
+          'Open param': 'Open param',
+          'Edit points': 'Edit points',
+          'Clone': 'Clone',
+          'Make unique': 'Make unique',
+          'Clip settings': 'Clip settings',
+          'Automate': 'Automate',
+          'Crossfade': 'Crossfade',
+          'Crossfade Length': 'Crossfade Length',
+          'Off': 'Off',
+          'None': 'None',
+          'Cut': 'Cut',
+          'Fade': 'Fade',
+          'Linear Crossfade': 'Linear Crossfade',
+          'Equal Power Crossfade': 'Equal Power Crossfade',
+          'S-Curve Crossfade': 'S-Curve Crossfade',
           'Effects': 'Effects',
           'Row effects': 'Row effects',
           'Master effects': 'Master effects',
@@ -243,6 +265,7 @@ class L10n {
           'Video project renamed': 'Video project renamed',
           'Rename failed': 'Rename failed',
           'Delete project?': 'Delete project?',
+          'This action cannot be undone.': 'This action cannot be undone.',
           'Delete video project?': 'Delete video project?',
           'Project': 'Project',
           'will be permanently deleted.': 'will be permanently deleted.',
@@ -277,6 +300,8 @@ class L10n {
           'Export WAV': 'Export WAV',
           'Export MP3': 'Export MP3',
           'Piano Roll Quick Guide': 'Piano Roll Quick Guide',
+          'A few gestures that make editing faster.':
+              'A few gestures that make editing faster.',
           'Create + shape notes': 'Create + shape notes',
           'Tap empty grid to add. Drag to move. Pull right edge to resize.':
               'Tap empty grid to add. Drag to move. Pull right edge to resize.',
@@ -349,6 +374,9 @@ class L10n {
           'Draft (fast)': 'Draft (fast)',
           'Good': 'Good',
           'Best': 'Best',
+          'Normalize': 'Normalize',
+          'Could not normalize this clip yet.':
+              'Could not normalize this clip yet.',
           'Normalize loudness': 'Normalize loudness',
           'Limiter ceiling (dBTP)': 'Limiter ceiling (dBTP)',
           'Bit depth': 'Bit depth',
@@ -371,6 +399,10 @@ class L10n {
           'Could not open the saved export.':
               'Could not open the saved export.',
           'Platform upload coming soon': 'Platform upload coming soon',
+          'Successfully Exported!': 'Successfully Exported!',
+          'Exit to Projects': 'Exit to Projects',
+          'Share': 'Share',
+          'Upload on Platform': 'Upload on Platform',
           'Upload to YouTube': 'Upload to YouTube',
           'Title': 'Title',
           'Description': 'Description',
@@ -402,7 +434,37 @@ class L10n {
           'Welcome to': 'Welcome to',
           'Email or Username': 'Email or Username',
           'Email': 'Email',
+          'Verify now': 'Verify now',
+          'Refresh': 'Refresh',
+          'You are': 'You are',
+          'Plan and billing management is coming soon.':
+              'Plan and billing management is coming soon.',
+          'Subscription details refreshed.': 'Subscription details refreshed.',
+          'Restore request sent. Matching purchases will sync shortly.':
+              'Restore request sent. Matching purchases will sync shortly.',
+          'Something went wrong.': 'Something went wrong.',
+          'This route is not configured yet.':
+              'This route is not configured yet.',
+          'This route is invalid.': 'This route is invalid.',
+          'Could not open your email app.': 'Could not open your email app.',
+          'Support contact is not configured yet.':
+              'Support contact is not configured yet.',
+          'This store product is not configured for the current build yet.':
+              'This store product is not configured for the current build yet.',
+          'Current access': 'Current access',
+          'Free': 'Free',
+          'Plan & Billing': 'Plan & Billing',
+          'Plan': 'Plan',
+          'Billing': 'Billing',
           'Password': 'Password',
+          'You sign in with': 'You sign in with',
+          'using': 'using',
+          'You sign in with email and password.':
+              'You sign in with email and password.',
+          'If you want to add a password later, sign out and use Forgot password from the sign-in screen.':
+              'If you want to add a password later, sign out and use Forgot password from the sign-in screen.',
+          'If you want to add a password later, sign out and use Forgot password with that email on the sign-in screen.':
+              'If you want to add a password later, sign out and use Forgot password with that email on the sign-in screen.',
           'Confirmation code': 'Confirmation code',
           'Confirmation code sent!': 'Confirmation code sent!',
           'Confirmation code will be sent to your email inbox.':
@@ -423,12 +485,25 @@ class L10n {
           'Add the last few details to start using Mixroom.':
               'Add the last few details to start using Mixroom.',
           'Username': 'Username',
+          '1-30 chars. Lowercase letters, numbers, underscores, and hyphens.':
+              '1-30 chars. Lowercase letters, numbers, underscores, and hyphens.',
+          'Available after the account backend is deployed.':
+              'Available after the account backend is deployed.',
           'Bio': 'Bio',
+          'Tell listeners what you make.': 'Tell listeners what you make.',
           'Tell people a bit about yourself':
               'Tell people a bit about yourself',
           'Generate username': 'Generate username',
           'Birthday (yyyy.mm.dd)': 'Birthday (yyyy.mm.dd)',
           'What describes you best?': 'What describes you best?',
+          'What describes you': 'What describes you',
+          'Producer': 'Producer',
+          'Artist': 'Artist',
+          'Songwriter': 'Songwriter',
+          'Audio engineer': 'Audio engineer',
+          'Student': 'Student',
+          'Beginner': 'Beginner',
+          'Make music for work': 'Make music for work',
           'Agree to all': 'Agree to all',
           'I agree to the': 'I agree to the',
           'and': 'and',
@@ -508,6 +583,8 @@ class L10n {
           'Step {current} of {total}': 'Step {current} of {total}',
           'Change': 'Change',
           'Select birthday': 'Select birthday',
+          'You must be at least {age} years old to use Mixroom.':
+              'You must be at least {age} years old to use Mixroom.',
           'Log Out': 'Log Out',
           'Delete Account': 'Delete Account',
           'Delete account?': 'Delete account?',
@@ -543,16 +620,31 @@ class L10n {
           'Feedback for': 'Feedback for',
           'Send Feedback': 'Send Feedback',
           'Submit': 'Submit',
+          'Please enter your feedback or bug report first.':
+              'Please enter your feedback or bug report first.',
+          'Choose feedback or bug report, then describe it. You can also attach current editor context.':
+              'Choose feedback or bug report, then describe it. You can also attach current editor context.',
+          'Choose feedback or bug report, then describe it. Account details are attached automatically.':
+              'Choose feedback or bug report, then describe it. Account details are attached automatically.',
           'Thank you for your submission!': 'Thank you for your submission!',
           'Thank you for the feedback!': 'Thank you for the feedback!',
           'Tell us what is working, missing, or would make this better.':
               'Tell us what is working, missing, or would make this better.',
           'Describe the bug, what you expected, and what happened.':
               'Describe the bug, what you expected, and what happened.',
+          '{count} characters left': '{count} characters left',
           'Allow Mixroom to respond by email.':
               'Allow Mixroom to respond by email.',
           'Optional. We may follow up using your account email about this submission.':
               'Optional. We may follow up using your account email about this submission.',
+          'Include with this report': 'Include with this report',
+          'Include AI chat history and project settings.':
+              'Include AI chat history and project settings.',
+          'Attach recent assistant messages and current DAW settings.':
+              'Attach recent assistant messages and current DAW settings.',
+          'Include a DAW screenshot.': 'Include a DAW screenshot.',
+          'Mixroom captures the editor view with chat closed.':
+              'Mixroom captures the editor view with chat closed.',
           'Video projects are coming soon.': 'Video projects are coming soon.',
           'No matching projects.': 'No matching projects.',
           'Sort by recent': 'Sort by recent',
@@ -585,7 +677,24 @@ class L10n {
           'Current Password': 'Current Password',
           'Enter current password': 'Enter current password',
           'Password updated successfully.': 'Password updated successfully.',
+          'Please enter your current password.':
+              'Please enter your current password.',
+          'New password must be different from current password.':
+              'New password must be different from current password.',
           'Updating...': 'Updating...',
+          'This page shows your current sign-in method. More linking options can come later.':
+              'This page shows your current sign-in method. More linking options can come later.',
+          'Username, birthday, and bio require the deployed account backend before they can be saved.':
+              'Username, birthday, and bio require the deployed account backend before they can be saved.',
+          'Username, birthday, and bio save after the account backend is deployed.':
+              'Username, birthday, and bio save after the account backend is deployed.',
+          'Manage privacy controls, legal documents, and data requests.':
+              'Manage privacy controls, legal documents, and data requests.',
+          'Tell us what is working, what is broken, or what you want to see next.':
+              'Tell us what is working, what is broken, or what you want to see next.',
+          'Send feedback or bug report': 'Send feedback or bug report',
+          'Project files are stored locally.':
+              'Project files are stored locally.',
           'Prompt usage': 'Prompt usage',
           'Extra prompt credits are used first, before daily and weekly limits.':
               'Extra prompt credits are used first, before daily and weekly limits.',
@@ -674,9 +783,34 @@ class L10n {
           'Folder already loaded for this project.':
               'Folder already loaded for this project.',
           'Failed to preview sample': 'Failed to preview sample',
+          'Project Settings': 'Project Settings',
           'Project Name': 'Project Name',
+          'Metronome': 'Metronome',
+          'Metronome Volume': 'Metronome Volume',
+          'Replay Tutorial': 'Replay Tutorial',
+          'Debug: Show First-Open Prompt': 'Debug: Show First-Open Prompt',
           'Run the interactive DAW tutorial again to revisit the timeline, tracks, effects, automation, AI, and export flow.':
               'Run the interactive DAW tutorial again to revisit the timeline, tracks, effects, automation, AI, and export flow.',
+          'Show Producer Capture UI': 'Show Producer Capture UI',
+          'Use Computer Keyboard as MIDI Input':
+              'Use Computer Keyboard as MIDI Input',
+          'Spacebar Stop Returns to Start': 'Spacebar Stop Returns to Start',
+          'When stopping playback with Space, jump back to the point where playback started.':
+              'When stopping playback with Space, jump back to the point where playback started.',
+          'Keyboard Shortcuts': 'Keyboard Shortcuts',
+          'View, remap, and reset desktop shortcuts.':
+              'View, remap, and reset desktop shortcuts.',
+          'Plugin Manager': 'Plugin Manager',
+          'Rescan, favorite, or hide desktop plugins.':
+              'Rescan, favorite, or hide desktop plugins.',
+          'Desktop Diagnostics': 'Desktop Diagnostics',
+          'Check audio device, CPU, buffer, and scan state.':
+              'Check audio device, CPU, buffer, and scan state.',
+          'Recovery & Missing Assets': 'Recovery & Missing Assets',
+          'Review recovered backups and missing media/plugin notices.':
+              'Review recovered backups and missing media/plugin notices.',
+          'Scan': 'Scan',
+          'View': 'View',
           'Bluetooth headset mic': 'Bluetooth headset mic',
           'Bluetooth headset mic can reduce audio quality and increase latency. Continue with this mic?':
               'Bluetooth headset mic can reduce audio quality and increase latency. Continue with this mic?',
@@ -706,8 +840,13 @@ class L10n {
           'Bluetooth headset mic can reduce audio quality and increase latency. You will be asked to confirm before recording.':
               'Bluetooth headset mic can reduce audio quality and increase latency. You will be asked to confirm before recording.',
           'Reset Bluetooth mic approvals': 'Reset Bluetooth mic approvals',
+          'Tempo': 'Tempo',
+          'Project Key': 'Project Key',
+          'No key': 'No key',
+          'Tempo Mode': 'Tempo Mode',
           'Tempo (BPM)': 'Tempo (BPM)',
           'TEMPO': 'TEMPO',
+          'Set Tempo': 'Set Tempo',
           'Export producer session': 'Export producer session',
           'Save producer session': 'Save producer session',
           'Clip tempo mode turned off.': 'Clip tempo mode turned off.',
@@ -722,6 +861,91 @@ class L10n {
           'Maximum of': 'Maximum of',
           'rows reached.': 'rows reached.',
           'Failed to share.': 'Failed to share.',
+          'Undo': 'Undo',
+          'Redo': 'Redo',
+          'Change project key': 'Change project key',
+          'Project set to': 'Project set to',
+          'Project BPM unchanged.': 'Project BPM unchanged.',
+          'Project tempo set to': 'Project tempo set to',
+          'This automation target is orphaned. Undo the plugin removal or re-add the plugin to relink it.':
+              'This automation target is orphaned. Undo the plugin removal or re-add the plugin to relink it.',
+          'Clone ready for': 'Clone ready for',
+          'Invalid range. Tap a different end point.':
+              'Invalid range. Tap a different end point.',
+          'Could not load this effect plugin.':
+              'Could not load this effect plugin.',
+          'Skipped unsupported cut action.': 'Skipped unsupported cut action.',
+          'Cut clip.': 'Cut clip.',
+          'Skipped incomplete move action.': 'Skipped incomplete move action.',
+          'Move made no changes.': 'Move made no changes.',
+          'Stretched clip.': 'Stretched clip.',
+          'Detected clip tempo and updated project tempo.':
+              'Detected clip tempo and updated project tempo.',
+          'Deleted clip.': 'Deleted clip.',
+          'Stopped sample processing.': 'Stopped sample processing.',
+          'Copied row effects.': 'Copied row effects.',
+          'Copy effects first.': 'Copy effects first.',
+          'Pasted row effects.': 'Pasted row effects.',
+          'This row has no effects to clear.':
+              'This row has no effects to clear.',
+          'Cleared row effects.': 'Cleared row effects.',
+          'Copied master effects.': 'Copied master effects.',
+          'Pasted master effects.': 'Pasted master effects.',
+          'Master has no effects to clear.': 'Master has no effects to clear.',
+          'Cleared master effects.': 'Cleared master effects.',
+          'Created automation clip.': 'Created automation clip.',
+          'Add a row before creating automation clips.':
+              'Add a row before creating automation clips.',
+          'Select a valid row before creating automation clips.':
+              'Select a valid row before creating automation clips.',
+          'Could not resolve that automation target.':
+              'Could not resolve that automation target.',
+          'No automatable parameters found for this plugin.':
+              'No automatable parameters found for this plugin.',
+          'Could not resolve that plugin parameter.':
+              'Could not resolve that plugin parameter.',
+          'Cleared automation clips.': 'Cleared automation clips.',
+          'Created': 'Created',
+          'kick-synced sidechain clips.': 'kick-synced sidechain clips.',
+          'Deleted automation clip.': 'Deleted automation clip.',
+          'Moved automation clip.': 'Moved automation clip.',
+          'Automation clip is already unique.':
+              'Automation clip is already unique.',
+          'Made automation clip unique.': 'Made automation clip unique.',
+          'Updated automation clip points.': 'Updated automation clip points.',
+          'Cleared automation.': 'Cleared automation.',
+          'Added automation ramp.': 'Added automation ramp.',
+          'Set automation points.': 'Set automation points.',
+          'MIDI notes already match that chop grid.':
+              'MIDI notes already match that chop grid.',
+          'Could not update this MIDI clip.':
+              'Could not update this MIDI clip.',
+          'MIDI notes already match that pitch.':
+              'MIDI notes already match that pitch.',
+          'Shifted MIDI notes': 'Shifted MIDI notes',
+          'up': 'up',
+          'down': 'down',
+          'by': 'by',
+          'That MIDI clip is already that long.':
+              'That MIDI clip is already that long.',
+          'Extended MIDI clip to': 'Extended MIDI clip to',
+          'Created MIDI clip from AI notes.':
+              'Created MIDI clip from AI notes.',
+          'Converting audio to MIDI...': 'Converting audio to MIDI...',
+          'Created MIDI clip below the source audio.':
+              'Created MIDI clip below the source audio.',
+          'Stem separation failed for target clips.':
+              'Stem separation failed for target clips.',
+          'Created stems for': 'Created stems for',
+          'clips.': 'clips.',
+          'Stem separation is only available for audio clips.':
+              'Stem separation is only available for audio clips.',
+          'Selected clip file was not found.':
+              'Selected clip file was not found.',
+          'Splitting stems...': 'Splitting stems...',
+          'Stem separation failed.': 'Stem separation failed.',
+          'Created vocal/instrumental stems.':
+              'Created vocal/instrumental stems.',
           'Master Volume': 'Master Volume',
           'Master Effects': 'Master Effects',
           'Master Bus': 'Master Bus',
@@ -730,6 +954,102 @@ class L10n {
           'Choose Instrument': 'Choose Instrument',
           'No instruments in this category.':
               'No instruments in this category.',
+          'Instrument': 'Instrument',
+          'All': 'All',
+          'Keys': 'Keys',
+          'Strings': 'Strings',
+          'Woodwinds': 'Woodwinds',
+          'Brass': 'Brass',
+          'Percussion': 'Percussion',
+          'Drums': 'Drums',
+          'Pads': 'Pads',
+          'Leads': 'Leads',
+          'Bass': 'Bass',
+          'Plucks': 'Plucks',
+          'Synths': 'Synths',
+          'Other': 'Other',
+          'Open instrument UI': 'Open instrument UI',
+          'Open UI': 'Open UI',
+          'Unlock piano roll from playhead': 'Unlock piano roll from playhead',
+          'Lock piano roll to playhead': 'Lock piano roll to playhead',
+          'Zoom out': 'Zoom out',
+          'Zoom in': 'Zoom in',
+          'Piano roll help': 'Piano roll help',
+          'Toggle fullscreen': 'Toggle fullscreen',
+          'Duplicate': 'Duplicate',
+          'File Browser Help': 'File Browser Help',
+          'Load a folder into the browser.': 'Load a folder into the browser.',
+          'Tap a folder button to switch the current folder.':
+              'Tap a folder button to switch the current folder.',
+          'Preview an audio file.': 'Preview an audio file.',
+          'Hold and drag a file into the timeline.':
+              'Hold and drag a file into the timeline.',
+          'Hold a folder button to remove it.':
+              'Hold a folder button to remove it.',
+          'Use the bottom waveform to seek preview playback.':
+              'Use the bottom waveform to seek preview playback.',
+          'Insert at playhead': 'Insert at playhead',
+          'Remove': 'Remove',
+          'Add a sample folder': 'Add a sample folder',
+          'This folder is currently unavailable.':
+              'This folder is currently unavailable.',
+          'Tip: choose local folders (not cloud-only placeholders).':
+              'Tip: choose local folders (not cloud-only placeholders).',
+          'Pick folder': 'Pick folder',
+          'Remove folder': 'Remove folder',
+          'No files found.': 'No files found.',
+          'File Browser': 'File Browser',
+          'How to use': 'How to use',
+          'Add folder': 'Add folder',
+          'Refresh folder': 'Refresh folder',
+          'Collapse panel': 'Collapse panel',
+          'Expand panel': 'Expand panel',
+          'Add Audio Clip': 'Add Audio Clip',
+          'Add Instrument Clip': 'Add Instrument Clip',
+          'Run': 'Run',
+          'Running': 'Running',
+          'Advanced options': 'Advanced options',
+          'Sample rate': 'Sample rate',
+          'Channels': 'Channels',
+          'Stereo': 'Stereo',
+          'Mono': 'Mono',
+          'Windows desktop currently exports with native WAV render only. MP3 and post-processing controls are disabled.':
+              'Windows desktop currently exports with native WAV render only. MP3 and post-processing controls are disabled.',
+          'Off: Clips ignore project tempo.\nResample: Clips follow tempo and shift pitch.\nStretch: Clips follow tempo and keep pitch.':
+              'Off: Clips ignore project tempo.\nResample: Clips follow tempo and shift pitch.\nStretch: Clips follow tempo and keep pitch.',
+          'Tempo mode: ': 'Tempo mode: ',
+          'Resample': 'Resample',
+          'Stretch': 'Stretch',
+          'Stretch (keep pitch)': 'Stretch (keep pitch)',
+          'Master': 'Master',
+          'Pan': 'Pan',
+          'Center': 'Center',
+          'Click to change analyzer view': 'Click to change analyzer view',
+          'Select': 'Select',
+          'Paint': 'Paint',
+          'Tone': 'Tone',
+          'Quick level and pitch adjustments':
+              'Quick level and pitch adjustments',
+          'Pitch': 'Pitch',
+          'MIDI clip': 'MIDI clip',
+          'Audio clip': 'Audio clip',
+          'Follows project BPM.': 'Follows project BPM.',
+          'MIDI clips follow project BPM automatically.':
+              'MIDI clips follow project BPM automatically.',
+          'No extra tempo mode is needed here.':
+              'No extra tempo mode is needed here.',
+          'Choose how this audio clip follows project BPM':
+              'Choose how this audio clip follows project BPM',
+          'Reversed': 'Reversed',
+          'Reverse': 'Reverse',
+          'Detect tempo': 'Detect tempo',
+          'Split vocals': 'Split vocals',
+          'Adjust To Tempo (Resample)': 'Adjust To Tempo (Resample)',
+          'Stretch To Tempo (Keep Pitch)': 'Stretch To Tempo (Keep Pitch)',
+          'Stretch mode is shown with teal clip handles.':
+              'Stretch mode is shown with teal clip handles.',
+          'Detect Tempo + Set Project BPM': 'Detect Tempo + Set Project BPM',
+          'Select Icon': 'Select Icon',
           'Microphone access is turned off': 'Microphone access is turned off',
           'No input devices available': 'No input devices available',
           'Input Device': 'Input Device',
@@ -744,6 +1064,174 @@ class L10n {
               'Built-in microphone recording needs access. External audio interfaces can still be used below when available.',
           'Audition folders and drag and drop':
               'Audition folders and drag and drop',
+          'Could not save preference. Please retry.':
+              'Could not save preference. Please retry.',
+          'Could not update telemetry preference. Please retry.':
+              'Could not update telemetry preference. Please retry.',
+          'Could not update marketing email preference. Please retry.':
+              'Could not update marketing email preference. Please retry.',
+          'Could not open this link on your device right now.':
+              'Could not open this link on your device right now.',
+          'Data export request': 'Data export request',
+          'Data correction/deletion request':
+              'Data correction/deletion request',
+          'Privacy inquiry': 'Privacy inquiry',
+          'Support request': 'Support request',
+          'Hello Mixroom Privacy Team,\n\n': 'Hello Mixroom Privacy Team,\n\n',
+          'Hello Mixroom Support,\n\n': 'Hello Mixroom Support,\n\n',
+          'Hello Mixroom Privacy Team,\n\nI would like to request a copy of my personal data.\n\nAccount email: \nFull name: \n\nThank you.':
+              'Hello Mixroom Privacy Team,\n\nI would like to request a copy of my personal data.\n\nAccount email: \nFull name: \n\nThank you.',
+          'Hello Mixroom Privacy Team,\n\nI would like to request a correction or deletion of my personal data.\n\nAccount email: \nRequest details: \n\nThank you.':
+              'Hello Mixroom Privacy Team,\n\nI would like to request a correction or deletion of my personal data.\n\nAccount email: \nRequest details: \n\nThank you.',
+          'Controls, documents, and requests':
+              'Controls, documents, and requests',
+          'Review legal documents, control privacy settings, and submit data-rights requests here.':
+              'Review legal documents, control privacy settings, and submit data-rights requests here.',
+          'Documents': 'Documents',
+          'How Mixroom collects, uses, and shares information.':
+              'How Mixroom collects, uses, and shares information.',
+          'Rules for using Mixroom and user content.':
+              'Rules for using Mixroom and user content.',
+          'Subprocessors': 'Subprocessors',
+          'See third-party service providers that process data on Mixroom\'s behalf.':
+              'See third-party service providers that process data on Mixroom\'s behalf.',
+          'Open-source licenses': 'Open-source licenses',
+          'View software licenses used by this app.':
+              'View software licenses used by this app.',
+          'Privacy Controls': 'Privacy Controls',
+          'You can change these preferences at any time from this screen.':
+              'You can change these preferences at any time from this screen.',
+          'Optional analytics and diagnostics':
+              'Optional analytics and diagnostics',
+          'Share app interaction events and diagnostics to help improve Mixroom quality and product decisions.':
+              'Share app interaction events and diagnostics to help improve Mixroom quality and product decisions.',
+          'Personalized recommendations': 'Personalized recommendations',
+          'Uses activity signals to tailor tips and suggestions.':
+              'Uses activity signals to tailor tips and suggestions.',
+          'Product updates and marketing email':
+              'Product updates and marketing email',
+          'Receive release notes, offers, and feature announcements.':
+              'Receive release notes, offers, and feature announcements.',
+          'Your Data Rights': 'Your Data Rights',
+          'Request my data export': 'Request my data export',
+          'Email request for a copy of your data.':
+              'Email request for a copy of your data.',
+          'Request data correction or deletion':
+              'Request data correction or deletion',
+          'Email request for correction or erasure.':
+              'Email request for correction or erasure.',
+          'Contact': 'Contact',
+          'Privacy contact': 'Privacy contact',
+          'Support contact': 'Support contact',
+          'Danger Zone': 'Danger Zone',
+          'Delete account permanently': 'Delete account permanently',
+          'Removes your account and signs you out.':
+              'Removes your account and signs you out.',
+          'Legal details and supporting information':
+              'Legal details and supporting information',
+          'Last updated: {date}': 'Last updated: {date}',
+          'This policy explains how Mixroom handles personal data in-app.':
+              'This policy explains how Mixroom handles personal data in-app.',
+          '1. Information We Collect': '1. Information We Collect',
+          'We may collect account information (such as email and profile details), usage analytics, crash diagnostics, and content metadata needed to operate features.':
+              'We may collect account information (such as email and profile details), usage analytics, crash diagnostics, and content metadata needed to operate features.',
+          '2. How We Use Data': '2. How We Use Data',
+          'Data is used to operate core app functionality, secure accounts, improve product quality, personalize user experience, and communicate essential service updates.':
+              'Data is used to operate core app functionality, secure accounts, improve product quality, personalize user experience, and communicate essential service updates.',
+          '3. Sharing and Processors': '3. Sharing and Processors',
+          'We may share data with trusted service providers that process data on our behalf (for example authentication, storage, analytics, or support tooling), subject to contractual safeguards.':
+              'We may share data with trusted service providers that process data on our behalf (for example authentication, storage, analytics, or support tooling), subject to contractual safeguards.',
+          '4. Retention': '4. Retention',
+          'We keep data only as long as needed for business and legal purposes. Retention periods may differ by data type, including backups and security logs.':
+              'We keep data only as long as needed for business and legal purposes. Retention periods may differ by data type, including backups and security logs.',
+          '5. Your Rights and Choices': '5. Your Rights and Choices',
+          'Depending on your region, you may have rights to access, export, correct, delete, or limit use of your personal data. You can submit a request from the Legal & Privacy Center.':
+              'Depending on your region, you may have rights to access, export, correct, delete, or limit use of your personal data. You can submit a request from the Legal & Privacy Center.',
+          '6. Children': '6. Children',
+          'Mixroom is not directed to children under the minimum age required by applicable law without appropriate parental consent and controls.':
+              'Mixroom is not directed to children under the minimum age required by applicable law without appropriate parental consent and controls.',
+          '7. Contact': '7. Contact',
+          'For privacy requests, contact privacy@mixroom.ai. For support, contact support@mixroom.ai.':
+              'For privacy requests, contact privacy@mixroom.ai. For support, contact support@mixroom.ai.',
+          'These terms govern use of Mixroom and related services.':
+              'These terms govern use of Mixroom and related services.',
+          '1. Acceptance': '1. Acceptance',
+          'By creating an account or using Mixroom, you agree to these Terms and any policies referenced here.':
+              'By creating an account or using Mixroom, you agree to these Terms and any policies referenced here.',
+          '2. Accounts': '2. Accounts',
+          'You are responsible for your account credentials and activity. Keep login details secure and notify us of unauthorized use.':
+              'You are responsible for your account credentials and activity. Keep login details secure and notify us of unauthorized use.',
+          '3. User Content': '3. User Content',
+          'You retain ownership of your content. You grant Mixroom a limited license to host, process, and transmit content solely to provide and improve the service.':
+              'You retain ownership of your content. You grant Mixroom a limited license to host, process, and transmit content solely to provide and improve the service.',
+          '4. Acceptable Use': '4. Acceptable Use',
+          'You agree not to abuse the service, violate intellectual property rights, distribute malicious content, or use Mixroom in unlawful ways.':
+              'You agree not to abuse the service, violate intellectual property rights, distribute malicious content, or use Mixroom in unlawful ways.',
+          '5. Termination': '5. Termination',
+          'We may suspend or terminate accounts for violations, fraud, abuse, or legal requirements. You may stop using the service at any time.':
+              'We may suspend or terminate accounts for violations, fraud, abuse, or legal requirements. You may stop using the service at any time.',
+          '6. Disclaimers and Liability': '6. Disclaimers and Liability',
+          'Services are provided on an as-is basis to the extent allowed by law. Liability is limited as described in the full legal agreement between you and Mixroom.':
+              'Services are provided on an as-is basis to the extent allowed by law. Liability is limited as described in the full legal agreement between you and Mixroom.',
+          'Legal questions can be sent to privacy@mixroom.ai or support@mixroom.ai.':
+              'Legal questions can be sent to privacy@mixroom.ai or support@mixroom.ai.',
+          'Mixroom uses third-party service providers to operate core app features. These providers process data on our behalf under contractual controls.':
+              'Mixroom uses third-party service providers to operate core app features. These providers process data on our behalf under contractual controls.',
+          'Amazon Web Services (AWS)': 'Amazon Web Services (AWS)',
+          'Google (Google Sign-In)': 'Google (Google Sign-In)',
+          'Apple (Sign in with Apple)': 'Apple (Sign in with Apple)',
+          'Kakao (Kakao Login)': 'Kakao (Kakao Login)',
+          'PostHog': 'PostHog',
+          'Sentry': 'Sentry',
+          'OpenAI': 'OpenAI',
+          'Purpose: account/authentication infrastructure, APIs, and application hosting. Typical data categories: account identifiers, authentication metadata, service logs, and app data required to deliver Mixroom features.':
+              'Purpose: account/authentication infrastructure, APIs, and application hosting. Typical data categories: account identifiers, authentication metadata, service logs, and app data required to deliver Mixroom features.',
+          'Purpose: social sign-in and account identity verification when users choose Google login. Typical data categories: basic profile identifiers (such as email and account subject ID) returned by Google authentication flows.':
+              'Purpose: social sign-in and account identity verification when users choose Google login. Typical data categories: basic profile identifiers (such as email and account subject ID) returned by Google authentication flows.',
+          'Purpose: social sign-in and account identity verification when users choose Apple login. Typical data categories: Apple account subject identifier and email relay/associated account email data provided by Apple auth.':
+              'Purpose: social sign-in and account identity verification when users choose Apple login. Typical data categories: Apple account subject identifier and email relay/associated account email data provided by Apple auth.',
+          'Purpose: social sign-in and account identity verification when users choose Kakao login. Typical data categories: Kakao account identifier and profile/email fields provided through Kakao authorization.':
+              'Purpose: social sign-in and account identity verification when users choose Kakao login. Typical data categories: Kakao account identifier and profile/email fields provided through Kakao authorization.',
+          'Purpose: product analytics and event telemetry, subject to user privacy toggle settings in-app. Typical data categories: app interaction events, device/app metadata, and aggregated usage signals.':
+              'Purpose: product analytics and event telemetry, subject to user privacy toggle settings in-app. Typical data categories: app interaction events, device/app metadata, and aggregated usage signals.',
+          'Purpose: crash reporting and diagnostics, subject to user privacy toggle settings in-app. Typical data categories: crash stack traces, runtime diagnostics, and device/app version metadata.':
+              'Purpose: crash reporting and diagnostics, subject to user privacy toggle settings in-app. Typical data categories: crash stack traces, runtime diagnostics, and device/app version metadata.',
+          'Purpose: AI assistant and model-inference features. Typical data categories: prompts/instructions and related context needed to generate assistant responses.':
+              'Purpose: AI assistant and model-inference features. Typical data categories: prompts/instructions and related context needed to generate assistant responses.',
+          'Updates': 'Updates',
+          'This list may change as Mixroom adds or removes service providers. Material updates are reflected in-app and in Mixroom privacy documentation.':
+              'This list may change as Mixroom adds or removes service providers. Material updates are reflected in-app and in Mixroom privacy documentation.',
+          'No active account.': 'No active account.',
+          'Type DELETE to confirm account deletion.':
+              'Type DELETE to confirm account deletion.',
+          'Enter your current password to delete this account.':
+              'Enter your current password to delete this account.',
+          'Re-authenticate with {provider} to delete this account.':
+              'Re-authenticate with {provider} to delete this account.',
+          'Re-authenticate with your social provider to delete this account.':
+              'Re-authenticate with your social provider to delete this account.',
+          'That re-authentication did not match your Mixroom account. Please try again.':
+              'That re-authentication did not match your Mixroom account. Please try again.',
+          'Delete account': 'Delete account',
+          'This permanently removes your Mixroom account and signed-in session on this device.':
+              'This permanently removes your Mixroom account and signed-in session on this device.',
+          'Before you continue': 'Before you continue',
+          'Your profile, auth access, and linked account data will be removed.':
+              'Your profile, auth access, and linked account data will be removed.',
+          'Deleting your Mixroom account does not cancel App Store or Google Play billing. Cancel there first if needed.':
+              'Deleting your Mixroom account does not cancel App Store or Google Play billing. Cancel there first if needed.',
+          'To protect your account, Mixroom will ask you to confirm DELETE and verify this session one more time.':
+              'To protect your account, Mixroom will ask you to confirm DELETE and verify this session one more time.',
+          'Signed in with {provider}': 'Signed in with {provider}',
+          'Type DELETE to continue': 'Type DELETE to continue',
+          'Current password': 'Current password',
+          'Enter your password': 'Enter your password',
+          'Confirm with {provider}': 'Confirm with {provider}',
+          'Verified': 'Verified',
+          'Run one more {provider} sign-in check before Mixroom deletes this account.':
+              'Run one more {provider} sign-in check before Mixroom deletes this account.',
+          'Re-auth with {provider}': 'Re-auth with {provider}',
+          'Re-auth completed': 'Re-auth completed',
           'Finish': 'Finish',
         },
         'ko': {
@@ -776,16 +1264,16 @@ class L10n {
           'Echo': '에코',
           'Reverb': '리버브',
           'Back': '뒤로',
-          'Export': '내보내기',
-          'EXPORT': '내보내기',
-          'Exported file saved!': '내보낸 파일 저장 완료!',
+          'Export': '파일로 저장',
+          'EXPORT': '파일로 저장',
+          'Exported file saved!': '파일 저장이 완료되었습니다!',
           'Your video was exported successfully!': '비디오 내보내기 성공!',
           'Share directly to:': '다음으로 공유:',
           'YouTube': '유튜브',
           'Instagram': '인스타그램',
           'TikTok': '틱톡',
           'Back to Editor': '편집기로 돌아가기',
-          'Export Successful': '내보내기 성공',
+          'Export Successful': '파일 저장 완료',
           'Audio Editor': '오디오 편집기',
           "SoundCloud": "사운드클라우드",
           "Export canceled or failed.": "내보내기 취소 또는 실패",
@@ -851,6 +1339,28 @@ class L10n {
           'Please don\'t close the app or lock your screen.':
               '앱을 종료하거나 화면을 잠그지 마세요.',
           'Track': '트랙',
+          'Row': '행',
+          'Add Row': 'Add Row',
+          'Type...': '입력...',
+          'Copy': '복사',
+          'Paste': '붙여넣기',
+          'Copy range': '구간 복사',
+          'Paste here': '여기에 붙여넣기',
+          'Open param': '파라미터 열기',
+          'Edit points': '포인트 편집',
+          'Clone': '복제',
+          'Make unique': '개별 패턴으로 분리',
+          'Clip settings': '클립 설정',
+          'Automate': '오토메이션',
+          'Crossfade': '크로스페이드',
+          'Crossfade Length': '크로스페이드 길이',
+          'Off': '끄기',
+          'None': '없음',
+          'Cut': '컷',
+          'Fade': '페이드',
+          'Linear Crossfade': '리니어 크로스페이드',
+          'Equal Power Crossfade': '이퀄 파워 크로스페이드',
+          'S-Curve Crossfade': 'S-커브 크로스페이드',
           'Effects': '이펙터',
           'Row effects': '행 이펙터',
           'Master effects': '마스터 이펙터',
@@ -928,17 +1438,18 @@ class L10n {
           'Video project renamed': '비디오 프로젝트 이름을 변경했습니다',
           'Rename failed': '이름 변경 실패',
           'Delete project?': '프로젝트를 삭제할까요?',
+          'This action cannot be undone.': '이 작업은 되돌릴 수 없습니다.',
           'Delete video project?': '비디오 프로젝트를 삭제할까요?',
           'Project': '프로젝트',
           'will be permanently deleted.': '영구적으로 삭제됩니다.',
           'Opening project…': '프로젝트 여는 중…',
           'Opening video project...': '비디오 프로젝트 여는 중...',
-          'Preparing export…': '내보내기 준비 중…',
+          'Preparing export…': '파일 저장 준비 중…',
           'Creating project…': '프로젝트 생성 중…',
           'Creating video project...': '비디오 프로젝트 생성 중...',
           'Untitled Project': '제목 없는 프로젝트',
           'Untitled Video Project': '제목 없는 비디오 프로젝트',
-          'Exporting…': '내보내는 중…',
+          'Exporting…': '파일을 만드는 중…',
           'Please select a .mixroom project file': '.mixroom 프로젝트 파일을 선택해 주세요',
           'Importing…': '가져오는 중…',
           'Import failed': '가져오기 실패',
@@ -955,12 +1466,14 @@ class L10n {
           'Last opened': '마지막으로 연 시간',
           'Edit': '편집',
           'Rename': '이름 변경',
-          'Share / Export': '공유 / 내보내기',
+          'Share / Export': '공유 / 파일 저장',
           'Save (.mixroom)': '저장 (.mixroom)',
           'Share (.mixroom)': '공유 (.mixroom)',
-          'Export WAV': 'WAV 내보내기',
-          'Export MP3': 'MP3 내보내기',
+          'Export WAV': 'WAV 파일로 저장',
+          'Export MP3': 'MP3 파일로 저장',
           'Piano Roll Quick Guide': '피아노 롤 빠른 안내',
+          'A few gestures that make editing faster.':
+              '편집을 더 빠르게 해주는 몇 가지 제스처입니다.',
           'Create + shape notes': '노트 만들기 및 형태 조정',
           'Tap empty grid to add. Drag to move. Pull right edge to resize.':
               '빈 그리드를 눌러 노트를 추가하세요. 드래그해 이동하고 오른쪽 끝을 끌어 길이를 조절하세요.',
@@ -1025,6 +1538,8 @@ class L10n {
           'Draft (fast)': '초안 (빠름)',
           'Good': '좋음',
           'Best': '최고',
+          'Normalize': '정규화',
+          'Could not normalize this clip yet.': '아직 이 클립을 정규화할 수 없습니다.',
           'Normalize loudness': '라우드니스 정규화',
           'Limiter ceiling (dBTP)': '리미터 상한 (dBTP)',
           'Bit depth': '비트 심도',
@@ -1034,9 +1549,9 @@ class L10n {
           'VBR quality': 'VBR 품질',
           'highest': '최고 품질',
           'smaller file': '작은 파일',
-          'Start export': '내보내기 시작',
+          'Start export': '파일 저장 시작',
           'Could not open export options.': '내보내기 옵션을 열 수 없습니다.',
-          'Save export': '내보내기 저장',
+          'Save export': '저장 위치 선택',
           'Project bundle saved': '.mixroom 파일을 저장했습니다',
           'Allow access': '접근 허용',
           'Allow media access': '미디어 접근 허용',
@@ -1046,6 +1561,10 @@ class L10n {
           'Open settings': '설정 열기',
           'Could not open the saved export.': '저장한 내보내기 파일을 열 수 없습니다.',
           'Platform upload coming soon': '플랫폼 업로드는 곧 제공됩니다',
+          'Successfully Exported!': '파일 저장이 완료되었습니다!',
+          'Exit to Projects': '프로젝트로 나가기',
+          'Share': '공유',
+          'Upload on Platform': '플랫폼에 업로드',
           'Upload to YouTube': 'YouTube에 업로드',
           'Title': '제목',
           'Description': '설명',
@@ -1074,13 +1593,40 @@ class L10n {
           'Welcome to': 'Welcome to',
           'Email or Username': '이메일 또는 사용자 ID',
           'Email': '이메일',
+          'Verify now': '지금 인증',
+          'Refresh': '새로고침',
+          'You are': '현재 상태',
+          'Plan and billing management is coming soon.':
+              '요금제 및 결제 관리는 곧 제공됩니다.',
+          'Subscription details refreshed.': '구독 정보를 새로고침했습니다.',
+          'Restore request sent. Matching purchases will sync shortly.':
+              '복원 요청을 보냈습니다. 일치하는 구매 내역은 곧 동기화됩니다.',
+          'Something went wrong.': '문제가 발생했습니다.',
+          'This route is not configured yet.': '아직 설정되지 않은 경로입니다.',
+          'This route is invalid.': '올바르지 않은 경로입니다.',
+          'Could not open your email app.': '이메일 앱을 열 수 없습니다.',
+          'Support contact is not configured yet.': '지원 연락처가 아직 설정되지 않았습니다.',
+          'This store product is not configured for the current build yet.':
+              '현재 빌드에는 이 스토어 상품이 아직 설정되어 있지 않습니다.',
+          'Current access': '현재 이용 권한',
+          'Free': '무료',
+          'Plan & Billing': '요금제 및 결제',
+          'Plan': '요금제',
+          'Billing': '결제',
           'Password': '비밀번호',
+          'You sign in with': '로그인 방식:',
+          'using': '이메일',
+          'You sign in with email and password.': '이메일과 비밀번호로 로그인합니다.',
+          'If you want to add a password later, sign out and use Forgot password from the sign-in screen.':
+              '나중에 비밀번호를 추가하려면 로그아웃한 뒤 로그인 화면에서 비밀번호 찾기를 사용하세요.',
+          'If you want to add a password later, sign out and use Forgot password with that email on the sign-in screen.':
+              '나중에 비밀번호를 추가하려면 로그아웃한 뒤 로그인 화면에서 해당 이메일로 비밀번호 찾기를 사용하세요.',
           'Confirmation code': '확인 코드',
           'Confirmation code sent!': '확인 코드가 전송되었습니다!',
           'Confirmation code will be sent to your email inbox.':
               '확인 코드는 이메일 받은편지함으로 전송됩니다.',
           'Select one (optional)': '선택하세요 (선택 사항)',
-          'Not set': '설정 안 함',
+          'Not set': '선택 안 함',
           'Enter a valid password and confirmation first to send the code.':
               '코드를 보내려면 올바른 비밀번호와 비밀번호 확인을 먼저 입력하세요.',
           'Continue': '계속',
@@ -1095,11 +1641,24 @@ class L10n {
           'Add the last few details to start using Mixroom.':
               'Mixroom을 시작하기 위한 마지막 정보를 입력하세요.',
           'Username': '사용자 ID',
+          '1-30 chars. Lowercase letters, numbers, underscores, and hyphens.':
+              '1~30자. 영문 소문자, 숫자, 밑줄, 하이픈을 사용할 수 있습니다.',
+          'Available after the account backend is deployed.':
+              '계정 백엔드 배포 후 사용할 수 있습니다.',
           'Bio': '소개',
+          'Tell listeners what you make.': '어떤 음악을 만드는지 간단히 적어보세요.',
           'Tell people a bit about yourself': '자신을 간단히 소개해보세요',
           'Generate username': '사용자 ID 생성',
           'Birthday (yyyy.mm.dd)': '생년월일 (yyyy.mm.dd)',
           'What describes you best?': '어떤 사용자에 가장 가까우신가요?',
+          'What describes you': '어떤 사용자에 가까우신가요?',
+          'Producer': '프로듀서',
+          'Artist': '아티스트',
+          'Songwriter': '작곡가/작사가',
+          'Audio engineer': '오디오 엔지니어',
+          'Student': '학생',
+          'Beginner': '입문자',
+          'Make music for work': '업무용 음악 제작자',
           'Agree to all': '전체 동의',
           'I agree to the': '다음에 동의합니다',
           'and': '및',
@@ -1170,6 +1729,8 @@ class L10n {
           'Step {current} of {total}': '{total}단계 중 {current}단계',
           'Change': '변경',
           'Select birthday': '생년월일 선택',
+          'You must be at least {age} years old to use Mixroom.':
+              'Mixroom을 사용하려면 만 {age}세 이상이어야 합니다.',
           'Log Out': '로그아웃',
           'Delete Account': '계정 삭제',
           'Delete account?': '계정을 삭제하시겠습니까?',
@@ -1189,11 +1750,11 @@ class L10n {
           'Birthday': '생년월일',
           'Using Mixroom for': 'Mixroom 사용 목적',
           'Provider': '제공자',
-          'Google': 'Google',
-          'Apple': 'Apple',
+          'Google': '구글',
+          'Apple': '애플',
           'KakaoTalk': '카카오톡',
           'Joined': '가입일',
-          'Music enthusiast': '음악 애호가',
+          'Music enthusiast': '취미 사용자',
           'Beginner producer': '초보 프로듀서',
           'For work': '업무용',
           'Songwriting': '작곡',
@@ -1205,16 +1766,31 @@ class L10n {
           'Feedback for': '피드백 대상',
           'Send Feedback': '피드백 보내기',
           'Submit': '제출',
+          'Please enter your feedback or bug report first.':
+              '먼저 피드백이나 버그 제보 내용을 입력해 주세요.',
+          'Choose feedback or bug report, then describe it. You can also attach current editor context.':
+              '피드백 또는 버그 제보를 선택한 뒤 내용을 작성해 주세요. 현재 편집기 상태도 함께 첨부할 수 있습니다.',
+          'Choose feedback or bug report, then describe it. Account details are attached automatically.':
+              '피드백 또는 버그 제보를 선택한 뒤 내용을 작성해 주세요. 계정 정보는 자동으로 함께 첨부됩니다.',
           'Thank you for your submission!': '의견을 보내주셔서 감사합니다!',
           'Thank you for the feedback!': '피드백 감사합니다!',
           'Tell us what is working, missing, or would make this better.':
               '잘 작동하는 점, 부족한 점, 더 좋아졌으면 하는 점을 알려주세요.',
           'Describe the bug, what you expected, and what happened.':
               '버그 내용과 기대한 동작, 실제로 발생한 내용을 알려주세요.',
+          '{count} characters left': '{count}자 남음',
           'Allow Mixroom to respond by email.':
               'Mixroom이 이메일로 답변할 수 있도록 허용합니다.',
           'Optional. We may follow up using your account email about this submission.':
               '선택 사항입니다. 이 제출 내용과 관련해 계정 이메일로 후속 연락을 드릴 수 있습니다.',
+          'Include with this report': '이 제보에 포함',
+          'Include AI chat history and project settings.':
+              'AI 채팅 기록과 프로젝트 설정을 포함합니다.',
+          'Attach recent assistant messages and current DAW settings.':
+              '최근 어시스턴트 메시지와 현재 DAW 설정을 첨부합니다.',
+          'Include a DAW screenshot.': 'DAW 스크린샷을 포함합니다.',
+          'Mixroom captures the editor view with chat closed.':
+              'Mixroom이 채팅을 닫은 상태의 편집기 화면을 캡처합니다.',
           'Video projects are coming soon.': '비디오 프로젝트는 곧 제공됩니다.',
           'No matching projects.': '일치하는 프로젝트가 없습니다.',
           'Sort by recent': '최근 순 정렬',
@@ -1246,7 +1822,22 @@ class L10n {
           'Current Password': '현재 비밀번호',
           'Enter current password': '현재 비밀번호 입력',
           'Password updated successfully.': '비밀번호가 성공적으로 변경되었습니다.',
+          'Please enter your current password.': '현재 비밀번호를 입력하세요.',
+          'New password must be different from current password.':
+              '새 비밀번호는 현재 비밀번호와 달라야 합니다.',
           'Updating...': '업데이트 중...',
+          'This page shows your current sign-in method. More linking options can come later.':
+              '현재 로그인 방식을 보여줍니다. 추가 연결 옵션은 추후 제공될 수 있습니다.',
+          'Username, birthday, and bio require the deployed account backend before they can be saved.':
+              '사용자 ID, 생년월일, 소개는 계정 백엔드 배포 후 저장할 수 있습니다.',
+          'Username, birthday, and bio save after the account backend is deployed.':
+              '사용자 ID, 생년월일, 소개는 계정 백엔드 배포 후 저장됩니다.',
+          'Manage privacy controls, legal documents, and data requests.':
+              '개인정보 설정, 법적 문서, 데이터 요청을 관리합니다.',
+          'Tell us what is working, what is broken, or what you want to see next.':
+              '잘 작동하는 점, 문제 있는 점, 다음에 보고 싶은 기능을 알려주세요.',
+          'Send feedback or bug report': '피드백 또는 버그 제보 보내기',
+          'Project files are stored locally.': '프로젝트 파일은 기기에 로컬로 저장됩니다.',
           'Prompt usage': '프롬프트 사용량',
           'Extra prompt credits are used first, before daily and weekly limits.':
               '추가 프롬프트 크레딧이 일일/주간 한도보다 먼저 사용됩니다.',
@@ -1331,9 +1922,33 @@ class L10n {
           'File is unavailable.': '파일을 사용할 수 없습니다.',
           'Folder already loaded for this project.': '이 프로젝트에 이미 불러온 폴더입니다.',
           'Failed to preview sample': '샘플 미리듣기 실패',
+          'Project Settings': '프로젝트 설정',
           'Project Name': '프로젝트 이름',
+          'Metronome': '메트로놈',
+          'Metronome Volume': '메트로놈 볼륨',
+          'Replay Tutorial': '튜토리얼 다시 보기',
+          'Debug: Show First-Open Prompt': '디버그: 첫 실행 안내 표시',
           'Run the interactive DAW tutorial again to revisit the timeline, tracks, effects, automation, AI, and export flow.':
               '대화형 DAW 튜토리얼을 다시 실행해 타임라인, 트랙, 이펙트, 오토메이션, AI, 내보내기 흐름을 다시 살펴보세요.',
+          'Show Producer Capture UI': '프로듀서 캡처 UI 표시',
+          'Use Computer Keyboard as MIDI Input': '컴퓨터 키보드를 MIDI 입력으로 사용',
+          'Spacebar Stop Returns to Start': '스페이스바 정지 시 시작 위치로 돌아가기',
+          'When stopping playback with Space, jump back to the point where playback started.':
+              '스페이스바로 재생을 멈추면 재생을 시작했던 위치로 돌아갑니다.',
+          'Keyboard Shortcuts': '키보드 단축키',
+          'View, remap, and reset desktop shortcuts.':
+              '데스크톱 단축키를 확인하고, 다시 지정하고, 초기화합니다.',
+          'Plugin Manager': '플러그인 관리자',
+          'Rescan, favorite, or hide desktop plugins.':
+              '데스크톱 플러그인을 다시 스캔하거나 즐겨찾기/숨김 처리합니다.',
+          'Desktop Diagnostics': '데스크톱 진단',
+          'Check audio device, CPU, buffer, and scan state.':
+              '오디오 장치, CPU, 버퍼, 스캔 상태를 확인합니다.',
+          'Recovery & Missing Assets': '복구 및 누락된 에셋',
+          'Review recovered backups and missing media/plugin notices.':
+              '복구된 백업과 누락된 미디어/플러그인 알림을 확인합니다.',
+          'Scan': '스캔',
+          'View': '보기',
           'Bluetooth headset mic': '블루투스 헤드셋 마이크',
           'Bluetooth headset mic can reduce audio quality and increase latency. Continue with this mic?':
               '블루투스 헤드셋 마이크는 음질 저하와 지연 증가를 유발할 수 있습니다. 이 마이크로 계속할까요?',
@@ -1355,7 +1970,7 @@ class L10n {
               '블루투스 재생과 녹음이 지원됩니다. 실시간 모니터링은 기본적으로 꺼져 있습니다.',
           'is using Bluetooth output. Real-time monitoring is off by default.':
               '는 블루투스 출력을 사용 중입니다. 실시간 모니터링은 기본적으로 꺼져 있습니다.',
-          'Advanced: monitor anyway': '고급: 그래도 모니터링',
+          'Advanced: monitor anyway': '고급기능: 실시간 모니터링 활성화',
           'May sound choppy or unstable on Bluetooth earphones.':
               '블루투스 이어폰에서 끊기거나 불안정하게 들릴 수 있습니다.',
           'Bluetooth headset mic can reduce audio quality and increase latency. This device is currently allowed for recording.':
@@ -1363,8 +1978,13 @@ class L10n {
           'Bluetooth headset mic can reduce audio quality and increase latency. You will be asked to confirm before recording.':
               '블루투스 헤드셋 마이크는 음질 저하와 지연 증가를 유발할 수 있습니다. 녹음 전에 확인을 요청합니다.',
           'Reset Bluetooth mic approvals': '블루투스 마이크 승인 초기화',
+          'Tempo': '템포',
+          'Project Key': '프로젝트 키',
+          'No key': '키 없음',
+          'Tempo Mode': '템포 모드',
           'Tempo (BPM)': '템포 (BPM)',
           'TEMPO': '템포',
+          'Set Tempo': '템포 설정',
           'Export producer session': '프로듀서 세션 내보내기',
           'Save producer session': '프로듀서 세션 저장',
           'Clip tempo mode turned off.': '클립 템포 모드를 껐습니다.',
@@ -1379,6 +1999,81 @@ class L10n {
           'Maximum of': '최대',
           'rows reached.': '개의 행에 도달했습니다.',
           'Failed to share.': '공유에 실패했습니다.',
+          'Undo': '실행 취소',
+          'Redo': '다시 실행',
+          'Change project key': '프로젝트 키 변경',
+          'Project set to': '프로젝트를 다음으로 설정했습니다:',
+          'Project BPM unchanged.': '프로젝트 BPM은 변경하지 않았습니다.',
+          'Project tempo set to': '프로젝트 템포를 다음으로 설정했습니다:',
+          'This automation target is orphaned. Undo the plugin removal or re-add the plugin to relink it.':
+              '이 오토메이션 대상은 연결이 끊겼습니다. 플러그인 제거를 실행 취소하거나 플러그인을 다시 추가해 다시 연결하세요.',
+          'Clone ready for': '복제 준비됨:',
+          'Invalid range. Tap a different end point.':
+              '잘못된 범위입니다. 다른 끝 지점을 탭하세요.',
+          'Could not load this effect plugin.': '이 이펙트 플러그인을 불러올 수 없습니다.',
+          'Skipped unsupported cut action.': '지원되지 않는 자르기 작업을 건너뛰었습니다.',
+          'Cut clip.': '클립을 잘랐습니다.',
+          'Skipped incomplete move action.': '완료되지 않은 이동 작업을 건너뛰었습니다.',
+          'Move made no changes.': '이동으로 변경된 내용이 없습니다.',
+          'Stretched clip.': '클립을 스트레치했습니다.',
+          'Detected clip tempo and updated project tempo.':
+              '클립 템포를 감지하고 프로젝트 템포를 업데이트했습니다.',
+          'Deleted clip.': '클립을 삭제했습니다.',
+          'Stopped sample processing.': '샘플 처리를 중지했습니다.',
+          'Copied row effects.': '행 이펙트를 복사했습니다.',
+          'Copy effects first.': '먼저 이펙트를 복사하세요.',
+          'Pasted row effects.': '행 이펙트를 붙여넣었습니다.',
+          'This row has no effects to clear.': '이 행에는 지울 이펙트가 없습니다.',
+          'Cleared row effects.': '행 이펙트를 지웠습니다.',
+          'Copied master effects.': '마스터 이펙트를 복사했습니다.',
+          'Pasted master effects.': '마스터 이펙트를 붙여넣었습니다.',
+          'Master has no effects to clear.': '마스터에는 지울 이펙트가 없습니다.',
+          'Cleared master effects.': '마스터 이펙트를 지웠습니다.',
+          'Created automation clip.': '오토메이션 클립을 만들었습니다.',
+          'Add a row before creating automation clips.':
+              '오토메이션 클립을 만들기 전에 행을 추가하세요.',
+          'Select a valid row before creating automation clips.':
+              '오토메이션 클립을 만들기 전에 올바른 행을 선택하세요.',
+          'Could not resolve that automation target.':
+              '해당 오토메이션 대상을 찾을 수 없습니다.',
+          'No automatable parameters found for this plugin.':
+              '이 플러그인에서 오토메이션 가능한 파라미터를 찾을 수 없습니다.',
+          'Could not resolve that plugin parameter.':
+              '해당 플러그인 파라미터를 찾을 수 없습니다.',
+          'Cleared automation clips.': '오토메이션 클립을 지웠습니다.',
+          'Created': '생성함',
+          'kick-synced sidechain clips.': '개의 킥 동기화 사이드체인 클립.',
+          'Deleted automation clip.': '오토메이션 클립을 삭제했습니다.',
+          'Moved automation clip.': '오토메이션 클립을 이동했습니다.',
+          'Automation clip is already unique.': '오토메이션 클립은 이미 고유합니다.',
+          'Made automation clip unique.': '오토메이션 클립을 고유하게 만들었습니다.',
+          'Updated automation clip points.': '오토메이션 클립 포인트를 업데이트했습니다.',
+          'Cleared automation.': '오토메이션을 지웠습니다.',
+          'Added automation ramp.': '오토메이션 램프를 추가했습니다.',
+          'Set automation points.': '오토메이션 포인트를 설정했습니다.',
+          'MIDI notes already match that chop grid.':
+              'MIDI 노트가 이미 해당 찹 그리드와 일치합니다.',
+          'Could not update this MIDI clip.': '이 MIDI 클립을 업데이트할 수 없습니다.',
+          'MIDI notes already match that pitch.': 'MIDI 노트가 이미 해당 피치와 일치합니다.',
+          'Shifted MIDI notes': 'MIDI 노트를 이동했습니다',
+          'up': '위로',
+          'down': '아래로',
+          'by': '만큼',
+          'That MIDI clip is already that long.': '해당 MIDI 클립은 이미 그 길이입니다.',
+          'Extended MIDI clip to': 'MIDI 클립 길이를 다음으로 늘렸습니다:',
+          'Created MIDI clip from AI notes.': 'AI 노트로 MIDI 클립을 만들었습니다.',
+          'Converting audio to MIDI...': '오디오를 MIDI로 변환 중...',
+          'Created MIDI clip below the source audio.':
+              '원본 오디오 아래에 MIDI 클립을 만들었습니다.',
+          'Stem separation failed for target clips.': '대상 클립의 스템 분리에 실패했습니다.',
+          'Created stems for': '스템을 생성한 클립 수:',
+          'clips.': '개.',
+          'Stem separation is only available for audio clips.':
+              '스템 분리는 오디오 클립에서만 사용할 수 있습니다.',
+          'Selected clip file was not found.': '선택한 클립 파일을 찾을 수 없습니다.',
+          'Splitting stems...': '스템 분리 중...',
+          'Stem separation failed.': '스템 분리에 실패했습니다.',
+          'Created vocal/instrumental stems.': '보컬/인스트루멘털 스템을 만들었습니다.',
           'Master Volume': '마스터 볼륨',
           'Master Effects': '마스터 이펙트',
           'Master Bus': '마스터 버스',
@@ -1386,6 +2081,97 @@ class L10n {
           'Open File Browser': '파일 브라우저 열기',
           'Choose Instrument': '악기 선택',
           'No instruments in this category.': '이 카테고리에 악기가 없습니다.',
+          'Instrument': '악기',
+          'All': '전체',
+          'Keys': '건반',
+          'Strings': '현악기',
+          'Woodwinds': '목관악기',
+          'Brass': '금관악기',
+          'Percussion': '타악기',
+          'Drums': '드럼',
+          'Pads': '패드',
+          'Leads': '리드',
+          'Bass': '베이스',
+          'Plucks': '플럭',
+          'Synths': '신스',
+          'Other': '기타',
+          'Open instrument UI': '악기 UI 열기',
+          'Open UI': 'UI 열기',
+          'Unlock piano roll from playhead': '피아노 롤 재생 헤드 고정 해제',
+          'Lock piano roll to playhead': '피아노 롤을 재생 헤드에 고정',
+          'Zoom out': '축소',
+          'Zoom in': '확대',
+          'Piano roll help': '피아노 롤 도움말',
+          'Toggle fullscreen': '전체 화면 전환',
+          'Duplicate': '복제',
+          'File Browser Help': '파일 브라우저 도움말',
+          'Load a folder into the browser.': '브라우저에 폴더를 불러옵니다.',
+          'Tap a folder button to switch the current folder.':
+              '폴더 버튼을 탭해 현재 폴더를 전환합니다.',
+          'Preview an audio file.': '오디오 파일을 미리 듣습니다.',
+          'Hold and drag a file into the timeline.': '파일을 길게 눌러 타임라인으로 드래그합니다.',
+          'Hold a folder button to remove it.': '폴더 버튼을 길게 눌러 제거합니다.',
+          'Use the bottom waveform to seek preview playback.':
+              '아래 파형에서 미리듣기 재생 위치를 이동합니다.',
+          'Insert at playhead': '재생 헤드 위치에 삽입',
+          'Remove': '제거',
+          'Add a sample folder': '샘플 폴더 추가',
+          'This folder is currently unavailable.': '현재 이 폴더를 사용할 수 없습니다.',
+          'Tip: choose local folders (not cloud-only placeholders).':
+              '팁: 클라우드 전용 자리 표시자가 아닌 로컬 폴더를 선택하세요.',
+          'Pick folder': '폴더 선택',
+          'Remove folder': '폴더 제거',
+          'No files found.': '파일을 찾을 수 없습니다.',
+          'File Browser': '파일 브라우저',
+          'How to use': '사용 방법',
+          'Add folder': '폴더 추가',
+          'Refresh folder': '폴더 새로고침',
+          'Collapse panel': '패널 접기',
+          'Expand panel': '패널 펼치기',
+          'Add Audio Clip': '오디오 클립 추가',
+          'Add Instrument Clip': '악기 클립 추가',
+          'Run': '실행',
+          'Running': '실행 중',
+          'Advanced options': '고급 옵션',
+          'Sample rate': '샘플 레이트',
+          'Channels': '채널',
+          'Stereo': '스테레오',
+          'Mono': '모노',
+          'Windows desktop currently exports with native WAV render only. MP3 and post-processing controls are disabled.':
+              'Windows 데스크톱은 현재 네이티브 WAV 렌더만 지원합니다. MP3와 후처리 설정은 비활성화됩니다.',
+          'Off: Clips ignore project tempo.\nResample: Clips follow tempo and shift pitch.\nStretch: Clips follow tempo and keep pitch.':
+              '끔: 클립이 프로젝트 템포를 따르지 않습니다.\n리샘플: 클립이 템포를 따르며 피치도 함께 변합니다.\n스트레치: 클립이 템포를 따르지만 피치는 유지합니다.',
+          'Tempo mode: ': '템포 모드: ',
+          'Resample': '리샘플',
+          'Stretch': '스트레치',
+          'Stretch (keep pitch)': '스트레치 (피치 유지)',
+          'Master': '마스터',
+          'Pan': '팬',
+          'Center': '중앙',
+          'Click to change analyzer view': '분석기 보기를 변경하려면 클릭',
+          'Select': '선택',
+          'Paint': '페인트',
+          'Tone': '톤',
+          'Quick level and pitch adjustments': '레벨과 피치를 빠르게 조정합니다',
+          'Pitch': '피치',
+          'MIDI clip': 'MIDI 클립',
+          'Audio clip': '오디오 클립',
+          'Follows project BPM.': '프로젝트 BPM을 따릅니다.',
+          'MIDI clips follow project BPM automatically.':
+              'MIDI 클립은 프로젝트 BPM을 자동으로 따릅니다.',
+          'No extra tempo mode is needed here.': '여기에는 추가 템포 모드가 필요하지 않습니다.',
+          'Choose how this audio clip follows project BPM':
+              '이 오디오 클립이 프로젝트 BPM을 따르는 방식을 선택합니다',
+          'Reversed': '뒤집힘',
+          'Reverse': '뒤집기',
+          'Detect tempo': '템포 감지',
+          'Split vocals': '보컬 분리',
+          'Adjust To Tempo (Resample)': '템포에 맞추기 (리샘플)',
+          'Stretch To Tempo (Keep Pitch)': '템포에 맞춰 스트레치 (피치 유지)',
+          'Stretch mode is shown with teal clip handles.':
+              '스트레치 모드는 청록색 클립 핸들로 표시됩니다.',
+          'Detect Tempo + Set Project BPM': '템포 감지 + 프로젝트 BPM 설정',
+          'Select Icon': '아이콘 선택',
           'Microphone access is turned off': '마이크 접근이 꺼져 있습니다',
           'No input devices available': '사용 가능한 입력 장치가 없습니다',
           'Input Device': '입력 장치',
@@ -1399,6 +2185,165 @@ class L10n {
           'Built-in microphone recording needs access. External audio interfaces can still be used below when available.':
               '내장 마이크 녹음을 사용하려면 접근 권한이 필요합니다. 외부 오디오 인터페이스는 사용 가능한 경우 아래에서 계속 사용할 수 있습니다.',
           'Audition folders and drag and drop': '폴더 미리듣기 및 드래그 앤 드롭',
+          'Could not save preference. Please retry.':
+              '설정을 저장할 수 없습니다. 다시 시도하세요.',
+          'Could not update telemetry preference. Please retry.':
+              '텔레메트리 설정을 업데이트할 수 없습니다. 다시 시도하세요.',
+          'Could not update marketing email preference. Please retry.':
+              '마케팅 이메일 설정을 업데이트할 수 없습니다. 다시 시도하세요.',
+          'Could not open this link on your device right now.':
+              '지금 이 기기에서 링크를 열 수 없습니다.',
+          'Data export request': '데이터 내보내기 요청',
+          'Data correction/deletion request': '데이터 정정/삭제 요청',
+          'Privacy inquiry': '개인정보 문의',
+          'Support request': '지원 요청',
+          'Hello Mixroom Privacy Team,\n\n': 'Mixroom 개인정보팀 안녕하세요,\n\n',
+          'Hello Mixroom Support,\n\n': 'Mixroom 지원팀 안녕하세요,\n\n',
+          'Hello Mixroom Privacy Team,\n\nI would like to request a copy of my personal data.\n\nAccount email: \nFull name: \n\nThank you.':
+              'Mixroom 개인정보팀 안녕하세요,\n\n제 개인정보 사본을 요청합니다.\n\n계정 이메일: \n이름: \n\n감사합니다.',
+          'Hello Mixroom Privacy Team,\n\nI would like to request a correction or deletion of my personal data.\n\nAccount email: \nRequest details: \n\nThank you.':
+              'Mixroom 개인정보팀 안녕하세요,\n\n제 개인정보의 정정 또는 삭제를 요청합니다.\n\n계정 이메일: \n요청 내용: \n\n감사합니다.',
+          'Controls, documents, and requests': '설정, 문서, 요청',
+          'Review legal documents, control privacy settings, and submit data-rights requests here.':
+              '여기에서 법적 문서를 확인하고 개인정보 설정을 관리하며 데이터 권리 요청을 제출할 수 있습니다.',
+          'Documents': '문서',
+          'How Mixroom collects, uses, and shares information.':
+              'Mixroom이 정보를 수집, 사용, 공유하는 방식입니다.',
+          'Rules for using Mixroom and user content.':
+              'Mixroom 및 사용자 콘텐츠 이용 규칙입니다.',
+          'Subprocessors': '하위 처리업체',
+          'See third-party service providers that process data on Mixroom\'s behalf.':
+              'Mixroom을 대신해 데이터를 처리하는 제3자 서비스 제공업체를 확인합니다.',
+          'Open-source licenses': '오픈소스 라이선스',
+          'View software licenses used by this app.':
+              '이 앱에서 사용하는 소프트웨어 라이선스를 확인합니다.',
+          'Privacy Controls': '개인정보 설정',
+          'You can change these preferences at any time from this screen.':
+              '이 화면에서 언제든지 설정을 변경할 수 있습니다.',
+          'Optional analytics and diagnostics': '선택적 분석 및 진단',
+          'Share app interaction events and diagnostics to help improve Mixroom quality and product decisions.':
+              'Mixroom의 품질 개선과 제품 의사결정을 돕기 위해 앱 사용 이벤트와 진단 정보를 공유합니다.',
+          'Personalized recommendations': '맞춤형 추천',
+          'Uses activity signals to tailor tips and suggestions.':
+              '활동 신호를 사용해 팁과 제안을 맞춤화합니다.',
+          'Product updates and marketing email': '제품 업데이트 및 마케팅 이메일',
+          'Receive release notes, offers, and feature announcements.':
+              '릴리스 노트, 혜택, 기능 안내를 받습니다.',
+          'Your Data Rights': '내 데이터 권리',
+          'Request my data export': '내 데이터 내보내기 요청',
+          'Email request for a copy of your data.': '데이터 사본을 이메일로 요청합니다.',
+          'Request data correction or deletion': '데이터 정정 또는 삭제 요청',
+          'Email request for correction or erasure.': '정정 또는 삭제를 이메일로 요청합니다.',
+          'Contact': '문의',
+          'Privacy contact': '개인정보 문의',
+          'Support contact': '지원 문의',
+          'Danger Zone': '주의 영역',
+          'Delete account permanently': '계정 영구 삭제',
+          'Removes your account and signs you out.': '계정을 삭제하고 로그아웃합니다.',
+          'Legal details and supporting information': '법적 세부정보 및 참고 정보',
+          'Last updated: {date}': '마지막 업데이트: {date}',
+          'This policy explains how Mixroom handles personal data in-app.':
+              '이 정책은 Mixroom이 앱 내 개인정보를 처리하는 방식을 설명합니다.',
+          '1. Information We Collect': '1. 수집하는 정보',
+          'We may collect account information (such as email and profile details), usage analytics, crash diagnostics, and content metadata needed to operate features.':
+              '기능 운영에 필요한 계정 정보(이메일 및 프로필 세부정보 등), 사용 분석, 충돌 진단 정보, 콘텐츠 메타데이터를 수집할 수 있습니다.',
+          '2. How We Use Data': '2. 데이터 이용 방식',
+          'Data is used to operate core app functionality, secure accounts, improve product quality, personalize user experience, and communicate essential service updates.':
+              '데이터는 핵심 앱 기능 운영, 계정 보호, 제품 품질 개선, 사용자 경험 맞춤화, 필수 서비스 업데이트 안내에 사용됩니다.',
+          '3. Sharing and Processors': '3. 공유 및 처리업체',
+          'We may share data with trusted service providers that process data on our behalf (for example authentication, storage, analytics, or support tooling), subject to contractual safeguards.':
+              '계약상 보호조치에 따라 인증, 저장소, 분석, 지원 도구 등 Mixroom을 대신해 데이터를 처리하는 신뢰할 수 있는 서비스 제공업체와 데이터를 공유할 수 있습니다.',
+          '4. Retention': '4. 보관',
+          'We keep data only as long as needed for business and legal purposes. Retention periods may differ by data type, including backups and security logs.':
+              '데이터는 비즈니스 및 법적 목적에 필요한 기간 동안만 보관합니다. 백업 및 보안 로그를 포함해 데이터 유형별 보관 기간이 다를 수 있습니다.',
+          '5. Your Rights and Choices': '5. 권리와 선택',
+          'Depending on your region, you may have rights to access, export, correct, delete, or limit use of your personal data. You can submit a request from the Legal & Privacy Center.':
+              '지역에 따라 개인정보의 열람, 내보내기, 정정, 삭제 또는 이용 제한을 요청할 권리가 있을 수 있습니다. 법률 및 개인정보 센터에서 요청을 제출할 수 있습니다.',
+          '6. Children': '6. 아동',
+          'Mixroom is not directed to children under the minimum age required by applicable law without appropriate parental consent and controls.':
+              'Mixroom은 관련 법률이 요구하는 최소 연령 미만의 아동을 적절한 부모 동의와 관리 없이 대상으로 하지 않습니다.',
+          '7. Contact': '7. 문의',
+          'For privacy requests, contact privacy@mixroom.ai. For support, contact support@mixroom.ai.':
+              '개인정보 요청은 privacy@mixroom.ai로, 지원 문의는 support@mixroom.ai로 연락하세요.',
+          'These terms govern use of Mixroom and related services.':
+              '본 약관은 Mixroom 및 관련 서비스 이용에 적용됩니다.',
+          '1. Acceptance': '1. 동의',
+          'By creating an account or using Mixroom, you agree to these Terms and any policies referenced here.':
+              '계정을 만들거나 Mixroom을 사용하면 본 약관 및 여기에서 참조하는 정책에 동의하는 것입니다.',
+          '2. Accounts': '2. 계정',
+          'You are responsible for your account credentials and activity. Keep login details secure and notify us of unauthorized use.':
+              '계정 인증 정보와 활동에 대한 책임은 사용자에게 있습니다. 로그인 정보를 안전하게 보관하고 무단 사용이 있으면 알려주세요.',
+          '3. User Content': '3. 사용자 콘텐츠',
+          'You retain ownership of your content. You grant Mixroom a limited license to host, process, and transmit content solely to provide and improve the service.':
+              '사용자는 자신의 콘텐츠 소유권을 유지합니다. 사용자는 서비스 제공 및 개선만을 위해 콘텐츠를 호스팅, 처리, 전송할 수 있는 제한적 라이선스를 Mixroom에 부여합니다.',
+          '4. Acceptable Use': '4. 허용되는 이용',
+          'You agree not to abuse the service, violate intellectual property rights, distribute malicious content, or use Mixroom in unlawful ways.':
+              '서비스를 남용하거나, 지식재산권을 침해하거나, 악성 콘텐츠를 배포하거나, Mixroom을 불법적인 방식으로 사용하지 않는 데 동의합니다.',
+          '5. Termination': '5. 종료',
+          'We may suspend or terminate accounts for violations, fraud, abuse, or legal requirements. You may stop using the service at any time.':
+              '위반, 사기, 남용 또는 법적 요구사항이 있는 경우 계정을 정지하거나 종료할 수 있습니다. 사용자는 언제든지 서비스 이용을 중단할 수 있습니다.',
+          '6. Disclaimers and Liability': '6. 면책 및 책임',
+          'Services are provided on an as-is basis to the extent allowed by law. Liability is limited as described in the full legal agreement between you and Mixroom.':
+              '서비스는 법이 허용하는 범위에서 있는 그대로 제공됩니다. 책임은 사용자와 Mixroom 간 전체 법적 계약에 명시된 범위로 제한됩니다.',
+          'Legal questions can be sent to privacy@mixroom.ai or support@mixroom.ai.':
+              '법적 문의는 privacy@mixroom.ai 또는 support@mixroom.ai로 보낼 수 있습니다.',
+          'Mixroom uses third-party service providers to operate core app features. These providers process data on our behalf under contractual controls.':
+              'Mixroom은 핵심 앱 기능 운영을 위해 제3자 서비스 제공업체를 사용합니다. 이러한 제공업체는 계약상 관리하에 Mixroom을 대신해 데이터를 처리합니다.',
+          'Amazon Web Services (AWS)': 'Amazon Web Services (AWS)',
+          'Google (Google Sign-In)': 'Google (Google 로그인)',
+          'Apple (Sign in with Apple)': 'Apple (Apple로 로그인)',
+          'Kakao (Kakao Login)': 'Kakao (Kakao 로그인)',
+          'PostHog': 'PostHog',
+          'Sentry': 'Sentry',
+          'OpenAI': 'OpenAI',
+          'Purpose: account/authentication infrastructure, APIs, and application hosting. Typical data categories: account identifiers, authentication metadata, service logs, and app data required to deliver Mixroom features.':
+              '목적: 계정/인증 인프라, API, 애플리케이션 호스팅. 일반 데이터 범주: 계정 식별자, 인증 메타데이터, 서비스 로그, Mixroom 기능 제공에 필요한 앱 데이터.',
+          'Purpose: social sign-in and account identity verification when users choose Google login. Typical data categories: basic profile identifiers (such as email and account subject ID) returned by Google authentication flows.':
+              '목적: 사용자가 Google 로그인을 선택할 때 소셜 로그인 및 계정 신원 확인. 일반 데이터 범주: Google 인증 흐름에서 반환되는 이메일, 계정 subject ID 등 기본 프로필 식별자.',
+          'Purpose: social sign-in and account identity verification when users choose Apple login. Typical data categories: Apple account subject identifier and email relay/associated account email data provided by Apple auth.':
+              '목적: 사용자가 Apple 로그인을 선택할 때 소셜 로그인 및 계정 신원 확인. 일반 데이터 범주: Apple 인증에서 제공하는 Apple 계정 subject 식별자 및 이메일 릴레이/연결 계정 이메일 데이터.',
+          'Purpose: social sign-in and account identity verification when users choose Kakao login. Typical data categories: Kakao account identifier and profile/email fields provided through Kakao authorization.':
+              '목적: 사용자가 Kakao 로그인을 선택할 때 소셜 로그인 및 계정 신원 확인. 일반 데이터 범주: Kakao 인가를 통해 제공되는 Kakao 계정 식별자 및 프로필/이메일 필드.',
+          'Purpose: product analytics and event telemetry, subject to user privacy toggle settings in-app. Typical data categories: app interaction events, device/app metadata, and aggregated usage signals.':
+              '목적: 앱 내 개인정보 토글 설정에 따른 제품 분석 및 이벤트 텔레메트리. 일반 데이터 범주: 앱 상호작용 이벤트, 기기/앱 메타데이터, 집계된 사용 신호.',
+          'Purpose: crash reporting and diagnostics, subject to user privacy toggle settings in-app. Typical data categories: crash stack traces, runtime diagnostics, and device/app version metadata.':
+              '목적: 앱 내 개인정보 토글 설정에 따른 충돌 보고 및 진단. 일반 데이터 범주: 충돌 스택 트레이스, 런타임 진단 정보, 기기/앱 버전 메타데이터.',
+          'Purpose: AI assistant and model-inference features. Typical data categories: prompts/instructions and related context needed to generate assistant responses.':
+              '목적: AI 어시스턴트 및 모델 추론 기능. 일반 데이터 범주: 어시스턴트 응답 생성을 위해 필요한 프롬프트/지시문 및 관련 컨텍스트.',
+          'Updates': '업데이트',
+          'This list may change as Mixroom adds or removes service providers. Material updates are reflected in-app and in Mixroom privacy documentation.':
+              'Mixroom이 서비스 제공업체를 추가하거나 제거함에 따라 이 목록은 변경될 수 있습니다. 중요한 업데이트는 앱 내 및 Mixroom 개인정보 문서에 반영됩니다.',
+          'No active account.': '활성 계정이 없습니다.',
+          'Type DELETE to confirm account deletion.':
+              '계정 삭제를 확인하려면 DELETE를 입력하세요.',
+          'Enter your current password to delete this account.':
+              '이 계정을 삭제하려면 현재 비밀번호를 입력하세요.',
+          'Re-authenticate with {provider} to delete this account.':
+              '이 계정을 삭제하려면 {provider}로 다시 인증하세요.',
+          'Re-authenticate with your social provider to delete this account.':
+              '이 계정을 삭제하려면 소셜 로그인 제공업체로 다시 인증하세요.',
+          'That re-authentication did not match your Mixroom account. Please try again.':
+              '재인증한 계정이 Mixroom 계정과 일치하지 않습니다. 다시 시도하세요.',
+          'Delete account': '계정 삭제',
+          'This permanently removes your Mixroom account and signed-in session on this device.':
+              '이 기기의 로그인 세션과 Mixroom 계정이 영구적으로 삭제됩니다.',
+          'Before you continue': '계속하기 전에',
+          'Your profile, auth access, and linked account data will be removed.':
+              '프로필, 인증 접근 권한, 연결된 계정 데이터가 삭제됩니다.',
+          'Deleting your Mixroom account does not cancel App Store or Google Play billing. Cancel there first if needed.':
+              'Mixroom 계정을 삭제해도 App Store 또는 Google Play 결제는 취소되지 않습니다. 필요한 경우 먼저 해당 스토어에서 취소하세요.',
+          'To protect your account, Mixroom will ask you to confirm DELETE and verify this session one more time.':
+              '계정 보호를 위해 DELETE 입력 확인과 현재 세션의 재인증이 한 번 더 필요합니다.',
+          'Signed in with {provider}': '{provider}로 로그인됨',
+          'Type DELETE to continue': '계속하려면 DELETE 입력',
+          'Current password': '현재 비밀번호',
+          'Enter your password': '비밀번호 입력',
+          'Confirm with {provider}': '{provider}로 확인',
+          'Verified': '확인됨',
+          'Run one more {provider} sign-in check before Mixroom deletes this account.':
+              'Mixroom이 이 계정을 삭제하기 전에 {provider} 로그인 확인을 한 번 더 진행합니다.',
+          'Re-auth with {provider}': '{provider}로 재인증',
+          'Re-auth completed': '재인증 완료',
           'Finish': '완료',
         },
         'zh': {
@@ -1445,6 +2390,12 @@ class L10n {
           "SoundCloud": "SoundCloud",
           "Export canceled or failed.": "导出已取消或失败",
           "Your audio was exported successfully!": "音频导出成功！",
+          'Successfully Exported!': '导出成功！',
+          'Exit to Projects': '退出到项目',
+          'Share': '分享',
+          'Upload on Platform': '上传到平台',
+          'Open in Files': '在文件中打开',
+          'Open saved file': '打开保存的文件',
           'Coming soon': '即将推出',
           'Coming Soon': '敬请期待',
           'Search feature coming soon!': '搜索功能即将推出！',
@@ -1486,6 +2437,33 @@ class L10n {
           'Delete track?': '删除轨道?',
           'Are you sure you want to delete this audio track?': '确定要删除此音频轨道吗？',
           'Cancel': '取消',
+          'Feedback': '反馈',
+          'Bug Report': '错误报告',
+          'Feedback for': '反馈对象',
+          'Send Feedback': '发送反馈',
+          'Submit': '提交',
+          'Please enter your feedback or bug report first.': '请先输入反馈或错误报告内容。',
+          'Choose feedback or bug report, then describe it. You can also attach current editor context.':
+              '请选择反馈或错误报告，然后描述内容。你也可以附加当前编辑器上下文。',
+          'Choose feedback or bug report, then describe it. Account details are attached automatically.':
+              '请选择反馈或错误报告，然后描述内容。账户信息会自动附加。',
+          'Thank you for your submission!': '感谢你的提交！',
+          'Thank you for the feedback!': '感谢你的反馈！',
+          'Tell us what is working, missing, or would make this better.':
+              '请告诉我们哪些功能好用、缺少什么，或者怎样会更好。',
+          'Describe the bug, what you expected, and what happened.':
+              '请描述错误、你期望的结果以及实际发生的情况。',
+          '{count} characters left': '还可输入 {count} 个字符',
+          'Allow Mixroom to respond by email.': '允许 Mixroom 通过电子邮件回复。',
+          'Optional. We may follow up using your account email about this submission.':
+              '可选。我们可能会使用你的账户邮箱跟进此次提交。',
+          'Include with this report': '随此报告包含',
+          'Include AI chat history and project settings.': '包含 AI 聊天记录和项目设置。',
+          'Attach recent assistant messages and current DAW settings.':
+              '附加最近的助手消息和当前 DAW 设置。',
+          'Include a DAW screenshot.': '包含 DAW 截图。',
+          'Mixroom captures the editor view with chat closed.':
+              'Mixroom 会在聊天关闭时捕获编辑器视图。',
           'Delete': '删除',
           'Add Video Clip': '添加视频片段',
           'Pro Mode Feature': '专业模式功能',
@@ -1525,6 +2503,22 @@ class L10n {
           'Close': '关闭',
           'Export failed: Output file missing or too small.': '导出失败：输出文件缺失或过小。',
           'Export failed! Check logs.': '导出失败！请检查日志。',
+          'Resample quality': '重采样质量',
+          'Draft (fast)': '草稿（快速）',
+          'Good': '良好',
+          'Best': '最佳',
+          'Normalize': '标准化',
+          'Could not normalize this clip yet.': '暂时无法标准化此片段。',
+          'Normalize loudness': '响度标准化',
+          'Limiter ceiling (dBTP)': '限制器上限 (dBTP)',
+          'Bit depth': '位深',
+          'Enable dithering': '启用抖动',
+          'Encoding mode': '编码模式',
+          'Bit rate': '比特率',
+          'VBR quality': 'VBR 质量',
+          'highest': '最高质量',
+          'smaller file': '较小文件',
+          'Start export': '开始导出',
           'AI Sync failed: Computed offset exceeds audio length.':
               'AI 同步失败：计算的偏移超过音频长度。',
           'AI Sync failed: Computed trim exceeds audio length.':
@@ -1593,9 +2587,31 @@ class L10n {
           'File is unavailable.': '文件不可用。',
           'Folder already loaded for this project.': '该项目已加载此文件夹。',
           'Failed to preview sample': '样本预听失败',
+          'Project Settings': '项目设置',
           'Project Name': '项目名称',
+          'Metronome': '节拍器',
+          'Metronome Volume': '节拍器音量',
+          'Replay Tutorial': '重播教程',
+          'Debug: Show First-Open Prompt': '调试：显示首次打开提示',
           'Run the interactive DAW tutorial again to revisit the timeline, tracks, effects, automation, AI, and export flow.':
               '再次运行交互式 DAW 教程，回顾时间线、轨道、效果、自动化、AI 和导出流程。',
+          'Show Producer Capture UI': '显示制作人采集界面',
+          'Use Computer Keyboard as MIDI Input': '将电脑键盘用作 MIDI 输入',
+          'Spacebar Stop Returns to Start': '空格停止时返回起点',
+          'When stopping playback with Space, jump back to the point where playback started.':
+              '用空格停止播放时，跳回播放开始的位置。',
+          'Keyboard Shortcuts': '键盘快捷键',
+          'View, remap, and reset desktop shortcuts.': '查看、重新映射和重置桌面快捷键。',
+          'Plugin Manager': '插件管理器',
+          'Rescan, favorite, or hide desktop plugins.': '重新扫描、收藏或隐藏桌面插件。',
+          'Desktop Diagnostics': '桌面诊断',
+          'Check audio device, CPU, buffer, and scan state.':
+              '检查音频设备、CPU、缓冲区和扫描状态。',
+          'Recovery & Missing Assets': '恢复与缺失资源',
+          'Review recovered backups and missing media/plugin notices.':
+              '查看已恢复的备份以及缺失媒体/插件通知。',
+          'Scan': '扫描',
+          'View': '查看',
           'Bluetooth headset mic': '蓝牙耳机麦克风',
           'Bluetooth headset mic can reduce audio quality and increase latency. Continue with this mic?':
               '蓝牙耳机麦克风可能降低音质并增加延迟。继续使用此麦克风吗？',
@@ -1627,8 +2643,11 @@ class L10n {
           'Bluetooth headset mic can reduce audio quality and increase latency. You will be asked to confirm before recording.':
               '蓝牙耳机麦克风可能降低音质并增加延迟。录音前将要求确认。',
           'Reset Bluetooth mic approvals': '重置蓝牙麦克风授权',
+          'Tempo': '速度',
+          'Tempo Mode': '速度模式',
           'Tempo (BPM)': '速度 (BPM)',
           'TEMPO': '速度',
+          'Set Tempo': '设置速度',
           'Export producer session': '导出制作人会话',
           'Save producer session': '保存制作人会话',
           'Clip tempo mode turned off.': '片段节奏模式已关闭。',
@@ -1650,6 +2669,95 @@ class L10n {
           'Open File Browser': '打开文件浏览器',
           'Choose Instrument': '选择乐器',
           'No instruments in this category.': '此分类下没有乐器。',
+          'Instrument': '乐器',
+          'All': '全部',
+          'Keys': '键盘',
+          'Strings': '弦乐',
+          'Woodwinds': '木管',
+          'Brass': '铜管',
+          'Percussion': '打击乐',
+          'Drums': '鼓',
+          'Pads': '铺底音色',
+          'Leads': '主奏音色',
+          'Bass': '贝斯',
+          'Plucks': '拨奏音色',
+          'Synths': '合成器',
+          'Other': '其他',
+          'Open instrument UI': '打开乐器界面',
+          'Open UI': '打开界面',
+          'Unlock piano roll from playhead': '取消钢琴卷帘跟随播放头',
+          'Lock piano roll to playhead': '钢琴卷帘跟随播放头',
+          'Zoom out': '缩小',
+          'Zoom in': '放大',
+          'Piano roll help': '钢琴卷帘帮助',
+          'Toggle fullscreen': '切换全屏',
+          'Duplicate': '复制',
+          'File Browser Help': '文件浏览器帮助',
+          'Load a folder into the browser.': '将文件夹载入浏览器。',
+          'Tap a folder button to switch the current folder.':
+              '点击文件夹按钮切换当前文件夹。',
+          'Preview an audio file.': '预听音频文件。',
+          'Hold and drag a file into the timeline.': '长按并将文件拖入时间线。',
+          'Hold a folder button to remove it.': '长按文件夹按钮将其移除。',
+          'Use the bottom waveform to seek preview playback.':
+              '使用底部波形定位预听播放位置。',
+          'Insert at playhead': '插入到播放头',
+          'Remove': '移除',
+          'Add a sample folder': '添加采样文件夹',
+          'This folder is currently unavailable.': '当前无法使用此文件夹。',
+          'Tip: choose local folders (not cloud-only placeholders).':
+              '提示：请选择本地文件夹（不要选择仅云端占位文件夹）。',
+          'Pick folder': '选择文件夹',
+          'Remove folder': '移除文件夹',
+          'No files found.': '未找到文件。',
+          'File Browser': '文件浏览器',
+          'How to use': '使用方法',
+          'Add folder': '添加文件夹',
+          'Refresh folder': '刷新文件夹',
+          'Collapse panel': '收起面板',
+          'Expand panel': '展开面板',
+          'Add Audio Clip': '添加音频片段',
+          'Add Instrument Clip': '添加乐器片段',
+          'Run': '运行',
+          'Running': '运行中',
+          'Advanced options': '高级选项',
+          'Sample rate': '采样率',
+          'Channels': '声道',
+          'Stereo': '立体声',
+          'Mono': '单声道',
+          'Windows desktop currently exports with native WAV render only. MP3 and post-processing controls are disabled.':
+              'Windows 桌面版当前仅支持原生 WAV 渲染导出。MP3 和后处理控制已禁用。',
+          'Off: Clips ignore project tempo.\nResample: Clips follow tempo and shift pitch.\nStretch: Clips follow tempo and keep pitch.':
+              '关闭：片段忽略项目速度。\n重采样：片段跟随速度并改变音高。\n拉伸：片段跟随速度并保持音高。',
+          'Tempo mode: ': '速度模式：',
+          'Resample': '重采样',
+          'Stretch': '拉伸',
+          'Stretch (keep pitch)': '拉伸（保持音高）',
+          'Master': '母线',
+          'Pan': '声像',
+          'Center': '居中',
+          'Click to change analyzer view': '点击切换分析器视图',
+          'Select': '选择',
+          'Paint': '绘制',
+          'Tone': '音色',
+          'Quick level and pitch adjustments': '快速调整音量和音高',
+          'Pitch': '音高',
+          'MIDI clip': 'MIDI 片段',
+          'Audio clip': '音频片段',
+          'Follows project BPM.': '跟随项目 BPM。',
+          'MIDI clips follow project BPM automatically.': 'MIDI 片段会自动跟随项目 BPM。',
+          'No extra tempo mode is needed here.': '这里不需要额外的速度模式。',
+          'Choose how this audio clip follows project BPM':
+              '选择此音频片段跟随项目 BPM 的方式',
+          'Reversed': '已反转',
+          'Reverse': '反转',
+          'Detect tempo': '检测速度',
+          'Split vocals': '分离人声',
+          'Adjust To Tempo (Resample)': '匹配速度（重采样）',
+          'Stretch To Tempo (Keep Pitch)': '拉伸到速度（保持音高）',
+          'Stretch mode is shown with teal clip handles.': '拉伸模式会以青绿色片段控制柄显示。',
+          'Detect Tempo + Set Project BPM': '检测速度 + 设置项目 BPM',
+          'Select Icon': '选择图标',
           'Profile': '配置',
           'Mixroom Producer': 'Mixroom 制作人',
           'Balance levels, reduce masking, and improve clarity.\nYou can undo everything after it runs.':
@@ -1839,6 +2947,7 @@ class L10n {
           'Video project renamed': 'ビデオプロジェクト名を変更しました',
           'Rename failed': '名前の変更に失敗しました',
           'Delete project?': 'プロジェクトを削除しますか？',
+          'This action cannot be undone.': 'この操作は取り消せません。',
           'Delete video project?': 'ビデオプロジェクトを削除しますか？',
           'Project': 'プロジェクト',
           'will be permanently deleted.': '完全に削除されます。',
@@ -1873,6 +2982,7 @@ class L10n {
           'Export WAV': 'WAVを書き出す',
           'Export MP3': 'MP3を書き出す',
           'Piano Roll Quick Guide': 'ピアノロールのクイックガイド',
+          'A few gestures that make editing faster.': '編集を速くするためのジェスチャーです。',
           'Create + shape notes': 'ノートを作成して形を調整',
           'Tap empty grid to add. Drag to move. Pull right edge to resize.':
               '空いているグリッドをタップして追加します。ドラッグで移動し、右端を引いて長さを変えます。',
@@ -1934,6 +3044,8 @@ class L10n {
           'Draft (fast)': 'ドラフト (高速)',
           'Good': '良い',
           'Best': '最高',
+          'Normalize': '正規化',
+          'Could not normalize this clip yet.': 'このクリップはまだ正規化できません。',
           'Normalize loudness': 'ラウドネスを正規化',
           'Limiter ceiling (dBTP)': 'リミッター上限 (dBTP)',
           'Bit depth': 'ビット深度',
@@ -1955,6 +3067,10 @@ class L10n {
           'Open settings': '設定を開く',
           'Could not open the saved export.': '保存した書き出しファイルを開けませんでした。',
           'Platform upload coming soon': 'プラットフォームへのアップロードは近日公開です',
+          'Successfully Exported!': '書き出しが完了しました！',
+          'Exit to Projects': 'プロジェクトへ戻る',
+          'Share': '共有',
+          'Upload on Platform': 'プラットフォームにアップロード',
           'Upload to YouTube': 'YouTube にアップロード',
           'Title': 'タイトル',
           'Description': '説明',
@@ -1983,7 +3099,32 @@ class L10n {
           'Welcome to': 'Welcome to',
           'Email or Username': 'メールまたはユーザー名',
           'Email': 'メール',
+          'Verify now': '今すぐ認証',
+          'Refresh': '更新',
+          'Plan and billing management is coming soon.': 'プランと請求管理は近日提供予定です。',
+          'Subscription details refreshed.': 'サブスクリプション情報を更新しました。',
+          'Restore request sent. Matching purchases will sync shortly.':
+              '復元リクエストを送信しました。一致する購入はまもなく同期されます。',
+          'Something went wrong.': '問題が発生しました。',
+          'This route is not configured yet.': 'このルートはまだ設定されていません。',
+          'This route is invalid.': 'このルートは無効です。',
+          'Could not open your email app.': 'メールアプリを開けませんでした。',
+          'Support contact is not configured yet.': 'サポート連絡先はまだ設定されていません。',
+          'This store product is not configured for the current build yet.':
+              'このストア商品は現在のビルドではまだ設定されていません。',
+          'Current access': '現在の利用権限',
+          'Free': '無料',
+          'Plan & Billing': 'プランと請求',
+          'Plan': 'プラン',
+          'Billing': '請求',
           'Password': 'パスワード',
+          'You sign in with': 'サインイン方法:',
+          'using': 'メール',
+          'You sign in with email and password.': 'メールアドレスとパスワードでサインインしています。',
+          'If you want to add a password later, sign out and use Forgot password from the sign-in screen.':
+              '後でパスワードを追加するには、サインアウトしてからサインイン画面で「パスワードを忘れた場合」を使用してください。',
+          'If you want to add a password later, sign out and use Forgot password with that email on the sign-in screen.':
+              '後でパスワードを追加するには、サインアウトしてからサインイン画面でそのメールアドレスを使って「パスワードを忘れた場合」を使用してください。',
           'Confirmation code': '確認コード',
           'Confirmation code sent!': '確認コードを送信しました！',
           'Confirmation code will be sent to your email inbox.':
@@ -2004,11 +3145,24 @@ class L10n {
           'Add the last few details to start using Mixroom.':
               'Mixroomを使い始めるために、最後の情報を入力してください。',
           'Username': 'ユーザー名',
+          '1-30 chars. Lowercase letters, numbers, underscores, and hyphens.':
+              '1〜30文字。小文字英字、数字、アンダースコア、ハイフンを使えます。',
+          'Available after the account backend is deployed.':
+              'アカウントバックエンドのデプロイ後に利用できます。',
           'Bio': '自己紹介',
+          'Tell listeners what you make.': 'どんな音楽を作っているかを書いてください。',
           'Tell people a bit about yourself': 'あなたのことをひとこと書いてください',
           'Generate username': 'ユーザー名を生成',
           'Birthday (yyyy.mm.dd)': '生年月日 (yyyy.mm.dd)',
           'What describes you best?': 'あなたに最も近いものはどれですか？',
+          'What describes you': 'あなたに近いもの',
+          'Producer': 'プロデューサー',
+          'Artist': 'アーティスト',
+          'Songwriter': 'ソングライター',
+          'Audio engineer': 'オーディオエンジニア',
+          'Student': '学生',
+          'Beginner': '初心者',
+          'Make music for work': '仕事で音楽制作',
           'Agree to all': 'すべてに同意',
           'I agree to the': '次に同意します',
           'and': 'と',
@@ -2076,6 +3230,8 @@ class L10n {
           'Step {current} of {total}': 'ステップ {current} / {total}',
           'Change': '変更',
           'Select birthday': '生年月日を選択',
+          'You must be at least {age} years old to use Mixroom.':
+              'Mixroomを利用するには{age}歳以上である必要があります。',
           'Log Out': 'ログアウト',
           'Delete Account': 'アカウント削除',
           'Delete account?': 'アカウントを削除しますか？',
@@ -2095,8 +3251,8 @@ class L10n {
           'Birthday': '生年月日',
           'Using Mixroom for': 'Mixroomの利用目的',
           'Provider': 'プロバイダー',
-          'Google': 'Google',
-          'Apple': 'Apple',
+          'Google': 'グーグル',
+          'Apple': 'アップル',
           'KakaoTalk': 'KakaoTalk',
           'Joined': '登録日',
           'Music enthusiast': '音楽愛好家',
@@ -2111,15 +3267,30 @@ class L10n {
           'Feedback for': 'フィードバック先',
           'Send Feedback': 'フィードバックを送信',
           'Submit': '送信',
+          'Please enter your feedback or bug report first.':
+              '先にフィードバックまたはバグ報告の内容を入力してください。',
+          'Choose feedback or bug report, then describe it. You can also attach current editor context.':
+              'フィードバックまたはバグ報告を選び、内容を入力してください。現在のエディター情報も添付できます。',
+          'Choose feedback or bug report, then describe it. Account details are attached automatically.':
+              'フィードバックまたはバグ報告を選び、内容を入力してください。アカウント情報は自動で添付されます。',
           'Thank you for your submission!': 'ご意見ありがとうございます！',
           'Thank you for the feedback!': 'フィードバックありがとうございます！',
           'Tell us what is working, missing, or would make this better.':
               '良い点、不足している点、改善してほしい点を教えてください。',
           'Describe the bug, what you expected, and what happened.':
               '不具合の内容、期待した動作、実際に起きたことを教えてください。',
+          '{count} characters left': '残り{count}文字',
           'Allow Mixroom to respond by email.': 'Mixroom からメールで返信できるようにする。',
           'Optional. We may follow up using your account email about this submission.':
               '任意です。この内容について、アカウントのメールアドレスにご連絡する場合があります。',
+          'Include with this report': 'この報告に含める',
+          'Include AI chat history and project settings.':
+              'AIチャット履歴とプロジェクト設定を含める。',
+          'Attach recent assistant messages and current DAW settings.':
+              '最近のアシスタントメッセージと現在のDAW設定を添付します。',
+          'Include a DAW screenshot.': 'DAWのスクリーンショットを含める。',
+          'Mixroom captures the editor view with chat closed.':
+              'Mixroomはチャットを閉じた状態のエディター画面をキャプチャします。',
           'Video projects are coming soon.': '動画プロジェクトは近日公開です。',
           'No matching projects.': '一致するプロジェクトがありません。',
           'Sort by recent': '最近順で並べ替え',
@@ -2151,7 +3322,22 @@ class L10n {
           'Current Password': '現在のパスワード',
           'Enter current password': '現在のパスワードを入力',
           'Password updated successfully.': 'パスワードが正常に更新されました。',
+          'Please enter your current password.': '現在のパスワードを入力してください。',
+          'New password must be different from current password.':
+              '新しいパスワードは現在のパスワードと異なる必要があります。',
           'Updating...': '更新中...',
+          'This page shows your current sign-in method. More linking options can come later.':
+              '現在のサインイン方法を表示しています。追加の連携オプションは今後提供される可能性があります。',
+          'Username, birthday, and bio require the deployed account backend before they can be saved.':
+              'ユーザー名、生年月日、自己紹介は、アカウントバックエンドのデプロイ後に保存できます。',
+          'Username, birthday, and bio save after the account backend is deployed.':
+              'ユーザー名、生年月日、自己紹介は、アカウントバックエンドのデプロイ後に保存されます。',
+          'Manage privacy controls, legal documents, and data requests.':
+              'プライバシー設定、法的文書、データリクエストを管理します。',
+          'Tell us what is working, what is broken, or what you want to see next.':
+              '良い点、不具合、次にほしい機能を教えてください。',
+          'Send feedback or bug report': 'フィードバックまたはバグ報告を送信',
+          'Project files are stored locally.': 'プロジェクトファイルはこの端末に保存されます。',
           'Prompt usage': 'プロンプト使用量',
           'Extra prompt credits are used first, before daily and weekly limits.':
               '追加プロンプトクレジットは、日次/週次の上限より先に消費されます。',
@@ -2240,9 +3426,33 @@ class L10n {
           'Folder already loaded for this project.':
               'このプロジェクトでは既に読み込まれているフォルダーです。',
           'Failed to preview sample': 'サンプルの試聴に失敗しました',
+          'Project Settings': 'プロジェクト設定',
           'Project Name': 'プロジェクト名',
+          'Metronome': 'メトロノーム',
+          'Metronome Volume': 'メトロノーム音量',
+          'Replay Tutorial': 'チュートリアルを再表示',
+          'Debug: Show First-Open Prompt': 'デバッグ: 初回案内を表示',
           'Run the interactive DAW tutorial again to revisit the timeline, tracks, effects, automation, AI, and export flow.':
               'インタラクティブDAWチュートリアルを再実行して、タイムライン、トラック、エフェクト、オートメーション、AI、書き出しフローを再確認します。',
+          'Show Producer Capture UI': 'プロデューサー取得UIを表示',
+          'Use Computer Keyboard as MIDI Input': 'コンピューターキーボードをMIDI入力に使う',
+          'Spacebar Stop Returns to Start': 'スペース停止時に開始位置へ戻る',
+          'When stopping playback with Space, jump back to the point where playback started.':
+              'スペースキーで再生を停止したとき、再生を開始した位置へ戻ります。',
+          'Keyboard Shortcuts': 'キーボードショートカット',
+          'View, remap, and reset desktop shortcuts.':
+              'デスクトップショートカットの確認、割り当て変更、リセットを行います。',
+          'Plugin Manager': 'プラグインマネージャー',
+          'Rescan, favorite, or hide desktop plugins.':
+              'デスクトッププラグインを再スキャン、お気に入り登録、非表示にします。',
+          'Desktop Diagnostics': 'デスクトップ診断',
+          'Check audio device, CPU, buffer, and scan state.':
+              'オーディオデバイス、CPU、バッファー、スキャン状態を確認します。',
+          'Recovery & Missing Assets': '復旧と不足アセット',
+          'Review recovered backups and missing media/plugin notices.':
+              '復旧したバックアップと不足しているメディア/プラグイン通知を確認します。',
+          'Scan': 'スキャン',
+          'View': '表示',
           'Bluetooth headset mic': 'Bluetoothヘッドセットマイク',
           'Bluetooth headset mic can reduce audio quality and increase latency. Continue with this mic?':
               'Bluetoothヘッドセットマイクは音質低下や遅延増加の可能性があります。このマイクで続行しますか？',
@@ -2274,8 +3484,13 @@ class L10n {
           'Bluetooth headset mic can reduce audio quality and increase latency. You will be asked to confirm before recording.':
               'Bluetoothヘッドセットマイクは音質低下や遅延増加の可能性があります。録音前に確認が求められます。',
           'Reset Bluetooth mic approvals': 'Bluetoothマイク許可をリセット',
+          'Tempo': 'テンポ',
+          'Project Key': 'プロジェクトキー',
+          'No key': 'キーなし',
+          'Tempo Mode': 'テンポモード',
           'Tempo (BPM)': 'テンポ (BPM)',
           'TEMPO': 'テンポ',
+          'Set Tempo': 'テンポを設定',
           'Export producer session': 'プロデューサーセッションを書き出し',
           'Save producer session': 'プロデューサーセッションを保存',
           'Clip tempo mode turned off.': 'クリップテンポモードをオフにしました。',
@@ -2290,6 +3505,81 @@ class L10n {
           'Maximum of': '最大',
           'rows reached.': '行に達しました。',
           'Failed to share.': '共有に失敗しました。',
+          'Undo': '元に戻す',
+          'Redo': 'やり直す',
+          'Change project key': 'プロジェクトキーを変更',
+          'Project set to': 'プロジェクトを次に設定しました:',
+          'Project BPM unchanged.': 'プロジェクトBPMは変更していません。',
+          'Project tempo set to': 'プロジェクトテンポを次に設定しました:',
+          'This automation target is orphaned. Undo the plugin removal or re-add the plugin to relink it.':
+              'このオートメーション対象はリンク切れです。プラグイン削除を元に戻すか、プラグインを再追加して再リンクしてください。',
+          'Clone ready for': 'クローン準備完了:',
+          'Invalid range. Tap a different end point.':
+              '無効な範囲です。別の終了点をタップしてください。',
+          'Could not load this effect plugin.': 'このエフェクトプラグインを読み込めませんでした。',
+          'Skipped unsupported cut action.': '未対応のカット操作をスキップしました。',
+          'Cut clip.': 'クリップをカットしました。',
+          'Skipped incomplete move action.': '不完全な移動操作をスキップしました。',
+          'Move made no changes.': '移動による変更はありませんでした。',
+          'Stretched clip.': 'クリップをストレッチしました。',
+          'Detected clip tempo and updated project tempo.':
+              'クリップテンポを検出し、プロジェクトテンポを更新しました。',
+          'Deleted clip.': 'クリップを削除しました。',
+          'Stopped sample processing.': 'サンプル処理を停止しました。',
+          'Copied row effects.': '行エフェクトをコピーしました。',
+          'Copy effects first.': '先にエフェクトをコピーしてください。',
+          'Pasted row effects.': '行エフェクトを貼り付けました。',
+          'This row has no effects to clear.': 'この行にクリアするエフェクトはありません。',
+          'Cleared row effects.': '行エフェクトをクリアしました。',
+          'Copied master effects.': 'マスターエフェクトをコピーしました。',
+          'Pasted master effects.': 'マスターエフェクトを貼り付けました。',
+          'Master has no effects to clear.': 'マスターにクリアするエフェクトはありません。',
+          'Cleared master effects.': 'マスターエフェクトをクリアしました。',
+          'Created automation clip.': 'オートメーションクリップを作成しました。',
+          'Add a row before creating automation clips.':
+              'オートメーションクリップを作成する前に行を追加してください。',
+          'Select a valid row before creating automation clips.':
+              'オートメーションクリップを作成する前に有効な行を選択してください。',
+          'Could not resolve that automation target.':
+              'そのオートメーション対象を解決できませんでした。',
+          'No automatable parameters found for this plugin.':
+              'このプラグインにオートメーション可能なパラメータが見つかりません。',
+          'Could not resolve that plugin parameter.':
+              'そのプラグインパラメータを解決できませんでした。',
+          'Cleared automation clips.': 'オートメーションクリップをクリアしました。',
+          'Created': '作成しました',
+          'kick-synced sidechain clips.': '個のキック同期サイドチェーンクリップ。',
+          'Deleted automation clip.': 'オートメーションクリップを削除しました。',
+          'Moved automation clip.': 'オートメーションクリップを移動しました。',
+          'Automation clip is already unique.': 'オートメーションクリップはすでに一意です。',
+          'Made automation clip unique.': 'オートメーションクリップを一意にしました。',
+          'Updated automation clip points.': 'オートメーションクリップポイントを更新しました。',
+          'Cleared automation.': 'オートメーションをクリアしました。',
+          'Added automation ramp.': 'オートメーションランプを追加しました。',
+          'Set automation points.': 'オートメーションポイントを設定しました。',
+          'MIDI notes already match that chop grid.':
+              'MIDIノートはすでにそのチョップグリッドに一致しています。',
+          'Could not update this MIDI clip.': 'このMIDIクリップを更新できませんでした。',
+          'MIDI notes already match that pitch.': 'MIDIノートはすでにそのピッチに一致しています。',
+          'Shifted MIDI notes': 'MIDIノートを移動しました',
+          'up': '上へ',
+          'down': '下へ',
+          'by': '分',
+          'That MIDI clip is already that long.': 'そのMIDIクリップはすでにその長さです。',
+          'Extended MIDI clip to': 'MIDIクリップを次の長さに延長しました:',
+          'Created MIDI clip from AI notes.': 'AIノートからMIDIクリップを作成しました。',
+          'Converting audio to MIDI...': 'オーディオをMIDIに変換中...',
+          'Created MIDI clip below the source audio.':
+              '元のオーディオの下にMIDIクリップを作成しました。',
+          'Stem separation failed for target clips.': '対象クリップのステム分離に失敗しました。',
+          'Created stems for': 'ステムを作成したクリップ数:',
+          'clips.': '個。',
+          'Stem separation is only available for audio clips.':
+              'ステム分離はオーディオクリップでのみ使用できます。',
+          'Selected clip file was not found.': '選択したクリップファイルが見つかりませんでした。',
+          'Splitting stems...': 'ステムを分離中...',
+          'Stem separation failed.': 'ステム分離に失敗しました。',
+          'Created vocal/instrumental stems.': 'ボーカル/インストゥルメンタルのステムを作成しました。',
           'Master Volume': 'マスターボリューム',
           'Master Effects': 'マスターエフェクト',
           'Master Bus': 'マスターバス',
@@ -2297,11 +3587,271 @@ class L10n {
           'Open File Browser': 'ファイルブラウザーを開く',
           'Choose Instrument': '楽器を選択',
           'No instruments in this category.': 'このカテゴリに楽器はありません。',
+          'Instrument': '楽器',
+          'All': 'すべて',
+          'Keys': '鍵盤',
+          'Strings': '弦楽器',
+          'Woodwinds': '木管楽器',
+          'Brass': '金管楽器',
+          'Percussion': '打楽器',
+          'Drums': 'ドラム',
+          'Pads': 'パッド',
+          'Leads': 'リード',
+          'Bass': 'ベース',
+          'Plucks': 'プラック',
+          'Synths': 'シンセ',
+          'Other': 'その他',
+          'Open instrument UI': '楽器UIを開く',
+          'Open UI': 'UIを開く',
+          'Unlock piano roll from playhead': 'ピアノロールの再生ヘッド追従を解除',
+          'Lock piano roll to playhead': 'ピアノロールを再生ヘッドに追従',
+          'Zoom out': '縮小',
+          'Zoom in': '拡大',
+          'Piano roll help': 'ピアノロールヘルプ',
+          'Toggle fullscreen': '全画面を切り替え',
+          'Duplicate': '複製',
+          'File Browser Help': 'ファイルブラウザーヘルプ',
+          'Load a folder into the browser.': 'ブラウザーにフォルダーを読み込みます。',
+          'Tap a folder button to switch the current folder.':
+              'フォルダーボタンをタップして現在のフォルダーを切り替えます。',
+          'Preview an audio file.': 'オーディオファイルを試聴します。',
+          'Hold and drag a file into the timeline.':
+              'ファイルを長押ししてタイムラインへドラッグします。',
+          'Hold a folder button to remove it.': 'フォルダーボタンを長押しして削除します。',
+          'Use the bottom waveform to seek preview playback.':
+              '下の波形で試聴再生位置を移動します。',
+          'Insert at playhead': '再生ヘッド位置に挿入',
+          'Remove': '削除',
+          'Add a sample folder': 'サンプルフォルダーを追加',
+          'This folder is currently unavailable.': 'このフォルダーは現在利用できません。',
+          'Tip: choose local folders (not cloud-only placeholders).':
+              'ヒント: クラウドのみのプレースホルダーではなく、ローカルフォルダーを選択してください。',
+          'Pick folder': 'フォルダーを選択',
+          'Remove folder': 'フォルダーを削除',
+          'No files found.': 'ファイルが見つかりません。',
+          'File Browser': 'ファイルブラウザー',
+          'How to use': '使い方',
+          'Add folder': 'フォルダーを追加',
+          'Refresh folder': 'フォルダーを更新',
+          'Collapse panel': 'パネルを折りたたむ',
+          'Expand panel': 'パネルを展開',
+          'Add Audio Clip': 'オーディオクリップを追加',
+          'Add Instrument Clip': '楽器クリップを追加',
+          'Run': '実行',
+          'Running': '実行中',
+          'Advanced options': '詳細オプション',
+          'Sample rate': 'サンプルレート',
+          'Channels': 'チャンネル',
+          'Stereo': 'ステレオ',
+          'Mono': 'モノ',
+          'Windows desktop currently exports with native WAV render only. MP3 and post-processing controls are disabled.':
+              'Windowsデスクトップ版は現在、ネイティブWAVレンダーのみで書き出します。MP3と後処理設定は無効です。',
+          'Off: Clips ignore project tempo.\nResample: Clips follow tempo and shift pitch.\nStretch: Clips follow tempo and keep pitch.':
+              'オフ: クリップはプロジェクトテンポを無視します。\nリサンプル: クリップはテンポに追従し、ピッチも変わります。\nストレッチ: クリップはテンポに追従し、ピッチを維持します。',
+          'Tempo mode: ': 'テンポモード: ',
+          'Resample': 'リサンプル',
+          'Stretch': 'ストレッチ',
+          'Stretch (keep pitch)': 'ストレッチ（ピッチ維持）',
+          'Master': 'マスター',
+          'Pan': 'パン',
+          'Center': '中央',
+          'Click to change analyzer view': 'クリックしてアナライザー表示を変更',
+          'Select': '選択',
+          'Paint': 'ペイント',
+          'Tone': 'トーン',
+          'Quick level and pitch adjustments': 'レベルとピッチをすばやく調整します',
+          'Pitch': 'ピッチ',
+          'MIDI clip': 'MIDIクリップ',
+          'Audio clip': 'オーディオクリップ',
+          'Follows project BPM.': 'プロジェクトBPMに追従します。',
+          'MIDI clips follow project BPM automatically.':
+              'MIDIクリップはプロジェクトBPMに自動で追従します。',
+          'No extra tempo mode is needed here.': 'ここでは追加のテンポモードは不要です。',
+          'Choose how this audio clip follows project BPM':
+              'このオーディオクリップがプロジェクトBPMに追従する方法を選択します',
+          'Reversed': '反転済み',
+          'Reverse': '反転',
+          'Detect tempo': 'テンポを検出',
+          'Split vocals': 'ボーカルを分離',
+          'Adjust To Tempo (Resample)': 'テンポに合わせる（リサンプル）',
+          'Stretch To Tempo (Keep Pitch)': 'テンポに合わせてストレッチ（ピッチ維持）',
+          'Stretch mode is shown with teal clip handles.':
+              'ストレッチモードは青緑色のクリップハンドルで表示されます。',
+          'Detect Tempo + Set Project BPM': 'テンポ検出 + プロジェクトBPM設定',
+          'Select Icon': 'アイコンを選択',
+          'Crossfade': 'クロスフェード',
+          'Crossfade Length': 'クロスフェード長',
+          'Off': 'オフ',
+          'None': 'なし',
+          'Cut': 'カット',
+          'Fade': 'フェード',
+          'Linear Crossfade': 'リニアクロスフェード',
+          'Equal Power Crossfade': 'イコールパワークロスフェード',
+          'S-Curve Crossfade': 'Sカーブクロスフェード',
           'Profile': 'プロファイル',
           'Mixroom Producer': 'Mixroom プロデューサー',
           'Balance levels, reduce masking, and improve clarity.\nYou can undo everything after it runs.':
               'レベルを整え、マスキングを減らし、明瞭さを高めます。\n実行後でもすべて元に戻せます。',
           'Audition folders and drag and drop': 'フォルダー試聴とドラッグ&ドロップ',
+          'Could not save preference. Please retry.':
+              '設定を保存できませんでした。もう一度お試しください。',
+          'Could not update telemetry preference. Please retry.':
+              'テレメトリー設定を更新できませんでした。もう一度お試しください。',
+          'Could not update marketing email preference. Please retry.':
+              'マーケティングメール設定を更新できませんでした。もう一度お試しください。',
+          'Could not open this link on your device right now.':
+              '現在このデバイスでリンクを開けません。',
+          'Data export request': 'データエクスポートリクエスト',
+          'Data correction/deletion request': 'データ修正/削除リクエスト',
+          'Privacy inquiry': 'プライバシーに関する問い合わせ',
+          'Support request': 'サポートリクエスト',
+          'Hello Mixroom Privacy Team,\n\n': 'Mixroomプライバシーチーム様\n\n',
+          'Hello Mixroom Support,\n\n': 'Mixroomサポートチーム様\n\n',
+          'Hello Mixroom Privacy Team,\n\nI would like to request a copy of my personal data.\n\nAccount email: \nFull name: \n\nThank you.':
+              'Mixroomプライバシーチーム様\n\n自分の個人データのコピーをリクエストします。\n\nアカウントのメールアドレス: \n氏名: \n\nよろしくお願いいたします。',
+          'Hello Mixroom Privacy Team,\n\nI would like to request a correction or deletion of my personal data.\n\nAccount email: \nRequest details: \n\nThank you.':
+              'Mixroomプライバシーチーム様\n\n自分の個人データの修正または削除をリクエストします。\n\nアカウントのメールアドレス: \nリクエスト内容: \n\nよろしくお願いいたします。',
+          'Controls, documents, and requests': '設定、文書、リクエスト',
+          'Review legal documents, control privacy settings, and submit data-rights requests here.':
+              'ここで法的文書の確認、プライバシー設定の管理、データ権利リクエストの送信ができます。',
+          'Documents': '文書',
+          'How Mixroom collects, uses, and shares information.':
+              'Mixroomが情報を収集、使用、共有する方法です。',
+          'Rules for using Mixroom and user content.':
+              'Mixroomとユーザーコンテンツの利用ルールです。',
+          'Subprocessors': 'サブプロセッサー',
+          'See third-party service providers that process data on Mixroom\'s behalf.':
+              'Mixroomに代わってデータを処理する第三者サービスプロバイダーを確認します。',
+          'Open-source licenses': 'オープンソースライセンス',
+          'View software licenses used by this app.':
+              'このアプリで使用しているソフトウェアライセンスを表示します。',
+          'Privacy Controls': 'プライバシー設定',
+          'You can change these preferences at any time from this screen.':
+              'この画面からいつでも設定を変更できます。',
+          'Optional analytics and diagnostics': '任意の分析と診断',
+          'Share app interaction events and diagnostics to help improve Mixroom quality and product decisions.':
+              'Mixroomの品質改善と製品判断に役立てるため、アプリ操作イベントと診断情報を共有します。',
+          'Personalized recommendations': 'パーソナライズされたおすすめ',
+          'Uses activity signals to tailor tips and suggestions.':
+              'アクティビティシグナルを使ってヒントや提案を調整します。',
+          'Product updates and marketing email': '製品アップデートとマーケティングメール',
+          'Receive release notes, offers, and feature announcements.':
+              'リリースノート、オファー、機能のお知らせを受け取ります。',
+          'Your Data Rights': 'データに関する権利',
+          'Request my data export': '自分のデータのエクスポートをリクエスト',
+          'Email request for a copy of your data.': 'データのコピーをメールでリクエストします。',
+          'Request data correction or deletion': 'データの修正または削除をリクエスト',
+          'Email request for correction or erasure.': '修正または消去をメールでリクエストします。',
+          'Contact': '連絡先',
+          'Privacy contact': 'プライバシー窓口',
+          'Support contact': 'サポート窓口',
+          'Danger Zone': '注意が必要な操作',
+          'Delete account permanently': 'アカウントを完全に削除',
+          'Removes your account and signs you out.': 'アカウントを削除し、サインアウトします。',
+          'Legal details and supporting information': '法的詳細と補足情報',
+          'Last updated: {date}': '最終更新日: {date}',
+          'This policy explains how Mixroom handles personal data in-app.':
+              'このポリシーは、Mixroomがアプリ内で個人データを取り扱う方法を説明します。',
+          '1. Information We Collect': '1. 収集する情報',
+          'We may collect account information (such as email and profile details), usage analytics, crash diagnostics, and content metadata needed to operate features.':
+              '機能の運用に必要なアカウント情報（メールアドレスやプロフィール情報など）、利用分析、クラッシュ診断、コンテンツのメタデータを収集する場合があります。',
+          '2. How We Use Data': '2. データの利用方法',
+          'Data is used to operate core app functionality, secure accounts, improve product quality, personalize user experience, and communicate essential service updates.':
+              'データは、主要なアプリ機能の運用、アカウント保護、製品品質の向上、ユーザー体験のパーソナライズ、重要なサービス更新の連絡に使用されます。',
+          '3. Sharing and Processors': '3. 共有と処理業者',
+          'We may share data with trusted service providers that process data on our behalf (for example authentication, storage, analytics, or support tooling), subject to contractual safeguards.':
+              '契約上の保護措置のもと、認証、ストレージ、分析、サポートツールなど、当社に代わってデータを処理する信頼できるサービスプロバイダーとデータを共有する場合があります。',
+          '4. Retention': '4. 保管',
+          'We keep data only as long as needed for business and legal purposes. Retention periods may differ by data type, including backups and security logs.':
+              'データは、事業上および法的な目的に必要な期間のみ保管します。バックアップやセキュリティログを含め、データの種類によって保管期間は異なる場合があります。',
+          '5. Your Rights and Choices': '5. 権利と選択',
+          'Depending on your region, you may have rights to access, export, correct, delete, or limit use of your personal data. You can submit a request from the Legal & Privacy Center.':
+              '地域によっては、個人データへのアクセス、エクスポート、修正、削除、または利用制限を求める権利があります。法務とプライバシーセンターからリクエストを送信できます。',
+          '6. Children': '6. 子ども',
+          'Mixroom is not directed to children under the minimum age required by applicable law without appropriate parental consent and controls.':
+              'Mixroomは、適切な保護者の同意と管理なしに、適用法で定められた最低年齢未満の子どもを対象としていません。',
+          '7. Contact': '7. お問い合わせ',
+          'For privacy requests, contact privacy@mixroom.ai. For support, contact support@mixroom.ai.':
+              'プライバシーに関するリクエストは privacy@mixroom.ai、サポートは support@mixroom.ai までご連絡ください。',
+          'These terms govern use of Mixroom and related services.':
+              '本規約は、Mixroomおよび関連サービスの利用に適用されます。',
+          '1. Acceptance': '1. 同意',
+          'By creating an account or using Mixroom, you agree to these Terms and any policies referenced here.':
+              'アカウントを作成する、またはMixroomを利用することで、本規約およびここで参照されるポリシーに同意したものとみなされます。',
+          '2. Accounts': '2. アカウント',
+          'You are responsible for your account credentials and activity. Keep login details secure and notify us of unauthorized use.':
+              'アカウント認証情報とアクティビティについてはユーザーが責任を負います。ログイン情報を安全に保管し、不正利用があった場合はお知らせください。',
+          '3. User Content': '3. ユーザーコンテンツ',
+          'You retain ownership of your content. You grant Mixroom a limited license to host, process, and transmit content solely to provide and improve the service.':
+              'ユーザーは自身のコンテンツの所有権を保持します。サービスの提供と改善のみを目的として、コンテンツをホスト、処理、送信する限定的なライセンスをMixroomに付与します。',
+          '4. Acceptable Use': '4. 許容される利用',
+          'You agree not to abuse the service, violate intellectual property rights, distribute malicious content, or use Mixroom in unlawful ways.':
+              'サービスを悪用しないこと、知的財産権を侵害しないこと、悪意あるコンテンツを配布しないこと、Mixroomを違法な方法で利用しないことに同意します。',
+          '5. Termination': '5. 終了',
+          'We may suspend or terminate accounts for violations, fraud, abuse, or legal requirements. You may stop using the service at any time.':
+              '違反、不正、悪用、または法的要件により、アカウントを停止または終了する場合があります。ユーザーはいつでもサービスの利用を停止できます。',
+          '6. Disclaimers and Liability': '6. 免責と責任',
+          'Services are provided on an as-is basis to the extent allowed by law. Liability is limited as described in the full legal agreement between you and Mixroom.':
+              'サービスは、法律で認められる範囲で現状有姿で提供されます。責任は、ユーザーとMixroomの完全な法的合意に記載された範囲に制限されます。',
+          'Legal questions can be sent to privacy@mixroom.ai or support@mixroom.ai.':
+              '法的な質問は privacy@mixroom.ai または support@mixroom.ai に送信できます。',
+          'Mixroom uses third-party service providers to operate core app features. These providers process data on our behalf under contractual controls.':
+              'Mixroomは主要なアプリ機能を運用するために第三者サービスプロバイダーを利用します。これらのプロバイダーは契約上の管理のもと、当社に代わってデータを処理します。',
+          'Amazon Web Services (AWS)': 'Amazon Web Services (AWS)',
+          'Google (Google Sign-In)': 'Google（Googleサインイン）',
+          'Apple (Sign in with Apple)': 'Apple（Appleでサインイン）',
+          'Kakao (Kakao Login)': 'Kakao（Kakaoログイン）',
+          'PostHog': 'PostHog',
+          'Sentry': 'Sentry',
+          'OpenAI': 'OpenAI',
+          'Purpose: account/authentication infrastructure, APIs, and application hosting. Typical data categories: account identifiers, authentication metadata, service logs, and app data required to deliver Mixroom features.':
+              '目的: アカウント/認証インフラ、API、アプリケーションホスティング。一般的なデータカテゴリ: アカウント識別子、認証メタデータ、サービスログ、Mixroom機能の提供に必要なアプリデータ。',
+          'Purpose: social sign-in and account identity verification when users choose Google login. Typical data categories: basic profile identifiers (such as email and account subject ID) returned by Google authentication flows.':
+              '目的: ユーザーがGoogleログインを選択した場合のソーシャルサインインとアカウント本人確認。一般的なデータカテゴリ: Google認証フローから返されるメールアドレス、アカウントsubject IDなどの基本プロフィール識別子。',
+          'Purpose: social sign-in and account identity verification when users choose Apple login. Typical data categories: Apple account subject identifier and email relay/associated account email data provided by Apple auth.':
+              '目的: ユーザーがAppleログインを選択した場合のソーシャルサインインとアカウント本人確認。一般的なデータカテゴリ: Apple認証から提供されるAppleアカウントsubject識別子、メールリレー/関連アカウントメールデータ。',
+          'Purpose: social sign-in and account identity verification when users choose Kakao login. Typical data categories: Kakao account identifier and profile/email fields provided through Kakao authorization.':
+              '目的: ユーザーがKakaoログインを選択した場合のソーシャルサインインとアカウント本人確認。一般的なデータカテゴリ: Kakao認可を通じて提供されるKakaoアカウント識別子とプロフィール/メール項目。',
+          'Purpose: product analytics and event telemetry, subject to user privacy toggle settings in-app. Typical data categories: app interaction events, device/app metadata, and aggregated usage signals.':
+              '目的: アプリ内のプライバシートグル設定に基づく製品分析とイベントテレメトリー。一般的なデータカテゴリ: アプリ操作イベント、デバイス/アプリのメタデータ、集計された利用シグナル。',
+          'Purpose: crash reporting and diagnostics, subject to user privacy toggle settings in-app. Typical data categories: crash stack traces, runtime diagnostics, and device/app version metadata.':
+              '目的: アプリ内のプライバシートグル設定に基づくクラッシュ報告と診断。一般的なデータカテゴリ: クラッシュスタックトレース、ランタイム診断、デバイス/アプリバージョンのメタデータ。',
+          'Purpose: AI assistant and model-inference features. Typical data categories: prompts/instructions and related context needed to generate assistant responses.':
+              '目的: AIアシスタントおよびモデル推論機能。一般的なデータカテゴリ: アシスタント応答の生成に必要なプロンプト/指示と関連コンテキスト。',
+          'Updates': '更新',
+          'This list may change as Mixroom adds or removes service providers. Material updates are reflected in-app and in Mixroom privacy documentation.':
+              'Mixroomがサービスプロバイダーを追加または削除することで、この一覧は変更される場合があります。重要な更新はアプリ内およびMixroomのプライバシー文書に反映されます。',
+          'No active account.': '有効なアカウントがありません。',
+          'Type DELETE to confirm account deletion.':
+              'アカウント削除を確認するには DELETE と入力してください。',
+          'Enter your current password to delete this account.':
+              'このアカウントを削除するには現在のパスワードを入力してください。',
+          'Re-authenticate with {provider} to delete this account.':
+              'このアカウントを削除するには{provider}で再認証してください。',
+          'Re-authenticate with your social provider to delete this account.':
+              'このアカウントを削除するにはソーシャルログインプロバイダーで再認証してください。',
+          'That re-authentication did not match your Mixroom account. Please try again.':
+              '再認証したアカウントがMixroomアカウントと一致しません。もう一度お試しください。',
+          'Delete account': 'アカウント削除',
+          'This permanently removes your Mixroom account and signed-in session on this device.':
+              'このデバイスのサインインセッションとMixroomアカウントを完全に削除します。',
+          'Before you continue': '続行する前に',
+          'Your profile, auth access, and linked account data will be removed.':
+              'プロフィール、認証アクセス、連携アカウントデータが削除されます。',
+          'Deleting your Mixroom account does not cancel App Store or Google Play billing. Cancel there first if needed.':
+              'Mixroomアカウントを削除してもApp StoreまたはGoogle Playの請求はキャンセルされません。必要な場合は先に各ストアでキャンセルしてください。',
+          'To protect your account, Mixroom will ask you to confirm DELETE and verify this session one more time.':
+              'アカウント保護のため、DELETEの入力確認とこのセッションの再認証がもう一度必要です。',
+          'Signed in with {provider}': '{provider}でサインイン中',
+          'Type DELETE to continue': '続行するには DELETE と入力',
+          'Current password': '現在のパスワード',
+          'Enter your password': 'パスワードを入力',
+          'Confirm with {provider}': '{provider}で確認',
+          'Verified': '確認済み',
+          'Run one more {provider} sign-in check before Mixroom deletes this account.':
+              'Mixroomがこのアカウントを削除する前に、{provider}のサインイン確認をもう一度行います。',
+          'Re-auth with {provider}': '{provider}で再認証',
+          'Re-auth completed': '再認証完了',
           'Finish': '完了',
         },
       };

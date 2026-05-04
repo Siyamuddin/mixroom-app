@@ -432,6 +432,33 @@ class BillingRepository:
                 raise UsernameClaimConflictError("That username is already taken.") from exc
             raise
 
+    def update_user_newsletter_subscription(
+        self,
+        user_id: str,
+        *,
+        newsletter_opt_in: bool,
+        newsletter_opt_in_at: Optional[str],
+    ) -> None:
+        if self._users is None:
+            raise RuntimeError("USERS_TABLE is not configured.")
+        normalized_user_id = str(user_id or "").strip()
+        if not normalized_user_id:
+            raise ValueError("User id is required.")
+        self._users.update_item(
+            Key={"user_id": normalized_user_id},
+            UpdateExpression=(
+                "SET newsletter_opt_in = :newsletter_opt_in, "
+                "newsletter_opt_in_at = :newsletter_opt_in_at, "
+                "updated_at = :updated_at"
+            ),
+            ExpressionAttributeValues={
+                ":newsletter_opt_in": bool(newsletter_opt_in),
+                ":newsletter_opt_in_at": newsletter_opt_in_at,
+                ":updated_at": _utc_now_iso(),
+            },
+            ConditionExpression="attribute_exists(user_id)",
+        )
+
     def delete_subscriptions_for_user(self, user_id: str) -> None:
         items = self.list_subscriptions_for_user(user_id)
         if not items:

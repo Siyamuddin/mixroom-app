@@ -321,6 +321,18 @@ ul {
   color: var(--blue);
 }
 
+.panel-meta.status-error {
+  color: var(--rose);
+}
+
+.panel-meta.status-success {
+  color: var(--mint);
+}
+
+.panel-meta.status-info {
+  color: var(--blue);
+}
+
 .auth-panel {
   margin: 64px auto 0;
   width: min(360px, 100%);
@@ -795,6 +807,33 @@ ul {
   align-items: start;
 }
 
+.billing-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.billing-entity-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.billing-preview-grid {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.billing-preview-section {
+  display: grid;
+  gap: 12px;
+}
+
+.billing-table {
+  min-width: 640px;
+}
+
 .admin-grid {
   grid-template-columns: minmax(0, 1.25fr) minmax(22rem, 0.95fr);
 }
@@ -890,6 +929,11 @@ ul {
 .text-area {
   min-height: 108px;
   resize: vertical;
+}
+
+.text-area-code,
+.table-code {
+  font: 0.84rem/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .select-input {
@@ -1175,6 +1219,7 @@ ul {
 
 .compact-table-wrap {
   margin-top: 12px;
+  overflow-x: auto;
 }
 
 table {
@@ -1212,11 +1257,16 @@ tbody tr[data-user-id] {
 }
 
 tbody tr[data-user-id]:hover,
-tbody tr[data-submission-id]:hover {
+tbody tr[data-submission-id]:hover,
+tbody tr[data-billing-selectable="true"]:hover {
   background: rgba(255, 255, 255, 0.03);
 }
 
 tbody tr[data-submission-id] {
+  cursor: pointer;
+}
+
+tbody tr[data-billing-selectable="true"] {
   cursor: pointer;
 }
 
@@ -1545,7 +1595,8 @@ tbody tr[data-submission-id] {
 @media (max-width: 1180px) {
   .panel-grid,
   .admin-grid,
-  .summary-grid {
+  .summary-grid,
+  .billing-entity-grid {
     grid-template-columns: 1fr;
   }
 

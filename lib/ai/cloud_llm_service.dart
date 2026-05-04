@@ -608,6 +608,7 @@ class CloudLlmService {
                                 'auto_trim',
                                 'cut',
                                 'stretch',
+                                'pitch_shift',
                                 'move',
                                 'tempo_follow',
                                 'auto_bpm_align',
@@ -641,6 +642,14 @@ class CloudLlmService {
                             'length_ms': {'type': 'number'},
                             'length_measures': {'type': 'number'},
                             'length_beats': {'type': 'number'},
+                            'semitones': {'type': 'number'},
+                            'delta_semitones': {'type': 'number'},
+                            'pitch_semitones': {'type': 'number'},
+                            'new_pitch_semitones': {'type': 'number'},
+                            'mode': {
+                              'type': 'string',
+                              'enum': ['set', 'delta'],
+                            },
                             'until_ms': {'type': 'number'},
                             'until_measure': {'type': 'number'},
                             'until_beat': {'type': 'number'},
@@ -1551,6 +1560,16 @@ class CloudLlmService {
     return 'You have reached the $limitLabel prompt limit. Try again in $wait.';
   }
 
+  bool _isPromptRateLimitResponse(
+    int statusCode,
+    Map<String, dynamic>? payload,
+    AiPromptRateLimitStatus? status,
+  ) {
+    if (statusCode != 429) return false;
+    if (status?.isBlocked == true) return true;
+    return payload?['error'] == 'prompt_rate_limit_hit';
+  }
+
   LlmResult _recoverableTextResult(
     String message, {
     String? softErrorCode,
@@ -1688,6 +1707,7 @@ class CloudLlmService {
     'auto_trim',
     'cut',
     'stretch',
+    'pitch_shift',
     'move',
     'tempo_follow',
     'auto_bpm_align',
@@ -1771,6 +1791,12 @@ class CloudLlmService {
       'cut_clip': 'cut',
       'resize': 'stretch',
       'resize_clip': 'stretch',
+      'pitch': 'pitch_shift',
+      'pitch_clip': 'pitch_shift',
+      'pitch_shift_clip': 'pitch_shift',
+      'shift_pitch': 'pitch_shift',
+      'transpose_audio': 'pitch_shift',
+      'transpose_clip': 'pitch_shift',
       'move_clip': 'move',
       'reposition': 'move',
       'shift': 'move',
@@ -2729,6 +2755,18 @@ class CloudLlmService {
         if (operation == 'cut') {
           return _hasSupportedCutPayload(data);
         }
+        if (operation == 'pitch_shift') {
+          final target = _actionTargetMap(data);
+          return _parseActionDouble(data['semitones'] ??
+                  target['semitones'] ??
+                  data['delta_semitones'] ??
+                  target['delta_semitones'] ??
+                  data['pitch_semitones'] ??
+                  target['pitch_semitones'] ??
+                  data['new_pitch_semitones'] ??
+                  target['new_pitch_semitones']) !=
+              null;
+        }
         return true;
       case 'effect_edit':
         return _allowedEffectEditOperations.contains(data['operation']);
@@ -3253,7 +3291,11 @@ class CloudLlmService {
     }
 
     if (response.statusCode != 200) {
-      if (response.statusCode == 429) {
+      if (_isPromptRateLimitResponse(
+        response.statusCode,
+        payload,
+        promptRateLimit,
+      )) {
         final message = _rateLimitMessage(
           promptRateLimit,
           payload?['message']?.toString().trim().isNotEmpty == true
@@ -3319,7 +3361,11 @@ class CloudLlmService {
               );
               if (response.statusCode == 200) {
                 // Continue into the normal response parsing below.
-              } else if (response.statusCode == 429) {
+              } else if (_isPromptRateLimitResponse(
+                response.statusCode,
+                payload,
+                promptRateLimit,
+              )) {
                 final message = _rateLimitMessage(
                   promptRateLimit,
                   payload?['message']?.toString().trim().isNotEmpty == true

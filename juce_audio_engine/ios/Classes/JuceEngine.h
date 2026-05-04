@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <deque>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -21,8 +22,445 @@
 #include <vector>
 
 extern "C" void juceLogToFlutter(const char *msg);
+extern "C" void mixroomConfigureHostedPluginWindow(void *nativeHandle,
+                                                    int scopeKind,
+                                                    int row,
+                                                    int effectIndex,
+                                                    int clipId,
+                                                    void *ownerHandle);
+extern "C" void mixroomPostHostedPluginAutomationSelection(
+    int scopeKind,
+    int row,
+    int effectIndex,
+    int clipId,
+    const char *paramId,
+    const char *paramName);
+extern "C" void mixroomRequestHostedPluginEditorClose(void *ownerHandle);
+extern "C" void mixroomSetHostedPluginWindowDetachedForOwner(void *ownerHandle,
+                                                             bool detached);
 
 class MetronomeAudioCallback;
+
+enum class HostedPluginEditorScopeKind
+{
+    unknown = 0,
+    trackEffect = 1,
+    masterEffect = 2,
+    midiClip = 3,
+};
+
+struct HostedPluginEditorMetadata
+{
+    HostedPluginEditorScopeKind scope = HostedPluginEditorScopeKind::unknown;
+    int row = -1;
+    int effectIndex = -1;
+    int clipId = -1;
+};
+
+class HostedPluginEditorShell;
+
+class HostedPluginEditorWindow : public juce::DocumentWindow
+{
+public:
+    using OnClose = std::function<void()>;
+
+    HostedPluginEditorWindow(const juce::String &title,
+                             juce::AudioProcessorEditor *editor,
+                             juce::AudioProcessor *parameterProcessorIn,
+                             HostedPluginEditorMetadata metadata,
+                             OnClose onClose);
+
+    bool matchesMetadata(const HostedPluginEditorMetadata &other) const noexcept
+    {
+        return metadata.scope == other.scope && metadata.row == other.row &&
+               metadata.effectIndex == other.effectIndex &&
+               metadata.clipId == other.clipId;
+    }
+
+    bool showAutomationContextMenuAtContentPoint(juce::Point<int> contentPoint);
+
+    void requestCloseFromHost()
+    {
+        closeButtonPressed();
+    }
+
+    void setDetached(bool shouldDetach);
+
+    bool isDetached() const noexcept
+    {
+        return detached;
+    }
+
+    void closeButtonPressed() override
+    {
+        setVisible(false);
+        auto onClose = std::move(onCloseFn);
+        juce::MessageManager::callAsync([onClose = std::move(onClose)]() mutable
+                                        {
+            if (onClose)
+                onClose(); });
+    }
+
+private:
+    HostedPluginEditorMetadata metadata;
+    juce::AudioProcessor *parameterProcessor = nullptr;
+    bool automationMenuOpen = false;
+    bool detached = false;
+    OnClose onCloseFn;
+};
+
+class HostedPluginEditorShell final : public juce::Component
+{
+public:
+    static constexpr int kHeaderHeight = 38;
+    static constexpr int kResizeHandleSize = 16;
+
+    static int extraChromeHeight() noexcept { return kHeaderHeight + 2; }
+
+    HostedPluginEditorShell(juce::Component &ownerComponent,
+                            juce::ComponentBoundsConstrainer *constrainer,
+                            std::function<void()> onClose,
+                            std::function<void()> onAutomate,
+                            std::function<void()> onToggleDetach,
+                            const juce::String &title,
+                            juce::AudioProcessorEditor *editor,
+                            bool editorResizable)
+        : owner(ownerComponent),
+          onCloseFn(std::move(onClose)),
+          onAutomateFn(std::move(onAutomate)),
+          onToggleDetachFn(std::move(onToggleDetach)),
+          editorOwned(editor),
+          titleLabel({}, title)
+    {
+        jassert(editorOwned != nullptr);
+        addAndMakeVisible(titleLabel);
+        titleLabel.setJustificationType(juce::Justification::centredLeft);
+        titleLabel.setInterceptsMouseClicks(false, false);
+        titleLabel.setColour(juce::Label::textColourId,
+                             juce::Colours::white.withAlpha(0.9f));
+        titleLabel.setFont(juce::Font(13.0f, juce::Font::bold));
+
+        addAndMakeVisible(automateButton);
+        automateButton.setButtonText("Auto");
+        automateButton.onClick = [this]()
+        {
+            if (onAutomateFn)
+                onAutomateFn();
+        };
+
+        addAndMakeVisible(detachButton);
+        detachButton.setButtonText("Float");
+        detachButton.onClick = [this]()
+        {
+            if (onToggleDetachFn)
+                onToggleDetachFn();
+        };
+
+        addAndMakeVisible(closeButton);
+        closeButton.setButtonText("X");
+        closeButton.onClick = [this]()
+        {
+            if (onCloseFn)
+                onCloseFn();
+        };
+
+        addAndMakeVisible(*editorOwned);
+
+        if (editorResizable)
+        {
+            resizeCorner = std::make_unique<juce::ResizableCornerComponent>(
+                &owner,
+                constrainer);
+            addAndMakeVisible(*resizeCorner);
+        }
+    }
+
+    juce::AudioProcessorEditor *getEditor() const noexcept
+    {
+        return editorOwned.get();
+    }
+
+    void setDetached(bool isDetached)
+    {
+        detachButton.setButtonText(isDetached ? "Dock" : "Float");
+    }
+
+    bool isPointInsideEditor(juce::Point<int> contentPoint) const noexcept
+    {
+        return editorOwned != nullptr && editorOwned->getBounds().contains(contentPoint);
+    }
+
+    juce::Point<int> contentPointToEditor(juce::Point<int> contentPoint) const noexcept
+    {
+        if (editorOwned == nullptr)
+            return contentPoint;
+        return contentPoint - editorOwned->getBounds().getPosition();
+    }
+
+    void paint(juce::Graphics &g) override
+    {
+        auto bounds = getLocalBounds().toFloat();
+        g.setColour(juce::Colour(0xff0f1520));
+        g.fillRoundedRectangle(bounds, 14.0f);
+
+        auto header = getLocalBounds().removeFromTop(kHeaderHeight).toFloat();
+        juce::ColourGradient headerGradient(
+            juce::Colour(0xff223449),
+            0.0f,
+            0.0f,
+            juce::Colour(0xff172232),
+            0.0f,
+            (float)kHeaderHeight,
+            false);
+        g.setGradientFill(headerGradient);
+        g.fillRoundedRectangle(header, 14.0f);
+        g.setColour(juce::Colour(0xff7bc4ff).withAlpha(0.12f));
+        g.fillRoundedRectangle(
+            juce::Rectangle<float>(10.0f, 8.0f, 5.0f, 22.0f),
+            3.0f);
+        g.setColour(juce::Colours::white.withAlpha(0.08f));
+        g.drawLine(14.0f,
+                   (float)kHeaderHeight,
+                   bounds.getWidth() - 14.0f,
+                   (float)kHeaderHeight,
+                   1.0f);
+        g.setColour(juce::Colours::white.withAlpha(0.12f));
+        g.drawRoundedRectangle(bounds.reduced(0.5f), 14.0f, 1.0f);
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds();
+        auto header = area.removeFromTop(kHeaderHeight);
+        closeButton.setBounds(header.removeFromRight(44).reduced(6, 7));
+        detachButton.setBounds(header.removeFromRight(64).reduced(4, 7));
+        automateButton.setBounds(header.removeFromRight(62).reduced(4, 7));
+        titleLabel.setBounds(header.reduced(16, 0));
+        if (editorOwned != nullptr)
+            editorOwned->setBounds(area.reduced(1, 1));
+        if (resizeCorner != nullptr)
+        {
+            resizeCorner->setBounds(
+                getWidth() - kResizeHandleSize - 6,
+                getHeight() - kResizeHandleSize - 6,
+                kResizeHandleSize,
+                kResizeHandleSize);
+        }
+    }
+
+    void mouseDown(const juce::MouseEvent &event) override
+    {
+        if (_headerBounds().contains(event.getPosition()))
+            dragger.startDraggingComponent(&owner, event);
+    }
+
+    void mouseDrag(const juce::MouseEvent &event) override
+    {
+        if (_headerBounds().contains(event.getMouseDownPosition()))
+            dragger.dragComponent(&owner, event, nullptr);
+    }
+
+private:
+    juce::Rectangle<int> _headerBounds() const noexcept
+    {
+        return getLocalBounds().removeFromTop(kHeaderHeight);
+    }
+
+    juce::Component &owner;
+    std::function<void()> onCloseFn;
+    std::function<void()> onAutomateFn;
+    std::unique_ptr<juce::AudioProcessorEditor> editorOwned;
+    juce::Label titleLabel;
+    juce::TextButton automateButton;
+    juce::TextButton detachButton;
+    juce::TextButton closeButton;
+    std::unique_ptr<juce::ResizableCornerComponent> resizeCorner;
+    juce::ComponentDragger dragger;
+    std::function<void()> onToggleDetachFn;
+};
+
+inline HostedPluginEditorWindow::HostedPluginEditorWindow(
+    const juce::String &title,
+    juce::AudioProcessorEditor *editor,
+    juce::AudioProcessor *parameterProcessorIn,
+    HostedPluginEditorMetadata metadataIn,
+    OnClose onClose)
+    : juce::DocumentWindow(title,
+                           juce::Colours::transparentBlack,
+                           0,
+                           true),
+      metadata(metadataIn),
+      parameterProcessor(parameterProcessorIn),
+      onCloseFn(std::move(onClose))
+{
+    setUsingNativeTitleBar(false);
+
+    const int initialWidth = juce::jlimit(360, 1600, juce::jmax(editor->getWidth(), 360));
+    const int initialHeight =
+        juce::jlimit(220, 1200, juce::jmax(editor->getHeight(), 220));
+    int minWidth = initialWidth;
+    int minHeight = initialHeight;
+    int maxWidth = initialWidth;
+    int maxHeight = initialHeight;
+    if (auto *constrainer = editor->getConstrainer())
+    {
+        minWidth = juce::jmax(280, constrainer->getMinimumWidth());
+        minHeight = juce::jmax(180, constrainer->getMinimumHeight());
+        maxWidth = constrainer->getMaximumWidth() > 0
+                       ? juce::jmax(minWidth, constrainer->getMaximumWidth())
+                       : juce::jmax(initialWidth, 1600);
+        maxHeight = constrainer->getMaximumHeight() > 0
+                        ? juce::jmax(minHeight, constrainer->getMaximumHeight())
+                        : juce::jmax(initialHeight, 1200);
+    }
+    const bool editorResizable = editor->isResizable();
+    setResizable(editorResizable, editorResizable);
+    auto *shell = new HostedPluginEditorShell(
+        *this,
+        getConstrainer(),
+        [this]()
+        {
+            closeButtonPressed();
+        },
+        [this]()
+        {
+            mixroomPostHostedPluginAutomationSelection(
+                static_cast<int>(metadata.scope),
+                metadata.row,
+                metadata.effectIndex,
+                metadata.clipId,
+                "",
+                "");
+        },
+        [this]()
+        {
+            setDetached(!detached);
+        },
+        title,
+        editor,
+        editorResizable);
+    setContentOwned(shell, true);
+    shell->setDetached(detached);
+    setResizeLimits(
+        editorResizable ? minWidth : initialWidth,
+        editorResizable ? minHeight + HostedPluginEditorShell::extraChromeHeight()
+                        : initialHeight + HostedPluginEditorShell::extraChromeHeight(),
+        editorResizable ? maxWidth : initialWidth,
+        editorResizable ? maxHeight + HostedPluginEditorShell::extraChromeHeight()
+                        : initialHeight + HostedPluginEditorShell::extraChromeHeight());
+    setContentComponentSize(
+        initialWidth,
+        initialHeight + HostedPluginEditorShell::extraChromeHeight());
+    centreWithSize(getWidth(), getHeight());
+    setVisible(true);
+    if (auto *peer = getPeer())
+        mixroomConfigureHostedPluginWindow(
+            peer->getNativeHandle(),
+            static_cast<int>(metadata.scope),
+            metadata.row,
+            metadata.effectIndex,
+            metadata.clipId,
+            this);
+    toFront(true);
+}
+
+inline void HostedPluginEditorWindow::setDetached(bool shouldDetach)
+{
+    if (detached == shouldDetach)
+        return;
+    detached = shouldDetach;
+    if (auto *shell = dynamic_cast<HostedPluginEditorShell *>(getContentComponent()))
+        shell->setDetached(detached);
+    mixroomSetHostedPluginWindowDetachedForOwner(this, detached);
+}
+
+inline bool HostedPluginEditorWindow::showAutomationContextMenuAtContentPoint(
+    juce::Point<int> contentPoint)
+{
+    if (metadata.scope != HostedPluginEditorScopeKind::trackEffect &&
+        metadata.scope != HostedPluginEditorScopeKind::masterEffect)
+        return false;
+
+    auto *shell = dynamic_cast<HostedPluginEditorShell *>(getContentComponent());
+    auto *editor = shell != nullptr ? shell->getEditor() : nullptr;
+    if (editor == nullptr || parameterProcessor == nullptr)
+        return false;
+    if (shell != nullptr)
+    {
+        if (!shell->isPointInsideEditor(contentPoint))
+            return false;
+        contentPoint = shell->contentPointToEditor(contentPoint);
+    }
+    if (!editor->getLocalBounds().contains(contentPoint))
+        return false;
+    const auto editorPoint = contentPoint;
+
+    auto *hitComponent = editor->getComponentAt(editorPoint);
+    if (hitComponent == nullptr)
+        hitComponent = editor;
+
+    int parameterIndex = -1;
+    for (auto *candidate = hitComponent;
+         candidate != nullptr;
+         candidate = candidate == editor ? nullptr : candidate->getParentComponent())
+    {
+        parameterIndex = editor->getControlParameterIndex(*candidate);
+        if (parameterIndex >= 0)
+            break;
+        if (candidate == editor)
+            break;
+    }
+    juce::String parameterId;
+    juce::String parameterName;
+    const auto parameters = parameterProcessor->getParameters();
+    if (parameterIndex >= 0 && parameterIndex < (int)parameters.size())
+    {
+        auto *parameter = parameters[(size_t)parameterIndex];
+        if (parameter != nullptr)
+        {
+            if (auto *withId =
+                    dynamic_cast<juce::AudioProcessorParameterWithID *>(parameter))
+                parameterId = withId->paramID;
+            if (parameterId.isEmpty())
+                parameterId = parameter->getName(128);
+            parameterName = parameter->getName(128).trim();
+        }
+    }
+
+    if (automationMenuOpen)
+        return true;
+
+    const bool resolvedParameter =
+        parameterId.isNotEmpty() && parameterName.isNotEmpty();
+    automationMenuOpen = true;
+    juce::PopupMenu menu;
+    menu.addItem(
+        1,
+        resolvedParameter
+            ? "Automate " + parameterName
+            : "Choose Parameter to Automate…");
+    const auto screenPoint = editor->localPointToGlobal(editorPoint);
+    juce::Component::SafePointer<HostedPluginEditorWindow> safeThis(this);
+    menu.showMenuAsync(
+        juce::PopupMenu::Options().withTargetScreenArea(
+            juce::Rectangle<int>(screenPoint.x, screenPoint.y, 1, 1)),
+        [safeThis, parameterId, parameterName, resolvedParameter](int result)
+        {
+            if (safeThis == nullptr)
+                return;
+            safeThis->automationMenuOpen = false;
+            if (result != 1)
+                return;
+            mixroomPostHostedPluginAutomationSelection(
+                static_cast<int>(safeThis->metadata.scope),
+                safeThis->metadata.row,
+                safeThis->metadata.effectIndex,
+                safeThis->metadata.clipId,
+                resolvedParameter ? parameterId.toRawUTF8() : "",
+                resolvedParameter ? parameterName.toRawUTF8() : "");
+        });
+    return true;
+}
 
 // ---------------------------
 // Helper: simple stereo pan
@@ -595,7 +1033,9 @@ public:
     virtual void setTimeline(double startSec, double lengthSec, double inFileOffsetSec = 0.0) = 0;
     virtual void setMuted(bool m) = 0;
     virtual void setGainUi(float gainUi) = 0;
+    virtual void setExtraGainLinear(float gainLinear) = 0;
     virtual void setPanNormalized(float panNormalized) = 0;
+    virtual void setFades(double fadeInSec, double fadeOutSec, int fadeCurve) = 0;
     virtual void setPitchSemitones(float semitones) = 0;
     virtual void setReversed(bool shouldReverse) = 0;
     virtual void setStretchOptions(double tempoRatio, bool preservePitch) = 0;
@@ -634,13 +1074,15 @@ inline float mixroomUiGainToLinear(float gainUi)
 
 inline void applyMixroomGainAndPan(juce::AudioBuffer<float> &buffer,
                                    float gainUi,
-                                   float panNormalized)
+                                   float panNormalized,
+                                   float extraGainLinear = 1.0f)
 {
     const int numChannels = buffer.getNumChannels();
     if (numChannels <= 0)
         return;
 
-    const float linearGain = mixroomUiGainToLinear(gainUi);
+    const float linearGain = mixroomUiGainToLinear(gainUi) *
+                             std::clamp(extraGainLinear, 0.0f, 64.0f);
     if (linearGain <= 0.0f)
     {
         buffer.clear();
@@ -662,6 +1104,61 @@ inline void applyMixroomGainAndPan(juce::AudioBuffer<float> &buffer,
     {
         left[i] *= leftGain;
         right[i] *= rightGain;
+    }
+}
+
+inline void applyMixroomClipFades(juce::AudioBuffer<float> &buffer,
+                                  double firstTimelineSec,
+                                  double sampleRate,
+                                  double clipStartSec,
+                                  double clipLengthSec,
+                                  double fadeInSec,
+                                  double fadeOutSec,
+                                  int fadeCurve)
+{
+    const int numSamples = buffer.getNumSamples();
+    const int numChannels = buffer.getNumChannels();
+    if (numSamples <= 0 || numChannels <= 0 || sampleRate <= 0.0)
+        return;
+
+    const double safeFadeIn = juce::jlimit(0.0, clipLengthSec, fadeInSec);
+    const double safeFadeOut = juce::jlimit(0.0, clipLengthSec, fadeOutSec);
+    if (safeFadeIn <= 1.0e-6 && safeFadeOut <= 1.0e-6)
+        return;
+    const int safeCurve = juce::jlimit(0, 2, fadeCurve);
+    auto shapeFadeIn = [safeCurve](double t)
+    {
+        t = juce::jlimit(0.0, 1.0, t);
+        if (safeCurve == 1)
+            return std::sin(t * juce::MathConstants<double>::pi * 0.5);
+        if (safeCurve == 2)
+        {
+            const double s = t * t * (3.0 - (2.0 * t));
+            return std::sin(s * juce::MathConstants<double>::pi * 0.5);
+        }
+        return t;
+    };
+    auto shapeFadeOut = [safeCurve, &shapeFadeIn](double t)
+    {
+        t = juce::jlimit(0.0, 1.0, t);
+        if (safeCurve == 1 || safeCurve == 2)
+            return shapeFadeIn(t);
+        return t;
+    };
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const double localSec = (firstTimelineSec + ((double)i / sampleRate)) - clipStartSec;
+        double gain = 1.0;
+        if (safeFadeIn > 1.0e-6 && localSec < safeFadeIn)
+            gain = std::min(gain, shapeFadeIn(localSec / safeFadeIn));
+        if (safeFadeOut > 1.0e-6 && localSec > clipLengthSec - safeFadeOut)
+            gain = std::min(gain, shapeFadeOut((clipLengthSec - localSec) / safeFadeOut));
+        const float g = (float)juce::jlimit(0.0, 1.0, gain);
+        if (g >= 0.9999f)
+            continue;
+        for (int ch = 0; ch < numChannels; ++ch)
+            buffer.getWritePointer(ch)[i] *= g;
     }
 }
 
@@ -703,10 +1200,21 @@ public:
                                     SimpleGainProcessor::kUiMax),
                          std::memory_order_relaxed);
     }
+    void setExtraGainLinear(float gainLinear) override
+    {
+        clipExtraGainLinear.store(std::clamp(gainLinear, 0.0f, 64.0f),
+                                  std::memory_order_relaxed);
+    }
     void setPanNormalized(float panNormalized) override
     {
         clipPanNormalized.store(std::clamp(panNormalized, -1.0f, 1.0f),
                                 std::memory_order_relaxed);
+    }
+    void setFades(double fadeInSec, double fadeOutSec, int fadeCurve) override
+    {
+        clipFadeInSec.store(juce::jmax(0.0, fadeInSec), std::memory_order_relaxed);
+        clipFadeOutSec.store(juce::jmax(0.0, fadeOutSec), std::memory_order_relaxed);
+        clipFadeCurve.store(juce::jlimit(0, 2, fadeCurve), std::memory_order_relaxed);
     }
     void setPitchSemitones(float semitones) override
     {
@@ -830,7 +1338,16 @@ public:
 
         applyMixroomGainAndPan(temp,
                                clipGainUi.load(std::memory_order_relaxed),
-                               clipPanNormalized.load(std::memory_order_relaxed));
+                               clipPanNormalized.load(std::memory_order_relaxed),
+                               clipExtraGainLinear.load(std::memory_order_relaxed));
+        applyMixroomClipFades(temp,
+                              blockStart + ((double)writeStart / sr),
+                              sr,
+                              cs,
+                              cl,
+                              clipFadeInSec.load(std::memory_order_relaxed),
+                              clipFadeOutSec.load(std::memory_order_relaxed),
+                              clipFadeCurve.load(std::memory_order_relaxed));
 
         for (int ch = 0; ch < juce::jmin(2, buffer.getNumChannels()); ++ch)
             buffer.copyFrom(ch, writeStart, temp, ch, 0, framesToRead);
@@ -870,7 +1387,11 @@ private:
     std::atomic<double> clipLengthSec{0.0};
     std::atomic<double> fileOffsetSec{0.0};
     std::atomic<float> clipGainUi{SimpleGainProcessor::kUiUnity};
+    std::atomic<float> clipExtraGainLinear{1.0f};
     std::atomic<float> clipPanNormalized{0.0f};
+    std::atomic<double> clipFadeInSec{0.0};
+    std::atomic<double> clipFadeOutSec{0.0};
+    std::atomic<int> clipFadeCurve{0};
     std::atomic<bool> muted{false};
 };
 
@@ -921,10 +1442,21 @@ public:
                                     SimpleGainProcessor::kUiMax),
                          std::memory_order_relaxed);
     }
+    void setExtraGainLinear(float gainLinear) override
+    {
+        clipExtraGainLinear.store(std::clamp(gainLinear, 0.0f, 64.0f),
+                                  std::memory_order_relaxed);
+    }
     void setPanNormalized(float panNormalized) override
     {
         clipPanNormalized.store(std::clamp(panNormalized, -1.0f, 1.0f),
                                 std::memory_order_relaxed);
+    }
+    void setFades(double fadeInSec, double fadeOutSec, int fadeCurve) override
+    {
+        clipFadeInSec.store(juce::jmax(0.0, fadeInSec), std::memory_order_relaxed);
+        clipFadeOutSec.store(juce::jmax(0.0, fadeOutSec), std::memory_order_relaxed);
+        clipFadeCurve.store(juce::jlimit(0, 2, fadeCurve), std::memory_order_relaxed);
     }
     void setPitchSemitones(float semitones) override
     {
@@ -1101,7 +1633,16 @@ public:
             applyRequestedPitchShift(temp);
             applyMixroomGainAndPan(temp,
                                    clipGainUi.load(std::memory_order_relaxed),
-                                   clipPanNormalized.load(std::memory_order_relaxed));
+                                   clipPanNormalized.load(std::memory_order_relaxed),
+                                   clipExtraGainLinear.load(std::memory_order_relaxed));
+            applyMixroomClipFades(temp,
+                                  readTimelineStart,
+                                  sr,
+                                  cs,
+                                  cl,
+                                  clipFadeInSec.load(std::memory_order_relaxed),
+                                  clipFadeOutSec.load(std::memory_order_relaxed),
+                                  clipFadeCurve.load(std::memory_order_relaxed));
 
             for (int ch = 0; ch < juce::jmin(2, buffer.getNumChannels()); ++ch)
                 buffer.copyFrom(ch, writeStart, temp, ch, 0, framesToRead);
@@ -1136,7 +1677,16 @@ public:
         applyRequestedPitchShift(temp);
         applyMixroomGainAndPan(temp,
                                clipGainUi.load(std::memory_order_relaxed),
-                               clipPanNormalized.load(std::memory_order_relaxed));
+                               clipPanNormalized.load(std::memory_order_relaxed),
+                               clipExtraGainLinear.load(std::memory_order_relaxed));
+        applyMixroomClipFades(temp,
+                              readTimelineStart,
+                              sr,
+                              cs,
+                              cl,
+                              clipFadeInSec.load(std::memory_order_relaxed),
+                              clipFadeOutSec.load(std::memory_order_relaxed),
+                              clipFadeCurve.load(std::memory_order_relaxed));
 
         for (int ch = 0; ch < juce::jmin(2, buffer.getNumChannels()); ++ch)
             buffer.copyFrom(ch, writeStart, temp, ch, 0, framesToRead);
@@ -1317,7 +1867,11 @@ private:
     std::atomic<double> clipLengthSec{0.0};
     std::atomic<double> fileOffsetSec{0.0};
     std::atomic<float> clipGainUi{SimpleGainProcessor::kUiUnity};
+    std::atomic<float> clipExtraGainLinear{1.0f};
     std::atomic<float> clipPanNormalized{0.0f};
+    std::atomic<double> clipFadeInSec{0.0};
+    std::atomic<double> clipFadeOutSec{0.0};
+    std::atomic<int> clipFadeCurve{0};
     std::atomic<float> pitchSemitones{0.0f};
     std::atomic<bool> reversed{false};
     std::atomic<double> tempoPlaybackRatio{1.0};
@@ -1367,10 +1921,20 @@ public:
                                     SimpleGainProcessor::kUiMax),
                          std::memory_order_relaxed);
     }
+    void setExtraGainLinear(float gainLinear) override
+    {
+        clipExtraGainLinear.store(std::clamp(gainLinear, 0.0f, 64.0f),
+                                  std::memory_order_relaxed);
+    }
     void setPanNormalized(float panNormalized) override
     {
         clipPanNormalized.store(std::clamp(panNormalized, -1.0f, 1.0f),
                                 std::memory_order_relaxed);
+    }
+
+    void setFades(double fadeInSec, double fadeOutSec, int fadeCurve) override
+    {
+        juce::ignoreUnused(fadeInSec, fadeOutSec, fadeCurve);
     }
 
     void setPitchSemitones(float semitones) override
@@ -1828,7 +2392,8 @@ public:
         {
             applyMixroomGainAndPan(buffer,
                                    clipGainUi.load(std::memory_order_relaxed),
-                                   clipPanNormalized.load(std::memory_order_relaxed));
+                                   clipPanNormalized.load(std::memory_order_relaxed),
+                                   clipExtraGainLinear.load(std::memory_order_relaxed));
             return;
         }
 
@@ -1982,7 +2547,8 @@ public:
 
         applyMixroomGainAndPan(buffer,
                                clipGainUi.load(std::memory_order_relaxed),
-                               clipPanNormalized.load(std::memory_order_relaxed));
+                               clipPanNormalized.load(std::memory_order_relaxed),
+                               clipExtraGainLinear.load(std::memory_order_relaxed));
     }
 
     const juce::String getName() const override { return "TimelineMidiClipProcessor"; }
@@ -3683,6 +4249,7 @@ private:
     std::atomic<double> clipLengthSec{0.0};
     std::atomic<double> fileOffsetSec{0.0};
     std::atomic<float> clipGainUi{SimpleGainProcessor::kUiUnity};
+    std::atomic<float> clipExtraGainLinear{1.0f};
     std::atomic<float> clipPanNormalized{0.0f};
     std::atomic<float> pitchSemitones{0.0f};
     std::atomic<double> tempoPlaybackRatio{1.0};
@@ -3752,7 +4319,10 @@ public:
     void bypassPlugin(int trackIndex, int effectIndex, bool shouldBypass);
     bool getPluginBypassState(int trackIndex, int effectIndex);
     void bypassTrack(int trackIndex, bool shouldBypass);
+    void setAdditionalPluginSearchPaths(const juce::StringArray &paths);
     juce::Array<juce::PluginDescription> getKnownPlugins();
+    juce::Array<juce::PluginDescription> rescanPlugins(const juce::StringArray &paths = {});
+    juce::NamedValueSet getEngineDiagnostics();
     void insertPluginEffect(int trackIdx, const juce::String &pluginPath, std::function<void(bool)> callback);
     void shutdownEngine();
 
@@ -3792,6 +4362,13 @@ public:
                              int pitch,
                              float velocity,
                              int durationMs);
+    bool openMidiClipPluginEditor(int clipId);
+    juce::String getMidiClipPluginStateBase64(int clipId);
+    bool setMidiClipPluginStateBase64(int clipId, const juce::String &stateBase64);
+    bool sendLiveMidiInputEvent(bool noteOn,
+                                int channel,
+                                int pitch,
+                                float velocity);
     struct LiveMidiInputEvent
     {
         int clipId = -1;
@@ -3855,8 +4432,10 @@ public:
 
     // CLIP-LEVEL
     void setClipGain(int clipIndex, float gain); // gain UI ∈ 0..3 (mapped to -60..+6 dB)
+    void setClipExtraGainLinear(int clipIndex, float gainLinear); // linear clip-only multiplier for normalization
     void muteClip(int clipIndex, bool shouldMute);
     void setClipPan(int clipIndex, float pan); // -1..1 where 0 = center
+    void setClipFades(int clipIndex, double fadeInSec, double fadeOutSec, int fadeCurve);
     void setClipPitch(int clipIndex, float semitones); // pitch ∈ -24..24
     void setClipReversed(int clipIndex, bool shouldReverse);
     void setClipStretchOptions(int clipIndex, double tempoRatio, bool preservePitch);
@@ -3872,7 +4451,15 @@ public:
     juce::StringArray getTrackEffectsForRow(int trackRow);
     juce::StringArray getTrackEffectIdsForRow(int trackRow);
     juce::StringArray getTrackEffectInstanceIdsForRow(int trackRow);
+    juce::String getTrackEffectStateBase64(int trackRow, int effectIndex);
+    bool setTrackEffectStateBase64(int trackRow,
+                                   int effectIndex,
+                                   const juce::String &stateBase64);
+    bool openTrackPluginEditor(int trackRow, int effectIndex);
     juce::Array<juce::NamedValueSet> getTrackPluginParameterInfo(int row, int effectIndex);
+    bool showHostedPluginAutomationContextMenu(const HostedPluginEditorMetadata &metadata,
+                                               int contentX,
+                                               int contentY);
     void bypassRowEffect(int rowIndex, int effectIndex, bool shouldBypass);
     bool getRowEffectBypassState(int rowIndex, int effectIndex);
     void setTrackAutomationPoints(int trackRow,
@@ -3902,6 +4489,10 @@ public:
                                   const juce::var &newValue);
     juce::StringArray getMasterEffects();
     juce::StringArray getMasterEffectIds();
+    juce::String getMasterEffectStateBase64(int effectIndex);
+    bool setMasterEffectStateBase64(int effectIndex,
+                                    const juce::String &stateBase64);
+    bool openMasterPluginEditor(int effectIndex);
     juce::Array<juce::NamedValueSet> getMasterPluginParameterInfo(int effectIndex);
     void bypassMasterEffect(int effectIndex, bool shouldBypass);
     bool getMasterEffectBypassState(int effectIndex);
@@ -3988,6 +4579,7 @@ public:
 
     // Gets master + all row meters
     std::vector<float> getAllMeterValues() const;
+    std::vector<float> getRecentMasterWaveform(int sampleCount) const;
 
     // Compressor meter strip (white-box only)
     const std::array<float, 5> getClipCompressorMeter(int clipIndex, int effectIndex);
@@ -4050,6 +4642,8 @@ private:
     juce::OwnedArray<juce::Array<juce::AudioProcessorGraph::NodeID>> trackEffectChains;
 
     juce::KnownPluginList pluginList;
+    juce::StringArray pluginScanFailures;
+    juce::StringArray additionalPluginSearchPaths;
     void scanPluginsIfNeeded();
     bool pluginsScanned = false;
     std::vector<juce::String> getExposedParametersForPlugin(const juce::String &pluginId);
@@ -4123,7 +4717,11 @@ private:
         double tempoRatio = 1.0;
         bool preservePitch = false;
         float gainUi = kGainUiUnity;
+        float extraGainLinear = 1.0f;
         float panNormalized = 0.0f;
+        double fadeInSec = 0.0;
+        double fadeOutSec = 0.0;
+        int fadeCurve = 0;
 
         // authoritative source state used to rebuild fresh player nodes
         juce::String sourceFilePath;
@@ -4132,9 +4730,10 @@ private:
         juce::Array<TimelineMidiNote> midiNotes;
         juce::NamedValueSet midiParams;
         double midiSourceTempoBpm = 120.0;
+        juce::MemoryBlock midiPluginState;
 
         // nodes/processors
-        juce::AudioProcessorGraph::Node::Ptr playerNode; // TimelineClipProcessor / TimelineMidiClipProcessor
+        juce::AudioProcessorGraph::Node::Ptr playerNode; // TimelineClipProcessor / TimelineMidiClipProcessor / ExternalMidiPluginClipProcessor
         juce::Array<juce::AudioProcessorGraph::NodeID> fxChain; // clip-level legacy FX
         int lastRowInputNodeUid = 0;                            // cached destination for fast rewires
     };
@@ -4195,6 +4794,9 @@ private:
     StereoMeterState masterMeter;
     std::atomic<bool> masterMeterEnabled{true};
     std::atomic<bool> masterClipLatched{false};
+    static constexpr int kMasterWaveformRingSize = 8192;
+    std::array<float, kMasterWaveformRingSize> masterWaveformRing{};
+    std::atomic<int> masterWaveformWritePos{0};
     std::array<float, 2> outputSafetyLastSample{0.0f, 0.0f};
     int outputSafetyMuteSamplesRemaining = 0;
     int outputSafetyFadeSamplesRemaining = 0;
@@ -4255,6 +4857,7 @@ private:
     std::vector<RowState> rows;
     std::unordered_map<int, int> rowIdToIndex;
     std::unordered_map<int, juce::Array<int>> rowIdToClipIds;
+    std::unordered_map<std::string, std::unique_ptr<HostedPluginEditorWindow>> hostedPluginEditorWindows;
     std::atomic<int> nextRowId{1};
 
     // MASTER bus: rows → master input → [FX...] → gain → pan → output
@@ -4301,11 +4904,20 @@ private:
     juce::Array<juce::AudioProcessorGraph::Connection> liveMonitorConnections;
 
     juce::LinearSmoothedValue<float> recPeak; // optional amplitude meter
+    void pushMasterWaveformSamples(const float *const *out,
+                                   int numOutCh,
+                                   int numSamples) noexcept;
     int projectClipLoadDepth = 0;
     bool projectClipLoadNeedsGraphRebuild = false;
     bool projectClipLoadNeedsOutputSafety = false;
     // Recursive because public graph mutation entrypoints can call one another.
     std::recursive_mutex graphRenderMutex;
+    bool openPluginEditorWindowForNode(juce::AudioProcessorGraph::NodeID nodeID,
+                                       const juce::String &titlePrefix,
+                                       HostedPluginEditorMetadata metadata = {});
+    void closePluginEditorWindowForNode(juce::AudioProcessorGraph::NodeID nodeID);
+    void closeHostedPluginEditorWindowsForRow(const RowState &row);
+    void closeAllHostedPluginEditorWindows();
     struct GraphMutationScope
     {
         GraphMutationScope(juce::CriticalSection &audioCallbackLock,

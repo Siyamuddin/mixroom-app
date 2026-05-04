@@ -2,8 +2,109 @@ import 'dart:convert';
 
 import 'package:mixroom/models/models.dart'; // for AutomationPoint
 
+const List<String> kProjectKeyRoots = <String>[
+  'C',
+  'C#',
+  'D',
+  'Eb',
+  'E',
+  'F',
+  'F#',
+  'G',
+  'Ab',
+  'A',
+  'Bb',
+  'B',
+];
+
+const List<String> kProjectKeyModes = <String>['major', 'minor'];
+
+String normalizeProjectKey(String? raw) {
+  final value = (raw ?? '').trim();
+  if (value.isEmpty) return '';
+  final lower = value
+      .toLowerCase()
+      .replaceAll('♯', '#')
+      .replaceAll('♭', 'b')
+      .replaceAll('_', ' ')
+      .replaceAll('-', ' ');
+  if (lower == 'none' || lower == 'unknown' || lower == 'no key') return '';
+
+  final match = RegExp(
+    r'\b([a-g])\s*(#|b)?\s*(major|maj|min(?:or)?|m)?\b',
+  ).firstMatch(lower);
+  if (match == null) return '';
+
+  final rootToken = '${match.group(1)}${match.group(2) ?? ''}';
+  final root = _canonicalProjectKeyRoot(rootToken);
+  if (root == null) return '';
+  final modeToken = (match.group(3) ?? '').trim();
+  final mode =
+      modeToken.startsWith('min') || modeToken == 'm' ? 'minor' : 'major';
+  return '$root $mode';
+}
+
+String projectKeyDisplayLabel(String? raw) {
+  final normalized = normalizeProjectKey(raw);
+  if (normalized.isEmpty) return 'No key';
+  final parts = normalized.split(' ');
+  if (parts.length < 2) return normalized;
+  final mode = parts[1] == 'minor' ? 'Minor' : 'Major';
+  return '${parts[0]} $mode';
+}
+
+String projectKeyShortLabel(String? raw) {
+  final normalized = normalizeProjectKey(raw);
+  if (normalized.isEmpty) return 'Key --';
+  final parts = normalized.split(' ');
+  if (parts.length < 2) return normalized;
+  return '${parts[0]} ${parts[1] == 'minor' ? 'Min' : 'Maj'}';
+}
+
+String? _canonicalProjectKeyRoot(String root) {
+  switch (root.trim().toLowerCase()) {
+    case 'c':
+    case 'b#':
+      return 'C';
+    case 'c#':
+    case 'db':
+      return 'C#';
+    case 'd':
+      return 'D';
+    case 'd#':
+    case 'eb':
+      return 'Eb';
+    case 'e':
+    case 'fb':
+      return 'E';
+    case 'f':
+    case 'e#':
+      return 'F';
+    case 'f#':
+    case 'gb':
+      return 'F#';
+    case 'g':
+      return 'G';
+    case 'g#':
+    case 'ab':
+      return 'Ab';
+    case 'a':
+      return 'A';
+    case 'a#':
+    case 'bb':
+      return 'Bb';
+    case 'b':
+    case 'cb':
+      return 'B';
+  }
+  return null;
+}
+
 class ProjectState {
   final double bpm;
+  final String projectKey;
+  final String estimatedKey;
+  final double estimatedKeyConfidence;
   final double masterGain0to3;
   final double masterPan0to1;
   final int maxRows;
@@ -14,6 +115,9 @@ class ProjectState {
 
   ProjectState({
     required this.bpm,
+    this.projectKey = '',
+    this.estimatedKey = '',
+    this.estimatedKeyConfidence = 0.0,
     required this.masterGain0to3,
     this.masterPan0to1 = 0.5,
     required this.maxRows,
@@ -25,6 +129,9 @@ class ProjectState {
 
   Map<String, dynamic> toJson() => {
         'bpm': bpm,
+        'project_key': projectKey,
+        'estimated_key': estimatedKey,
+        'estimated_key_confidence': estimatedKeyConfidence,
         'master_gain_0to3': masterGain0to3,
         'master_pan_0to1': masterPan0to1,
         'max_rows': maxRows,
@@ -36,6 +143,9 @@ class ProjectState {
 
   Map<String, dynamic> toMagnitudeResolverJson() => {
         'bpm': bpm,
+        'project_key': projectKey,
+        'estimated_key': estimatedKey,
+        'estimated_key_confidence': estimatedKeyConfidence,
         'master_gain_0to3': masterGain0to3,
         'master_pan_0to1': masterPan0to1,
         'max_rows': maxRows,

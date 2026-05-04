@@ -15,6 +15,7 @@ from common.auth import extract_user_id_from_event, json_response, unauthorized
 from common.logging_utils import build_request_log_context, log_request_complete
 from common.monitoring import capture_exception, init_sentry
 from common.apple_app_store import verify_apple_purchase
+from common.billing_catalog_repository import BillingCatalogRepository
 from common.events import RequestBodyError, build_event_record, parse_json_body
 from common.google_play import verify_google_purchase
 from common.models import free_entitlement
@@ -24,6 +25,7 @@ from common.repository import BillingRepository
 from common import config
 
 repo = BillingRepository()
+catalog_repo = BillingCatalogRepository()
 init_sentry("mixroom-app-api-billing")
 
 
@@ -56,12 +58,21 @@ def _handle_checkout(event: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     region_code = str(body.get("region_code") or "").upper()
     provider = choose_web_provider(region_code)
     session_id = str(uuid.uuid4())
+    product_code = str(body.get("product_code") or "").strip().lower()
+    catalog = catalog_repo.get_catalog()
+    product = {}
+    if product_code:
+        product = catalog_repo.get_product(product_code)
+        if not product or not bool(product.get("enabled")):
+            raise RequestBodyError("Unknown or disabled billing product.")
 
     payload = {
         **body,
         "session_id": session_id,
         "region_code": region_code,
         "provider": provider,
+        "product_code": product_code,
+        "plan_code": str(product.get("plan_code") or ""),
     }
 
     record = build_event_record(
@@ -73,6 +84,8 @@ def _handle_checkout(event: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         normalized={
             "provider": provider,
             "management_channel": provider,
+            "product_code": product_code,
+            "plan_code": str(product.get("plan_code") or ""),
         },
     )
     _persist_event(record)
@@ -83,6 +96,8 @@ def _handle_checkout(event: Dict[str, Any], user_id: str) -> Dict[str, Any]:
             "provider": provider,
             "session_id": session_id,
             "checkout_url": checkout_url(provider, session_id),
+            "product": product,
+            "support": catalog.get("support") or {},
         },
     )
 

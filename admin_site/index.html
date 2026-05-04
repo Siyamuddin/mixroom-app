@@ -722,187 +722,864 @@
               <div class="loading-spinner" aria-hidden="true"></div>
               <p class="loading-copy" data-tab-loading-label="dev">Loading dev settings…</p>
             </div>
-            <section class="panel-grid">
-            <article class="panel">
-              <div class="panel-header">
-                <div>
-                  <p class="panel-label" data-i18n="panel.aiPromptLimits.label">AI Prompt Limits</p>
-                  <h2 data-i18n="panel.aiPromptLimits.title">Free tier defaults</h2>
-                </div>
-                <p id="ai-prompt-limits-meta" class="panel-meta" data-i18n="panel.aiPromptLimits.meta">
-                  Server-enforced prompt limits for free users.
-                </p>
-              </div>
-              <div id="ai-prompt-limits-summary" class="detail-card settings-summary-card">
-                <div class="detail-label" data-i18n="settings.currentLimits">Current effective limits</div>
-                <div class="detail-value" data-i18n="empty.signInAiPromptLimits">
-                  Sign in to load AI prompt limit settings.
-                </div>
-              </div>
-              <form id="ai-prompt-limits-form" class="form-stack">
-                <div class="inspector-grid">
-                  <label class="search-input-wrap" for="free-daily-prompt-limit">
-                    <span class="search-label" data-i18n="settings.freeDailyPromptLimit">
-                      Free daily prompt limit
-                    </span>
-                    <input
-                      id="free-daily-prompt-limit"
-                      class="text-input"
-                      type="number"
-                      min="0"
-                      step="1"
-                      autocomplete="off"
-                    />
-                  </label>
-                  <label class="search-input-wrap" for="free-weekly-prompt-limit">
-                    <span class="search-label" data-i18n="settings.freeWeeklyPromptLimit">
-                      Free weekly prompt limit
-                    </span>
-                    <input
-                      id="free-weekly-prompt-limit"
-                      class="text-input"
-                      type="number"
-                      min="0"
-                      step="1"
-                      autocomplete="off"
-                    />
-                  </label>
-                </div>
-                <p
-                  id="ai-prompt-limits-editor-note"
-                  class="panel-meta hidden"
-                  data-i18n="settings.andrewOnlyControl"
-                >
-                  Andrew-only control.
-                </p>
-                <label
-                  id="ai-prompt-limits-confirm-wrap"
-                  class="search-input-wrap hidden"
-                  for="ai-prompt-limits-confirm-input"
-                >
-                  <span
-                    id="ai-prompt-limits-confirm-label"
-                    class="search-label"
-                    data-i18n="settings.confirmPromptLimits"
-                  >
-                    Type APPLY PROMPT LIMITS to confirm
-                  </span>
-                  <input
-                    id="ai-prompt-limits-confirm-input"
-                    class="text-input"
-                    type="text"
-                    autocomplete="off"
-                    spellcheck="false"
-                  />
-                </label>
-                <div class="search-actions">
-                  <button
-                    id="ai-prompt-limits-save-button"
-                    class="button button-secondary"
-                    type="submit"
-                    data-i18n="action.savePromptLimits"
-                  >
-                    Save prompt limits
-                  </button>
-                </div>
-              </form>
-              <p id="ai-prompt-limits-feedback" class="panel-meta"></p>
-            </article>
+            <section class="billing-stack">
+              <section class="panel-grid">
+                <article class="panel">
+                  <div class="panel-header">
+                    <div>
+                      <p class="panel-label" data-i18n="panel.aiPromptLimits.label">AI Prompt Limits</p>
+                      <h2 data-i18n="panel.aiPromptLimits.title">Free tier defaults</h2>
+                    </div>
+                    <p id="ai-prompt-limits-meta" class="panel-meta" data-i18n="panel.aiPromptLimits.meta">
+                      Server-enforced prompt limits for free users.
+                    </p>
+                  </div>
+                  <div id="ai-prompt-limits-summary" class="detail-card settings-summary-card">
+                    <div class="detail-label" data-i18n="settings.currentLimits">Current effective limits</div>
+                    <div class="detail-value" data-i18n="empty.signInAiPromptLimits">
+                      Sign in to load AI prompt limit settings.
+                    </div>
+                  </div>
+                  <form id="ai-prompt-limits-form" class="form-stack">
+                    <div class="inspector-grid">
+                      <label class="search-input-wrap" for="free-daily-prompt-limit">
+                        <span class="search-label" data-i18n="settings.freeDailyPromptLimit">
+                          Free daily prompt limit
+                        </span>
+                        <input
+                          id="free-daily-prompt-limit"
+                          class="text-input"
+                          type="number"
+                          min="0"
+                          step="1"
+                          autocomplete="off"
+                        />
+                      </label>
+                      <label class="search-input-wrap" for="free-weekly-prompt-limit">
+                        <span class="search-label" data-i18n="settings.freeWeeklyPromptLimit">
+                          Free weekly prompt limit
+                        </span>
+                        <input
+                          id="free-weekly-prompt-limit"
+                          class="text-input"
+                          type="number"
+                          min="0"
+                          step="1"
+                          autocomplete="off"
+                        />
+                      </label>
+                    </div>
+                    <p
+                      id="ai-prompt-limits-editor-note"
+                      class="panel-meta hidden"
+                      data-i18n="settings.andrewOnlyControl"
+                    >
+                      Andrew-only control.
+                    </p>
+                    <label
+                      id="ai-prompt-limits-confirm-wrap"
+                      class="search-input-wrap hidden"
+                      for="ai-prompt-limits-confirm-input"
+                    >
+                      <span
+                        id="ai-prompt-limits-confirm-label"
+                        class="search-label"
+                        data-i18n="settings.confirmPromptLimits"
+                      >
+                        Type APPLY PROMPT LIMITS to confirm
+                      </span>
+                      <input
+                        id="ai-prompt-limits-confirm-input"
+                        class="text-input"
+                        type="text"
+                        autocomplete="off"
+                        spellcheck="false"
+                      />
+                    </label>
+                    <div class="search-actions">
+                      <button
+                        id="ai-prompt-limits-save-button"
+                        class="button button-secondary"
+                        type="submit"
+                        data-i18n="action.savePromptLimits"
+                      >
+                        Save prompt limits
+                      </button>
+                    </div>
+                  </form>
+                  <p id="ai-prompt-limits-feedback" class="panel-meta"></p>
+                </article>
 
-            <article id="producer-capture-whitelist-panel" class="panel">
-              <div class="panel-header">
-                <div>
-                  <p class="panel-label" data-i18n="panel.producerCaptureWhitelist.label">
-                    Producer Capture Whitelist
+                <article id="producer-capture-whitelist-panel" class="panel">
+                  <div class="panel-header">
+                    <div>
+                      <p class="panel-label" data-i18n="panel.producerCaptureWhitelist.label">
+                        Producer Capture Whitelist
+                      </p>
+                      <h2 data-i18n="panel.producerCaptureWhitelist.title">
+                        Producer capture usernames
+                      </h2>
+                    </div>
+                    <p
+                      id="producer-capture-whitelist-meta"
+                      class="panel-meta"
+                      data-i18n="panel.producerCaptureWhitelist.meta"
+                    >
+                      Usernames allowlisted to see the Producer Capture UI toggle.
+                    </p>
+                  </div>
+                  <div id="producer-capture-whitelist-summary" class="detail-card settings-summary-card">
+                    <div class="detail-label" data-i18n="settings.currentProducerCaptureWhitelist">
+                      Current producer capture whitelist
+                    </div>
+                    <div class="detail-value" data-i18n="empty.signInProducerCaptureWhitelist">
+                      Sign in to load producer capture whitelist settings.
+                    </div>
+                  </div>
+                  <form id="producer-capture-whitelist-form" class="form-stack">
+                    <label class="search-input-wrap" for="producer-capture-whitelist-input">
+                      <span class="search-label" data-i18n="settings.producerCaptureWhitelistUsernames">
+                        Usernames (comma or line separated)
+                      </span>
+                      <textarea
+                        id="producer-capture-whitelist-input"
+                        class="text-area"
+                        rows="6"
+                        spellcheck="false"
+                      ></textarea>
+                    </label>
+                    <p
+                      id="producer-capture-whitelist-editor-note"
+                      class="panel-meta"
+                      data-i18n="settings.editableByAnyAdmin"
+                    >
+                      Any admin can edit this list.
+                    </p>
+                    <label
+                      id="producer-capture-whitelist-confirm-wrap"
+                      class="search-input-wrap"
+                      for="producer-capture-whitelist-confirm-input"
+                    >
+                      <span
+                        id="producer-capture-whitelist-confirm-label"
+                        class="search-label"
+                        data-i18n="settings.confirmProducerCaptureWhitelist"
+                      >
+                        Type APPLY PRODUCER WHITELIST to confirm
+                      </span>
+                      <input
+                        id="producer-capture-whitelist-confirm-input"
+                        class="text-input"
+                        type="text"
+                        autocomplete="off"
+                        spellcheck="false"
+                      />
+                    </label>
+                    <div class="search-actions">
+                      <button
+                        id="producer-capture-whitelist-save-button"
+                        class="button button-secondary"
+                        type="submit"
+                        data-i18n="action.saveProducerCaptureWhitelist"
+                      >
+                        Save producer whitelist
+                      </button>
+                    </div>
+                  </form>
+                  <p id="producer-capture-whitelist-feedback" class="panel-meta"></p>
+                </article>
+
+                <article id="ai-runtime-panel" class="panel hidden">
+                  <div class="panel-header">
+                    <div>
+                      <p class="panel-label" data-i18n="panel.aiRuntime.label">AI Runtime</p>
+                      <h2 data-i18n="panel.aiRuntime.title">Server prompt and model config</h2>
+                    </div>
+                    <p id="ai-runtime-meta" class="panel-meta" data-i18n="panel.aiRuntime.meta">
+                      Prompt and runtime overrides for server-owned AI features.
+                    </p>
+                  </div>
+                  <div id="ai-runtime-settings" class="inspector-empty" data-i18n="empty.signInAiRuntime">
+                    Sign in to load AI runtime settings.
+                  </div>
+                </article>
+              </section>
+
+              <article id="billing-catalog-panel" class="panel">
+                <div class="panel-header">
+                  <div>
+                    <p class="panel-label" data-i18n="panel.billingCatalog.label">Billing Catalog</p>
+                    <h2 data-i18n="panel.billingCatalog.title">Plans, products, offers, and support</h2>
+                  </div>
+                  <p id="billing-catalog-meta" class="panel-meta" data-i18n="panel.billingCatalog.meta">
+                    Control the catalog the app reads for pricing, entitlements, and support links.
                   </p>
-                  <h2 data-i18n="panel.producerCaptureWhitelist.title">
-                    Producer capture usernames
-                  </h2>
                 </div>
-                <p
-                  id="producer-capture-whitelist-meta"
-                  class="panel-meta"
-                  data-i18n="panel.producerCaptureWhitelist.meta"
-                >
-                  Usernames allowlisted to see the Producer Capture UI toggle.
-                </p>
-              </div>
-              <div id="producer-capture-whitelist-summary" class="detail-card settings-summary-card">
-                <div class="detail-label" data-i18n="settings.currentProducerCaptureWhitelist">
-                  Current producer capture whitelist
+                <div id="billing-catalog-summary" class="mini-grid">
+                  <div class="mini-metric">
+                    <div class="mini-label" data-i18n="billing.summary.plans">Plans</div>
+                    <div class="mini-value" data-i18n="empty.signInBillingCatalog">Sign in to load billing catalog settings.</div>
+                  </div>
                 </div>
-                <div class="detail-value" data-i18n="empty.signInProducerCaptureWhitelist">
-                  Sign in to load producer capture whitelist settings.
+                <div id="billing-catalog-preview" class="billing-preview-grid">
+                  <div class="inspector-empty" data-i18n="empty.signInBillingCatalog">
+                    Sign in to load billing catalog settings.
+                  </div>
                 </div>
-              </div>
-              <form id="producer-capture-whitelist-form" class="form-stack">
-                <label class="search-input-wrap" for="producer-capture-whitelist-input">
-                  <span class="search-label" data-i18n="settings.producerCaptureWhitelistUsernames">
-                    Usernames (comma or line separated)
-                  </span>
-                  <textarea
-                    id="producer-capture-whitelist-input"
-                    class="text-area"
-                    rows="6"
-                    spellcheck="false"
-                  ></textarea>
-                </label>
-                <p
-                  id="producer-capture-whitelist-editor-note"
-                  class="panel-meta"
-                  data-i18n="settings.editableByAnyAdmin"
-                >
-                  Any admin can edit this list.
-                </p>
-                <label
-                  id="producer-capture-whitelist-confirm-wrap"
-                  class="search-input-wrap"
-                  for="producer-capture-whitelist-confirm-input"
-                >
-                  <span
-                    id="producer-capture-whitelist-confirm-label"
-                    class="search-label"
-                    data-i18n="settings.confirmProducerCaptureWhitelist"
-                  >
-                    Type APPLY PRODUCER WHITELIST to confirm
-                  </span>
-                  <input
-                    id="producer-capture-whitelist-confirm-input"
-                    class="text-input"
-                    type="text"
-                    autocomplete="off"
-                    spellcheck="false"
-                  />
-                </label>
-                <div class="search-actions">
-                  <button
-                    id="producer-capture-whitelist-save-button"
-                    class="button button-secondary"
-                    type="submit"
-                    data-i18n="action.saveProducerCaptureWhitelist"
-                  >
-                    Save producer whitelist
-                  </button>
-                </div>
-              </form>
-              <p id="producer-capture-whitelist-feedback" class="panel-meta"></p>
-            </article>
+                <form id="billing-catalog-form" class="form-stack hidden">
+                  <p id="billing-catalog-editor-note" class="panel-meta" data-i18n="billing.catalog.replaceNotice">
+                    Save replaces the full billing catalog document. Review plan, product, and offer JSON together before applying.
+                  </p>
+                  <div class="inspector-grid">
+                    <label class="search-input-wrap" for="billing-catalog-support-email">
+                      <span class="search-label" data-i18n="billing.support.email">Support email</span>
+                      <input
+                        id="billing-catalog-support-email"
+                        class="text-input"
+                        type="email"
+                        autocomplete="off"
+                        spellcheck="false"
+                      />
+                    </label>
+                    <label class="search-input-wrap" for="billing-catalog-contact-label">
+                      <span class="search-label" data-i18n="billing.support.contactLabel">Contact label</span>
+                      <input
+                        id="billing-catalog-contact-label"
+                        class="text-input"
+                        type="text"
+                        autocomplete="off"
+                        spellcheck="false"
+                      />
+                    </label>
+                  </div>
+                  <div class="inspector-grid">
+                    <label class="search-input-wrap" for="billing-catalog-support-url">
+                      <span class="search-label" data-i18n="billing.support.supportUrl">Support URL</span>
+                      <input
+                        id="billing-catalog-support-url"
+                        class="text-input"
+                        type="url"
+                        autocomplete="off"
+                        spellcheck="false"
+                      />
+                    </label>
+                    <label class="search-input-wrap" for="billing-catalog-faq-url">
+                      <span class="search-label" data-i18n="billing.support.faqUrl">FAQ URL</span>
+                      <input
+                        id="billing-catalog-faq-url"
+                        class="text-input"
+                        type="url"
+                        autocomplete="off"
+                        spellcheck="false"
+                      />
+                    </label>
+                  </div>
+                  <div class="inspector-grid">
+                    <label class="search-input-wrap" for="billing-catalog-manage-subscription-url">
+                      <span class="search-label" data-i18n="billing.support.manageSubscriptionUrl">
+                        Manage subscription URL
+                      </span>
+                      <input
+                        id="billing-catalog-manage-subscription-url"
+                        class="text-input"
+                        type="url"
+                        autocomplete="off"
+                        spellcheck="false"
+                      />
+                    </label>
+                    <label class="search-input-wrap" for="billing-catalog-refund-policy-url">
+                      <span class="search-label" data-i18n="billing.support.refundPolicyUrl">
+                        Refund policy URL
+                      </span>
+                      <input
+                        id="billing-catalog-refund-policy-url"
+                        class="text-input"
+                        type="url"
+                        autocomplete="off"
+                        spellcheck="false"
+                      />
+                    </label>
+                  </div>
+                  <label class="search-input-wrap" for="billing-catalog-default-checkout-url">
+                    <span class="search-label" data-i18n="billing.support.defaultCheckoutUrl">
+                      Default checkout URL
+                    </span>
+                    <input
+                      id="billing-catalog-default-checkout-url"
+                      class="text-input"
+                      type="url"
+                      autocomplete="off"
+                      spellcheck="false"
+                    />
+                  </label>
+                  <label class="search-input-wrap" for="billing-catalog-plans-input">
+                    <span class="search-label" data-i18n="billing.editor.plans">Plans JSON</span>
+                    <textarea
+                      id="billing-catalog-plans-input"
+                      class="text-area text-area-code"
+                      rows="10"
+                      spellcheck="false"
+                    ></textarea>
+                  </label>
+                  <label class="search-input-wrap" for="billing-catalog-products-input">
+                    <span class="search-label" data-i18n="billing.editor.products">Products JSON</span>
+                    <textarea
+                      id="billing-catalog-products-input"
+                      class="text-area text-area-code"
+                      rows="10"
+                      spellcheck="false"
+                    ></textarea>
+                  </label>
+                  <label class="search-input-wrap" for="billing-catalog-offers-input">
+                    <span class="search-label" data-i18n="billing.editor.offers">Offers JSON</span>
+                    <textarea
+                      id="billing-catalog-offers-input"
+                      class="text-area text-area-code"
+                      rows="10"
+                      spellcheck="false"
+                    ></textarea>
+                  </label>
+                  <div class="search-actions">
+                    <button
+                      id="billing-catalog-save-button"
+                      class="button button-secondary"
+                      type="submit"
+                      data-i18n="action.saveBillingCatalog"
+                    >
+                      Save billing catalog
+                    </button>
+                  </div>
+                </form>
+                <p id="billing-catalog-feedback" class="panel-meta"></p>
+              </article>
 
-            <article id="ai-runtime-panel" class="panel hidden">
-              <div class="panel-header">
-                <div>
-                  <p class="panel-label" data-i18n="panel.aiRuntime.label">AI Runtime</p>
-                  <h2 data-i18n="panel.aiRuntime.title">Server prompt and model config</h2>
-                </div>
-                <p id="ai-runtime-meta" class="panel-meta" data-i18n="panel.aiRuntime.meta">
-                  Prompt and runtime overrides for server-owned AI features.
-                </p>
-              </div>
-              <div id="ai-runtime-settings" class="inspector-empty" data-i18n="empty.signInAiRuntime">
-                Sign in to load AI runtime settings.
-              </div>
-            </article>
-          </section>
+              <section class="billing-entity-grid">
+                <article id="billing-organizations-panel" class="panel billing-entity-panel">
+                  <div class="panel-header">
+                    <div>
+                      <p class="panel-label" data-i18n="panel.billingOrganizations.label">Organizations</p>
+                      <h2 data-i18n="panel.billingOrganizations.title">Team billing organizations</h2>
+                    </div>
+                    <p id="billing-organizations-meta" class="panel-meta" data-i18n="panel.billingOrganizations.meta">
+                      Create or update team billing orgs, seat limits, and shared workspace access.
+                    </p>
+                  </div>
+                  <div class="compact-table-wrap">
+                    <table class="billing-table">
+                      <thead>
+                        <tr>
+                          <th data-i18n="table.organization">Organization</th>
+                          <th data-i18n="table.plan">Plan</th>
+                          <th data-i18n="table.seats">Seats</th>
+                          <th data-i18n="table.status">Status</th>
+                          <th data-i18n="table.updated">Updated</th>
+                        </tr>
+                      </thead>
+                      <tbody id="billing-organizations-table-body">
+                        <tr>
+                          <td colspan="5" class="table-empty" data-i18n="empty.signInBillingControlPlane">
+                            Sign in to load billing control-plane records.
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div class="table-footer">
+                    <p id="billing-organizations-page-meta" class="panel-meta"></p>
+                  </div>
+                  <form id="billing-organization-form" class="form-stack">
+                    <p class="panel-meta" data-i18n="billing.form.help">
+                      Click a row to edit. Leave the record ID blank to create a new item.
+                    </p>
+                    <div class="inspector-grid">
+                      <label class="search-input-wrap" for="billing-organization-id">
+                        <span class="search-label" data-i18n="billing.organization.id">Organization ID</span>
+                        <input
+                          id="billing-organization-id"
+                          class="text-input"
+                          type="text"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </label>
+                      <label class="search-input-wrap" for="billing-organization-name">
+                        <span class="search-label" data-i18n="billing.organization.name">Name</span>
+                        <input
+                          id="billing-organization-name"
+                          class="text-input"
+                          type="text"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </label>
+                    </div>
+                    <div class="inspector-grid">
+                      <label class="search-input-wrap" for="billing-organization-plan-code">
+                        <span class="search-label" data-i18n="billing.organization.planCode">Plan code</span>
+                        <select id="billing-organization-plan-code" class="select-input"></select>
+                      </label>
+                      <label class="search-input-wrap" for="billing-organization-seat-limit">
+                        <span class="search-label" data-i18n="billing.organization.seatLimit">Seat limit</span>
+                        <input
+                          id="billing-organization-seat-limit"
+                          class="text-input"
+                          type="number"
+                          min="0"
+                          step="1"
+                          autocomplete="off"
+                        />
+                      </label>
+                    </div>
+                    <div class="inspector-grid">
+                      <label class="search-input-wrap" for="billing-organization-status">
+                        <span class="search-label" data-i18n="table.status">Status</span>
+                        <select id="billing-organization-status" class="select-input">
+                          <option value="draft" data-i18n="value.draft">draft</option>
+                          <option value="active" data-i18n="value.active">active</option>
+                          <option value="suspended" data-i18n="value.suspended">suspended</option>
+                          <option value="archived" data-i18n="value.archived">archived</option>
+                        </select>
+                      </label>
+                      <label class="checkbox-row" for="billing-organization-shared-workspace-enabled">
+                        <input id="billing-organization-shared-workspace-enabled" type="checkbox" />
+                        <span data-i18n="billing.organization.sharedWorkspaceEnabled">
+                          Shared workspace enabled
+                        </span>
+                      </label>
+                    </div>
+                    <label class="search-input-wrap" for="billing-organization-support-notes">
+                      <span class="search-label" data-i18n="billing.organization.supportNotes">Support notes</span>
+                      <textarea
+                        id="billing-organization-support-notes"
+                        class="text-area"
+                        rows="4"
+                        spellcheck="false"
+                      ></textarea>
+                    </label>
+                    <div class="search-actions">
+                      <button
+                        id="billing-organization-save-button"
+                        class="button button-secondary"
+                        type="submit"
+                        data-i18n="action.saveOrganization"
+                      >
+                        Save organization
+                      </button>
+                      <button
+                        id="billing-organization-clear-button"
+                        class="button button-ghost"
+                        type="button"
+                        data-i18n="action.clear"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </form>
+                  <p id="billing-organization-feedback" class="panel-meta"></p>
+                </article>
+
+                <article id="billing-memberships-panel" class="panel billing-entity-panel">
+                  <div class="panel-header">
+                    <div>
+                      <p class="panel-label" data-i18n="panel.billingMemberships.label">Memberships</p>
+                      <h2 data-i18n="panel.billingMemberships.title">Organization memberships</h2>
+                    </div>
+                    <p id="billing-memberships-meta" class="panel-meta" data-i18n="panel.billingMemberships.meta">
+                      Track who belongs to each org, their role, and whether they consume a seat.
+                    </p>
+                  </div>
+                  <div class="compact-table-wrap">
+                    <table class="billing-table">
+                      <thead>
+                        <tr>
+                          <th data-i18n="table.organization">Organization</th>
+                          <th data-i18n="table.user">User</th>
+                          <th data-i18n="table.role">Role</th>
+                          <th data-i18n="table.status">Status</th>
+                          <th data-i18n="table.updated">Updated</th>
+                        </tr>
+                      </thead>
+                      <tbody id="billing-memberships-table-body">
+                        <tr>
+                          <td colspan="5" class="table-empty" data-i18n="empty.signInBillingControlPlane">
+                            Sign in to load billing control-plane records.
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div class="table-footer">
+                    <p id="billing-memberships-page-meta" class="panel-meta"></p>
+                  </div>
+                  <form id="billing-membership-form" class="form-stack">
+                    <p class="panel-meta" data-i18n="billing.form.help">
+                      Click a row to edit. Leave the record ID blank to create a new item.
+                    </p>
+                    <div class="inspector-grid">
+                      <label class="search-input-wrap" for="billing-membership-organization-id">
+                        <span class="search-label" data-i18n="billing.membership.organizationId">
+                          Organization ID
+                        </span>
+                        <input
+                          id="billing-membership-organization-id"
+                          class="text-input"
+                          type="text"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </label>
+                      <label class="search-input-wrap" for="billing-membership-user-id">
+                        <span class="search-label" data-i18n="billing.membership.userId">User ID</span>
+                        <input
+                          id="billing-membership-user-id"
+                          class="text-input"
+                          type="text"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </label>
+                    </div>
+                    <div class="inspector-grid">
+                      <label class="search-input-wrap" for="billing-membership-role">
+                        <span class="search-label" data-i18n="table.role">Role</span>
+                        <select id="billing-membership-role" class="select-input">
+                          <option value="owner">owner</option>
+                          <option value="admin">admin</option>
+                          <option value="manager">manager</option>
+                          <option value="member">member</option>
+                          <option value="viewer">viewer</option>
+                        </select>
+                      </label>
+                      <label class="search-input-wrap" for="billing-membership-status">
+                        <span class="search-label" data-i18n="table.status">Status</span>
+                        <select id="billing-membership-status" class="select-input">
+                          <option value="pending">pending</option>
+                          <option value="active">active</option>
+                          <option value="inactive">inactive</option>
+                          <option value="revoked">revoked</option>
+                        </select>
+                      </label>
+                    </div>
+                    <label class="checkbox-row" for="billing-membership-seat-consumed">
+                      <input id="billing-membership-seat-consumed" type="checkbox" />
+                      <span data-i18n="billing.membership.seatConsumed">Seat consumed</span>
+                    </label>
+                    <div class="search-actions">
+                      <button
+                        id="billing-membership-save-button"
+                        class="button button-secondary"
+                        type="submit"
+                        data-i18n="action.saveMembership"
+                      >
+                        Save membership
+                      </button>
+                      <button
+                        id="billing-membership-clear-button"
+                        class="button button-ghost"
+                        type="button"
+                        data-i18n="action.clear"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </form>
+                  <p id="billing-membership-feedback" class="panel-meta"></p>
+                </article>
+
+                <article id="billing-workspaces-panel" class="panel billing-entity-panel">
+                  <div class="panel-header">
+                    <div>
+                      <p class="panel-label" data-i18n="panel.billingWorkspaces.label">Workspaces</p>
+                      <h2 data-i18n="panel.billingWorkspaces.title">Shared team workspaces</h2>
+                    </div>
+                    <p id="billing-workspaces-meta" class="panel-meta" data-i18n="panel.billingWorkspaces.meta">
+                      Control workspace ownership, visibility, and default project privacy.
+                    </p>
+                  </div>
+                  <div class="compact-table-wrap">
+                    <table class="billing-table">
+                      <thead>
+                        <tr>
+                          <th data-i18n="table.workspace">Workspace</th>
+                          <th data-i18n="table.organization">Organization</th>
+                          <th data-i18n="table.owner">Owner</th>
+                          <th data-i18n="table.status">Status</th>
+                          <th data-i18n="table.updated">Updated</th>
+                        </tr>
+                      </thead>
+                      <tbody id="billing-workspaces-table-body">
+                        <tr>
+                          <td colspan="5" class="table-empty" data-i18n="empty.signInBillingControlPlane">
+                            Sign in to load billing control-plane records.
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div class="table-footer">
+                    <p id="billing-workspaces-page-meta" class="panel-meta"></p>
+                  </div>
+                  <form id="billing-workspace-form" class="form-stack">
+                    <p class="panel-meta" data-i18n="billing.form.help">
+                      Click a row to edit. Leave the record ID blank to create a new item.
+                    </p>
+                    <div class="inspector-grid">
+                      <label class="search-input-wrap" for="billing-workspace-id">
+                        <span class="search-label" data-i18n="billing.workspace.id">Workspace ID</span>
+                        <input
+                          id="billing-workspace-id"
+                          class="text-input"
+                          type="text"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </label>
+                      <label class="search-input-wrap" for="billing-workspace-name">
+                        <span class="search-label" data-i18n="billing.workspace.name">Name</span>
+                        <input
+                          id="billing-workspace-name"
+                          class="text-input"
+                          type="text"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </label>
+                    </div>
+                    <div class="inspector-grid">
+                      <label class="search-input-wrap" for="billing-workspace-organization-id">
+                        <span class="search-label" data-i18n="billing.workspace.organizationId">Organization ID</span>
+                        <input
+                          id="billing-workspace-organization-id"
+                          class="text-input"
+                          type="text"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </label>
+                      <label class="search-input-wrap" for="billing-workspace-owner-user-id">
+                        <span class="search-label" data-i18n="billing.workspace.ownerUserId">Owner user ID</span>
+                        <input
+                          id="billing-workspace-owner-user-id"
+                          class="text-input"
+                          type="text"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </label>
+                    </div>
+                    <div class="inspector-grid">
+                      <label class="search-input-wrap" for="billing-workspace-visibility">
+                        <span class="search-label" data-i18n="billing.workspace.visibility">Visibility</span>
+                        <input
+                          id="billing-workspace-visibility"
+                          class="text-input"
+                          type="text"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </label>
+                      <label class="search-input-wrap" for="billing-workspace-default-project-privacy">
+                        <span class="search-label" data-i18n="billing.workspace.defaultProjectPrivacy">
+                          Default project privacy
+                        </span>
+                        <input
+                          id="billing-workspace-default-project-privacy"
+                          class="text-input"
+                          type="text"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </label>
+                    </div>
+                    <label class="search-input-wrap" for="billing-workspace-status">
+                      <span class="search-label" data-i18n="table.status">Status</span>
+                      <select id="billing-workspace-status" class="select-input">
+                        <option value="active">active</option>
+                        <option value="archived">archived</option>
+                      </select>
+                    </label>
+                    <div class="search-actions">
+                      <button
+                        id="billing-workspace-save-button"
+                        class="button button-secondary"
+                        type="submit"
+                        data-i18n="action.saveWorkspace"
+                      >
+                        Save workspace
+                      </button>
+                      <button
+                        id="billing-workspace-clear-button"
+                        class="button button-ghost"
+                        type="button"
+                        data-i18n="action.clear"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </form>
+                  <p id="billing-workspace-feedback" class="panel-meta"></p>
+                </article>
+
+                <article id="billing-cloud-projects-panel" class="panel billing-entity-panel">
+                  <div class="panel-header">
+                    <div>
+                      <p class="panel-label" data-i18n="panel.billingCloudProjects.label">Cloud Projects</p>
+                      <h2 data-i18n="panel.billingCloudProjects.title">Cloud project records</h2>
+                    </div>
+                    <p id="billing-cloud-projects-meta" class="panel-meta" data-i18n="panel.billingCloudProjects.meta">
+                      Manage workspace-linked cloud project metadata and optional document uploads.
+                    </p>
+                  </div>
+                  <div class="compact-table-wrap">
+                    <table class="billing-table">
+                      <thead>
+                        <tr>
+                          <th data-i18n="table.cloudProject">Cloud project</th>
+                          <th data-i18n="table.workspace">Workspace</th>
+                          <th data-i18n="table.owner">Owner</th>
+                          <th data-i18n="table.status">Status</th>
+                          <th data-i18n="table.updated">Updated</th>
+                        </tr>
+                      </thead>
+                      <tbody id="billing-cloud-projects-table-body">
+                        <tr>
+                          <td colspan="5" class="table-empty" data-i18n="empty.signInBillingControlPlane">
+                            Sign in to load billing control-plane records.
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div class="table-footer">
+                    <p id="billing-cloud-projects-page-meta" class="panel-meta"></p>
+                  </div>
+                  <form id="billing-cloud-project-form" class="form-stack">
+                    <p class="panel-meta" data-i18n="billing.form.help">
+                      Click a row to edit. Leave the record ID blank to create a new item.
+                    </p>
+                    <div class="inspector-grid">
+                      <label class="search-input-wrap" for="billing-cloud-project-id">
+                        <span class="search-label" data-i18n="billing.cloudProject.id">Project ID</span>
+                        <input
+                          id="billing-cloud-project-id"
+                          class="text-input"
+                          type="text"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </label>
+                      <label class="search-input-wrap" for="billing-cloud-project-name">
+                        <span class="search-label" data-i18n="billing.cloudProject.name">Name</span>
+                        <input
+                          id="billing-cloud-project-name"
+                          class="text-input"
+                          type="text"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </label>
+                    </div>
+                    <div class="inspector-grid">
+                      <label class="search-input-wrap" for="billing-cloud-project-workspace-id">
+                        <span class="search-label" data-i18n="billing.cloudProject.workspaceId">Workspace ID</span>
+                        <input
+                          id="billing-cloud-project-workspace-id"
+                          class="text-input"
+                          type="text"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </label>
+                      <label class="search-input-wrap" for="billing-cloud-project-organization-id">
+                        <span class="search-label" data-i18n="billing.cloudProject.organizationId">
+                          Organization ID
+                        </span>
+                        <input
+                          id="billing-cloud-project-organization-id"
+                          class="text-input"
+                          type="text"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </label>
+                    </div>
+                    <div class="inspector-grid">
+                      <label class="search-input-wrap" for="billing-cloud-project-owner-user-id">
+                        <span class="search-label" data-i18n="billing.cloudProject.ownerUserId">Owner user ID</span>
+                        <input
+                          id="billing-cloud-project-owner-user-id"
+                          class="text-input"
+                          type="text"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </label>
+                      <label class="search-input-wrap" for="billing-cloud-project-storage-mode">
+                        <span class="search-label" data-i18n="billing.cloudProject.storageMode">Storage mode</span>
+                        <input
+                          id="billing-cloud-project-storage-mode"
+                          class="text-input"
+                          type="text"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </label>
+                    </div>
+                    <div class="inspector-grid">
+                      <label class="search-input-wrap" for="billing-cloud-project-document-revision">
+                        <span class="search-label" data-i18n="billing.cloudProject.documentRevision">
+                          Document revision
+                        </span>
+                        <input
+                          id="billing-cloud-project-document-revision"
+                          class="text-input"
+                          type="number"
+                          min="0"
+                          step="1"
+                          autocomplete="off"
+                        />
+                      </label>
+                      <label class="search-input-wrap" for="billing-cloud-project-status">
+                        <span class="search-label" data-i18n="table.status">Status</span>
+                        <select id="billing-cloud-project-status" class="select-input">
+                          <option value="draft">draft</option>
+                          <option value="active">active</option>
+                          <option value="archived">archived</option>
+                        </select>
+                      </label>
+                    </div>
+                    <label class="search-input-wrap" for="billing-cloud-project-document">
+                      <span class="search-label" data-i18n="billing.cloudProject.document">Document JSON</span>
+                      <textarea
+                        id="billing-cloud-project-document"
+                        class="text-area text-area-code"
+                        rows="7"
+                        spellcheck="false"
+                      ></textarea>
+                    </label>
+                    <div class="search-actions">
+                      <button
+                        id="billing-cloud-project-save-button"
+                        class="button button-secondary"
+                        type="submit"
+                        data-i18n="action.saveCloudProject"
+                      >
+                        Save cloud project
+                      </button>
+                      <button
+                        id="billing-cloud-project-clear-button"
+                        class="button button-ghost"
+                        type="button"
+                        data-i18n="action.clear"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </form>
+                  <p id="billing-cloud-project-feedback" class="panel-meta"></p>
+                </article>
+              </section>
+            </section>
           </section>
         </section>
       </main>

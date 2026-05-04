@@ -12,6 +12,7 @@ import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/core/crash_reporting/crash_reporting_service.dart';
 import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/auth_service.dart';
+import 'package:mixroom/helpers/desktop_file_ingress_service.dart';
 import 'package:mixroom/helpers/iap_service.dart';
 import 'package:mixroom/helpers/open_mixroom_service.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
@@ -361,6 +362,7 @@ void main() async {
 
   // Never block first frame on startup method channels.
   unawaited(OpenMixroomService.init());
+  unawaited(DesktopFileIngressService.init());
 }
 
 void listenForNativeLogs() {

@@ -11,6 +11,11 @@ const ADMIN_USERS_GRANT_PROMPTS_PATH = "/v1/internal/admin/users/grant-prompts";
 const ADMIN_FEEDBACK_PATH = "/v1/internal/admin/feedback";
 const ADMIN_AI_PROMPT_LIMITS_PATH = "/v1/internal/admin/settings/ai-prompt-limits";
 const ADMIN_AI_RUNTIME_PATH = "/v1/internal/admin/settings/ai-runtime";
+const ADMIN_BILLING_CATALOG_PATH = "/v1/internal/admin/settings/billing-catalog";
+const ADMIN_BILLING_ORGANIZATIONS_PATH = "/v1/internal/admin/billing/organizations";
+const ADMIN_BILLING_MEMBERSHIPS_PATH = "/v1/internal/admin/billing/memberships";
+const ADMIN_BILLING_WORKSPACES_PATH = "/v1/internal/admin/billing/workspaces";
+const ADMIN_BILLING_CLOUD_PROJECTS_PATH = "/v1/internal/admin/billing/cloud-projects";
 const ADMIN_PRODUCER_CAPTURE_WHITELIST_PATH =
   "/v1/internal/admin/settings/producer-capture-whitelist";
 const DEFAULT_ADMIN_USERS_LIMIT = 8;
@@ -940,6 +945,104 @@ const elements = {
   aiRuntimePanel: document.querySelector("#ai-runtime-panel"),
   aiRuntimeMeta: document.querySelector("#ai-runtime-meta"),
   aiRuntimeSettings: document.querySelector("#ai-runtime-settings"),
+  billingCatalogMeta: document.querySelector("#billing-catalog-meta"),
+  billingCatalogSummary: document.querySelector("#billing-catalog-summary"),
+  billingCatalogPreview: document.querySelector("#billing-catalog-preview"),
+  billingCatalogForm: document.querySelector("#billing-catalog-form"),
+  billingCatalogSupportEmailInput: document.querySelector("#billing-catalog-support-email"),
+  billingCatalogContactLabelInput: document.querySelector("#billing-catalog-contact-label"),
+  billingCatalogSupportUrlInput: document.querySelector("#billing-catalog-support-url"),
+  billingCatalogFaqUrlInput: document.querySelector("#billing-catalog-faq-url"),
+  billingCatalogManageSubscriptionUrlInput: document.querySelector(
+    "#billing-catalog-manage-subscription-url",
+  ),
+  billingCatalogRefundPolicyUrlInput: document.querySelector(
+    "#billing-catalog-refund-policy-url",
+  ),
+  billingCatalogDefaultCheckoutUrlInput: document.querySelector(
+    "#billing-catalog-default-checkout-url",
+  ),
+  billingCatalogPlansInput: document.querySelector("#billing-catalog-plans-input"),
+  billingCatalogProductsInput: document.querySelector("#billing-catalog-products-input"),
+  billingCatalogOffersInput: document.querySelector("#billing-catalog-offers-input"),
+  billingCatalogSaveButton: document.querySelector("#billing-catalog-save-button"),
+  billingCatalogFeedback: document.querySelector("#billing-catalog-feedback"),
+  billingOrganizationsMeta: document.querySelector("#billing-organizations-meta"),
+  billingOrganizationsTableBody: document.querySelector("#billing-organizations-table-body"),
+  billingOrganizationsPageMeta: document.querySelector("#billing-organizations-page-meta"),
+  billingOrganizationForm: document.querySelector("#billing-organization-form"),
+  billingOrganizationIdInput: document.querySelector("#billing-organization-id"),
+  billingOrganizationNameInput: document.querySelector("#billing-organization-name"),
+  billingOrganizationPlanCodeInput: document.querySelector("#billing-organization-plan-code"),
+  billingOrganizationSeatLimitInput: document.querySelector("#billing-organization-seat-limit"),
+  billingOrganizationStatusInput: document.querySelector("#billing-organization-status"),
+  billingOrganizationSharedWorkspaceEnabledInput: document.querySelector(
+    "#billing-organization-shared-workspace-enabled",
+  ),
+  billingOrganizationSupportNotesInput: document.querySelector(
+    "#billing-organization-support-notes",
+  ),
+  billingOrganizationSaveButton: document.querySelector("#billing-organization-save-button"),
+  billingOrganizationClearButton: document.querySelector("#billing-organization-clear-button"),
+  billingOrganizationFeedback: document.querySelector("#billing-organization-feedback"),
+  billingMembershipsMeta: document.querySelector("#billing-memberships-meta"),
+  billingMembershipsTableBody: document.querySelector("#billing-memberships-table-body"),
+  billingMembershipsPageMeta: document.querySelector("#billing-memberships-page-meta"),
+  billingMembershipForm: document.querySelector("#billing-membership-form"),
+  billingMembershipOrganizationIdInput: document.querySelector(
+    "#billing-membership-organization-id",
+  ),
+  billingMembershipUserIdInput: document.querySelector("#billing-membership-user-id"),
+  billingMembershipRoleInput: document.querySelector("#billing-membership-role"),
+  billingMembershipStatusInput: document.querySelector("#billing-membership-status"),
+  billingMembershipSeatConsumedInput: document.querySelector("#billing-membership-seat-consumed"),
+  billingMembershipSaveButton: document.querySelector("#billing-membership-save-button"),
+  billingMembershipClearButton: document.querySelector("#billing-membership-clear-button"),
+  billingMembershipFeedback: document.querySelector("#billing-membership-feedback"),
+  billingWorkspacesMeta: document.querySelector("#billing-workspaces-meta"),
+  billingWorkspacesTableBody: document.querySelector("#billing-workspaces-table-body"),
+  billingWorkspacesPageMeta: document.querySelector("#billing-workspaces-page-meta"),
+  billingWorkspaceForm: document.querySelector("#billing-workspace-form"),
+  billingWorkspaceIdInput: document.querySelector("#billing-workspace-id"),
+  billingWorkspaceNameInput: document.querySelector("#billing-workspace-name"),
+  billingWorkspaceOrganizationIdInput: document.querySelector(
+    "#billing-workspace-organization-id",
+  ),
+  billingWorkspaceOwnerUserIdInput: document.querySelector("#billing-workspace-owner-user-id"),
+  billingWorkspaceVisibilityInput: document.querySelector("#billing-workspace-visibility"),
+  billingWorkspaceDefaultProjectPrivacyInput: document.querySelector(
+    "#billing-workspace-default-project-privacy",
+  ),
+  billingWorkspaceStatusInput: document.querySelector("#billing-workspace-status"),
+  billingWorkspaceSaveButton: document.querySelector("#billing-workspace-save-button"),
+  billingWorkspaceClearButton: document.querySelector("#billing-workspace-clear-button"),
+  billingWorkspaceFeedback: document.querySelector("#billing-workspace-feedback"),
+  billingCloudProjectsMeta: document.querySelector("#billing-cloud-projects-meta"),
+  billingCloudProjectsTableBody: document.querySelector("#billing-cloud-projects-table-body"),
+  billingCloudProjectsPageMeta: document.querySelector("#billing-cloud-projects-page-meta"),
+  billingCloudProjectForm: document.querySelector("#billing-cloud-project-form"),
+  billingCloudProjectIdInput: document.querySelector("#billing-cloud-project-id"),
+  billingCloudProjectNameInput: document.querySelector("#billing-cloud-project-name"),
+  billingCloudProjectWorkspaceIdInput: document.querySelector(
+    "#billing-cloud-project-workspace-id",
+  ),
+  billingCloudProjectOrganizationIdInput: document.querySelector(
+    "#billing-cloud-project-organization-id",
+  ),
+  billingCloudProjectOwnerUserIdInput: document.querySelector(
+    "#billing-cloud-project-owner-user-id",
+  ),
+  billingCloudProjectStorageModeInput: document.querySelector(
+    "#billing-cloud-project-storage-mode",
+  ),
+  billingCloudProjectDocumentRevisionInput: document.querySelector(
+    "#billing-cloud-project-document-revision",
+  ),
+  billingCloudProjectStatusInput: document.querySelector("#billing-cloud-project-status"),
+  billingCloudProjectDocumentInput: document.querySelector("#billing-cloud-project-document"),
+  billingCloudProjectSaveButton: document.querySelector("#billing-cloud-project-save-button"),
+  billingCloudProjectClearButton: document.querySelector("#billing-cloud-project-clear-button"),
+  billingCloudProjectFeedback: document.querySelector("#billing-cloud-project-feedback"),
   summarySection: document.querySelector("#summary-section"),
   aiUsageMetrics: document.querySelector("#ai-usage-metrics"),
   topFeatures: document.querySelector("#top-features"),
@@ -995,6 +1098,11 @@ const state = {
   aiPromptLimitsBusy: false,
   producerCaptureWhitelistBusy: false,
   aiRuntimeBusy: false,
+  billingCatalogBusy: false,
+  billingOrganizationsBusy: false,
+  billingMembershipsBusy: false,
+  billingWorkspacesBusy: false,
+  billingCloudProjectsBusy: false,
   deleteBusy: false,
   grantBusy: false,
   activeTab: DEFAULT_TAB,
@@ -1020,6 +1128,26 @@ const state = {
   producerCaptureWhitelistFeedback: null,
   aiRuntimeSettings: null,
   aiRuntimeFeedbackByFeature: {},
+  billingCatalog: null,
+  billingCatalogConfigurable: true,
+  billingCatalogFeedback: null,
+  billingOrganizations: [],
+  billingOrganizationsLoaded: false,
+  billingMemberships: [],
+  billingMembershipsLoaded: false,
+  billingWorkspaces: [],
+  billingWorkspacesLoaded: false,
+  billingCloudProjects: [],
+  billingCloudProjectsLoaded: false,
+  collaborationConfigurable: true,
+  selectedBillingOrganizationId: "",
+  selectedBillingMembershipKey: "",
+  selectedBillingWorkspaceId: "",
+  selectedBillingCloudProjectId: "",
+  billingOrganizationFeedback: null,
+  billingMembershipFeedback: null,
+  billingWorkspaceFeedback: null,
+  billingCloudProjectFeedback: null,
   livePresence: null,
   livePresenceRequestId: 0,
   analyticsRange: "7d",
@@ -1079,6 +1207,28 @@ function bindEvents() {
   elements.aiRuntimeSettings.addEventListener("submit", handleAiRuntimeSubmit);
   elements.aiRuntimeSettings.addEventListener("input", handleAiRuntimeInputChange);
   elements.aiRuntimeSettings.addEventListener("change", handleAiRuntimeInputChange);
+  elements.billingCatalogForm.addEventListener("submit", handleBillingCatalogSubmit);
+  elements.billingOrganizationsTableBody.addEventListener("click", handleBillingOrganizationsTableClick);
+  elements.billingOrganizationForm.addEventListener("submit", handleBillingOrganizationSubmit);
+  elements.billingOrganizationClearButton.addEventListener(
+    "click",
+    clearBillingOrganizationSelection,
+  );
+  elements.billingMembershipsTableBody.addEventListener("click", handleBillingMembershipsTableClick);
+  elements.billingMembershipForm.addEventListener("submit", handleBillingMembershipSubmit);
+  elements.billingMembershipClearButton.addEventListener("click", clearBillingMembershipSelection);
+  elements.billingWorkspacesTableBody.addEventListener("click", handleBillingWorkspacesTableClick);
+  elements.billingWorkspaceForm.addEventListener("submit", handleBillingWorkspaceSubmit);
+  elements.billingWorkspaceClearButton.addEventListener("click", clearBillingWorkspaceSelection);
+  elements.billingCloudProjectsTableBody.addEventListener(
+    "click",
+    handleBillingCloudProjectsTableClick,
+  );
+  elements.billingCloudProjectForm.addEventListener("submit", handleBillingCloudProjectSubmit);
+  elements.billingCloudProjectClearButton.addEventListener(
+    "click",
+    clearBillingCloudProjectSelection,
+  );
   elements.languageSelector.addEventListener("change", handleLocaleChange);
   elements.signedOutLanguageSelector.addEventListener("change", handleLocaleChange);
   ["pointerdown", "keydown", "scroll", "touchstart"].forEach((eventName) => {
@@ -1179,6 +1329,11 @@ function rerenderForLocale() {
   renderAiPromptLimitSettings();
   renderProducerCaptureWhitelistSettings();
   renderAiRuntimeSettings();
+  renderBillingCatalogSettings();
+  renderBillingOrganizations();
+  renderBillingMemberships();
+  renderBillingWorkspaces();
+  renderBillingCloudProjects();
   renderUserSearchMeta(state.lastUserSearchPayload || {});
   updateTabView();
 }
@@ -1572,6 +1727,14 @@ function canEditProducerCaptureWhitelist() {
   return !!tokens?.idToken;
 }
 
+function canEditBillingCatalog() {
+  return canViewAiRuntimeSettings() && state.billingCatalogConfigurable !== false;
+}
+
+function canEditBillingControlPlane() {
+  return canViewAiRuntimeSettings() && state.collaborationConfigurable !== false;
+}
+
 function canGrantAiPrompts() {
   return state.overview?.permissions?.can_grant_ai_prompts === true;
 }
@@ -1832,11 +1995,26 @@ async function loadDevTabData({ silent = false, force = false } = {}) {
     state.aiRuntimeSettings = null;
     renderAiRuntimeSettings();
   }
+  if (force || !state.loadedTabs.dev || !state.billingCatalog) {
+    requests.push(loadBillingCatalogSettings({ silent }));
+  }
+  if (force || !state.loadedTabs.dev || !state.billingOrganizationsLoaded) {
+    requests.push(loadBillingOrganizations({ silent }));
+  }
+  if (force || !state.loadedTabs.dev || !state.billingMembershipsLoaded) {
+    requests.push(loadBillingMemberships({ silent }));
+  }
+  if (force || !state.loadedTabs.dev || !state.billingWorkspacesLoaded) {
+    requests.push(loadBillingWorkspaces({ silent }));
+  }
+  if (force || !state.loadedTabs.dev || !state.billingCloudProjectsLoaded) {
+    requests.push(loadBillingCloudProjects({ silent }));
+  }
   if (!requests.length) {
     state.loadedTabs.dev = true;
     return;
   }
-  setTabLoading("dev", true, t("status.loadingProducerCaptureWhitelist"));
+  setTabLoading("dev", true, tMaybe("status.loadingBillingControlPlane", "Loading dev settings..."));
   try {
     await Promise.all(requests);
     state.loadedTabs.dev = true;
@@ -2134,6 +2312,194 @@ async function loadProducerCaptureWhitelistSettings({ silent = false } = {}) {
     handleAdminRequestError(error, t("status.loadProducerCaptureWhitelistFailed"));
   } finally {
     state.producerCaptureWhitelistBusy = false;
+    updateBusyState();
+  }
+}
+
+async function loadBillingCatalogSettings({ silent = false } = {}) {
+  if (!tokens?.idToken) {
+    return;
+  }
+
+  state.billingCatalogBusy = true;
+  updateBusyState();
+  if (!silent) {
+    setStatus(
+      tMaybe("status.loadingBillingCatalog", "Loading billing catalog settings..."),
+      "info",
+    );
+  }
+
+  try {
+    const payload = await fetchAdminJson(ADMIN_BILLING_CATALOG_PATH);
+    state.billingCatalog = payload || null;
+    state.billingCatalogConfigurable = payload?.configurable !== false;
+    renderBillingCatalogSettings();
+    if (!silent) {
+      setStatus(
+        tMaybe("status.billingCatalogLoaded", "Billing catalog settings loaded."),
+        "success",
+      );
+    }
+  } catch (error) {
+    handleAdminRequestError(
+      error,
+      tMaybe("status.loadBillingCatalogFailed", "Could not load billing catalog settings."),
+    );
+  } finally {
+    state.billingCatalogBusy = false;
+    updateBusyState();
+  }
+}
+
+async function loadBillingOrganizations({ silent = false } = {}) {
+  if (!tokens?.idToken) {
+    return;
+  }
+
+  state.billingOrganizationsBusy = true;
+  updateBusyState();
+  if (!silent) {
+    setStatus(
+      tMaybe("status.loadingBillingOrganizations", "Loading billing organizations..."),
+      "info",
+    );
+  }
+
+  try {
+    const payload = await fetchAdminJson(ADMIN_BILLING_ORGANIZATIONS_PATH);
+    state.billingOrganizations = Array.isArray(payload.organizations) ? payload.organizations : [];
+    state.billingOrganizationsLoaded = true;
+    state.collaborationConfigurable = payload?.configurable !== false;
+    syncSelectedBillingOrganization();
+    renderBillingOrganizations();
+    if (!silent) {
+      setStatus(
+        tMaybe("status.billingOrganizationsLoaded", "Billing organizations loaded."),
+        "success",
+      );
+    }
+  } catch (error) {
+    handleAdminRequestError(
+      error,
+      tMaybe("status.loadBillingOrganizationsFailed", "Could not load billing organizations."),
+    );
+  } finally {
+    state.billingOrganizationsBusy = false;
+    updateBusyState();
+  }
+}
+
+async function loadBillingMemberships({ silent = false } = {}) {
+  if (!tokens?.idToken) {
+    return;
+  }
+
+  state.billingMembershipsBusy = true;
+  updateBusyState();
+  if (!silent) {
+    setStatus(
+      tMaybe("status.loadingBillingMemberships", "Loading billing memberships..."),
+      "info",
+    );
+  }
+
+  try {
+    const payload = await fetchAdminJson(ADMIN_BILLING_MEMBERSHIPS_PATH);
+    state.billingMemberships = Array.isArray(payload.memberships) ? payload.memberships : [];
+    state.billingMembershipsLoaded = true;
+    state.collaborationConfigurable = payload?.configurable !== false;
+    syncSelectedBillingMembership();
+    renderBillingMemberships();
+    if (!silent) {
+      setStatus(
+        tMaybe("status.billingMembershipsLoaded", "Billing memberships loaded."),
+        "success",
+      );
+    }
+  } catch (error) {
+    handleAdminRequestError(
+      error,
+      tMaybe("status.loadBillingMembershipsFailed", "Could not load billing memberships."),
+    );
+  } finally {
+    state.billingMembershipsBusy = false;
+    updateBusyState();
+  }
+}
+
+async function loadBillingWorkspaces({ silent = false } = {}) {
+  if (!tokens?.idToken) {
+    return;
+  }
+
+  state.billingWorkspacesBusy = true;
+  updateBusyState();
+  if (!silent) {
+    setStatus(
+      tMaybe("status.loadingBillingWorkspaces", "Loading billing workspaces..."),
+      "info",
+    );
+  }
+
+  try {
+    const payload = await fetchAdminJson(ADMIN_BILLING_WORKSPACES_PATH);
+    state.billingWorkspaces = Array.isArray(payload.workspaces) ? payload.workspaces : [];
+    state.billingWorkspacesLoaded = true;
+    state.collaborationConfigurable = payload?.configurable !== false;
+    syncSelectedBillingWorkspace();
+    renderBillingWorkspaces();
+    if (!silent) {
+      setStatus(
+        tMaybe("status.billingWorkspacesLoaded", "Billing workspaces loaded."),
+        "success",
+      );
+    }
+  } catch (error) {
+    handleAdminRequestError(
+      error,
+      tMaybe("status.loadBillingWorkspacesFailed", "Could not load billing workspaces."),
+    );
+  } finally {
+    state.billingWorkspacesBusy = false;
+    updateBusyState();
+  }
+}
+
+async function loadBillingCloudProjects({ silent = false } = {}) {
+  if (!tokens?.idToken) {
+    return;
+  }
+
+  state.billingCloudProjectsBusy = true;
+  updateBusyState();
+  if (!silent) {
+    setStatus(
+      tMaybe("status.loadingBillingCloudProjects", "Loading billing cloud projects..."),
+      "info",
+    );
+  }
+
+  try {
+    const payload = await fetchAdminJson(ADMIN_BILLING_CLOUD_PROJECTS_PATH);
+    state.billingCloudProjects = Array.isArray(payload.cloud_projects) ? payload.cloud_projects : [];
+    state.billingCloudProjectsLoaded = true;
+    state.collaborationConfigurable = payload?.configurable !== false;
+    syncSelectedBillingCloudProject();
+    renderBillingCloudProjects();
+    if (!silent) {
+      setStatus(
+        tMaybe("status.billingCloudProjectsLoaded", "Billing cloud projects loaded."),
+        "success",
+      );
+    }
+  } catch (error) {
+    handleAdminRequestError(
+      error,
+      tMaybe("status.loadBillingCloudProjectsFailed", "Could not load billing cloud projects."),
+    );
+  } finally {
+    state.billingCloudProjectsBusy = false;
     updateBusyState();
   }
 }
@@ -2471,6 +2837,908 @@ function renderAiRuntimeSettings() {
   elements.aiRuntimeSettings.className = "inspector-stack";
   elements.aiRuntimeSettings.innerHTML = forms || escapeHtml(t("empty.signInAiRuntime"));
   updateAiRuntimeConfirmButtons();
+}
+
+function renderBillingCatalogSettings() {
+  const catalog = state.billingCatalog;
+  const defaultMeta = tMaybe(
+    "panel.billingCatalog.meta",
+    "Control the catalog the app reads for pricing, entitlements, and support links.",
+  );
+  if (!catalog) {
+    elements.billingCatalogMeta.textContent = defaultMeta;
+    elements.billingCatalogSummary.innerHTML = buildBillingCatalogSummaryHtml({
+      plans: [],
+      products: [],
+      offers: [],
+      support: null,
+    });
+    elements.billingCatalogPreview.innerHTML = `
+      <div class="inspector-empty">${escapeHtml(
+        tMaybe("empty.signInBillingCatalog", "Sign in to load billing catalog settings."),
+      )}</div>
+    `;
+    elements.billingCatalogForm.classList.add("hidden");
+    elements.billingCatalogSupportEmailInput.value = "";
+    elements.billingCatalogContactLabelInput.value = "";
+    elements.billingCatalogSupportUrlInput.value = "";
+    elements.billingCatalogFaqUrlInput.value = "";
+    elements.billingCatalogManageSubscriptionUrlInput.value = "";
+    elements.billingCatalogRefundPolicyUrlInput.value = "";
+    elements.billingCatalogDefaultCheckoutUrlInput.value = "";
+    elements.billingCatalogPlansInput.value = "";
+    elements.billingCatalogProductsInput.value = "";
+    elements.billingCatalogOffersInput.value = "";
+    renderBillingFeedback(elements.billingCatalogFeedback, state.billingCatalogFeedback);
+    renderBillingOrganizations();
+    updateBusyState();
+    return;
+  }
+
+  const plans = Array.isArray(catalog.plans) ? catalog.plans : [];
+  const products = Array.isArray(catalog.products) ? catalog.products : [];
+  const offers = Array.isArray(catalog.offers) ? catalog.offers : [];
+  const support = catalog.support && typeof catalog.support === "object" ? catalog.support : {};
+  const metaParts = [
+    catalog.configurable === false ? "Read-only defaults" : "Editable by admin",
+  ];
+  if (catalog.updated_at) {
+    metaParts.push(`Updated ${formatDate(catalog.updated_at)}`);
+  }
+  elements.billingCatalogMeta.textContent = metaParts.join(" • ") || defaultMeta;
+  elements.billingCatalogSummary.innerHTML = buildBillingCatalogSummaryHtml({
+    plans,
+    products,
+    offers,
+    support,
+  });
+  elements.billingCatalogPreview.innerHTML = buildBillingCatalogPreviewHtml({
+    plans,
+    products,
+    offers,
+    support,
+  });
+  elements.billingCatalogForm.classList.remove("hidden");
+  elements.billingCatalogSupportEmailInput.value = `${support.support_email || ""}`;
+  elements.billingCatalogContactLabelInput.value = `${support.contact_label || ""}`;
+  elements.billingCatalogSupportUrlInput.value = `${support.support_url || ""}`;
+  elements.billingCatalogFaqUrlInput.value = `${support.faq_url || ""}`;
+  elements.billingCatalogManageSubscriptionUrlInput.value =
+    `${support.manage_subscription_url || ""}`;
+  elements.billingCatalogRefundPolicyUrlInput.value = `${support.refund_policy_url || ""}`;
+  elements.billingCatalogDefaultCheckoutUrlInput.value = `${support.default_checkout_url || ""}`;
+  elements.billingCatalogPlansInput.value = JSON.stringify(plans, null, 2);
+  elements.billingCatalogProductsInput.value = JSON.stringify(products, null, 2);
+  elements.billingCatalogOffersInput.value = JSON.stringify(offers, null, 2);
+  renderBillingFeedback(elements.billingCatalogFeedback, state.billingCatalogFeedback);
+  renderBillingOrganizations();
+  updateBusyState();
+}
+
+function renderBillingOrganizations() {
+  const records = Array.isArray(state.billingOrganizations) ? state.billingOrganizations : [];
+  const configurable = state.collaborationConfigurable !== false;
+  const baseMeta = tMaybe(
+    "panel.billingOrganizations.meta",
+    "Create or update team billing orgs, seat limits, and shared workspace access.",
+  );
+  elements.billingOrganizationsMeta.textContent = configurable
+    ? baseMeta
+    : `${baseMeta} • Collaboration table not configured.`;
+  if (!records.length) {
+    elements.billingOrganizationsTableBody.innerHTML = buildBillingEmptyTableRow(
+      5,
+      configurable
+        ? tMaybe("empty.noOrganizations", "No organizations yet.")
+        : tMaybe("empty.signInBillingControlPlane", "Billing control-plane records are unavailable."),
+    );
+  } else {
+    elements.billingOrganizationsTableBody.innerHTML = records
+      .map((record) => {
+        const selected = record.organization_id === state.selectedBillingOrganizationId;
+        const rowClass = selected ? ' class="is-selected"' : "";
+        return `
+          <tr${rowClass} data-billing-selectable="true" data-organization-id="${escapeHtml(
+            record.organization_id || "",
+          )}">
+            <td>
+              <div class="user-name">${escapeHtml(record.name || record.organization_id || "")}</div>
+              <div class="user-subtext table-code">${escapeHtml(record.organization_id || "")}</div>
+            </td>
+            <td>${escapeHtml(record.plan_code || t("detail.na"))}</td>
+            <td>${escapeHtml(formatWholeNumber(record.seat_limit || 0))}</td>
+            <td>${escapeHtml(formatStatusLabel(record.status || ""))}</td>
+            <td>${escapeHtml(formatDate(record.updated_at || record.created_at))}</td>
+          </tr>
+        `;
+      })
+      .join("");
+  }
+  elements.billingOrganizationsPageMeta.textContent = buildBillingRecordMeta(records.length, "orgs");
+  renderBillingOrganizationForm();
+  renderBillingFeedback(elements.billingOrganizationFeedback, state.billingOrganizationFeedback);
+}
+
+function renderBillingMemberships() {
+  const records = Array.isArray(state.billingMemberships) ? state.billingMemberships : [];
+  const configurable = state.collaborationConfigurable !== false;
+  const baseMeta = tMaybe(
+    "panel.billingMemberships.meta",
+    "Track who belongs to each org, their role, and whether they consume a seat.",
+  );
+  elements.billingMembershipsMeta.textContent = configurable
+    ? baseMeta
+    : `${baseMeta} • Collaboration table not configured.`;
+  if (!records.length) {
+    elements.billingMembershipsTableBody.innerHTML = buildBillingEmptyTableRow(
+      5,
+      configurable
+        ? tMaybe("empty.noMemberships", "No memberships yet.")
+        : tMaybe("empty.signInBillingControlPlane", "Billing control-plane records are unavailable."),
+    );
+  } else {
+    elements.billingMembershipsTableBody.innerHTML = records
+      .map((record) => {
+        const key = billingMembershipKey(record);
+        const selected = key === state.selectedBillingMembershipKey;
+        const rowClass = selected ? ' class="is-selected"' : "";
+        const seat = record.seat_consumed ? "Seat consumed" : "No seat";
+        return `
+          <tr${rowClass} data-billing-selectable="true" data-membership-key="${escapeHtml(key)}">
+            <td class="table-code">${escapeHtml(record.organization_id || "")}</td>
+            <td>
+              <div class="user-name table-code">${escapeHtml(record.user_id || "")}</div>
+              <div class="user-subtext">${escapeHtml(seat)}</div>
+            </td>
+            <td>${escapeHtml(record.role || t("detail.na"))}</td>
+            <td>${escapeHtml(formatStatusLabel(record.status || ""))}</td>
+            <td>${escapeHtml(formatDate(record.updated_at || record.created_at))}</td>
+          </tr>
+        `;
+      })
+      .join("");
+  }
+  elements.billingMembershipsPageMeta.textContent = buildBillingRecordMeta(records.length, "memberships");
+  renderBillingMembershipForm();
+  renderBillingFeedback(elements.billingMembershipFeedback, state.billingMembershipFeedback);
+}
+
+function renderBillingWorkspaces() {
+  const records = Array.isArray(state.billingWorkspaces) ? state.billingWorkspaces : [];
+  const configurable = state.collaborationConfigurable !== false;
+  const baseMeta = tMaybe(
+    "panel.billingWorkspaces.meta",
+    "Control workspace ownership, visibility, and default project privacy.",
+  );
+  elements.billingWorkspacesMeta.textContent = configurable
+    ? baseMeta
+    : `${baseMeta} • Collaboration table not configured.`;
+  if (!records.length) {
+    elements.billingWorkspacesTableBody.innerHTML = buildBillingEmptyTableRow(
+      5,
+      configurable
+        ? tMaybe("empty.noWorkspaces", "No workspaces yet.")
+        : tMaybe("empty.signInBillingControlPlane", "Billing control-plane records are unavailable."),
+    );
+  } else {
+    elements.billingWorkspacesTableBody.innerHTML = records
+      .map((record) => {
+        const selected = record.workspace_id === state.selectedBillingWorkspaceId;
+        const rowClass = selected ? ' class="is-selected"' : "";
+        const workspaceMeta = [record.visibility, record.default_project_privacy]
+          .map((value) => `${value || ""}`.trim())
+          .filter(Boolean)
+          .join(" • ");
+        return `
+          <tr${rowClass} data-billing-selectable="true" data-workspace-id="${escapeHtml(
+            record.workspace_id || "",
+          )}">
+            <td>
+              <div class="user-name">${escapeHtml(record.name || record.workspace_id || "")}</div>
+              <div class="user-subtext table-code">${escapeHtml(
+                workspaceMeta || record.workspace_id || "",
+              )}</div>
+            </td>
+            <td class="table-code">${escapeHtml(record.organization_id || "")}</td>
+            <td class="table-code">${escapeHtml(record.user_id || t("detail.na"))}</td>
+            <td>${escapeHtml(formatStatusLabel(record.status || ""))}</td>
+            <td>${escapeHtml(formatDate(record.updated_at || record.created_at))}</td>
+          </tr>
+        `;
+      })
+      .join("");
+  }
+  elements.billingWorkspacesPageMeta.textContent = buildBillingRecordMeta(records.length, "workspaces");
+  renderBillingWorkspaceForm();
+  renderBillingFeedback(elements.billingWorkspaceFeedback, state.billingWorkspaceFeedback);
+}
+
+function renderBillingCloudProjects() {
+  const records = Array.isArray(state.billingCloudProjects) ? state.billingCloudProjects : [];
+  const configurable = state.collaborationConfigurable !== false;
+  const baseMeta = tMaybe(
+    "panel.billingCloudProjects.meta",
+    "Manage workspace-linked cloud project metadata and optional document uploads.",
+  );
+  elements.billingCloudProjectsMeta.textContent = configurable
+    ? baseMeta
+    : `${baseMeta} • Collaboration table not configured.`;
+  if (!records.length) {
+    elements.billingCloudProjectsTableBody.innerHTML = buildBillingEmptyTableRow(
+      5,
+      configurable
+        ? tMaybe("empty.noCloudProjects", "No cloud projects yet.")
+        : tMaybe("empty.signInBillingControlPlane", "Billing control-plane records are unavailable."),
+    );
+  } else {
+    elements.billingCloudProjectsTableBody.innerHTML = records
+      .map((record) => {
+        const selected = record.project_id === state.selectedBillingCloudProjectId;
+        const rowClass = selected ? ' class="is-selected"' : "";
+        const projectMeta = [record.storage_mode, record.document_revision ? `rev ${record.document_revision}` : ""]
+          .filter(Boolean)
+          .join(" • ");
+        return `
+          <tr${rowClass} data-billing-selectable="true" data-cloud-project-id="${escapeHtml(
+            record.project_id || "",
+          )}">
+            <td>
+              <div class="user-name">${escapeHtml(record.name || record.project_id || "")}</div>
+              <div class="user-subtext table-code">${escapeHtml(
+                projectMeta || record.project_id || "",
+              )}</div>
+            </td>
+            <td class="table-code">${escapeHtml(record.workspace_id || "")}</td>
+            <td class="table-code">${escapeHtml(record.user_id || t("detail.na"))}</td>
+            <td>${escapeHtml(formatStatusLabel(record.status || ""))}</td>
+            <td>${escapeHtml(formatDate(record.updated_at || record.created_at))}</td>
+          </tr>
+        `;
+      })
+      .join("");
+  }
+  elements.billingCloudProjectsPageMeta.textContent = buildBillingRecordMeta(
+    records.length,
+    "cloud projects",
+  );
+  renderBillingCloudProjectForm();
+  renderBillingFeedback(elements.billingCloudProjectFeedback, state.billingCloudProjectFeedback);
+}
+
+function renderBillingOrganizationForm() {
+  const record = getSelectedBillingOrganization();
+  const defaultPlanCode = state.billingCatalog?.plans?.[0]?.code || "studio";
+  const planCode = `${record?.plan_code || defaultPlanCode || ""}`.trim();
+  elements.billingOrganizationPlanCodeInput.innerHTML = buildBillingPlanCodeOptions(planCode);
+  elements.billingOrganizationIdInput.value = `${record?.organization_id || ""}`;
+  elements.billingOrganizationNameInput.value = `${record?.name || ""}`;
+  elements.billingOrganizationPlanCodeInput.value = planCode;
+  elements.billingOrganizationSeatLimitInput.value =
+    record?.seat_limit == null ? "" : `${record.seat_limit}`;
+  elements.billingOrganizationStatusInput.value = `${record?.status || "active"}`;
+  elements.billingOrganizationSharedWorkspaceEnabledInput.checked =
+    record?.shared_workspace_enabled !== false;
+  elements.billingOrganizationSupportNotesInput.value = `${record?.support_notes || ""}`;
+}
+
+function renderBillingMembershipForm() {
+  const record = getSelectedBillingMembership();
+  elements.billingMembershipOrganizationIdInput.value = `${record?.organization_id || ""}`;
+  elements.billingMembershipUserIdInput.value = `${record?.user_id || ""}`;
+  elements.billingMembershipRoleInput.value = `${record?.role || "member"}`;
+  elements.billingMembershipStatusInput.value = `${record?.status || "active"}`;
+  elements.billingMembershipSeatConsumedInput.checked = record?.seat_consumed === true;
+}
+
+function renderBillingWorkspaceForm() {
+  const record = getSelectedBillingWorkspace();
+  elements.billingWorkspaceIdInput.value = `${record?.workspace_id || ""}`;
+  elements.billingWorkspaceNameInput.value = `${record?.name || ""}`;
+  elements.billingWorkspaceOrganizationIdInput.value = `${record?.organization_id || ""}`;
+  elements.billingWorkspaceOwnerUserIdInput.value = `${record?.user_id || ""}`;
+  elements.billingWorkspaceVisibilityInput.value = `${record?.visibility || "organization"}`;
+  elements.billingWorkspaceDefaultProjectPrivacyInput.value =
+    `${record?.default_project_privacy || "workspace"}`;
+  elements.billingWorkspaceStatusInput.value = `${record?.status || "active"}`;
+}
+
+function renderBillingCloudProjectForm() {
+  const record = getSelectedBillingCloudProject();
+  elements.billingCloudProjectIdInput.value = `${record?.project_id || ""}`;
+  elements.billingCloudProjectNameInput.value = `${record?.name || ""}`;
+  elements.billingCloudProjectWorkspaceIdInput.value = `${record?.workspace_id || ""}`;
+  elements.billingCloudProjectOrganizationIdInput.value = `${record?.organization_id || ""}`;
+  elements.billingCloudProjectOwnerUserIdInput.value = `${record?.user_id || ""}`;
+  elements.billingCloudProjectStorageModeInput.value =
+    `${record?.storage_mode || "metadata_only"}`;
+  elements.billingCloudProjectDocumentRevisionInput.value =
+    record?.document_revision == null ? "" : `${record.document_revision}`;
+  elements.billingCloudProjectStatusInput.value = `${record?.status || "active"}`;
+  elements.billingCloudProjectDocumentInput.value = "";
+}
+
+function buildBillingCatalogSummaryHtml({ plans, products, offers, support }) {
+  return [
+    buildBillingMiniMetricHtml("Plans", formatWholeNumber(plans.length || 0)),
+    buildBillingMiniMetricHtml("Products", formatWholeNumber(products.length || 0)),
+    buildBillingMiniMetricHtml("Offers", formatWholeNumber(offers.length || 0)),
+    buildBillingMiniMetricHtml(
+      "Support",
+      support?.support_email || support?.contact_label || t("detail.na"),
+    ),
+  ].join("");
+}
+
+function buildBillingMiniMetricHtml(label, value) {
+  return `
+    <div class="mini-metric">
+      <div class="mini-label">${escapeHtml(label)}</div>
+      <div class="mini-value">${escapeHtml(value)}</div>
+    </div>
+  `;
+}
+
+function buildBillingCatalogPreviewHtml({ plans, products, offers, support }) {
+  const planRows = plans.map((plan) => [
+    `<span class="table-code">${escapeHtml(plan.code || "")}</span>`,
+    escapeHtml(plan.label || plan.code || ""),
+    escapeHtml(plan.group || ""),
+    escapeHtml(summarizeMap(plan.limits || {})),
+  ]);
+  const productRows = products.map((product) => [
+    `<span class="table-code">${escapeHtml(product.code || "")}</span>`,
+    escapeHtml(product.plan_code || ""),
+    escapeHtml(`${product.type || ""} • ${product.billing_interval || ""}`.trim()),
+    escapeHtml(product.price_display || product.management_channel || t("detail.na")),
+  ]);
+  const offerRows = offers.map((offer) => [
+    `<span class="table-code">${escapeHtml(offer.code || "")}</span>`,
+    escapeHtml(offer.provider || ""),
+    escapeHtml(offer.product_code || ""),
+    escapeHtml(offer.provider_product_id || t("detail.na")),
+  ]);
+  return `
+    ${buildBillingPreviewTableSection("Plans", ["Code", "Label", "Group", "Limits"], planRows)}
+    ${buildBillingPreviewTableSection(
+      "Products",
+      ["Code", "Plan", "Type", "Price / Channel"],
+      productRows,
+    )}
+    ${buildBillingPreviewTableSection(
+      "Offers",
+      ["Code", "Provider", "Product", "Provider Product ID"],
+      offerRows,
+    )}
+    <section class="billing-preview-section">
+      <div class="subsection-header">
+        <div>
+          <p class="panel-label">Support</p>
+          <h3>Support links</h3>
+        </div>
+      </div>
+      <div class="detail-grid">
+        ${detailCardHtml("Support email", support?.support_email || t("detail.na"), { monospace: true })}
+        ${detailCardHtml("Contact label", support?.contact_label || t("detail.na"))}
+        ${detailCardHtml("Support URL", support?.support_url || t("detail.na"), { monospace: true })}
+        ${detailCardHtml("FAQ URL", support?.faq_url || t("detail.na"), { monospace: true })}
+        ${detailCardHtml(
+          "Manage subscription URL",
+          support?.manage_subscription_url || t("detail.na"),
+          { monospace: true },
+        )}
+        ${detailCardHtml(
+          "Default checkout URL",
+          support?.default_checkout_url || t("detail.na"),
+          { monospace: true },
+        )}
+      </div>
+    </section>
+  `;
+}
+
+function buildBillingPreviewTableSection(title, columns, rows) {
+  return `
+    <section class="billing-preview-section">
+      <div class="subsection-header">
+        <div>
+          <p class="panel-label">${escapeHtml(title)}</p>
+          <h3>${escapeHtml(title)}</h3>
+        </div>
+      </div>
+      <div class="compact-table-wrap">
+        <table class="billing-table billing-preview-table">
+          <thead>
+            <tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr>
+          </thead>
+          <tbody>
+            ${rows.length
+              ? rows
+                .map(
+                  (row) => `<tr>${row.map((value) => `<td>${value}</td>`).join("")}</tr>`,
+                )
+                .join("")
+              : buildBillingEmptyTableRow(columns.length, "No records.")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+function buildBillingEmptyTableRow(colspan, message) {
+  return `<tr><td colspan="${colspan}" class="table-empty">${escapeHtml(message)}</td></tr>`;
+}
+
+function buildBillingRecordMeta(count, label) {
+  const parts = [`${formatWholeNumber(count)} ${label}`];
+  if (state.collaborationConfigurable === false) {
+    parts.push("not configured");
+  }
+  return parts.join(" • ");
+}
+
+function renderBillingFeedback(node, feedback) {
+  node.textContent = feedback?.message || "";
+  node.className = feedback?.tone ? `panel-meta status-${feedback.tone}` : "panel-meta";
+}
+
+function summarizeMap(value) {
+  if (!value || typeof value !== "object") {
+    return t("detail.na");
+  }
+  const entries = Object.entries(value)
+    .filter(([, current]) => current !== null && current !== undefined && `${current}` !== "")
+    .slice(0, 4);
+  if (!entries.length) {
+    return t("detail.na");
+  }
+  return entries.map(([key, current]) => `${key}: ${current}`).join(" • ");
+}
+
+function buildBillingPlanCodeOptions(selectedValue) {
+  const options = Array.isArray(state.billingCatalog?.plans)
+    ? state.billingCatalog.plans.map((plan) => ({
+      value: `${plan.code || ""}`.trim(),
+      label: `${plan.label || plan.code || ""}`.trim(),
+    }))
+    : [];
+  if (selectedValue && !options.some((option) => option.value === selectedValue)) {
+    options.unshift({ value: selectedValue, label: selectedValue });
+  }
+  if (!options.length) {
+    options.push({ value: "studio", label: "Studio" });
+  }
+  return options
+    .map((option) => {
+      const selected = option.value === `${selectedValue || ""}` ? "selected" : "";
+      return `<option value="${escapeHtml(option.value)}" ${selected}>${escapeHtml(option.label)}</option>`;
+    })
+    .join("");
+}
+
+function syncSelectedBillingOrganization() {
+  if (!state.billingOrganizations.some((record) => record.organization_id === state.selectedBillingOrganizationId)) {
+    state.selectedBillingOrganizationId = "";
+  }
+}
+
+function syncSelectedBillingMembership() {
+  if (!state.billingMemberships.some((record) => billingMembershipKey(record) === state.selectedBillingMembershipKey)) {
+    state.selectedBillingMembershipKey = "";
+  }
+}
+
+function syncSelectedBillingWorkspace() {
+  if (!state.billingWorkspaces.some((record) => record.workspace_id === state.selectedBillingWorkspaceId)) {
+    state.selectedBillingWorkspaceId = "";
+  }
+}
+
+function syncSelectedBillingCloudProject() {
+  if (!state.billingCloudProjects.some((record) => record.project_id === state.selectedBillingCloudProjectId)) {
+    state.selectedBillingCloudProjectId = "";
+  }
+}
+
+function getSelectedBillingOrganization() {
+  return state.billingOrganizations.find(
+    (record) => record.organization_id === state.selectedBillingOrganizationId,
+  ) || null;
+}
+
+function getSelectedBillingMembership() {
+  return state.billingMemberships.find(
+    (record) => billingMembershipKey(record) === state.selectedBillingMembershipKey,
+  ) || null;
+}
+
+function getSelectedBillingWorkspace() {
+  return state.billingWorkspaces.find(
+    (record) => record.workspace_id === state.selectedBillingWorkspaceId,
+  ) || null;
+}
+
+function getSelectedBillingCloudProject() {
+  return state.billingCloudProjects.find(
+    (record) => record.project_id === state.selectedBillingCloudProjectId,
+  ) || null;
+}
+
+function billingMembershipKey(record) {
+  return `${record?.organization_id || ""}:${record?.user_id || ""}`;
+}
+
+function clearBillingOrganizationSelection() {
+  state.selectedBillingOrganizationId = "";
+  renderBillingOrganizations();
+}
+
+function clearBillingMembershipSelection() {
+  state.selectedBillingMembershipKey = "";
+  renderBillingMemberships();
+}
+
+function clearBillingWorkspaceSelection() {
+  state.selectedBillingWorkspaceId = "";
+  renderBillingWorkspaces();
+}
+
+function clearBillingCloudProjectSelection() {
+  state.selectedBillingCloudProjectId = "";
+  renderBillingCloudProjects();
+}
+
+function handleBillingOrganizationsTableClick(event) {
+  const row = event.target.closest("tr[data-organization-id]");
+  if (!row) {
+    return;
+  }
+  state.selectedBillingOrganizationId = `${row.dataset.organizationId || ""}`;
+  renderBillingOrganizations();
+}
+
+function handleBillingMembershipsTableClick(event) {
+  const row = event.target.closest("tr[data-membership-key]");
+  if (!row) {
+    return;
+  }
+  state.selectedBillingMembershipKey = `${row.dataset.membershipKey || ""}`;
+  renderBillingMemberships();
+}
+
+function handleBillingWorkspacesTableClick(event) {
+  const row = event.target.closest("tr[data-workspace-id]");
+  if (!row) {
+    return;
+  }
+  state.selectedBillingWorkspaceId = `${row.dataset.workspaceId || ""}`;
+  renderBillingWorkspaces();
+}
+
+function handleBillingCloudProjectsTableClick(event) {
+  const row = event.target.closest("tr[data-cloud-project-id]");
+  if (!row) {
+    return;
+  }
+  state.selectedBillingCloudProjectId = `${row.dataset.cloudProjectId || ""}`;
+  renderBillingCloudProjects();
+}
+
+async function handleBillingCatalogSubmit(event) {
+  event.preventDefault();
+  if (!tokens?.idToken || !canEditBillingCatalog()) {
+    return;
+  }
+
+  state.billingCatalogBusy = true;
+  state.billingCatalogFeedback = null;
+  updateBusyState();
+  setStatus(tMaybe("status.savingBillingCatalog", "Saving billing catalog settings..."), "info");
+
+  try {
+    const plans = parseJsonArrayInput(
+      elements.billingCatalogPlansInput.value,
+      "Plans JSON",
+    );
+    const products = parseJsonArrayInput(
+      elements.billingCatalogProductsInput.value,
+      "Products JSON",
+    );
+    const offers = parseJsonArrayInput(
+      elements.billingCatalogOffersInput.value,
+      "Offers JSON",
+    );
+    const payload = await fetchAdminJson(ADMIN_BILLING_CATALOG_PATH, {
+      method: "PUT",
+      body: JSON.stringify({
+        plans,
+        products,
+        offers,
+        support: {
+          support_email: `${elements.billingCatalogSupportEmailInput.value || ""}`.trim(),
+          support_url: `${elements.billingCatalogSupportUrlInput.value || ""}`.trim(),
+          faq_url: `${elements.billingCatalogFaqUrlInput.value || ""}`.trim(),
+          manage_subscription_url:
+            `${elements.billingCatalogManageSubscriptionUrlInput.value || ""}`.trim(),
+          refund_policy_url: `${elements.billingCatalogRefundPolicyUrlInput.value || ""}`.trim(),
+          contact_label: `${elements.billingCatalogContactLabelInput.value || ""}`.trim(),
+          default_checkout_url:
+            `${elements.billingCatalogDefaultCheckoutUrlInput.value || ""}`.trim(),
+        },
+      }),
+    });
+    state.billingCatalog = payload || null;
+    state.billingCatalogConfigurable = payload?.configurable !== false;
+    state.billingCatalogFeedback = {
+      tone: "success",
+      message: tMaybe("status.billingCatalogSaved", "Billing catalog settings saved."),
+    };
+    renderBillingCatalogSettings();
+    setStatus(tMaybe("status.billingCatalogSaved", "Billing catalog settings saved."), "success");
+  } catch (error) {
+    handleAdminRequestError(
+      error,
+      tMaybe("status.saveBillingCatalogFailed", "Could not save billing catalog settings."),
+    );
+    state.billingCatalogFeedback = {
+      tone: "error",
+      message: error.message || tMaybe("status.saveBillingCatalogFailed", "Could not save billing catalog settings."),
+    };
+    renderBillingCatalogSettings();
+  } finally {
+    state.billingCatalogBusy = false;
+    updateBusyState();
+  }
+}
+
+async function handleBillingOrganizationSubmit(event) {
+  event.preventDefault();
+  if (!tokens?.idToken || !canEditBillingControlPlane()) {
+    return;
+  }
+
+  state.billingOrganizationsBusy = true;
+  state.billingOrganizationFeedback = null;
+  updateBusyState();
+  setStatus(tMaybe("status.savingOrganization", "Saving organization..."), "info");
+
+  try {
+    const payload = await fetchAdminJson(ADMIN_BILLING_ORGANIZATIONS_PATH, {
+      method: "POST",
+      body: JSON.stringify({
+        organization_id: `${elements.billingOrganizationIdInput.value || ""}`.trim(),
+        name: `${elements.billingOrganizationNameInput.value || ""}`.trim(),
+        plan_code: `${elements.billingOrganizationPlanCodeInput.value || ""}`.trim(),
+        seat_limit: `${elements.billingOrganizationSeatLimitInput.value || ""}`.trim(),
+        status: `${elements.billingOrganizationStatusInput.value || ""}`.trim(),
+        shared_workspace_enabled: elements.billingOrganizationSharedWorkspaceEnabledInput.checked,
+        support_notes: `${elements.billingOrganizationSupportNotesInput.value || ""}`.trim(),
+      }),
+    });
+    if (payload.organization) {
+      state.selectedBillingOrganizationId = payload.organization.organization_id || "";
+      state.billingOrganizations = upsertByKey(
+        state.billingOrganizations,
+        payload.organization,
+        (record) => record.organization_id,
+      );
+    }
+    state.billingOrganizationFeedback = {
+      tone: "success",
+      message: tMaybe("status.organizationSaved", "Organization saved."),
+    };
+    renderBillingOrganizations();
+    setStatus(tMaybe("status.organizationSaved", "Organization saved."), "success");
+  } catch (error) {
+    handleAdminRequestError(error, tMaybe("status.saveOrganizationFailed", "Could not save organization."));
+    state.billingOrganizationFeedback = {
+      tone: "error",
+      message: error.message || tMaybe("status.saveOrganizationFailed", "Could not save organization."),
+    };
+    renderBillingOrganizations();
+  } finally {
+    state.billingOrganizationsBusy = false;
+    updateBusyState();
+  }
+}
+
+async function handleBillingMembershipSubmit(event) {
+  event.preventDefault();
+  if (!tokens?.idToken || !canEditBillingControlPlane()) {
+    return;
+  }
+
+  state.billingMembershipsBusy = true;
+  state.billingMembershipFeedback = null;
+  updateBusyState();
+  setStatus(tMaybe("status.savingMembership", "Saving membership..."), "info");
+
+  try {
+    const payload = await fetchAdminJson(ADMIN_BILLING_MEMBERSHIPS_PATH, {
+      method: "POST",
+      body: JSON.stringify({
+        organization_id: `${elements.billingMembershipOrganizationIdInput.value || ""}`.trim(),
+        user_id: `${elements.billingMembershipUserIdInput.value || ""}`.trim(),
+        role: `${elements.billingMembershipRoleInput.value || ""}`.trim(),
+        status: `${elements.billingMembershipStatusInput.value || ""}`.trim(),
+        seat_consumed: elements.billingMembershipSeatConsumedInput.checked,
+      }),
+    });
+    if (payload.membership) {
+      state.selectedBillingMembershipKey = billingMembershipKey(payload.membership);
+      state.billingMemberships = upsertByKey(
+        state.billingMemberships,
+        payload.membership,
+        billingMembershipKey,
+      );
+    }
+    state.billingMembershipFeedback = {
+      tone: "success",
+      message: tMaybe("status.membershipSaved", "Membership saved."),
+    };
+    renderBillingMemberships();
+    setStatus(tMaybe("status.membershipSaved", "Membership saved."), "success");
+  } catch (error) {
+    handleAdminRequestError(error, tMaybe("status.saveMembershipFailed", "Could not save membership."));
+    state.billingMembershipFeedback = {
+      tone: "error",
+      message: error.message || tMaybe("status.saveMembershipFailed", "Could not save membership."),
+    };
+    renderBillingMemberships();
+  } finally {
+    state.billingMembershipsBusy = false;
+    updateBusyState();
+  }
+}
+
+async function handleBillingWorkspaceSubmit(event) {
+  event.preventDefault();
+  if (!tokens?.idToken || !canEditBillingControlPlane()) {
+    return;
+  }
+
+  state.billingWorkspacesBusy = true;
+  state.billingWorkspaceFeedback = null;
+  updateBusyState();
+  setStatus(tMaybe("status.savingWorkspace", "Saving workspace..."), "info");
+
+  try {
+    const payload = await fetchAdminJson(ADMIN_BILLING_WORKSPACES_PATH, {
+      method: "POST",
+      body: JSON.stringify({
+        workspace_id: `${elements.billingWorkspaceIdInput.value || ""}`.trim(),
+        organization_id: `${elements.billingWorkspaceOrganizationIdInput.value || ""}`.trim(),
+        owner_user_id: `${elements.billingWorkspaceOwnerUserIdInput.value || ""}`.trim(),
+        name: `${elements.billingWorkspaceNameInput.value || ""}`.trim(),
+        visibility: `${elements.billingWorkspaceVisibilityInput.value || ""}`.trim(),
+        default_project_privacy:
+          `${elements.billingWorkspaceDefaultProjectPrivacyInput.value || ""}`.trim(),
+        status: `${elements.billingWorkspaceStatusInput.value || ""}`.trim(),
+      }),
+    });
+    if (payload.workspace) {
+      state.selectedBillingWorkspaceId = payload.workspace.workspace_id || "";
+      state.billingWorkspaces = upsertByKey(
+        state.billingWorkspaces,
+        payload.workspace,
+        (record) => record.workspace_id,
+      );
+    }
+    state.billingWorkspaceFeedback = {
+      tone: "success",
+      message: tMaybe("status.workspaceSaved", "Workspace saved."),
+    };
+    renderBillingWorkspaces();
+    setStatus(tMaybe("status.workspaceSaved", "Workspace saved."), "success");
+  } catch (error) {
+    handleAdminRequestError(error, tMaybe("status.saveWorkspaceFailed", "Could not save workspace."));
+    state.billingWorkspaceFeedback = {
+      tone: "error",
+      message: error.message || tMaybe("status.saveWorkspaceFailed", "Could not save workspace."),
+    };
+    renderBillingWorkspaces();
+  } finally {
+    state.billingWorkspacesBusy = false;
+    updateBusyState();
+  }
+}
+
+async function handleBillingCloudProjectSubmit(event) {
+  event.preventDefault();
+  if (!tokens?.idToken || !canEditBillingControlPlane()) {
+    return;
+  }
+
+  state.billingCloudProjectsBusy = true;
+  state.billingCloudProjectFeedback = null;
+  updateBusyState();
+  setStatus(tMaybe("status.savingCloudProject", "Saving cloud project..."), "info");
+
+  try {
+    const documentValue = `${elements.billingCloudProjectDocumentInput.value || ""}`.trim();
+    const documentPayload = documentValue ? parseJsonObjectInput(documentValue, "Document JSON") : null;
+    const payload = await fetchAdminJson(ADMIN_BILLING_CLOUD_PROJECTS_PATH, {
+      method: "POST",
+      body: JSON.stringify({
+        project_id: `${elements.billingCloudProjectIdInput.value || ""}`.trim(),
+        workspace_id: `${elements.billingCloudProjectWorkspaceIdInput.value || ""}`.trim(),
+        organization_id: `${elements.billingCloudProjectOrganizationIdInput.value || ""}`.trim(),
+        owner_user_id: `${elements.billingCloudProjectOwnerUserIdInput.value || ""}`.trim(),
+        name: `${elements.billingCloudProjectNameInput.value || ""}`.trim(),
+        storage_mode: `${elements.billingCloudProjectStorageModeInput.value || ""}`.trim(),
+        document_revision: `${elements.billingCloudProjectDocumentRevisionInput.value || ""}`.trim(),
+        status: `${elements.billingCloudProjectStatusInput.value || ""}`.trim(),
+        ...(documentPayload ? { document: documentPayload } : {}),
+      }),
+    });
+    if (payload.cloud_project) {
+      state.selectedBillingCloudProjectId = payload.cloud_project.project_id || "";
+      state.billingCloudProjects = upsertByKey(
+        state.billingCloudProjects,
+        payload.cloud_project,
+        (record) => record.project_id,
+      );
+    }
+    state.billingCloudProjectFeedback = {
+      tone: "success",
+      message: tMaybe("status.cloudProjectSaved", "Cloud project saved."),
+    };
+    renderBillingCloudProjects();
+    setStatus(tMaybe("status.cloudProjectSaved", "Cloud project saved."), "success");
+  } catch (error) {
+    handleAdminRequestError(
+      error,
+      tMaybe("status.saveCloudProjectFailed", "Could not save cloud project."),
+    );
+    state.billingCloudProjectFeedback = {
+      tone: "error",
+      message: error.message || tMaybe("status.saveCloudProjectFailed", "Could not save cloud project."),
+    };
+    renderBillingCloudProjects();
+  } finally {
+    state.billingCloudProjectsBusy = false;
+    updateBusyState();
+  }
+}
+
+function upsertByKey(list, record, getKey) {
+  const key = getKey(record);
+  const nextList = Array.isArray(list) ? [...list] : [];
+  const index = nextList.findIndex((candidate) => getKey(candidate) === key);
+  if (index >= 0) {
+    nextList[index] = record;
+  } else {
+    nextList.push(record);
+  }
+  return nextList.sort((left, right) =>
+    `${right.updated_at || right.created_at || ""}`.localeCompare(`${left.updated_at || left.created_at || ""}`),
+  );
+}
+
+function parseJsonArrayInput(value, label) {
+  let parsed;
+  try {
+    parsed = JSON.parse(value);
+  } catch (_) {
+    throw new Error(`${label} must be valid JSON.`);
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${label} must be a JSON array.`);
+  }
+  return parsed;
+}
+
+function parseJsonObjectInput(value, label) {
+  let parsed;
+  try {
+    parsed = JSON.parse(value);
+  } catch (_) {
+    throw new Error(`${label} must be valid JSON.`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${label} must be a JSON object.`);
+  }
+  return parsed;
 }
 
 function buildSelectOptions(options, selectedValue, { emptyLabel = "" } = {}) {
@@ -4396,7 +5664,53 @@ function updateBusyState() {
   elements.producerCaptureWhitelistSaveButton.textContent = state.producerCaptureWhitelistBusy
     ? t("action.saving")
     : t("action.saveProducerCaptureWhitelist");
+  setFormControlsDisabled(
+    elements.billingCatalogForm,
+    state.billingCatalogBusy || !signedIn || !canEditBillingCatalog(),
+  );
+  elements.billingCatalogSaveButton.disabled =
+    state.billingCatalogBusy || !signedIn || !canEditBillingCatalog();
+  elements.billingCatalogSaveButton.textContent = state.billingCatalogBusy
+    ? t("action.saving")
+    : tMaybe("action.saveBillingCatalog", "Save billing catalog");
+  setFormControlsDisabled(
+    elements.billingOrganizationForm,
+    state.billingOrganizationsBusy || !signedIn || !canEditBillingControlPlane(),
+  );
+  elements.billingOrganizationSaveButton.textContent = state.billingOrganizationsBusy
+    ? t("action.saving")
+    : tMaybe("action.saveOrganization", "Save organization");
+  setFormControlsDisabled(
+    elements.billingMembershipForm,
+    state.billingMembershipsBusy || !signedIn || !canEditBillingControlPlane(),
+  );
+  elements.billingMembershipSaveButton.textContent = state.billingMembershipsBusy
+    ? t("action.saving")
+    : tMaybe("action.saveMembership", "Save membership");
+  setFormControlsDisabled(
+    elements.billingWorkspaceForm,
+    state.billingWorkspacesBusy || !signedIn || !canEditBillingControlPlane(),
+  );
+  elements.billingWorkspaceSaveButton.textContent = state.billingWorkspacesBusy
+    ? t("action.saving")
+    : tMaybe("action.saveWorkspace", "Save workspace");
+  setFormControlsDisabled(
+    elements.billingCloudProjectForm,
+    state.billingCloudProjectsBusy || !signedIn || !canEditBillingControlPlane(),
+  );
+  elements.billingCloudProjectSaveButton.textContent = state.billingCloudProjectsBusy
+    ? t("action.saving")
+    : tMaybe("action.saveCloudProject", "Save cloud project");
   updateAiRuntimeConfirmButtons();
+}
+
+function setFormControlsDisabled(form, disabled) {
+  if (!form) {
+    return;
+  }
+  form.querySelectorAll("input, textarea, select, button").forEach((node) => {
+    node.disabled = disabled;
+  });
 }
 
 function setStatus(message, tone = "info") {
@@ -5173,6 +6487,11 @@ function resetAdminState() {
   state.aiPromptLimitsBusy = false;
   state.producerCaptureWhitelistBusy = false;
   state.aiRuntimeBusy = false;
+  state.billingCatalogBusy = false;
+  state.billingOrganizationsBusy = false;
+  state.billingMembershipsBusy = false;
+  state.billingWorkspacesBusy = false;
+  state.billingCloudProjectsBusy = false;
   state.deleteBusy = false;
   state.grantBusy = false;
   state.currentSearchQuery = "";
@@ -5197,6 +6516,26 @@ function resetAdminState() {
   state.producerCaptureWhitelistFeedback = null;
   state.aiRuntimeSettings = null;
   state.aiRuntimeFeedbackByFeature = {};
+  state.billingCatalog = null;
+  state.billingCatalogConfigurable = true;
+  state.billingCatalogFeedback = null;
+  state.billingOrganizations = [];
+  state.billingOrganizationsLoaded = false;
+  state.billingMemberships = [];
+  state.billingMembershipsLoaded = false;
+  state.billingWorkspaces = [];
+  state.billingWorkspacesLoaded = false;
+  state.billingCloudProjects = [];
+  state.billingCloudProjectsLoaded = false;
+  state.collaborationConfigurable = true;
+  state.selectedBillingOrganizationId = "";
+  state.selectedBillingMembershipKey = "";
+  state.selectedBillingWorkspaceId = "";
+  state.selectedBillingCloudProjectId = "";
+  state.billingOrganizationFeedback = null;
+  state.billingMembershipFeedback = null;
+  state.billingWorkspaceFeedback = null;
+  state.billingCloudProjectFeedback = null;
   state.livePresence = null;
   state.livePresenceRequestId = 0;
   state.analyticsRange = "7d";
@@ -5218,6 +6557,16 @@ function resetAdminState() {
   elements.aiPromptLimitsConfirmInput.value = "";
   elements.producerCaptureWhitelistInput.value = "";
   elements.producerCaptureWhitelistConfirmInput.value = "";
+  elements.billingCatalogSupportEmailInput.value = "";
+  elements.billingCatalogContactLabelInput.value = "";
+  elements.billingCatalogSupportUrlInput.value = "";
+  elements.billingCatalogFaqUrlInput.value = "";
+  elements.billingCatalogManageSubscriptionUrlInput.value = "";
+  elements.billingCatalogRefundPolicyUrlInput.value = "";
+  elements.billingCatalogDefaultCheckoutUrlInput.value = "";
+  elements.billingCatalogPlansInput.value = "";
+  elements.billingCatalogProductsInput.value = "";
+  elements.billingCatalogOffersInput.value = "";
   elements.adminUsersTableBody.innerHTML = `
     <tr>
       <td colspan="5" class="table-empty">${escapeHtml(t("empty.signInSearchUsers"))}</td>
@@ -5232,15 +6581,40 @@ function resetAdminState() {
   `;
   elements.feedbackInspector.className = "inspector-empty";
   elements.feedbackInspector.innerHTML = escapeHtml(t("empty.signInFeedback"));
+  elements.billingOrganizationsTableBody.innerHTML = buildBillingEmptyTableRow(
+    5,
+    tMaybe("empty.signInBillingControlPlane", "Sign in to load billing control-plane records."),
+  );
+  elements.billingMembershipsTableBody.innerHTML = buildBillingEmptyTableRow(
+    5,
+    tMaybe("empty.signInBillingControlPlane", "Sign in to load billing control-plane records."),
+  );
+  elements.billingWorkspacesTableBody.innerHTML = buildBillingEmptyTableRow(
+    5,
+    tMaybe("empty.signInBillingControlPlane", "Sign in to load billing control-plane records."),
+  );
+  elements.billingCloudProjectsTableBody.innerHTML = buildBillingEmptyTableRow(
+    5,
+    tMaybe("empty.signInBillingControlPlane", "Sign in to load billing control-plane records."),
+  );
   elements.adminUsersPageMeta.textContent = "";
   elements.trackedUsersPageMeta.textContent = "";
   elements.projectsPageMeta.textContent = "";
   elements.aiObservabilityTracePageMeta.textContent = "";
   elements.feedbackPageMeta.textContent = "";
+  elements.billingOrganizationsPageMeta.textContent = "";
+  elements.billingMembershipsPageMeta.textContent = "";
+  elements.billingWorkspacesPageMeta.textContent = "";
+  elements.billingCloudProjectsPageMeta.textContent = "";
   updateTabView();
   renderAiPromptLimitSettings();
   renderProducerCaptureWhitelistSettings();
   renderAiRuntimeSettings();
+  renderBillingCatalogSettings();
+  renderBillingOrganizations();
+  renderBillingMemberships();
+  renderBillingWorkspaces();
+  renderBillingCloudProjects();
 }
 
 function destroyAnalyticsChart(chartKey) {

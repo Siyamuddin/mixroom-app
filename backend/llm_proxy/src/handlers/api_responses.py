@@ -500,6 +500,15 @@ def _limit_type(limit_reason: str) -> str:
     return "daily"
 
 
+def _client_status_code_for_upstream_error(status_code: int) -> int:
+    # Provider 429s are transient upstream throttles, not Mixroom prompt quota
+    # failures. Returning them as 429 makes existing clients show prompt-limit
+    # copy, so expose them as service-unavailable responses instead.
+    if status_code == 429:
+        return 503
+    return status_code
+
+
 def _error_code_from_payload(payload: Dict[str, Any], status_code: int) -> str:
     error = payload.get("error")
     if isinstance(error, dict):
@@ -2629,8 +2638,13 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             tags={"service": "llm_proxy"},
         )
     response_payload["observability"] = _observability_payload()
+    client_status_code = _client_status_code_for_upstream_error(status_code)
+    if client_status_code != status_code:
+        response_payload["error"] = "LLM upstream rate limited. Please try again shortly."
+        response_payload["code"] = "llm_upstream_rate_limited"
     proxy_response = {
         **proxy_response,
+        "statusCode": client_status_code,
         "body": json.dumps(response_payload),
     }
     return _finalize(proxy_response, error=error_code)

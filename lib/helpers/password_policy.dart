@@ -56,6 +56,40 @@ class PasswordPolicy {
     return issues.first;
   }
 
+  static String? validateLocalized(BuildContext context, String password) {
+    final safe = password.trim();
+    String requirementText(String key) {
+      return L10n.translate(
+        context,
+        'Use {requirements}.',
+      ).replaceAll('{requirements}', L10n.translate(context, key));
+    }
+
+    if (safe.length < minLength) {
+      final lengthText = L10n.translate(
+        context,
+        'at least {minLength} characters',
+      ).replaceAll('{minLength}', '$minLength');
+      return L10n.translate(
+        context,
+        'Use {requirements}.',
+      ).replaceAll('{requirements}', lengthText);
+    }
+    if (requireUppercase && !RegExp(r'[A-Z]').hasMatch(safe)) {
+      return requirementText('an uppercase letter');
+    }
+    if (requireLowercase && !RegExp(r'[a-z]').hasMatch(safe)) {
+      return requirementText('a lowercase letter');
+    }
+    if (requireNumber && !RegExp(r'\d').hasMatch(safe)) {
+      return requirementText('a number');
+    }
+    if (requireSymbol && !RegExp(r'[^A-Za-z0-9]').hasMatch(safe)) {
+      return requirementText('a symbol');
+    }
+    return null;
+  }
+
   static String requirementsText() {
     final parts = <String>['at least $minLength characters'];
     if (requireUppercase) parts.add('an uppercase letter');

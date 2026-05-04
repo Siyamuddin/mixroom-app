@@ -1,17 +1,22 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:intl/intl.dart';
+import 'package:mixroom/config/app_api_config.dart';
 import 'package:mixroom/config/legal_config.dart';
 import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/helpers/feedback_service.dart';
+import 'package:mixroom/helpers/entitlement_service.dart';
+import 'package:mixroom/helpers/iap_service.dart';
 import 'package:mixroom/helpers/password_policy.dart';
 import 'package:mixroom/helpers/app_popup.dart';
-import 'package:mixroom/helpers/glass_ui_tokens.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/feedback_models.dart';
+import 'package:mixroom/models/entitlement_models.dart';
 import 'package:mixroom/models/app_user_models.dart';
 import 'package:mixroom/models/auth_user_profile.dart';
 import 'package:mixroom/models/music_profile_option.dart';
@@ -20,10 +25,13 @@ import 'package:mixroom/screens/legal_privacy_center.dart';
 import 'package:mixroom/widgets/app_responsive_body.dart';
 import 'package:mixroom/widgets/app_shell_figma.dart';
 import 'package:mixroom/widgets/auth_figma_shell.dart';
+import 'package:mixroom/widgets/account_subscription_surface.dart';
 import 'package:mixroom/widgets/email_verification_sheet.dart';
 import 'package:mixroom/widgets/language_selector.dart';
+import 'package:mixroom/widgets/mixroom_glass_dropdown.dart';
 import 'package:mixroom/widgets/remote_welcome_onboarding_screen.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class AccountScreen extends StatelessWidget {
   const AccountScreen({
@@ -241,11 +249,14 @@ class _AccountBodyState extends State<_AccountBody> {
             (widget.appUser?.musicProfile ?? '').trim().toLowerCase());
   }
 
-  String? _validateBirthdate(DateTime? birthdateUtc) {
+  String? _validateBirthdate(BuildContext context, DateTime? birthdateUtc) {
     if (birthdateUtc == null) return null;
     final latestAllowed = _latestAllowedBirthdateUtc();
     if (birthdateUtc.isAfter(latestAllowed)) {
-      return 'You must be at least ${LegalConfig.minimumSignupAgeYears} years old to use Mixroom.';
+      return L10n.translate(
+        context,
+        'You must be at least {age} years old to use Mixroom.',
+      ).replaceAll('{age}', '${LegalConfig.minimumSignupAgeYears}');
     }
     return null;
   }
@@ -290,7 +301,7 @@ class _AccountBodyState extends State<_AccountBody> {
       initialDate: initialDate,
       firstDate: _earliestSelectableBirthdateUtc(),
       lastDate: _latestAllowedBirthdateUtc(),
-      helpText: 'Select birthday',
+      helpText: L10n.translate(context, 'Select birthday'),
     );
     if (picked == null || !mounted) return;
     final normalized = DateTime.utc(picked.year, picked.month, picked.day);
@@ -330,7 +341,7 @@ class _AccountBodyState extends State<_AccountBody> {
       );
       return;
     }
-    final birthdateError = _validateBirthdate(_selectedBirthdateUtc);
+    final birthdateError = _validateBirthdate(context, _selectedBirthdateUtc);
     if (birthdateError != null) {
       showAppSnackBar(context, birthdateError);
       return;
@@ -468,7 +479,11 @@ class _AccountBodyState extends State<_AccountBody> {
     );
     final usernameValue = (widget.appUser?.username ?? '').trim();
     final bioValue = (widget.appUser?.bio ?? '').trim();
-    final musicProfileValue = musicProfileLabel(widget.appUser?.musicProfile);
+    final musicProfileLabelText =
+        musicProfileLabel(widget.appUser?.musicProfile);
+    final musicProfileValue = musicProfileLabelText.isEmpty
+        ? ''
+        : L10n.translate(context, musicProfileLabelText);
     final needsEmailVerification =
         widget.user.provider == AuthProviderType.email &&
             !widget.user.emailVerified;
@@ -1119,6 +1134,7 @@ class _SignInMethodRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final providerLabel = L10n.translate(context, provider.label);
     return Row(
       children: [
         Container(
@@ -1137,7 +1153,7 @@ class _SignInMethodRow extends StatelessWidget {
           ),
           alignment: Alignment.center,
           child: Text(
-            provider.label.substring(0, 1),
+            providerLabel.substring(0, 1),
             style: TextStyle(
               color: active ? const Color(0xFFC9DBFF) : Colors.white70,
               fontSize: 12,
@@ -1148,7 +1164,7 @@ class _SignInMethodRow extends StatelessWidget {
         const SizedBox(width: 10),
         Expanded(
           child: Text(
-            provider.label,
+            providerLabel,
             style: const TextStyle(
               color: Colors.white,
               fontSize: 12.5,
@@ -1737,7 +1753,7 @@ class _EditableMusicProfileRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!isEditing) {
-      return _ReadonlyRow(label: 'You are', value: value);
+      return _ReadonlyRow(label: 'What describes you', value: value);
     }
 
     return Padding(
@@ -1745,53 +1761,164 @@ class _EditableMusicProfileRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _AccountFieldLabel(label: 'You are'),
+          const _AccountFieldLabel(label: 'What describes you'),
           const SizedBox(width: 8),
           Expanded(
-            child: DropdownButtonFormField<String?>(
-              key: ValueKey<String>(selectedValue ?? '__unset__'),
-              initialValue: selectedValue,
-              items: <DropdownMenuItem<String?>>[
-                DropdownMenuItem<String?>(
-                  value: null,
-                  child: Text(L10n.translate(context, 'Not set')),
-                ),
-                ...kMusicProfileOptions.map(
-                  (option) => DropdownMenuItem<String?>(
-                    value: option.value,
-                    child: Text(option.label),
-                  ),
-                ),
-              ],
-              onChanged: enabled ? onChanged : null,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
-              dropdownColor: kMixroomGlassDropdownMenuColor,
-              iconEnabledColor: Colors.white70,
-              decoration: InputDecoration(
-                isDense: true,
-                hintText: L10n.translate(context, 'Select one'),
-                hintStyle: TextStyle(color: Colors.white.withOpacity(0.45)),
-                filled: true,
-                fillColor: Colors.white.withOpacity(enabled ? 0.06 : 0.03),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: Colors.white.withOpacity(0.12)),
-                ),
-                disabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: Colors.white.withOpacity(0.08)),
-                ),
-                focusedBorder: const OutlineInputBorder(
-                  borderRadius: BorderRadius.all(Radius.circular(10)),
-                  borderSide: BorderSide(color: Color(0xFF5F96FF), width: 1.1),
-                ),
-              ),
+            child: _MusicProfileDropdown(
+              enabled: enabled,
+              selectedValue: selectedValue,
+              onChanged: onChanged,
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+const String _kMusicProfileUnsetMenuValue = '__unset_music_profile__';
+
+class _MusicProfileDropdown extends StatelessWidget {
+  const _MusicProfileDropdown({
+    required this.enabled,
+    required this.selectedValue,
+    required this.onChanged,
+  });
+
+  final bool enabled;
+  final String? selectedValue;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final normalizedValue = (selectedValue ?? '').trim().toLowerCase();
+    final selectedLabel = normalizedValue.isEmpty
+        ? 'Not set'
+        : musicProfileLabel(normalizedValue).isEmpty
+            ? 'Not set'
+            : musicProfileLabel(normalizedValue);
+    final selectedMenuValue = normalizedValue.isEmpty
+        ? _kMusicProfileUnsetMenuValue
+        : normalizedValue;
+    final menuOptions = <({String value, String label})>[
+      (value: _kMusicProfileUnsetMenuValue, label: 'Not set'),
+      ...kMusicProfileOptions.map(
+        (option) => (value: option.value, label: option.label),
+      ),
+    ];
+
+    Future<void> showProfileMenu(BuildContext anchorContext) async {
+      if (!enabled) return;
+      final selected = await showMixroomGlassDropdown<String>(
+        anchorContext: anchorContext,
+        child: Builder(
+          builder: (menuContext) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: menuOptions.map((option) {
+                final isSelected = option.value == selectedMenuValue;
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => Navigator.pop(menuContext, option.value),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 9,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? Colors.white.withValues(alpha: 0.15)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(13),
+                      border: isSelected
+                          ? Border.all(
+                              color: Colors.white.withValues(alpha: 0.16),
+                            )
+                          : null,
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            L10n.translate(context, option.label),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontFamily: 'Pretendard',
+                              color: isSelected
+                                  ? Colors.white
+                                  : Colors.white.withValues(alpha: 0.76),
+                              fontSize: 13,
+                              fontWeight: isSelected
+                                  ? FontWeight.w700
+                                  : FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        if (isSelected) ...[
+                          const SizedBox(width: 8),
+                          const Icon(
+                            Icons.check_rounded,
+                            color: Color(0xFF8FB5FF),
+                            size: 17,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(growable: false),
+            );
+          },
+        ),
+      );
+      if (selected == null) return;
+      onChanged(selected == _kMusicProfileUnsetMenuValue ? null : selected);
+    }
+
+    return Builder(
+      builder: (anchorContext) {
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: enabled ? () => showProfileMenu(anchorContext) : null,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: enabled ? 0.06 : 0.03),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: enabled ? 0.12 : 0.08),
+              ),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    L10n.translate(context, selectedLabel),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: enabled
+                          ? Colors.white
+                          : Colors.white.withValues(alpha: 0.48),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  color: Colors.white.withValues(alpha: enabled ? 0.70 : 0.34),
+                  size: 20,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -1803,71 +1930,420 @@ class _DividerLine extends StatelessWidget {
   }
 }
 
-class _SubscriptionEntitlementCard extends StatelessWidget {
+class _SubscriptionEntitlementCard extends StatefulWidget {
   const _SubscriptionEntitlementCard();
 
   @override
+  State<_SubscriptionEntitlementCard> createState() =>
+      _SubscriptionEntitlementCardState();
+}
+
+class _SubscriptionEntitlementCardState
+    extends State<_SubscriptionEntitlementCard> {
+  bool _didBootstrap = false;
+  bool _actionBusy = false;
+  String? _inlineMessage;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_didBootstrap) return;
+    _didBootstrap = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_refreshData(silent: true));
+    });
+  }
+
+  Future<void> _refreshData({
+    bool silent = false,
+  }) async {
+    final entitlementService = context.read<EntitlementService>();
+    await entitlementService.refresh(force: !entitlementService.isInitialized);
+    if (!mounted) return;
+    if (!AppApiConfig.accountPlanBillingEnabled) {
+      if (!silent) {
+        showAppSnackBar(
+          context,
+          L10n.translate(context, 'Subscription details refreshed.'),
+          tone: AppPopupTone.success,
+        );
+      }
+      return;
+    }
+    final iapService = context.read<IapService>();
+    await entitlementService.refreshAccountSurface(
+      force: !entitlementService.isAccountSurfaceInitialized,
+    );
+    if (iapService.isMobilePlatformSupported) {
+      await iapService.initialize();
+      if (iapService.isInitialized && iapService.isStoreAvailable) {
+        await iapService.refreshProducts();
+      }
+    }
+    if (!silent && mounted) {
+      showAppSnackBar(
+        context,
+        L10n.translate(context, 'Subscription details refreshed.'),
+        tone: AppPopupTone.success,
+      );
+    }
+  }
+
+  Future<void> _runAction(
+    Future<void> Function() action, {
+    String? successMessage,
+  }) async {
+    if (_actionBusy) return;
+    setState(() {
+      _actionBusy = true;
+      _inlineMessage = null;
+    });
+    try {
+      await action();
+      if (!mounted) return;
+      if ((successMessage ?? '').trim().isNotEmpty) {
+        final translatedSuccess = L10n.translate(context, successMessage!);
+        showAppSnackBar(
+          context,
+          translatedSuccess,
+          tone: AppPopupTone.success,
+        );
+        setState(() {
+          _inlineMessage = translatedSuccess;
+        });
+      }
+    } catch (error) {
+      final message = error.toString().replaceFirst('Bad state: ', '').trim();
+      final translatedMessage = L10n.translate(
+        context,
+        message.isEmpty ? 'Something went wrong.' : message,
+      );
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        translatedMessage,
+        tone: AppPopupTone.error,
+      );
+      setState(() {
+        _inlineMessage = translatedMessage;
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _actionBusy = false;
+        });
+      }
+    }
+  }
+
+  String _platformKey() {
+    if (kIsWeb) return 'web';
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.iOS:
+        return 'ios';
+      case TargetPlatform.android:
+        return 'android';
+      default:
+        return 'web';
+    }
+  }
+
+  String _regionCode(BuildContext context) {
+    final locale = Localizations.maybeLocaleOf(context);
+    final countryCode = locale?.countryCode ??
+        WidgetsBinding.instance.platformDispatcher.locale.countryCode;
+    final normalized = (countryCode ?? '').trim().toUpperCase();
+    return normalized.isEmpty ? 'US' : normalized;
+  }
+
+  BillingProvider _platformProvider(String regionCode) {
+    if (kIsWeb) {
+      return regionCode == 'KR' ? BillingProvider.toss : BillingProvider.paddle;
+    }
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.iOS:
+        return BillingProvider.apple;
+      case TargetPlatform.android:
+        return BillingProvider.google;
+      default:
+        return regionCode == 'KR'
+            ? BillingProvider.toss
+            : BillingProvider.paddle;
+    }
+  }
+
+  Future<void> _launchUrlString(String value) async {
+    final normalized = value.trim();
+    if (normalized.isEmpty) {
+      throw StateError('This route is not configured yet.');
+    }
+    final uri = Uri.tryParse(normalized);
+    if (uri == null) {
+      throw StateError('This route is invalid.');
+    }
+    final mode = kIsWeb || uri.scheme == 'mailto'
+        ? LaunchMode.platformDefault
+        : LaunchMode.externalApplication;
+    final launched = await launchUrl(uri, mode: mode);
+    if (!launched) {
+      throw StateError('Could not open ${uri.toString()}.');
+    }
+  }
+
+  Future<void> _handleManageSubscription() async {
+    final entitlementService = context.read<EntitlementService>();
+    final support = entitlementService.effectiveBillingSupport;
+    final portalUrl = await entitlementService.fetchPortalUrl();
+    final target = (portalUrl ?? '').trim().isNotEmpty
+        ? portalUrl!
+        : support.manageSubscriptionUrl.trim().isNotEmpty
+            ? support.manageSubscriptionUrl
+            : support.defaultCheckoutUrl;
+    await _launchUrlString(target);
+  }
+
+  Future<void> _handleRestorePurchases() async {
+    final entitlementService = context.read<EntitlementService>();
+    final iapService = context.read<IapService>();
+    final provider = _platformProvider(_regionCode(context));
+    if (iapService.isMobilePlatformSupported) {
+      await iapService.initialize();
+      await iapService.restorePurchases();
+      final restoreError = (iapService.lastError ?? '').trim();
+      if (restoreError.isNotEmpty) {
+        throw StateError(restoreError);
+      }
+      await entitlementService.refresh(force: true);
+      await entitlementService.refreshAccountSurface(force: true);
+      return;
+    }
+    await entitlementService.restorePurchases(provider: provider);
+  }
+
+  Future<void> _handleContactSupport() async {
+    final support = context.read<EntitlementService>().effectiveBillingSupport;
+    if (support.supportUrl.trim().isNotEmpty) {
+      await _launchUrlString(support.supportUrl);
+      return;
+    }
+    if (support.supportEmail.trim().isNotEmpty) {
+      final uri = Uri(
+        scheme: 'mailto',
+        path: support.supportEmail,
+      );
+      final launched = await launchUrl(uri, mode: LaunchMode.platformDefault);
+      if (!launched) {
+        throw StateError('Could not open your email app.');
+      }
+      return;
+    }
+    throw StateError('Support contact is not configured yet.');
+  }
+
+  Future<void> _handleProductSelection(BillingProductDefinition product) async {
+    final entitlementService = context.read<EntitlementService>();
+    final iapService = context.read<IapService>();
+    final catalog = entitlementService.billingCatalog;
+    final regionCode = _regionCode(context);
+    final provider = _platformProvider(regionCode);
+
+    if (product.managementChannel == 'admin' || product.type == 'contract') {
+      await _handleContactSupport();
+      return;
+    }
+
+    final offer = catalog?.bestOfferForProduct(
+      productCode: product.code,
+      provider: provider,
+      regionCode: regionCode,
+    );
+
+    if (iapService.isMobilePlatformSupported) {
+      await iapService.initialize();
+      if (offer != null) {
+        final storeProduct =
+            iapService.findProductById(offer.providerProductId);
+        if (storeProduct != null) {
+          await iapService.buyProduct(storeProduct);
+          final purchaseError = (iapService.lastError ?? '').trim();
+          if (purchaseError.isNotEmpty) {
+            throw StateError(purchaseError);
+          }
+          await entitlementService.refresh(force: true);
+          await entitlementService.refreshAccountSurface(force: true);
+          return;
+        }
+      }
+      throw StateError(
+        'This store product is not configured for the current build yet.',
+      );
+    }
+
+    final checkout = await entitlementService.createWebCheckoutSession(
+      regionCode: regionCode,
+      productCode: product.code,
+    );
+    final checkoutUrl =
+        (checkout['checkout_url'] ?? '').toString().trim().isNotEmpty
+            ? (checkout['checkout_url'] ?? '').toString().trim()
+            : entitlementService.effectiveBillingSupport.defaultCheckoutUrl;
+    await _launchUrlString(checkoutUrl);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final entitlementService = context.watch<EntitlementService>();
+    if (!AppApiConfig.accountPlanBillingEnabled) {
+      final entitlement = entitlementService.entitlement ??
+          EntitlementSnapshot.free(userId: '');
+      return _SubscriptionComingSoonCard(
+        entitlement: entitlement,
+        isLoading: entitlementService.isLoading,
+        onRefresh: entitlementService.isLoading || _actionBusy
+            ? null
+            : () {
+                unawaited(
+                  _runAction(
+                    () => _refreshData(silent: true),
+                    successMessage: 'Subscription details refreshed.',
+                  ),
+                );
+              },
+      );
+    }
+
+    final iapService = context.watch<IapService>();
+    final regionCode = _regionCode(context);
+    final provider = _platformProvider(regionCode);
+
+    return AccountSubscriptionSurface(
+      entitlementService: entitlementService,
+      iapService: iapService,
+      platformKey: _platformKey(),
+      regionCode: regionCode,
+      platformProvider: provider,
+      isActionBusy: _actionBusy,
+      inlineMessage: _inlineMessage,
+      onRefresh: () {
+        unawaited(
+          _runAction(
+            () => _refreshData(silent: true),
+            successMessage: 'Subscription details refreshed.',
+          ),
+        );
+      },
+      onManageSubscription: () {
+        unawaited(_runAction(_handleManageSubscription));
+      },
+      onRestorePurchases: () {
+        unawaited(
+          _runAction(
+            _handleRestorePurchases,
+            successMessage:
+                'Restore request sent. Matching purchases will sync shortly.',
+          ),
+        );
+      },
+      onContactSupport: () {
+        unawaited(_runAction(_handleContactSupport));
+      },
+      onSelectProduct: (product) {
+        unawaited(_runAction(() => _handleProductSelection(product)));
+      },
+    );
+  }
+}
+
+class _SubscriptionComingSoonCard extends StatelessWidget {
+  const _SubscriptionComingSoonCard({
+    required this.entitlement,
+    required this.isLoading,
+    required this.onRefresh,
+  });
+
+  final EntitlementSnapshot entitlement;
+  final bool isLoading;
+  final VoidCallback? onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final planLabel = entitlement.effectivePlanLabel.trim().isEmpty
+        ? 'Free'
+        : entitlement.effectivePlanLabel;
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
+        color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Icon(
-                Icons.workspace_premium_rounded,
-                color: Color(0xFFA4C2FF),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                L10n.translate(context, 'Subscription'),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
+          const Icon(Icons.workspace_premium_rounded, color: Color(0xFFA4C2FF)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  L10n.translate(context, 'Subscription'),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
+                const SizedBox(height: 2),
+                Text(
+                  L10n.translate(
+                    context,
+                    'Plan and billing management is coming soon.',
+                  ),
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '${L10n.translate(context, 'Current access')}: ${L10n.translate(context, planLabel)}',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.58),
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            tooltip: L10n.translate(context, 'Refresh'),
+            onPressed: onRefresh,
+            style: IconButton.styleFrom(
+              backgroundColor: Colors.white.withValues(alpha: 0.08),
+              foregroundColor: Colors.white,
+              disabledForegroundColor: Colors.white38,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
               ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(
-            L10n.translate(context, 'Subscriptions are not enabled yet.'),
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12.5,
-              fontWeight: FontWeight.w600,
             ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            L10n.translate(
-              context,
-              'When billing opens, you will be able to upgrade and manage your plan from this screen.',
-            ),
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              height: 1.35,
-            ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 42,
-            child: OutlinedButton(
-              onPressed: null,
-              style: OutlinedButton.styleFrom(
-                disabledForegroundColor: Colors.white54,
-                side: BorderSide(color: Colors.white.withOpacity(0.12)),
-              ),
-              child: Text(L10n.translate(context, 'Coming soon')),
-            ),
+            icon: isLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        Color(0xFFF4F4F4),
+                      ),
+                    ),
+                  )
+                : const Icon(Icons.refresh_rounded, size: 18),
           ),
         ],
       ),
@@ -2041,6 +2517,27 @@ class _FeedbackEntryCard extends StatelessWidget {
   }
 }
 
+String _localizedSocialSignInDescription({
+  required String localeCode,
+  required String providerLabel,
+  required String email,
+}) {
+  switch (localeCode) {
+    case 'ko':
+      return email.isEmpty
+          ? '$providerLabel로 로그인합니다.'
+          : '$providerLabel로 로그인합니다. 이메일: $email';
+    case 'ja':
+      return email.isEmpty
+          ? '$providerLabelでサインインしています。'
+          : '$providerLabelでサインインしています。メール: $email';
+    default:
+      return email.isEmpty
+          ? 'You sign in with $providerLabel.'
+          : 'You sign in with $providerLabel using $email.';
+  }
+}
+
 class _SecurityAccessCard extends StatelessWidget {
   const _SecurityAccessCard({
     required this.user,
@@ -2053,14 +2550,22 @@ class _SecurityAccessCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isEmailAccount = user.provider == AuthProviderType.email;
-    final providerLabel = user.provider.label;
+    final providerLabel = L10n.translate(context, user.provider.label);
     final email = user.email.trim();
-    final socialDescription = email.isEmpty
-        ? 'You sign in with $providerLabel.'
-        : 'You sign in with $providerLabel using $email.';
+    final socialDescription = _localizedSocialSignInDescription(
+      localeCode: Localizations.localeOf(context).languageCode,
+      providerLabel: providerLabel,
+      email: email,
+    );
     final socialSupportingText = email.isEmpty
-        ? 'If you want to add a password later, sign out and use Forgot password from the sign-in screen.'
-        : 'If you want to add a password later, sign out and use Forgot password with that email on the sign-in screen.';
+        ? L10n.translate(
+            context,
+            'If you want to add a password later, sign out and use Forgot password from the sign-in screen.',
+          )
+        : L10n.translate(
+            context,
+            'If you want to add a password later, sign out and use Forgot password with that email on the sign-in screen.',
+          );
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
@@ -2088,12 +2593,12 @@ class _SecurityAccessCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  L10n.translate(
-                    context,
-                    isEmailAccount
-                        ? 'You sign in with email and password.'
-                        : socialDescription,
-                  ),
+                  isEmailAccount
+                      ? L10n.translate(
+                          context,
+                          'You sign in with email and password.',
+                        )
+                      : socialDescription,
                   style: const TextStyle(
                     color: Colors.white70,
                     fontSize: 12,
@@ -2104,10 +2609,7 @@ class _SecurityAccessCard extends StatelessWidget {
                 if (!isEmailAccount) ...[
                   const SizedBox(height: 6),
                   Text(
-                    L10n.translate(
-                      context,
-                      socialSupportingText,
-                    ),
+                    socialSupportingText,
                     style: const TextStyle(
                       color: Colors.white54,
                       fontSize: 11.5,
@@ -2188,7 +2690,8 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
       _showSnack('Please enter your current password.');
       return;
     }
-    final passwordIssue = PasswordPolicy.validate(newPassword);
+    final passwordIssue =
+        PasswordPolicy.validateLocalized(context, newPassword);
     if (passwordIssue != null) {
       _showSnack(passwordIssue);
       return;
@@ -2274,7 +2777,7 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
                   Text(
                     L10n.translate(
                       context,
-                      PasswordPolicy.requirementsText(),
+                      PasswordPolicy.requirementsTextLocalized(context),
                     ),
                     style: const TextStyle(
                       color: Colors.white70,
@@ -2295,7 +2798,7 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
                   const SizedBox(height: 10),
                   _PasswordField(
                     label: 'New Password',
-                    hint: 'At least ${PasswordPolicy.minLength} characters',
+                    hint: 'At least 8 characters',
                     controller: _newPasswordController,
                     obscureText: _hideNewPassword,
                     onToggleVisibility: () => setState(

@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:mixroom/helpers/glass_ui_tokens.dart';
+import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/providers/locale_provider.dart';
 import 'package:provider/provider.dart';
@@ -40,14 +41,16 @@ class MixroomAuthBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final useDesktopSplashFit = assetPath == kMixroomLaunchSplashAsset &&
+        PlatformCapabilities.current.isDesktop;
     return ColoredBox(
       color: const Color(0xFF090909),
       child: Image.asset(
         assetPath,
-        fit: BoxFit.cover,
+        fit: useDesktopSplashFit ? BoxFit.contain : BoxFit.cover,
         width: double.infinity,
         height: double.infinity,
-        alignment: Alignment.center,
+        alignment: useDesktopSplashFit ? Alignment.center : Alignment.center,
         filterQuality: FilterQuality.high,
       ),
     );
@@ -59,6 +62,56 @@ class MixroomLaunchSplash extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (PlatformCapabilities.current.isDesktop) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF090909),
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            const MixroomAuthBackground(
+              assetPath: kMixroomSignInBackgroundAsset,
+            ),
+            IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: <Color>[
+                      Colors.black.withValues(alpha: 0.22),
+                      Colors.transparent,
+                      const Color(0xFF2D7CC5).withValues(alpha: 0.14),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Image.asset(
+                    kMixroomBrandMarkAsset,
+                    width: 96,
+                    height: 96,
+                    fit: BoxFit.contain,
+                    filterQuality: FilterQuality.high,
+                  ),
+                  const SizedBox(height: 20),
+                  Image.asset(
+                    kMixroomWordmarkAsset,
+                    width: 238,
+                    height: 34,
+                    fit: BoxFit.contain,
+                    filterQuality: FilterQuality.high,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return const Scaffold(
       backgroundColor: Color(0xFF090909),
       body: SizedBox.expand(

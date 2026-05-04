@@ -25,6 +25,9 @@ Future<AudioTrack> _buildMidiTrack(List<MidiNote> notes) {
 Widget _buildEditor({
   required AudioTrack clip,
   required MidiCommitCallback onCommit,
+  bool isRecording = false,
+  PianoKeyDownCallback? onKeyboardNoteDown,
+  PianoKeyUpCallback? onKeyboardNoteUp,
 }) {
   return MaterialApp(
     home: Material(
@@ -39,12 +42,16 @@ Widget _buildEditor({
             beatsPerBar: 4,
             projectPlayheadMs: 0,
             isPlaying: false,
+            isRecording: isRecording,
             magnetEnabled: true,
             quantizeDivisionsPerBar: 4,
             fullscreen: false,
             onFullscreenChanged: (_) {},
             onClose: () {},
             onCommit: onCommit,
+            onScrubRequested: (_) {},
+            onKeyboardNoteDown: onKeyboardNoteDown,
+            onKeyboardNoteUp: onKeyboardNoteUp,
           ),
         ),
       ),
@@ -66,7 +73,7 @@ Future<void> _boxSelectNotes(WidgetTester tester) async {
   );
   await tester.pump();
   await gesture.up();
-  await tester.pumpAndSettle();
+  await tester.pump(const Duration(milliseconds: 120));
 }
 
 MidiNote _noteById(List<MidiNote> notes, String id) {
@@ -107,7 +114,7 @@ void main() {
         },
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 120));
 
     await _boxSelectNotes(tester);
 
@@ -128,7 +135,7 @@ void main() {
     await moveGesture.moveBy(const Offset(56, 0));
     await tester.pump();
     await moveGesture.up();
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 120));
 
     final afterMove = tester.getTopLeft(noteAFinder);
     expect(afterMove.dx, greaterThan(beforeMove.dx));
@@ -170,7 +177,7 @@ void main() {
         },
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 120));
 
     await _boxSelectNotes(tester);
 
@@ -184,7 +191,7 @@ void main() {
     await resizeGesture.moveBy(const Offset(56, 0));
     await tester.pump();
     await resizeGesture.up();
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 120));
 
     final afterResize =
         tester.getSize(find.byKey(const ValueKey<String>('piano_note_a')));
@@ -224,7 +231,7 @@ void main() {
           }) async {},
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 120));
     }
 
     await pumpEditor();
@@ -250,5 +257,210 @@ void main() {
 
     expect(afterTopLeft.dx, greaterThan(beforeTopLeft.dx));
     expect(afterSize.width, greaterThan(beforeSize.width));
+  });
+
+  testWidgets('two-finger pinch zoom scales the grid monotonically',
+      (tester) async {
+    final clip = await _buildMidiTrack(<MidiNote>[
+      MidiNote(
+        id: 'a',
+        pitch: 84,
+        startBeat: 2,
+        lengthBeats: 1,
+        velocity: 0.7,
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+
+    final noteFinder = find.byKey(const ValueKey<String>('piano_note_a'));
+    final gridTopLeft = tester.getTopLeft(
+        find.byKey(const ValueKey<String>('piano_roll_grid_canvas')));
+    final pinchCenter = gridTopLeft + const Offset(260, 160);
+    final initialWidth = tester.getSize(noteFinder).width;
+
+    final first = await tester.startGesture(
+      pinchCenter + const Offset(-28, -18),
+      pointer: 11,
+      kind: PointerDeviceKind.touch,
+    );
+    await tester.pump();
+    final second = await tester.startGesture(
+      pinchCenter + const Offset(28, 18),
+      pointer: 12,
+      kind: PointerDeviceKind.touch,
+    );
+    await tester.pump();
+
+    await first.moveBy(const Offset(-24, -16));
+    await second.moveBy(const Offset(24, 16));
+    await tester.pump();
+    final firstZoomWidth = tester.getSize(noteFinder).width;
+
+    await first.moveBy(const Offset(-24, -16));
+    await second.moveBy(const Offset(24, 16));
+    await tester.pump();
+    final secondZoomWidth = tester.getSize(noteFinder).width;
+
+    await first.up();
+    await second.up();
+    await tester.pump(const Duration(milliseconds: 120));
+
+    expect(firstZoomWidth, greaterThan(initialWidth));
+    expect(secondZoomWidth, greaterThanOrEqualTo(firstZoomWidth));
+  });
+
+  testWidgets('two-finger pinch zoom out shrinks the grid monotonically',
+      (tester) async {
+    final clip = await _buildMidiTrack(<MidiNote>[
+      MidiNote(
+        id: 'a',
+        pitch: 84,
+        startBeat: 2,
+        lengthBeats: 1,
+        velocity: 0.7,
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+
+    final noteFinder = find.byKey(const ValueKey<String>('piano_note_a'));
+    final gridTopLeft = tester.getTopLeft(
+        find.byKey(const ValueKey<String>('piano_roll_grid_canvas')));
+    final pinchCenter = gridTopLeft + const Offset(260, 160);
+    final initialWidth = tester.getSize(noteFinder).width;
+
+    final first = await tester.startGesture(
+      pinchCenter + const Offset(-120, -80),
+      pointer: 21,
+      kind: PointerDeviceKind.touch,
+    );
+    await tester.pump();
+    final second = await tester.startGesture(
+      pinchCenter + const Offset(120, 80),
+      pointer: 22,
+      kind: PointerDeviceKind.touch,
+    );
+    await tester.pump();
+
+    await first.moveBy(const Offset(28, 18));
+    await second.moveBy(const Offset(-28, -18));
+    await tester.pump();
+    final firstZoomWidth = tester.getSize(noteFinder).width;
+
+    await first.moveBy(const Offset(28, 18));
+    await second.moveBy(const Offset(-28, -18));
+    await tester.pump();
+    final secondZoomWidth = tester.getSize(noteFinder).width;
+
+    await first.up();
+    await second.up();
+    await tester.pump(const Duration(milliseconds: 120));
+
+    expect(firstZoomWidth, lessThan(initialWidth));
+    expect(secondZoomWidth, lessThanOrEqualTo(firstZoomWidth));
+  });
+
+  testWidgets('piano key retriggers when a previous pointer is stuck',
+      (tester) async {
+    final clip = await _buildMidiTrack(<MidiNote>[]);
+    final events = <String>[];
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        isRecording: true,
+        onKeyboardNoteDown: (requestedClip, pitch, velocity) async {
+          events.add('down:$pitch');
+        },
+        onKeyboardNoteUp: (requestedClip, pitch) async {
+          events.add('up:$pitch');
+        },
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+
+    final keyCenter = tester.getCenter(find.text('C6'));
+    final first = await tester.startGesture(
+      keyCenter,
+      pointer: 31,
+      kind: PointerDeviceKind.touch,
+    );
+    await tester.pump();
+    final second = await tester.startGesture(
+      keyCenter,
+      pointer: 32,
+      kind: PointerDeviceKind.touch,
+    );
+    await tester.pump();
+
+    await first.up();
+    await second.up();
+    await tester.pump(const Duration(milliseconds: 120));
+
+    expect(events.take(3), <String>['down:84', 'up:84', 'down:84']);
+  });
+
+  testWidgets('recording mode renders notes from the live clip model',
+      (tester) async {
+    final clip = await _buildMidiTrack(const <MidiNote>[]);
+
+    Widget editor() => _buildEditor(
+          clip: clip,
+          isRecording: true,
+          onCommit: ({
+            required List<MidiNote> notes,
+            required Map<String, double> instrumentParams,
+            required String instrumentId,
+            required String instrumentName,
+          }) async {},
+        );
+
+    await tester.pumpWidget(editor());
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(find.byKey(const ValueKey<String>('piano_note_live')), findsNothing);
+
+    clip.midiNotes = <MidiNote>[
+      MidiNote(
+        id: 'live',
+        pitch: 84,
+        startBeat: 1,
+        lengthBeats: 0.5,
+        velocity: 0.8,
+      ),
+    ];
+    await tester.pumpWidget(editor());
+    await tester.pump(const Duration(milliseconds: 120));
+
+    expect(
+        find.byKey(const ValueKey<String>('piano_note_live')), findsOneWidget);
   });
 }

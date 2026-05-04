@@ -7,6 +7,7 @@ Today it owns:
 - app-user bootstrap and profile endpoints
 - native social sign-in completion against Cognito
 - entitlement and billing APIs
+- billing catalog and collaboration APIs
 - admin overview APIs
 
 It still contains the in-house subscription core that normalizes Apple IAP, Google IAP, Paddle, and Toss into one canonical entitlement record per Cognito user.
@@ -16,14 +17,26 @@ It still contains the in-house subscription core that normalizes Apple IAP, Goog
 - Canonical domain model for plans/providers/statuses.
 - Client APIs:
 - `GET /v1/entitlements/me`
+- `GET /v1/billing/catalog`
 - `GET /v1/users/me`
 - `PATCH /v1/users/me`
 - `DELETE /v1/users/me`
+- `GET /v1/organizations/me`
+- `GET /v1/workspaces/me`
+- `GET /v1/cloud-projects/me`
+- `GET /v1/cloud-projects/{project_id}`
+- `PUT /v1/cloud-projects/{project_id}`
 - `POST /v1/billing/web/checkout-session`
   - `POST /v1/billing/mobile/apple/verify`
   - `POST /v1/billing/mobile/google/verify`
   - `POST /v1/billing/restore`
   - `GET /v1/billing/portal-url`
+- Admin APIs:
+  - `GET|PUT /v1/internal/admin/settings/billing-catalog`
+  - `GET|POST /v1/internal/admin/billing/organizations`
+  - `GET|POST /v1/internal/admin/billing/memberships`
+  - `GET|POST /v1/internal/admin/billing/workspaces`
+  - `GET|POST /v1/internal/admin/billing/cloud-projects`
 - Webhook ingestion:
   - `POST /v1/webhooks/apple`
   - `POST /v1/webhooks/google`
@@ -95,10 +108,12 @@ Environment variables (set by template and per-stage overrides):
 - `USERS_TABLE`
 - `USERNAME_CLAIMS_TABLE`
 - `CATALOG_MAPPINGS_TABLE`
+- `COLLABORATION_TABLE`
 - `CUSTOMER_LINKS_TABLE`
 - `PURCHASE_TOKENS_TABLE`
 - `RECONCILIATION_JOBS_TABLE`
 - `PROJECTION_QUEUE_URL`
+- `CLOUD_PROJECT_DOCUMENTS_BUCKET`
 - `AWS_REGION`
 - `ALLOW_STUDIO_TIER`
 
@@ -115,11 +130,16 @@ Provider secrets should be stored in Secrets Manager and read by handlers:
 - `GET /v1/users/me` auto-creates or refreshes the app-level user row from verified Cognito claims.
 - `PATCH /v1/users/me` updates app-profile fields like username and bio.
 - `DELETE /v1/users/me` deletes Mixroom-side user/profile/link data, but intentionally refuses if the user still has an active paid subscription.
+- `GET /v1/billing/catalog` is now the source of truth for visible plans, products, offers, and support URLs. The hardcoded `free/pro/studio` tier is preserved only as the compatibility rail for the existing projector.
+- `GET /v1/organizations/me`, `GET /v1/workspaces/me`, and `GET /v1/cloud-projects/me` expose the shared-workspace and cloud-project layer used by Studio, Enterprise, and Education plans.
+- `GET|PUT /v1/cloud-projects/{project_id}` adds a minimal authenticated cloud-project document rail with optimistic locking via `expected_revision`.
+- The admin billing endpoints are the intended control plane for plan configuration, manual contract activation, org seats, workspaces, and cloud-project metadata.
 - Username uniqueness is enforced server-side with a dedicated case-insensitive username-claim table.
 - Mobile policy is supported by design: no external checkout requirement on iOS/Android clients.
 - Apple purchases are verified through signed transaction JWS or legacy receipt fallback.
 - Google purchases are verified against the Play Developer API.
 - Apple server notifications and Google RTDN are intended to be the canonical renewal/refund/revoke sources once configured.
+- Team-plan cloud projects are intentionally split from telemetry. Use `COLLABORATION_TABLE` for authoritative org/workspace/project metadata and `CLOUD_PROJECT_DOCUMENTS_BUCKET` for versioned project document blobs.
 - The backend now verifies Cognito JWTs itself when API Gateway authorizers are not present.
 - Event projector is deterministic and idempotent; stale revisions do not overwrite newer entitlement snapshots.
 

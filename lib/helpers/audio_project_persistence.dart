@@ -5,15 +5,49 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
-import 'project_manager.dart';
-
 enum AudioProjectSaveMode {
   autosave,
   checkpoint,
 }
 
+enum AudioProjectLoadSource {
+  primary,
+  autosaveBackup,
+  checkpointBackup,
+}
+
+class AudioProjectRecoverySnapshot {
+  const AudioProjectRecoverySnapshot({
+    required this.mode,
+    required this.file,
+    required this.modifiedAt,
+  });
+
+  final AudioProjectSaveMode mode;
+  final File file;
+  final DateTime modifiedAt;
+}
+
+class AudioProjectLoadResult {
+  const AudioProjectLoadResult({
+    required this.projectState,
+    required this.source,
+    required this.availableSnapshots,
+    this.sourceFile,
+    this.warningMessage,
+  });
+
+  final Map<String, dynamic> projectState;
+  final AudioProjectLoadSource source;
+  final List<AudioProjectRecoverySnapshot> availableSnapshots;
+  final File? sourceFile;
+  final String? warningMessage;
+
+  bool get usedRecoveryBackup => source != AudioProjectLoadSource.primary;
+}
+
 abstract class AudioProjectPersistence {
-  Future<Map<String, dynamic>> loadProjectState(Directory projectDir);
+  Future<AudioProjectLoadResult> loadProjectState(Directory projectDir);
 
   Future<void> saveProjectState({
     required Directory projectDir,
@@ -23,9 +57,43 @@ abstract class AudioProjectPersistence {
 }
 
 class JsonAudioProjectPersistence implements AudioProjectPersistence {
+  static const String _recoveryDirName = '.mixroom_recovery';
+  static const int _autosaveHistoryLimit = 8;
+  static const int _checkpointHistoryLimit = 6;
+
   @override
-  Future<Map<String, dynamic>> loadProjectState(Directory projectDir) {
-    return ProjectManager.readProjectJson(projectDir);
+  Future<AudioProjectLoadResult> loadProjectState(Directory projectDir) async {
+    final primaryFile = File(p.join(projectDir.path, 'project.json'));
+    final snapshots = await _listRecoverySnapshots(projectDir);
+
+    try {
+      final decoded = await _readProjectFile(primaryFile);
+      return AudioProjectLoadResult(
+        projectState: decoded,
+        source: AudioProjectLoadSource.primary,
+        sourceFile: primaryFile,
+        availableSnapshots: snapshots,
+      );
+    } catch (primaryError) {
+      for (final fallback in snapshots) {
+        try {
+          final decoded = await _readProjectFile(fallback.file);
+          return AudioProjectLoadResult(
+            projectState: decoded,
+            source: fallback.mode == AudioProjectSaveMode.autosave
+                ? AudioProjectLoadSource.autosaveBackup
+                : AudioProjectLoadSource.checkpointBackup,
+            sourceFile: fallback.file,
+            availableSnapshots: snapshots,
+            warningMessage:
+                'Recovered project from ${fallback.mode.name} backup after the primary project file could not be read.',
+          );
+        } catch (_) {
+          continue;
+        }
+      }
+      rethrow;
+    }
   }
 
   @override
@@ -48,12 +116,103 @@ class JsonAudioProjectPersistence implements AudioProjectPersistence {
     await temp.writeAsString(encoded, flush: true);
     try {
       await temp.rename(target.path);
-      return;
     } on FileSystemException {
       if (await target.exists()) {
         await target.delete();
       }
       await temp.rename(target.path);
+    }
+    await _writeRecoverySnapshot(
+      projectDir: projectDir,
+      encodedProjectState: encoded,
+      mode: mode,
+    );
+  }
+
+  Future<Map<String, dynamic>> _readProjectFile(File file) async {
+    final decoded = jsonDecode(await file.readAsString());
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException(
+          'Project state must decode to a JSON object.');
+    }
+    return decoded;
+  }
+
+  Directory _recoveryDir(
+    Directory projectDir,
+    AudioProjectSaveMode mode,
+  ) {
+    return Directory(
+      p.join(projectDir.path, _recoveryDirName, mode.name),
+    );
+  }
+
+  Future<List<AudioProjectRecoverySnapshot>> _listRecoverySnapshots(
+    Directory projectDir,
+  ) async {
+    final snapshots = <AudioProjectRecoverySnapshot>[];
+    for (final mode in AudioProjectSaveMode.values) {
+      final dir = _recoveryDir(projectDir, mode);
+      if (!await dir.exists()) continue;
+      await for (final entity in dir.list(followLinks: false)) {
+        if (entity is! File || !entity.path.toLowerCase().endsWith('.json')) {
+          continue;
+        }
+        final stat = await entity.stat();
+        snapshots.add(
+          AudioProjectRecoverySnapshot(
+            mode: mode,
+            file: entity,
+            modifiedAt: stat.modified,
+          ),
+        );
+      }
+    }
+    snapshots.sort((a, b) => b.modifiedAt.compareTo(a.modifiedAt));
+    return snapshots;
+  }
+
+  Future<void> _writeRecoverySnapshot({
+    required Directory projectDir,
+    required String encodedProjectState,
+    required AudioProjectSaveMode mode,
+  }) async {
+    final dir = _recoveryDir(projectDir, mode);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    final file = File(
+      p.join(
+        dir.path,
+        '${DateTime.now().millisecondsSinceEpoch}_${mode.name}.json',
+      ),
+    );
+    await file.writeAsString(encodedProjectState, flush: true);
+    await _trimRecoverySnapshots(projectDir, mode);
+  }
+
+  Future<void> _trimRecoverySnapshots(
+    Directory projectDir,
+    AudioProjectSaveMode mode,
+  ) async {
+    final dir = _recoveryDir(projectDir, mode);
+    if (!await dir.exists()) return;
+    final files = await dir
+        .list(followLinks: false)
+        .where((entity) => entity is File)
+        .cast<File>()
+        .toList();
+    files.sort(
+      (a, b) => b.path.toLowerCase().compareTo(a.path.toLowerCase()),
+    );
+    final maxCount = switch (mode) {
+      AudioProjectSaveMode.autosave => _autosaveHistoryLimit,
+      AudioProjectSaveMode.checkpoint => _checkpointHistoryLimit,
+    };
+    for (var i = maxCount; i < files.length; i++) {
+      try {
+        await files[i].delete();
+      } catch (_) {}
     }
   }
 }

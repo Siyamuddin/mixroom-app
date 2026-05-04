@@ -1051,6 +1051,16 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       return;
     }
 
+    if (method_call.method_name() == "setClipExtraGainLinear") {
+      const int clip = FindInt(args, "clip", 0);
+      const float gain = static_cast<float>(FindDouble(args, "gain", 1.0));
+      CallOnMessageThreadSync([clip, gain] {
+        JuceEngine::get().setClipExtraGainLinear(clip, gain);
+      });
+      result->Success(flutter::EncodableValue());
+      return;
+    }
+
     if (method_call.method_name() == "setClipPan") {
       const int clip = FindInt(args, "clip", 0);
       const float pan = static_cast<float>(FindDouble(args, "pan", 0.0));

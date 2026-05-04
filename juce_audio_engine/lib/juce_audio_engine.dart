@@ -43,6 +43,62 @@ class JuceEngineCapabilities {
   }
 }
 
+class JuceEngineDiagnostics {
+  const JuceEngineDiagnostics({
+    required this.sampleRate,
+    required this.bufferSize,
+    required this.cpuUsage,
+    required this.pluginsScanned,
+    required this.knownPluginCount,
+    required this.pluginScanFailureCount,
+    required this.pluginScanFailures,
+    required this.rowCount,
+    required this.clipCount,
+    required this.inputDeviceName,
+    required this.outputDeviceName,
+    required this.inputChannelCount,
+    required this.outputChannelCount,
+  });
+
+  final double sampleRate;
+  final int bufferSize;
+  final double cpuUsage;
+  final bool pluginsScanned;
+  final int knownPluginCount;
+  final int pluginScanFailureCount;
+  final List<String> pluginScanFailures;
+  final int rowCount;
+  final int clipCount;
+  final String inputDeviceName;
+  final String outputDeviceName;
+  final int inputChannelCount;
+  final int outputChannelCount;
+
+  factory JuceEngineDiagnostics.fromMap(Map<String, dynamic> map) {
+    return JuceEngineDiagnostics(
+      sampleRate: (map['sampleRate'] as num?)?.toDouble() ?? 0.0,
+      bufferSize: (map['bufferSize'] as num?)?.toInt() ?? 0,
+      cpuUsage: (map['cpuUsage'] as num?)?.toDouble() ?? 0.0,
+      pluginsScanned: map['pluginsScanned'] == true,
+      knownPluginCount: (map['knownPluginCount'] as num?)?.toInt() ?? 0,
+      pluginScanFailureCount:
+          (map['pluginScanFailureCount'] as num?)?.toInt() ?? 0,
+      pluginScanFailures:
+          ((map['pluginScanFailures'] as List?) ?? const <Object?>[])
+              .whereType<String>()
+              .map((value) => value.trim())
+              .where((value) => value.isNotEmpty)
+              .toList(growable: false),
+      rowCount: (map['rowCount'] as num?)?.toInt() ?? 0,
+      clipCount: (map['clipCount'] as num?)?.toInt() ?? 0,
+      inputDeviceName: map['inputDeviceName']?.toString() ?? '',
+      outputDeviceName: map['outputDeviceName']?.toString() ?? '',
+      inputChannelCount: (map['inputChannelCount'] as num?)?.toInt() ?? 0,
+      outputChannelCount: (map['outputChannelCount'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
 enum AudioRouteKind {
   unknown,
   speaker,
@@ -115,6 +171,8 @@ class JuceAudioEngine {
       .receiveBroadcastStream()
       .cast<Map<dynamic, dynamic>>()
       .map((e) => Map<String, dynamic>.from(e));
+
+  static Stream<Map<String, dynamic>> get eventsStream => _events;
 
   static void initialiseEventListeners() {
     try {
@@ -468,7 +526,7 @@ class JuceAudioEngine {
         return const JuceEngineCapabilities(
           externalPluginHosting: true,
           supportedPluginFormats: <String>['AU', 'VST3'],
-          nativePluginEditor: false,
+          nativePluginEditor: true,
         );
       case TargetPlatform.windows:
         return const JuceEngineCapabilities(
@@ -503,9 +561,13 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<List<Map<String, dynamic>>> scanPlugins() async {
+  static Future<List<Map<String, dynamic>>> scanPlugins({
+    List<String>? searchPaths,
+  }) async {
     try {
-      final result = await _ch.invokeMethod<List<dynamic>>('scanPlugins');
+      final result = await _ch.invokeMethod<List<dynamic>>('scanPlugins', {
+        if (searchPaths != null) 'searchPaths': searchPaths,
+      });
       final normalized = <Map<String, dynamic>>[];
       if (result == null) return normalized;
       for (final item in result) {
@@ -530,6 +592,9 @@ class JuceAudioEngine {
         if (manufacturer.isNotEmpty) out['manufacturer'] = manufacturer;
         final category = raw['category']?.toString().trim() ?? '';
         if (category.isNotEmpty) out['category'] = category;
+        if (raw['isInstrument'] is bool) {
+          out['isInstrument'] = raw['isInstrument'] == true;
+        }
 
         normalized.add(out);
       }
@@ -540,6 +605,113 @@ class JuceAudioEngine {
     } on PlatformException catch (e) {
       _logError('scanPlugins', e);
       return <Map<String, dynamic>>[];
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> rescanPlugins({
+    List<String>? searchPaths,
+  }) async {
+    try {
+      final result = await _ch.invokeMethod<List<dynamic>>('rescanPlugins', {
+        if (searchPaths != null) 'searchPaths': searchPaths,
+      });
+      final normalized = <Map<String, dynamic>>[];
+      if (result == null) return normalized;
+      for (final item in result) {
+        if (item is! Map) continue;
+        final raw = Map<String, dynamic>.from(item);
+        final rawId = raw['id']?.toString().trim() ?? '';
+        final rawPath = raw['path']?.toString().trim() ?? '';
+        final rawName = raw['name']?.toString().trim() ?? '';
+
+        final id =
+            rawId.isNotEmpty ? rawId : (rawPath.isNotEmpty ? rawPath : rawName);
+        if (id.isEmpty) continue;
+
+        final out = <String, dynamic>{
+          'id': id,
+          'name': rawName.isNotEmpty ? rawName : id,
+        };
+
+        final format = raw['format']?.toString().trim() ?? '';
+        if (format.isNotEmpty) out['format'] = format;
+        final manufacturer = raw['manufacturer']?.toString().trim() ?? '';
+        if (manufacturer.isNotEmpty) out['manufacturer'] = manufacturer;
+        final category = raw['category']?.toString().trim() ?? '';
+        if (category.isNotEmpty) out['category'] = category;
+        if (raw['isInstrument'] is bool) {
+          out['isInstrument'] = raw['isInstrument'] == true;
+        }
+
+        normalized.add(out);
+      }
+      return normalized;
+    } on MissingPluginException catch (e) {
+      _logError('rescanPlugins', e);
+      return <Map<String, dynamic>>[];
+    } on PlatformException catch (e) {
+      _logError('rescanPlugins', e);
+      return <Map<String, dynamic>>[];
+    }
+  }
+
+  static Future<JuceEngineDiagnostics> getEngineDiagnostics() async {
+    try {
+      final raw = await _ch.invokeMethod<Map<dynamic, dynamic>>(
+        'getEngineDiagnostics',
+      );
+      if (raw == null) {
+        return const JuceEngineDiagnostics(
+          sampleRate: 0.0,
+          bufferSize: 0,
+          cpuUsage: 0.0,
+          pluginsScanned: false,
+          knownPluginCount: 0,
+          pluginScanFailureCount: 0,
+          pluginScanFailures: const <String>[],
+          rowCount: 0,
+          clipCount: 0,
+          inputDeviceName: '',
+          outputDeviceName: '',
+          inputChannelCount: 0,
+          outputChannelCount: 0,
+        );
+      }
+      return JuceEngineDiagnostics.fromMap(Map<String, dynamic>.from(raw));
+    } on MissingPluginException catch (e) {
+      _logError('getEngineDiagnostics', e);
+      return const JuceEngineDiagnostics(
+        sampleRate: 0.0,
+        bufferSize: 0,
+        cpuUsage: 0.0,
+        pluginsScanned: false,
+        knownPluginCount: 0,
+        pluginScanFailureCount: 0,
+        pluginScanFailures: const <String>[],
+        rowCount: 0,
+        clipCount: 0,
+        inputDeviceName: '',
+        outputDeviceName: '',
+        inputChannelCount: 0,
+        outputChannelCount: 0,
+      );
+    } on PlatformException catch (e) {
+      _logError('getEngineDiagnostics', e);
+      return const JuceEngineDiagnostics(
+        sampleRate: 0.0,
+        bufferSize: 0,
+        cpuUsage: 0.0,
+        pluginsScanned: false,
+        knownPluginCount: 0,
+        pluginScanFailureCount: 0,
+        pluginScanFailures: const <String>[],
+        rowCount: 0,
+        clipCount: 0,
+        inputDeviceName: '',
+        outputDeviceName: '',
+        inputChannelCount: 0,
+        outputChannelCount: 0,
+      );
     }
   }
 
@@ -754,6 +926,26 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<bool> sendLiveMidiInputEvent({
+    required bool noteOn,
+    required int channel,
+    required int pitch,
+    required double velocity,
+  }) async {
+    try {
+      final ok = await _ch.invokeMethod<bool>('sendLiveMidiInputEvent', {
+        'noteOn': noteOn,
+        'channel': channel.clamp(1, 16),
+        'pitch': pitch.clamp(0, 127),
+        'velocity': velocity.clamp(0.0, 1.0),
+      });
+      return ok ?? false;
+    } on PlatformException catch (e) {
+      _logError('sendLiveMidiInputEvent', e);
+      return false;
+    }
+  }
+
   static Future<bool> playPreviewMidiNote(
     int clipIndex, {
     required int pitch,
@@ -770,6 +962,55 @@ class JuceAudioEngine {
       return ok ?? false;
     } on PlatformException catch (e) {
       _logError('playPreviewMidiNote', e);
+      return false;
+    }
+  }
+
+  static Future<bool> openMidiClipPluginEditor(int clipIndex) async {
+    try {
+      final opened = await _ch.invokeMethod<bool>('openMidiClipPluginEditor', {
+        'clip': clipIndex,
+      });
+      return opened ?? false;
+    } on MissingPluginException catch (e) {
+      _logError('openMidiClipPluginEditor', e);
+      return false;
+    } on PlatformException catch (e) {
+      _logError('openMidiClipPluginEditor', e);
+      return false;
+    }
+  }
+
+  static Future<String> getMidiClipPluginState(int clipIndex) async {
+    try {
+      final state = await _ch.invokeMethod<String>('getMidiClipPluginState', {
+        'clip': clipIndex,
+      });
+      return state ?? '';
+    } on MissingPluginException catch (e) {
+      _logError('getMidiClipPluginState', e);
+      return '';
+    } on PlatformException catch (e) {
+      _logError('getMidiClipPluginState', e);
+      return '';
+    }
+  }
+
+  static Future<bool> setMidiClipPluginState(
+    int clipIndex, {
+    required String stateBase64,
+  }) async {
+    try {
+      final applied = await _ch.invokeMethod<bool>('setMidiClipPluginState', {
+        'clip': clipIndex,
+        'stateBase64': stateBase64,
+      });
+      return applied ?? false;
+    } on MissingPluginException catch (e) {
+      _logError('setMidiClipPluginState', e);
+      return false;
+    } on PlatformException catch (e) {
+      _logError('setMidiClipPluginState', e);
       return false;
     }
   }
@@ -902,6 +1143,18 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<void> setClipExtraGainLinear(
+      int clipIndex, double gainLinear) async {
+    try {
+      await _ch.invokeMethod('setClipExtraGainLinear', {
+        'clip': clipIndex,
+        'gain': gainLinear,
+      });
+    } on PlatformException catch (e) {
+      _logError('setClipExtraGainLinear', e);
+    }
+  }
+
   static Future<void> setClipPan(int clipIndex, double panMinus1To1) async {
     try {
       await _ch.invokeMethod('setClipPan', {
@@ -989,6 +1242,24 @@ class JuceAudioEngine {
       });
     } on PlatformException catch (e) {
       _logError('setClipTime', e);
+    }
+  }
+
+  static Future<void> setClipFades(
+    int clipIndex, {
+    required double fadeInSec,
+    required double fadeOutSec,
+    int fadeCurve = 0,
+  }) async {
+    try {
+      await _ch.invokeMethod('setClipFades', {
+        'clip': clipIndex,
+        'fadeInSec': fadeInSec,
+        'fadeOutSec': fadeOutSec,
+        'fadeCurve': fadeCurve,
+      });
+    } on PlatformException catch (e) {
+      _logError('setClipFades', e);
     }
   }
 
@@ -1186,6 +1457,59 @@ class JuceAudioEngine {
     } on PlatformException catch (e) {
       _logError('getTrackEffectInstanceIdsForRow', e);
       return <String>[];
+    }
+  }
+
+  static Future<String> getTrackEffectState(int row, int effectIndex) async {
+    try {
+      final state = await _ch.invokeMethod<String>('getTrackEffectState', {
+        'row': row,
+        'effect': effectIndex,
+      });
+      return (state ?? '').trim();
+    } on MissingPluginException catch (e) {
+      _logError('getTrackEffectState', e);
+      return '';
+    } on PlatformException catch (e) {
+      _logError('getTrackEffectState', e);
+      return '';
+    }
+  }
+
+  static Future<bool> setTrackEffectState(
+    int row,
+    int effectIndex, {
+    required String stateBase64,
+  }) async {
+    try {
+      final applied = await _ch.invokeMethod<bool>('setTrackEffectState', {
+        'row': row,
+        'effect': effectIndex,
+        'stateBase64': stateBase64,
+      });
+      return applied ?? false;
+    } on MissingPluginException catch (e) {
+      _logError('setTrackEffectState', e);
+      return false;
+    } on PlatformException catch (e) {
+      _logError('setTrackEffectState', e);
+      return false;
+    }
+  }
+
+  static Future<bool> openTrackPluginEditor(int row, int effectIndex) async {
+    try {
+      final opened = await _ch.invokeMethod<bool>('openTrackPluginEditor', {
+        'row': row,
+        'effect': effectIndex,
+      });
+      return opened ?? false;
+    } on MissingPluginException catch (e) {
+      _logError('openTrackPluginEditor', e);
+      return false;
+    } on PlatformException catch (e) {
+      _logError('openTrackPluginEditor', e);
+      return false;
     }
   }
 
@@ -1424,6 +1748,68 @@ class JuceAudioEngine {
     } on PlatformException catch (e) {
       _logError('getMasterEffectIds', e);
       return <String>[];
+    }
+  }
+
+  static Future<String> getMasterEffectState(int effectIndex) async {
+    try {
+      final state = await _ch.invokeMethod<String>('getMasterEffectState', {
+        'effect': effectIndex,
+      });
+      return (state ?? '').trim();
+    } on MissingPluginException catch (e) {
+      _logError('getMasterEffectState', e);
+      return '';
+    } on PlatformException catch (e) {
+      _logError('getMasterEffectState', e);
+      return '';
+    }
+  }
+
+  static Future<bool> setMasterEffectState(
+    int effectIndex, {
+    required String stateBase64,
+  }) async {
+    try {
+      final applied = await _ch.invokeMethod<bool>('setMasterEffectState', {
+        'effect': effectIndex,
+        'stateBase64': stateBase64,
+      });
+      return applied ?? false;
+    } on MissingPluginException catch (e) {
+      _logError('setMasterEffectState', e);
+      return false;
+    } on PlatformException catch (e) {
+      _logError('setMasterEffectState', e);
+      return false;
+    }
+  }
+
+  static Future<bool> openMasterPluginEditor(int effectIndex) async {
+    try {
+      final opened = await _ch.invokeMethod<bool>('openMasterPluginEditor', {
+        'effect': effectIndex,
+      });
+      return opened ?? false;
+    } on MissingPluginException catch (e) {
+      _logError('openMasterPluginEditor', e);
+      return false;
+    } on PlatformException catch (e) {
+      _logError('openMasterPluginEditor', e);
+      return false;
+    }
+  }
+
+  static Future<void> setHostedPluginWindowsDetached(bool detached) async {
+    try {
+      await _ch.invokeMethod(
+        'setHostedPluginWindowsDetached',
+        {'detached': detached},
+      );
+    } on MissingPluginException catch (e) {
+      _logError('setHostedPluginWindowsDetached', e);
+    } on PlatformException catch (e) {
+      _logError('setHostedPluginWindowsDetached', e);
     }
   }
 
@@ -2026,6 +2412,22 @@ class JuceAudioEngine {
     } on PlatformException catch (e) {
       _logError('getHostSampleRate', e);
       return 44100.0;
+    }
+  }
+
+  static Future<List<double>> getRecentMasterWaveform({
+    int sampleCount = 2048,
+  }) async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>(
+        'getRecentMasterWaveform',
+        {'sampleCount': sampleCount},
+      );
+      if (raw == null) return const <double>[];
+      return raw.map((e) => (e as num).toDouble()).toList(growable: false);
+    } on PlatformException catch (e) {
+      _logError('getRecentMasterWaveform', e);
+      return const <double>[];
     }
   }
 

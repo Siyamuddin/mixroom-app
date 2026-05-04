@@ -764,6 +764,268 @@ class MainActivity : FlutterFragmentActivity() {
     }
   }
 
+  private fun parentDocumentId(documentId: String): String? {
+    val cleaned = documentId.trim().trim('/')
+    if (cleaned.isEmpty() || !cleaned.contains(":")) return null
+
+    val volume = cleaned.substringBefore(':').trim()
+    val relativePath = cleaned.substringAfter(':').trim().trim('/')
+    if (volume.isEmpty()) return null
+    if (relativePath.isEmpty() || !relativePath.contains('/')) return "$volume:"
+
+    val parentRelativePath = relativePath.substringBeforeLast('/').trim('/')
+    return if (parentRelativePath.isEmpty()) "$volume:" else "$volume:$parentRelativePath"
+  }
+
+  private fun queryDefaultIntentActivities(intent: Intent): List<android.content.pm.ResolveInfo> {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      packageManager.queryIntentActivities(
+        intent,
+        PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong())
+      )
+    } else {
+      @Suppress("DEPRECATION")
+      packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+    }
+  }
+
+  private fun grantUriToIntentHandlers(uri: Uri, flags: Int, handlers: List<android.content.pm.ResolveInfo>) {
+    for (resolveInfo in handlers) {
+      grantUriPermission(resolveInfo.activityInfo.packageName, uri, flags)
+    }
+  }
+
+  private fun startUriIntentIfResolvable(intent: Intent, uri: Uri, flags: Int): Boolean {
+    val handlers = queryDefaultIntentActivities(intent)
+    if (handlers.isEmpty()) return false
+    grantUriToIntentHandlers(uri, flags, handlers)
+    startActivity(intent)
+    return true
+  }
+
+  private fun isFolderLikeDocumentUri(uri: Uri): Boolean {
+    val path = uri.path ?: return false
+    if (path.contains("/tree/") && !path.contains("/document/")) return true
+    return try {
+      contentResolver.getType(uri) == DocumentsContract.Document.MIME_TYPE_DIR
+    } catch (_: Exception) {
+      false
+    }
+  }
+
+  private fun isDocumentsUiHandler(resolveInfo: android.content.pm.ResolveInfo): Boolean {
+    val packageName = resolveInfo.activityInfo.packageName.lowercase()
+    val activityName = resolveInfo.activityInfo.name.lowercase()
+    return packageName.contains("documentsui") || activityName.contains("documentsui")
+  }
+
+  private fun isFileManagerHandler(resolveInfo: android.content.pm.ResolveInfo): Boolean {
+    val packageName = resolveInfo.activityInfo.packageName.lowercase()
+    val activityName = resolveInfo.activityInfo.name.lowercase()
+    return isDocumentsUiHandler(resolveInfo) ||
+      packageName == "com.sec.android.app.myfiles" ||
+      activityName.contains("myfiles") ||
+      packageName == "com.android.providers.downloads.ui"
+  }
+
+  private fun startWithExactHandler(
+    baseIntent: Intent,
+    uri: Uri,
+    flags: Int,
+    handler: android.content.pm.ResolveInfo,
+  ): Boolean {
+    val exactIntent = Intent(baseIntent).apply {
+      setClassName(handler.activityInfo.packageName, handler.activityInfo.name)
+    }
+    return startUriIntentIfResolvable(exactIntent, uri, flags)
+  }
+
+  private fun launchDocumentPickerAtSavedExportFile(path: String): Boolean {
+    val permissionFlags =
+      Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+
+    for (uri in buildSavedExportUriCandidates(path)) {
+      if (isFolderLikeDocumentUri(uri)) continue
+
+      val mimeType = try {
+        contentResolver.getType(uri) ?: "*/*"
+      } catch (_: Exception) {
+        "*/*"
+      }
+
+      val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+        addCategory(Intent.CATEGORY_OPENABLE)
+        addCategory(Intent.CATEGORY_DEFAULT)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or permissionFlags)
+        type = mimeType
+        putExtra(DocumentsContract.EXTRA_INITIAL_URI, uri)
+      }
+
+      val documentsUiHandlers = queryDefaultIntentActivities(intent).filter(::isDocumentsUiHandler)
+      for (handler in documentsUiHandlers) {
+        try {
+          if (startWithExactHandler(intent, uri, permissionFlags, handler)) {
+            return true
+          }
+        } catch (_: Exception) {}
+      }
+
+      val fileViewerHandlers = queryDefaultIntentActivities(intent)
+        .filterNot(::isFileManagerHandler)
+
+      for (handler in fileViewerHandlers) {
+        try {
+          if (startWithExactHandler(intent, uri, permissionFlags, handler)) {
+            return true
+          }
+        } catch (_: Exception) {}
+      }
+    }
+
+    return false
+  }
+
+  private fun launchSavedExportFile(path: String): Boolean {
+    val permissionFlags =
+      Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+
+    for (uri in buildSavedExportUriCandidates(path)) {
+      if (isFolderLikeDocumentUri(uri)) continue
+
+      val mimeType = try {
+        contentResolver.getType(uri) ?: "*/*"
+      } catch (_: Exception) {
+        "*/*"
+      }
+
+      val intent = Intent(Intent.ACTION_VIEW).apply {
+        addCategory(Intent.CATEGORY_DEFAULT)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or permissionFlags)
+        setDataAndType(uri, mimeType)
+        clipData = ClipData.newUri(contentResolver, "Mixroom export", uri)
+      }
+
+      try {
+        if (startUriIntentIfResolvable(intent, uri, permissionFlags)) {
+          return true
+        }
+      } catch (_: Exception) {}
+    }
+
+    return false
+  }
+
+  private fun launchFilesAppForSavedExportFile(path: String): Boolean {
+    val permissionFlags =
+      Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+
+    for (uri in buildSavedExportUriCandidates(path)) {
+      if (isFolderLikeDocumentUri(uri)) continue
+
+      val mimeType = try {
+        contentResolver.getType(uri) ?: "*/*"
+      } catch (_: Exception) {
+        "*/*"
+      }
+
+      val baseIntent = Intent(Intent.ACTION_VIEW).apply {
+        addCategory(Intent.CATEGORY_DEFAULT)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or permissionFlags)
+        setDataAndType(uri, mimeType)
+        clipData = ClipData.newUri(contentResolver, "Mixroom export", uri)
+        putExtra(DocumentsContract.EXTRA_INITIAL_URI, uri)
+      }
+
+      val documentsUiHandlers = queryDefaultIntentActivities(baseIntent).filter(::isDocumentsUiHandler)
+      for (resolveInfo in documentsUiHandlers) {
+        try {
+          if (startWithExactHandler(baseIntent, uri, permissionFlags, resolveInfo)) {
+            return true
+          }
+        } catch (_: Exception) {}
+      }
+    }
+
+    return false
+  }
+
+  private fun launchFilesAppForDocument(path: String): Boolean {
+    val authorities = buildDocumentProviderAuthorities()
+    val parentUris = mutableListOf<Uri>()
+
+    fun addParentUri(authority: String, documentId: String) {
+      val parentId = parentDocumentId(documentId) ?: return
+      try {
+        val uri = DocumentsContract.buildDocumentUri(authority, parentId)
+        if (parentUris.none { it.toString() == uri.toString() }) {
+          parentUris.add(uri)
+        }
+      } catch (_: Exception) {}
+    }
+
+    for (uri in buildSavedExportUriCandidates(path)) {
+      try {
+        val authority = uri.authority?.trim()
+        val documentId = DocumentsContract.getDocumentId(uri)
+        if (!authority.isNullOrEmpty()) {
+          addParentUri(authority, documentId)
+        }
+      } catch (_: Exception) {}
+    }
+
+    val localDocumentId = localPathToDocumentId(path)
+    if (!localDocumentId.isNullOrBlank()) {
+      for (authority in authorities) {
+        addParentUri(authority, localDocumentId)
+      }
+    }
+
+    for (documentId in extractDocumentIdsFromPath(path)) {
+      for (authority in authorities) {
+        addParentUri(authority, documentId)
+      }
+    }
+
+    for (folderUri in parentUris) {
+      try {
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+          addCategory(Intent.CATEGORY_DEFAULT)
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+          setDataAndType(folderUri, DocumentsContract.Document.MIME_TYPE_DIR)
+        }
+
+        val resolveInfoList = queryDefaultIntentActivities(intent)
+        if (resolveInfoList.isEmpty()) continue
+
+        val documentsUiHandlers = resolveInfoList.filter(::isDocumentsUiHandler)
+        for (resolveInfo in documentsUiHandlers) {
+          try {
+            if (startWithExactHandler(
+                intent,
+                folderUri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                resolveInfo
+              )
+            ) {
+              return true
+            }
+          } catch (_: Exception) {}
+        }
+
+        grantUriToIntentHandlers(
+          folderUri,
+          Intent.FLAG_GRANT_READ_URI_PERMISSION,
+          resolveInfoList
+        )
+
+        startActivity(intent)
+        return true
+      } catch (_: Exception) {}
+    }
+
+    return false
+  }
+
   private fun localFileFromDocumentId(documentId: String): File? {
     val cleaned = documentId.trim().trim('/')
     if (cleaned.isEmpty() || !cleaned.contains(":")) return null
@@ -890,50 +1152,8 @@ class MainActivity : FlutterFragmentActivity() {
   private fun openSavedExport(path: String): Boolean {
     val normalized = path.trim()
     if (normalized.isEmpty()) return false
-    val uriCandidates = buildSavedExportUriCandidates(normalized)
 
-    for (uri in uriCandidates) {
-      try {
-        val mimeType = contentResolver.getType(uri) ?: "*/*"
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-          addCategory(Intent.CATEGORY_DEFAULT)
-          addFlags(
-            Intent.FLAG_ACTIVITY_NEW_TASK or
-              Intent.FLAG_GRANT_READ_URI_PERMISSION or
-              Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-          )
-          setDataAndType(uri, mimeType)
-        }
-
-        val resolveInfoList = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-          packageManager.queryIntentActivities(
-            intent,
-            PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong())
-          )
-        } else {
-          @Suppress("DEPRECATION")
-          packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
-        }
-
-        if (resolveInfoList.isEmpty()) {
-          continue
-        }
-
-        for (resolveInfo in resolveInfoList) {
-          val packageName = resolveInfo.activityInfo.packageName
-          grantUriPermission(
-            packageName,
-            uri,
-            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-          )
-        }
-
-        startActivity(intent)
-        return true
-      } catch (_: Exception) {}
-    }
-
-    return false
+    return launchSavedExportFile(normalized)
   }
 
   private fun saveProducerSessionToDownloads(

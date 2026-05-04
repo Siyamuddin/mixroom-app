@@ -75,6 +75,10 @@ class AudioTrack {
   List<double>? _reversedWaveformCache;
   List<double>? _reversedWaveformSource;
   double gain;
+  bool normalizeVolume;
+  double normalizeGain;
+  // Legacy migration field for projects saved while normalize was stored in gain.
+  double preNormalizeGain;
   double pitchSemitones; // clip pitch shift in semitones
   bool isReversed; // clip plays the source waveform in reverse
   double sourceTempoBpm; // detected/imported source BPM (<=0 means unknown)
@@ -93,6 +97,7 @@ class AudioTrack {
   String instrumentName;
   Map<String, double> instrumentParams;
   List<MidiNote> midiNotes;
+  String hostedInstrumentStateBase64;
 
   AudioTrack._({
     required this.file,
@@ -108,6 +113,9 @@ class AudioTrack {
     Duration? currentPosition,
     this.normWaveformData = const [],
     this.gain = kDefaultGainUi,
+    this.normalizeVolume = false,
+    this.normalizeGain = 1.0,
+    this.preNormalizeGain = kDefaultGainUi,
     this.pitchSemitones = 0.0,
     this.isReversed = false,
     this.sourceTempoBpm = 0.0,
@@ -126,6 +134,7 @@ class AudioTrack {
     this.instrumentName = '',
     Map<String, double>? instrumentParams,
     List<MidiNote>? midiNotes,
+    this.hostedInstrumentStateBase64 = '',
   })  : currentPosition = currentPosition ?? Duration.zero,
         instrumentParams = instrumentParams ?? const <String, double>{},
         midiNotes = midiNotes ?? const <MidiNote>[],
@@ -148,6 +157,9 @@ class AudioTrack {
     List<AutomationPoint>? volumeAutomation,
     Duration? currentPosition,
     double gain = kDefaultGainUi,
+    bool normalizeVolume = false,
+    double normalizeGain = 1.0,
+    double preNormalizeGain = kDefaultGainUi,
     double pitchSemitones = 0.0,
     bool isReversed = false,
     double sourceTempoBpm = 0.0,
@@ -166,6 +178,7 @@ class AudioTrack {
     String instrumentName = '',
     Map<String, double>? instrumentParams,
     List<MidiNote>? midiNotes,
+    String hostedInstrumentStateBase64 = '',
   }) async {
     // Then create instance
     return AudioTrack._(
@@ -182,6 +195,9 @@ class AudioTrack {
       currentPosition: currentPosition,
       normWaveformData: const [],
       gain: gain,
+      normalizeVolume: normalizeVolume,
+      normalizeGain: normalizeGain,
+      preNormalizeGain: preNormalizeGain,
       pitchSemitones: pitchSemitones,
       isReversed: isReversed,
       sourceTempoBpm: sourceTempoBpm,
@@ -200,6 +216,7 @@ class AudioTrack {
       instrumentName: instrumentName,
       instrumentParams: instrumentParams,
       midiNotes: midiNotes,
+      hostedInstrumentStateBase64: hostedInstrumentStateBase64,
     );
   }
 
@@ -251,10 +268,18 @@ class AutomationPoint {
 
 class EffectSnapshot {
   final String effectId; // name or path
+  final String displayName;
   final bool bypassed;
   final Map<String, dynamic> params;
+  final String stateBase64;
 
-  EffectSnapshot(this.effectId, this.bypassed, this.params);
+  EffectSnapshot(
+    this.effectId,
+    this.bypassed,
+    this.params, {
+    this.displayName = '',
+    this.stateBase64 = '',
+  });
 }
 
 class RowEffectsSnapshot {
@@ -435,6 +460,9 @@ extension AudioTrackSerialization on AudioTrack {
       "offset": offset,
       "crossfade": crossfade,
       "gain": gain,
+      "normalizeVolume": normalizeVolume,
+      "normalizeGain": normalizeGain,
+      "preNormalizeGain": preNormalizeGain,
       "pitchSemitones": pitchSemitones,
       "isReversed": isReversed,
       "sourceTempoBpm": sourceTempoBpm,
@@ -447,6 +475,7 @@ extension AudioTrackSerialization on AudioTrack {
       "instrumentName": instrumentName,
       "instrumentParams": instrumentParams,
       "midiNotes": midiNotes.map((n) => n.toJson()).toList(),
+      "hostedInstrumentStateB64": hostedInstrumentStateBase64,
     };
   }
 }
@@ -462,6 +491,8 @@ class RowStateSnapshot {
   final List<AutomationLaneSnapshot> automationLanes;
   final List<AutomationClipSnapshot> automationClips;
   final String? selectedAutomationTargetId;
+  final bool muted;
+  final bool soloed;
 
   RowStateSnapshot({
     required this.row,
@@ -472,6 +503,8 @@ class RowStateSnapshot {
     this.automationLanes = const <AutomationLaneSnapshot>[],
     this.automationClips = const <AutomationClipSnapshot>[],
     this.selectedAutomationTargetId,
+    this.muted = false,
+    this.soloed = false,
   });
 
   Map<String, dynamic> toJson() {
@@ -484,6 +517,8 @@ class RowStateSnapshot {
       "automationLanes": automationLanes.map((e) => e.toJson()).toList(),
       "automationClips": automationClips.map((e) => e.toJson()).toList(),
       "selectedAutomationTargetId": selectedAutomationTargetId,
+      "muted": muted,
+      "soloed": soloed,
     };
   }
 
@@ -510,6 +545,8 @@ class RowStateSnapshot {
       automationClips: clips,
       selectedAutomationTargetId:
           (json["selectedAutomationTargetId"] as String?)?.trim(),
+      muted: json["muted"] == true,
+      soloed: json["soloed"] == true,
     );
   }
 }
@@ -526,8 +563,10 @@ extension AutomationPointJson on AutomationPoint {
 extension EffectSnapshotJson on EffectSnapshot {
   Map<String, dynamic> toJson() => {
         "effectId": effectId,
+        if (displayName.trim().isNotEmpty) "displayName": displayName.trim(),
         "bypassed": bypassed,
         "params": params,
+        if (stateBase64.trim().isNotEmpty) "stateBase64": stateBase64.trim(),
       };
 
   static EffectSnapshot fromJson(Map<String, dynamic> json) {
@@ -536,6 +575,8 @@ extension EffectSnapshotJson on EffectSnapshot {
       json["effectId"] as String,
       json["bypassed"] as bool,
       rawParams,
+      displayName: (json["displayName"] as String?)?.trim() ?? '',
+      stateBase64: (json["stateBase64"] as String?)?.trim() ?? '',
     );
   }
 }

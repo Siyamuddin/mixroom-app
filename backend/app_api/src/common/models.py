@@ -179,6 +179,9 @@ class EntitlementSnapshot:
     capabilities: Dict[str, bool]
     management_channel: str
     revision: int
+    plan_code: str = "free"
+    plan_label: str = "Free"
+    plan_group: str = "individual"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -192,6 +195,9 @@ class EntitlementSnapshot:
             "capabilities": self.capabilities,
             "management_channel": self.management_channel,
             "revision": self.revision,
+            "plan_code": self.plan_code,
+            "plan_label": self.plan_label,
+            "plan_group": self.plan_group,
         }
 
 
@@ -207,4 +213,7 @@ def free_entitlement(user_id: str, allow_studio_tier: bool, revision: int = 0) -
         capabilities=default_capabilities_for_tier("free", allow_studio_tier),
         management_channel="free",
         revision=revision,
+        plan_code="free",
+        plan_label="Free",
+        plan_group="individual",
     )

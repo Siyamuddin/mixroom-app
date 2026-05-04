@@ -216,6 +216,8 @@ class WebhookHandlerTests(unittest.TestCase):
         self.assertEqual(payload["updated_users"], 1)
         self.assertFalse(self.repo.user_profiles["user-1"]["newsletter_opt_in"])
         self.assertIsNone(self.repo.user_profiles["user-1"]["newsletter_opt_in_at"])
+        self.assertEqual(self.repo.user_profile_upserts, [])
+        self.assertEqual(len(self.repo.user_profile_newsletter_updates), 1)
 
     def test_stibee_resubscribe_updates_user_profile(self):
         self.repo.user_profiles["user-1"] = {
@@ -268,6 +270,8 @@ class WebhookHandlerTests(unittest.TestCase):
             self.repo.user_profiles["user-1"]["newsletter_opt_in_at"],
             "2026-04-13T03:00:00+00:00",
         )
+        self.assertEqual(self.repo.user_profile_upserts, [])
+        self.assertEqual(len(self.repo.user_profile_newsletter_updates), 1)
 
     def test_stibee_documented_payload_without_occurred_at_updates_user_profile(self):
         self.repo.user_profiles["user-1"] = {

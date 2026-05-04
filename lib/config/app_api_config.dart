@@ -29,6 +29,11 @@ class AppApiConfig {
     defaultValue: false,
   );
 
+  static const bool accountPlanBillingEnabled = bool.fromEnvironment(
+    'ACCOUNT_PLAN_BILLING_ENABLED',
+    defaultValue: false,
+  );
+
   static const int requestTimeoutSeconds = int.fromEnvironment(
     'SUBSCRIPTION_REQUEST_TIMEOUT_SECONDS',
     defaultValue: 20,

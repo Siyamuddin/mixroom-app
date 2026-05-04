@@ -31,9 +31,11 @@ After deploy, the same backend also owns:
 - the app-level profile update endpoint `PATCH /v1/users/me`
 - the `mixroom-users-*` DynamoDB table for minimal platform user records
 - the `mixroom-user-username-claims-*` DynamoDB table for unique username ownership
+- the `mixroom-collaboration-*` DynamoDB table for organizations, memberships, workspaces, and cloud-project metadata
+- the `mixroom-cloud-project-documents-*` S3 bucket for optional cloud project documents
 
 
-## 2. Seed the catalog mapping table
+## 2. Seed the catalog and billing control plane
 
 Populate `mixroom-catalog-mappings-*` with one record per product ID.
 
@@ -66,6 +68,17 @@ Recommended shape:
 ```
 
 If you add Studio later, add matching `studio` rows for both stores.
+
+The same table now also stores the admin-managed billing catalog document used by:
+
+- `GET /v1/billing/catalog`
+- `GET|PUT /v1/internal/admin/settings/billing-catalog`
+
+Before launch, define at least:
+
+1. plan definitions for `free`, `starter`, `producer`, `studio`, `enterprise`, `education`
+2. visible products for monthly/yearly subscriptions plus any credits/day-pass SKUs
+3. support URLs and support email shown in the client
 
 ## 3. App Store Connect
 
@@ -147,7 +160,28 @@ Required:
 2. `CognitoAppClientId`
 3. The app must continue sending the Cognito ID token as `Authorization: Bearer ...`
 
-## 6. Flutter app build config
+## 6. Collaboration and cloud-project control plane
+
+Before turning on Studio, Enterprise, or Education sales, verify:
+
+1. `mixroom-collaboration-*` exists after deploy.
+2. Admin dashboard billing screens can create:
+   - organizations
+   - memberships
+   - workspaces
+   - cloud-project records
+3. The signed-in app can read:
+   - `GET /v1/organizations/me`
+   - `GET /v1/workspaces/me`
+   - `GET /v1/cloud-projects/me`
+4. The signed-in app can open and update one cloud project with:
+   - `GET /v1/cloud-projects/{project_id}`
+   - `PUT /v1/cloud-projects/{project_id}` using `expected_revision`
+5. If you want project JSON blobs stored remotely, verify `CLOUD_PROJECT_DOCUMENTS_BUCKET` exists with bucket versioning enabled and that uploads succeed from the admin or authenticated cloud-project update flow.
+
+This is the minimum needed for shared team plans. Do not reuse telemetry snapshots as authoritative cloud project storage.
+
+## 7. Flutter app build config
 
 Run the app with:
 
@@ -176,7 +210,7 @@ Recommended rollout:
    - `SUBSCRIPTION_SHADOW_MODE=false`
    - `IAP_ENABLE_PURCHASES=true`
 
-## 7. Manual validation cases
+## 8. Manual validation cases
 
 Before launch, verify all of these in sandbox/test:
 
@@ -189,8 +223,11 @@ Before launch, verify all of these in sandbox/test:
 - Expiration removes access.
 - Refund/revoke removes access.
 - Another Mixroom account cannot claim an already-linked store subscription.
+- A user with only org-based Studio/Enterprise/Education access still sees shared workspaces and cloud projects.
+- Admin-created support URLs and support email appear in the app account screen.
+- Admin-created plan/product differences appear in the app billing catalog without a new deploy.
 
-## 8. Rough KPI snapshot
+## 9. Rough KPI snapshot
 
 Once the backend is live, you can print a rough active/cancel/churn snapshot with:
 

@@ -923,8 +923,21 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           JuceBridge.setClipGainJNI(args.intValue("clip"), args.floatValue("gain"))
           result.success(null)
         }
+        "setClipExtraGainLinear" -> {
+          JuceBridge.setClipExtraGainLinearJNI(args.intValue("clip"), args.floatValue("gain"))
+          result.success(null)
+        }
         "setClipPan" -> {
           JuceBridge.setClipPanJNI(args.intValue("clip"), args.floatValue("pan"))
+          result.success(null)
+        }
+        "setClipFades" -> {
+          JuceBridge.setClipFadesJNI(
+            args.intValue("clip"),
+            args.doubleValue("fadeInSec"),
+            args.doubleValue("fadeOutSec"),
+            args.intValue("fadeCurve"),
+          )
           result.success(null)
         }
         "setClipPitch" -> {

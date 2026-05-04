@@ -22,18 +22,47 @@ class EntitlementService extends ChangeNotifier {
   VoidCallback? _authListener;
 
   EntitlementSnapshot? _entitlement;
+  BillingCatalogSnapshot? _billingCatalog;
+  OrganizationAccessSnapshot? _organizationsAccess;
+  WorkspaceAccessSnapshot? _workspacesAccess;
+  CloudProjectAccessSnapshot? _cloudProjectsAccess;
+
   bool _isLoading = false;
   bool _isInitialized = false;
+  bool _isAccountSurfaceLoading = false;
+  bool _isAccountSurfaceInitialized = false;
+
   String? _lastError;
+  String? _accountSurfaceError;
+
   DateTime? _lastSyncedAtUtc;
+  DateTime? _accountSurfaceLastSyncedAtUtc;
+
   String? _boundUserId;
   Future<void>? _refreshInFlight;
+  Future<void>? _accountSurfaceRefreshInFlight;
+
+  Map<String, String> _accountSurfaceWarnings = <String, String>{};
 
   EntitlementSnapshot? get entitlement => _entitlement;
+  BillingCatalogSnapshot? get billingCatalog => _billingCatalog;
+  OrganizationAccessSnapshot? get organizationsAccess => _organizationsAccess;
+  WorkspaceAccessSnapshot? get workspacesAccess => _workspacesAccess;
+  CloudProjectAccessSnapshot? get cloudProjectsAccess => _cloudProjectsAccess;
+
   bool get isLoading => _isLoading;
   bool get isInitialized => _isInitialized;
+  bool get isAccountSurfaceLoading => _isAccountSurfaceLoading;
+  bool get isAccountSurfaceInitialized => _isAccountSurfaceInitialized;
+
   String? get lastError => _lastError;
+  String? get accountSurfaceError => _accountSurfaceError;
+
   DateTime? get lastSyncedAtUtc => _lastSyncedAtUtc;
+  DateTime? get accountSurfaceLastSyncedAtUtc => _accountSurfaceLastSyncedAtUtc;
+
+  Map<String, String> get accountSurfaceWarnings =>
+      Map<String, String>.unmodifiable(_accountSurfaceWarnings);
 
   bool get isEnforcementEnabled => AppApiConfig.enforceSubscriptions;
 
@@ -45,6 +74,48 @@ class EntitlementService extends ChangeNotifier {
   }
 
   PlanTier get currentTier => _entitlement?.tier ?? PlanTier.free;
+
+  BillingSupportInfo get effectiveBillingSupport =>
+      _billingCatalog?.support ??
+      _entitlement?.billingSupport ??
+      BillingSupportInfo.defaults();
+
+  CollaborationAccessSummary get effectiveAccessSummary {
+    final entitlementSummary = _entitlement?.workspaceAccessSummary;
+    return CollaborationAccessSummary(
+      organizationCount: _maxInt(
+        entitlementSummary?.organizationCount ?? 0,
+        _organizationsAccess?.summary.organizationCount ?? 0,
+        _organizationsAccess?.organizations.length ?? 0,
+      ),
+      workspaceCount: _maxInt(
+        entitlementSummary?.workspaceCount ?? 0,
+        _workspacesAccess?.summary.workspaceCount ?? 0,
+        _workspacesAccess?.workspaces.length ?? 0,
+      ),
+      cloudProjectCount: _maxInt(
+        entitlementSummary?.cloudProjectCount ?? 0,
+        _cloudProjectsAccess?.summary.cloudProjectCount ?? 0,
+        _cloudProjectsAccess?.cloudProjects.length ?? 0,
+      ),
+    );
+  }
+
+  List<OrganizationAccessItem> get effectiveOrganizations {
+    if (_organizationsAccess != null) {
+      return _organizationsAccess!.organizations;
+    }
+    return _entitlement?.organizations ?? const <OrganizationAccessItem>[];
+  }
+
+  List<WorkspaceAccessItem> get effectiveWorkspaces =>
+      _workspacesAccess?.workspaces ?? const <WorkspaceAccessItem>[];
+
+  List<CloudProjectAccessItem> get effectiveCloudProjects =>
+      _cloudProjectsAccess?.cloudProjects ?? const <CloudProjectAccessItem>[];
+
+  List<AccountAccessSource> get effectiveAccessSources =>
+      _entitlement?.accessSources ?? const <AccountAccessSource>[];
 
   bool get isProEntitled {
     final current = _entitlement;
@@ -93,7 +164,7 @@ class EntitlementService extends ChangeNotifier {
         return;
       }
 
-      final response = await auth.authorizedRequest(
+      final response = await _sendAuthedNoExpire(
         (token) => _httpClient.get(
           _buildUri('/v1/entitlements/me'),
           headers: <String, String>{
@@ -105,16 +176,15 @@ class EntitlementService extends ChangeNotifier {
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw StateError(
-            'Entitlement request failed (${response.statusCode}).');
+          'Entitlement request failed (${response.statusCode}).',
+        );
       }
 
       final decoded = jsonDecode(response.body);
       if (decoded is! Map) {
         throw const FormatException('Entitlement response shape is invalid.');
       }
-      final json = decoded.map(
-        (key, value) => MapEntry(key.toString(), value),
-      );
+      final json = decoded.map((key, value) => MapEntry(key.toString(), value));
 
       _entitlement = EntitlementSnapshot.fromJson(
         json,
@@ -126,7 +196,7 @@ class EntitlementService extends ChangeNotifier {
       _isInitialized = true;
       await _writeCachedEntitlement(user.userId, _entitlement!);
     } catch (e) {
-      _lastError = e.toString().replaceFirst('Bad state: ', '');
+      _lastError = _cleanErrorMessage(e);
       _isInitialized = true;
       if (_entitlement == null) {
         _setFallbackFreeEntitlement(user.userId);
@@ -141,13 +211,114 @@ class EntitlementService extends ChangeNotifier {
     }
   }
 
+  Future<void> refreshAccountSurface({
+    bool force = false,
+  }) async {
+    final auth = _auth;
+    final user = auth?.signedInUser;
+    if (auth == null || user == null) return;
+
+    if (_isAccountSurfaceLoading) {
+      await (_accountSurfaceRefreshInFlight ?? Future<void>.value());
+      return;
+    }
+    if (!force && _isAccountSurfaceInitialized && !_isAccountSurfaceStale) {
+      return;
+    }
+
+    final refreshCompleter = Completer<void>();
+    _accountSurfaceRefreshInFlight = refreshCompleter.future;
+    _isAccountSurfaceLoading = true;
+    notifyListeners();
+
+    try {
+      if (!AppApiConfig.hasApiBaseUrl) {
+        _accountSurfaceError = 'App API base URL is not configured.';
+        _accountSurfaceWarnings = const <String, String>{};
+        _isAccountSurfaceInitialized = true;
+        return;
+      }
+
+      final results = await Future.wait<_AccountEndpointResult<dynamic>>(
+        <Future<_AccountEndpointResult<dynamic>>>[
+          _fetchAccountEndpoint(
+            endpointKey: 'catalog',
+            path: '/v1/billing/catalog',
+            parser: (json) => BillingCatalogSnapshot.fromJson(json),
+          ),
+          _fetchAccountEndpoint(
+            endpointKey: 'organizations',
+            path: '/v1/organizations/me',
+            parser: (json) => OrganizationAccessSnapshot.fromJson(json),
+          ),
+          _fetchAccountEndpoint(
+            endpointKey: 'workspaces',
+            path: '/v1/workspaces/me',
+            parser: (json) => WorkspaceAccessSnapshot.fromJson(json),
+          ),
+          _fetchAccountEndpoint(
+            endpointKey: 'cloud_projects',
+            path: '/v1/cloud-projects/me',
+            parser: (json) => CloudProjectAccessSnapshot.fromJson(json),
+          ),
+        ],
+      );
+
+      final warnings = <String, String>{};
+      for (final result in results) {
+        if (result.error != null && result.error!.isNotEmpty) {
+          warnings[result.endpointKey] = result.error!;
+        }
+      }
+
+      final catalogResult = results[0].data;
+      final organizationsResult = results[1].data;
+      final workspacesResult = results[2].data;
+      final cloudProjectsResult = results[3].data;
+
+      if (catalogResult is BillingCatalogSnapshot) {
+        _billingCatalog = catalogResult;
+      }
+      if (organizationsResult is OrganizationAccessSnapshot) {
+        _organizationsAccess = organizationsResult;
+      }
+      if (workspacesResult is WorkspaceAccessSnapshot) {
+        _workspacesAccess = workspacesResult;
+      }
+      if (cloudProjectsResult is CloudProjectAccessSnapshot) {
+        _cloudProjectsAccess = cloudProjectsResult;
+      }
+
+      _accountSurfaceWarnings = warnings;
+      _accountSurfaceError = warnings.isEmpty
+          ? null
+          : results.every((result) => result.data == null)
+              ? 'Account details are temporarily unavailable.'
+              : 'Some account details are temporarily unavailable.';
+      _accountSurfaceLastSyncedAtUtc = DateTime.now().toUtc();
+      _isAccountSurfaceInitialized = true;
+    } catch (e) {
+      _accountSurfaceError = _cleanErrorMessage(e);
+      _isAccountSurfaceInitialized = true;
+    } finally {
+      _isAccountSurfaceLoading = false;
+      _accountSurfaceRefreshInFlight = null;
+      if (!refreshCompleter.isCompleted) {
+        refreshCompleter.complete();
+      }
+      notifyListeners();
+    }
+  }
+
   Future<Map<String, dynamic>> createWebCheckoutSession({
     required String regionCode,
+    String? productCode,
     String? successUrl,
     String? cancelUrl,
   }) async {
     final body = <String, dynamic>{
       'region_code': regionCode,
+      if ((productCode ?? '').trim().isNotEmpty) 'product_code': productCode,
       if ((successUrl ?? '').trim().isNotEmpty) 'success_url': successUrl,
       if ((cancelUrl ?? '').trim().isNotEmpty) 'cancel_url': cancelUrl,
     };
@@ -177,6 +348,7 @@ class EntitlementService extends ChangeNotifier {
       },
     );
     await refresh(force: true);
+    await refreshAccountSurface(force: true);
     return result;
   }
 
@@ -205,6 +377,7 @@ class EntitlementService extends ChangeNotifier {
       },
     );
     await refresh(force: true);
+    await refreshAccountSurface(force: true);
     return result;
   }
 
@@ -218,6 +391,7 @@ class EntitlementService extends ChangeNotifier {
       },
     );
     await refresh(force: true);
+    await refreshAccountSurface(force: true);
   }
 
   Future<String?> fetchPortalUrl() async {
@@ -240,17 +414,34 @@ class EntitlementService extends ChangeNotifier {
     return DateTime.now().toUtc().difference(synced) > ttl;
   }
 
-  Future<Map<String, dynamic>> _getAuthed(String path) async {
-    final auth = _auth;
-    final user = auth?.signedInUser;
-    if (auth == null || user == null) {
-      throw StateError('No authenticated user.');
-    }
-    if (!AppApiConfig.hasApiBaseUrl) {
-      throw StateError('App API base URL is not configured.');
-    }
+  bool get _isAccountSurfaceStale {
+    final synced = _accountSurfaceLastSyncedAtUtc;
+    if (synced == null) return true;
+    final ttl = Duration(minutes: AppApiConfig.entitlementCacheTtlMinutes);
+    return DateTime.now().toUtc().difference(synced) > ttl;
+  }
 
-    final response = await auth.authorizedRequest(
+  Future<_AccountEndpointResult<T>> _fetchAccountEndpoint<T>({
+    required String endpointKey,
+    required String path,
+    required T Function(Map<String, dynamic> json) parser,
+  }) async {
+    try {
+      final json = await _getAuthed(path);
+      return _AccountEndpointResult<T>(
+        endpointKey: endpointKey,
+        data: parser(json),
+      );
+    } catch (e) {
+      return _AccountEndpointResult<T>(
+        endpointKey: endpointKey,
+        error: _friendlyEndpointError(endpointKey, e),
+      );
+    }
+  }
+
+  Future<Map<String, dynamic>> _getAuthed(String path) async {
+    final response = await _sendAuthedNoExpire(
       (token) => _httpClient.get(
         _buildUri(path),
         headers: <String, String>{
@@ -266,16 +457,7 @@ class EntitlementService extends ChangeNotifier {
     String path, {
     Map<String, dynamic>? body,
   }) async {
-    final auth = _auth;
-    final user = auth?.signedInUser;
-    if (auth == null || user == null) {
-      throw StateError('No authenticated user.');
-    }
-    if (!AppApiConfig.hasApiBaseUrl) {
-      throw StateError('Subscription API base URL is not configured.');
-    }
-
-    final response = await auth.authorizedRequest(
+    final response = await _sendAuthedNoExpire(
       (token) => _httpClient
           .post(
             _buildUri(path),
@@ -294,13 +476,50 @@ class EntitlementService extends ChangeNotifier {
     return _decodeResponse(path: path, response: response);
   }
 
+  Future<http.Response> _sendAuthedNoExpire(
+    Future<http.Response> Function(String token) send,
+  ) async {
+    final auth = _auth;
+    final user = auth?.signedInUser;
+    if (auth == null || user == null) {
+      throw StateError('No authenticated user.');
+    }
+    if (!AppApiConfig.hasApiBaseUrl) {
+      throw StateError('Subscription API base URL is not configured.');
+    }
+
+    final initialToken = await auth.getIdTokenOrNull();
+    if ((initialToken ?? '').trim().isEmpty) {
+      throw StateError('Session expired. Please sign in again.');
+    }
+
+    var response = await send(initialToken!);
+    if (!_isUnauthorizedResponse(response)) {
+      return response;
+    }
+
+    final refreshedToken = await auth.refreshIdTokenOrNull();
+    if ((refreshedToken ?? '').trim().isEmpty) {
+      throw StateError('Session expired. Please sign in again.');
+    }
+
+    response = await send(refreshedToken!);
+    if (_isUnauthorizedResponse(response)) {
+      throw StateError(
+        'Authenticated request failed (${response.statusCode}).',
+      );
+    }
+    return response;
+  }
+
   Map<String, dynamic> _decodeResponse({
     required String path,
     required http.Response response,
   }) {
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError(
-          'Request $path failed (${response.statusCode}): ${response.body}');
+        'Request $path failed (${response.statusCode}): ${response.body}',
+      );
     }
     if (response.body.trim().isEmpty) return <String, dynamic>{};
     final decoded = jsonDecode(response.body);
@@ -323,11 +542,7 @@ class EntitlementService extends ChangeNotifier {
       if (_boundUserId != null) {
         final previousUserId = _boundUserId!;
         _boundUserId = null;
-        _entitlement = null;
-        AnalyticsService.instance.setSubscriptionTier(null);
-        _lastSyncedAtUtc = null;
-        _lastError = null;
-        _isInitialized = false;
+        _resetStateForSignedOutUser();
         notifyListeners();
         unawaited(_clearCachedEntitlement(previousUserId));
       }
@@ -338,18 +553,34 @@ class EntitlementService extends ChangeNotifier {
       if ((_entitlement == null || _isEntitlementStale) && !_isLoading) {
         unawaited(refresh());
       }
+      if (_isAccountSurfaceStale && !_isAccountSurfaceLoading) {
+        unawaited(refreshAccountSurface());
+      }
       return;
     }
 
     _boundUserId = userId;
     _entitlement = EntitlementSnapshot.free(userId: userId);
+    _billingCatalog = null;
+    _organizationsAccess = null;
+    _workspacesAccess = null;
+    _cloudProjectsAccess = null;
     AnalyticsService.instance.setSubscriptionTier(_entitlement?.tier.value);
     _lastSyncedAtUtc = null;
+    _accountSurfaceLastSyncedAtUtc = null;
     _lastError = null;
+    _accountSurfaceError = null;
+    _accountSurfaceWarnings = <String, String>{};
     _isInitialized = true;
+    _isAccountSurfaceInitialized = false;
     notifyListeners();
 
-    unawaited(_loadCachedEntitlement(userId).then((_) => refresh(force: true)));
+    unawaited(
+      _loadCachedEntitlement(userId).then((_) async {
+        await refresh(force: true);
+        await refreshAccountSurface(force: true);
+      }),
+    );
   }
 
   Future<void> _loadCachedEntitlement(String userId) async {
@@ -398,6 +629,22 @@ class EntitlementService extends ChangeNotifier {
     _isInitialized = true;
   }
 
+  void _resetStateForSignedOutUser() {
+    _entitlement = null;
+    _billingCatalog = null;
+    _organizationsAccess = null;
+    _workspacesAccess = null;
+    _cloudProjectsAccess = null;
+    AnalyticsService.instance.setSubscriptionTier(null);
+    _lastSyncedAtUtc = null;
+    _accountSurfaceLastSyncedAtUtc = null;
+    _lastError = null;
+    _accountSurfaceError = null;
+    _accountSurfaceWarnings = <String, String>{};
+    _isInitialized = false;
+    _isAccountSurfaceInitialized = false;
+  }
+
   void _detachAuthListener() {
     final auth = _auth;
     final listener = _authListener;
@@ -406,4 +653,61 @@ class EntitlementService extends ChangeNotifier {
     }
     _authListener = null;
   }
+
+  String _friendlyEndpointError(String endpointKey, Object error) {
+    final message = _cleanErrorMessage(error);
+    if (message.contains('(404)')) {
+      return '${_endpointLabel(endpointKey)} endpoint is not available.';
+    }
+    if (message.contains('(401)')) {
+      return 'Sign in again to load ${_endpointLabel(endpointKey).toLowerCase()}.';
+    }
+    if (message.contains('(403)')) {
+      return '${_endpointLabel(endpointKey)} is not available for this account.';
+    }
+    if (message.isEmpty) {
+      return '${_endpointLabel(endpointKey)} is temporarily unavailable.';
+    }
+    return message;
+  }
+
+  String _endpointLabel(String endpointKey) {
+    switch (endpointKey) {
+      case 'catalog':
+        return 'Billing catalog';
+      case 'organizations':
+        return 'Organizations';
+      case 'workspaces':
+        return 'Workspaces';
+      case 'cloud_projects':
+        return 'Cloud projects';
+      default:
+        return 'Account data';
+    }
+  }
+
+  String _cleanErrorMessage(Object error) {
+    return error.toString().replaceFirst('Bad state: ', '').trim();
+  }
+
+  int _maxInt(int a, int b, int c) {
+    final maxAB = a > b ? a : b;
+    return maxAB > c ? maxAB : c;
+  }
+
+  bool _isUnauthorizedResponse(http.Response response) {
+    return response.statusCode == 401 || response.statusCode == 403;
+  }
+}
+
+class _AccountEndpointResult<T> {
+  const _AccountEndpointResult({
+    required this.endpointKey,
+    this.data,
+    this.error,
+  });
+
+  final String endpointKey;
+  final T? data;
+  final String? error;
 }

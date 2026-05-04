@@ -11,6 +11,7 @@ import 'package:provider/provider.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
 import 'package:mixroom/helpers/halo.dart';
 import 'package:mixroom/helpers/mix_change_highlighter.dart';
+import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/models/entitlement_models.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
@@ -649,6 +650,7 @@ class RowEffectsPanel extends StatefulWidget {
   final Future<List<Map<String, dynamic>>> Function(int row, int effectIndex)
       getTrackPluginParameters;
   final Future<List<Map<String, dynamic>>> Function() scanPlugins;
+  final Future<bool> Function(int row, int effectIndex)? openTrackPluginEditor;
   final Future<void> Function(
           int row, int effectIndex, String paramId, dynamic value)
       setTrackEffectParam;
@@ -704,6 +706,7 @@ class RowEffectsPanel extends StatefulWidget {
     required this.insertEffectOnRow,
     required this.getTrackPluginParameters,
     required this.scanPlugins,
+    this.openTrackPluginEditor,
     required this.setTrackEffectParam,
     this.onRequestAutomateParameter,
     required this.onHeightChanged,
@@ -978,11 +981,11 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         elevation: 8,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         position: RelativeRect.fromLTRB(left, top, right, bottom),
-        items: const <PopupMenuEntry<String>>[
+        items: <PopupMenuEntry<String>>[
           PopupMenuItem<String>(
             value: 'automate',
             height: 34,
-            child: Text('Automate'),
+            child: Text(L10n.translate(context, 'Automate')),
           ),
         ],
       );
@@ -1127,6 +1130,16 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
           haloKeys: haloKeys,
           anchorGlobalPos: details.globalPosition,
         ),
+        onSecondaryTapDown: PlatformCapabilities.current.isDesktop
+            ? (details) => _showAutomateParameterSheet(
+                  effectIndex: effectIndex,
+                  effectName: effectName,
+                  paramId: paramId,
+                  paramName: paramName,
+                  haloKeys: haloKeys,
+                  anchorGlobalPos: details.globalPosition,
+                )
+            : null,
         child: _wrapWithHalos(
           haloKeys: haloKeys,
           borderRadius: borderRadius,
@@ -1357,6 +1370,28 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         _stopShaperPreviewPolling();
       }
     });
+  }
+
+  String _rawEffectIdAt(int idx) {
+    if (idx < 0 || idx >= _effectKeys.length) return '';
+    final stableKey = _effectKeys[idx];
+    final hashIndex = stableKey.lastIndexOf('#');
+    if (hashIndex <= 0) return stableKey;
+    return stableKey.substring(0, hashIndex);
+  }
+
+  bool _isLikelyExternalEffectSlot(int idx) {
+    final rawId = _rawEffectIdAt(idx).trim();
+    if (rawId.isEmpty) return false;
+    final effectName =
+        (idx >= 0 && idx < _effects.length) ? _effects[idx].trim() : '';
+    return rawId != effectName;
+  }
+
+  Future<void> _tryOpenTrackPluginEditor(int idx) async {
+    final opener = widget.openTrackPluginEditor;
+    if (opener == null || !_isLikelyExternalEffectSlot(idx)) return;
+    await opener(widget.rowIndex, idx);
   }
 
   void _moveDelayDivisionState(int from, int to) {
@@ -2973,6 +3008,12 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     } catch (_) {
       plugins = const <Map<String, dynamic>>[];
     }
+    final externalEffects = plugins.where((plugin) {
+      final category =
+          (plugin['category'] ?? '').toString().trim().toLowerCase();
+      final isInstrument = plugin['isInstrument'] == true;
+      return !isInstrument && category != 'instrument';
+    }).toList(growable: false);
     // const allowedInBasic = ['Reverb', 'EQ Parametric', 'EQ 3-Band', 'Delay', 'Distortion', 'De-Esser', 'Compressor'];
     const allowedInBasic = [
       "Gain",
@@ -3119,14 +3160,15 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                     },
                   ),
                   ListView.separated(
-                    itemCount: plugins.isEmpty ? 1 : plugins.length,
+                    itemCount:
+                        externalEffects.isEmpty ? 1 : externalEffects.length,
                     separatorBuilder: (_, __) => Divider(
                       height: 1,
                       thickness: 1,
                       color: Colors.white.withOpacity(0.07),
                     ),
                     itemBuilder: (context, i) {
-                      if (plugins.isEmpty) {
+                      if (externalEffects.isEmpty) {
                         return ListTile(
                           dense: true,
                           contentPadding:
@@ -3144,7 +3186,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                           ),
                         );
                       }
-                      final meta = plugins[i];
+                      final meta = externalEffects[i];
                       final path = (meta['id'] ?? '').toString();
                       if (path.isEmpty) return const SizedBox.shrink();
                       final name = (meta['name'] ?? path).toString();
@@ -3184,6 +3226,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                           await _loadEffects();
                           final addedIndex = _effects.length - 1;
                           if (addedIndex >= 0 && addedIndex < _effects.length) {
+                            await _tryOpenTrackPluginEditor(addedIndex);
                             widget.onTutorialEffectAdded?.call(
                               widget.rowIndex,
                               addedIndex,
@@ -3226,6 +3269,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
       _currentParams = [];
       _returnHighlightedEffectIndex = null;
     });
+    unawaited(_tryOpenTrackPluginEditor(idx));
 
     // Turn on dynamics reduction metering if it is about to be opened
     if (_showsDynamicsReductionMeter(_effects[idx])) {
@@ -4428,6 +4472,7 @@ class MasterEffectsPanel extends StatefulWidget {
     String paramName,
   )? onRequestAutomateParameter;
   final Future<List<Map<String, dynamic>>> Function() scanPlugins;
+  final Future<bool> Function(int effectIndex)? openMasterPluginEditor;
   final void Function(
           int effectIndex, String paramId, dynamic oldValue, dynamic newValue)?
       onMasterPluginParamCommit;
@@ -4468,6 +4513,7 @@ class MasterEffectsPanel extends StatefulWidget {
     required this.setMasterEffectParam,
     this.onRequestAutomateParameter,
     required this.scanPlugins,
+    this.openMasterPluginEditor,
     this.onHeightChanged,
     this.onMasterPluginParamCommit,
     this.onMasterPresetCommit,
@@ -4707,11 +4753,11 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
         elevation: 8,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         position: RelativeRect.fromLTRB(left, top, right, bottom),
-        items: const <PopupMenuEntry<String>>[
+        items: <PopupMenuEntry<String>>[
           PopupMenuItem<String>(
             value: 'automate',
             height: 34,
-            child: Text('Automate'),
+            child: Text(L10n.translate(context, 'Automate')),
           ),
         ],
       );
@@ -4839,6 +4885,16 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
           haloKeys: haloKeys,
           anchorGlobalPos: details.globalPosition,
         ),
+        onSecondaryTapDown: PlatformCapabilities.current.isDesktop
+            ? (details) => _showAutomateParameterSheet(
+                  effectIndex: effectIndex,
+                  effectName: effectName,
+                  paramId: paramId,
+                  paramName: paramName,
+                  haloKeys: haloKeys,
+                  anchorGlobalPos: details.globalPosition,
+                )
+            : null,
         child: _wrapWithHalos(
           haloKeys: haloKeys,
           borderRadius: borderRadius,
@@ -4972,6 +5028,28 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
       _bypassed = List<bool>.from(bypass);
     });
     widget.onHeightChanged?.call(_panelHeight);
+  }
+
+  String _rawEffectIdAt(int idx) {
+    if (idx < 0 || idx >= _effectKeys.length) return '';
+    final stableKey = _effectKeys[idx];
+    final hashIndex = stableKey.lastIndexOf('#');
+    if (hashIndex <= 0) return stableKey;
+    return stableKey.substring(0, hashIndex);
+  }
+
+  bool _isLikelyExternalEffectSlot(int idx) {
+    final rawId = _rawEffectIdAt(idx).trim();
+    if (rawId.isEmpty) return false;
+    final effectName =
+        (idx >= 0 && idx < _effects.length) ? _effects[idx].trim() : '';
+    return rawId != effectName;
+  }
+
+  Future<void> _tryOpenMasterPluginEditor(int idx) async {
+    final opener = widget.openMasterPluginEditor;
+    if (opener == null || !_isLikelyExternalEffectSlot(idx)) return;
+    await opener(idx);
   }
 
   void _moveDelayDivisionState(int from, int to) {
@@ -6166,6 +6244,12 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     } catch (_) {
       plugins = const <Map<String, dynamic>>[];
     }
+    final externalEffects = plugins.where((plugin) {
+      final category =
+          (plugin['category'] ?? '').toString().trim().toLowerCase();
+      final isInstrument = plugin['isInstrument'] == true;
+      return !isInstrument && category != 'instrument';
+    }).toList(growable: false);
     const allowedInBasic = [
       "Gain",
       "Reverb",
@@ -6301,14 +6385,15 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                     },
                   ),
                   ListView.separated(
-                    itemCount: plugins.isEmpty ? 1 : plugins.length,
+                    itemCount:
+                        externalEffects.isEmpty ? 1 : externalEffects.length,
                     separatorBuilder: (_, __) => Divider(
                       height: 1,
                       thickness: 1,
                       color: Colors.white.withOpacity(0.07),
                     ),
                     itemBuilder: (context, i) {
-                      if (plugins.isEmpty) {
+                      if (externalEffects.isEmpty) {
                         return ListTile(
                           dense: true,
                           contentPadding:
@@ -6326,7 +6411,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                           ),
                         );
                       }
-                      final meta = plugins[i];
+                      final meta = externalEffects[i];
                       final path = (meta['id'] ?? '').toString();
                       if (path.isEmpty) return const SizedBox.shrink();
                       final name = (meta['name'] ?? path).toString();
@@ -6364,6 +6449,10 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                           Navigator.pop(context);
                           await widget.insertMasterEffect(path);
                           await _loadEffects();
+                          final addedIndex = _effects.length - 1;
+                          if (addedIndex >= 0 && addedIndex < _effects.length) {
+                            await _tryOpenMasterPluginEditor(addedIndex);
+                          }
                         },
                       );
                     },
@@ -6389,6 +6478,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
       _currentParams = [];
       _returnHighlightedEffectIndex = null;
     });
+    unawaited(_tryOpenMasterPluginEditor(idx));
 
     if (_showsDynamicsReductionMeter(_effects[idx])) {
       _startCompressorMetering(effectIndex: idx);

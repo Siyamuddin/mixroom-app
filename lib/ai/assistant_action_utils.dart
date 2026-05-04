@@ -164,8 +164,7 @@ class AssistantActionUtils {
       final clampedMeasure = math.max(1.0, measure);
       final withinMeasure =
           beat != null && beat.isFinite && beat > 0.0 ? beat - 1.0 : 0.0;
-      return ((clampedMeasure - 1.0) * beatsPerBar + withinMeasure) *
-          msPerBeat;
+      return ((clampedMeasure - 1.0) * beatsPerBar + withinMeasure) * msPerBeat;
     }
 
     if (beat != null && beat.isFinite) {
@@ -1204,6 +1203,14 @@ class AssistantActionUtils {
       case 'resize_clip':
       case 'duration':
         return 'stretch';
+      case 'pitch':
+      case 'pitch_clip':
+      case 'pitch_shift':
+      case 'pitch_shift_clip':
+      case 'shift_pitch':
+      case 'transpose_audio':
+      case 'transpose_clip':
+        return 'pitch_shift';
       case 'reposition':
       case 'shift':
       case 'shift_clip':
@@ -1571,7 +1578,8 @@ class AssistantActionUtils {
       return rawProgression
           .map((e) {
             if (e is Map) {
-              final chord = e['chord'] ?? e['symbol'] ?? e['name'] ?? e['token'];
+              final chord =
+                  e['chord'] ?? e['symbol'] ?? e['name'] ?? e['token'];
               if (chord != null) return chord.toString().trim();
             }
             return e.toString().trim();

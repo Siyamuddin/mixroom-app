@@ -13,6 +13,9 @@ const int _kPromptStatsWindowOutputSamples = 12000;
 const int _kPromptStatsWindowCount = 6;
 const int _kPromptStatsMaxSamples =
     _kPromptStatsWindowOutputSamples * _kPromptStatsWindowCount;
+const int _kKeyChromaBins = 12;
+const int _kKeyChromaMinMidi = 36; // C2
+const int _kKeyChromaMaxMidi = 84; // C6
 const Map<String, double> _kFallbackPromptRoleProbs = <String, double>{
   'vocals': 0.17,
   'drums': 0.17,
@@ -121,6 +124,7 @@ class ProjectStateBuilder {
     required List<double> rowGain,
     required List<double> rowPan,
     required List<List<AutomationPoint>> rowAutomation,
+    String projectKey = '',
     double masterGain0to3 = 1.0,
     double masterPan0to1 = 0.5,
     Map<int, String> roleOverrides = const {},
@@ -210,6 +214,7 @@ class ProjectStateBuilder {
     final stereoStatsCache = <String, Map<String, double>>{};
     final nativePromptAnalysisCache = <String, Map<String, dynamic>>{};
     final clipPathSignatureCache = <String, String>{};
+    final keyAudioStatsByAnalysisKey = <String, Map<String, double>>{};
 
     final rows = <RowState>[];
     for (var row = 0; row < effectiveMaxRows; row++) {
@@ -460,6 +465,8 @@ class ProjectStateBuilder {
           );
         }
 
+        keyAudioStatsByAnalysisKey[analysisKey] = stats;
+
         probs.forEach((k, v) {
           rowRoleAccum[k] = (rowRoleAccum[k] ?? 0) + v;
         });
@@ -562,9 +569,16 @@ class ProjectStateBuilder {
     }
 
     final bpm = bpmFallback;
+    final keyEstimate = _estimateProjectKey(
+      audioTracks,
+      keyAudioStatsByAnalysisKey,
+    );
 
     return ProjectState(
         bpm: bpm,
+        projectKey: normalizeProjectKey(projectKey),
+        estimatedKey: keyEstimate.key,
+        estimatedKeyConfidence: keyEstimate.confidence,
         masterGain0to3: masterGain0to3,
         masterPan0to1: masterPan0to1,
         maxRows: effectiveMaxRows,
@@ -572,6 +586,194 @@ class ProjectStateBuilder {
         masterEffects: masterEffects,
         overlapMatrix: overlap,
         overlapRatioMatrix: overlapRatio);
+  }
+
+  _ProjectKeyEstimate _estimateProjectKey(
+    List<AudioTrack> tracks,
+    Map<String, Map<String, double>> audioStatsByAnalysisKey,
+  ) {
+    final pitchClassWeights = List<double>.filled(12, 0.0);
+    var totalWeight = 0.0;
+
+    for (final track in tracks) {
+      final transpose = track.pitchSemitones.round();
+      if (track.isMidi && track.midiNotes.isNotEmpty) {
+        for (final note in track.midiNotes) {
+          final noteWeight = note.lengthBeats.clamp(0.05, 16.0).toDouble() *
+              note.velocity.clamp(0.1, 1.0).toDouble();
+          final pc = (note.pitch + transpose) % 12;
+          pitchClassWeights[pc < 0 ? pc + 12 : pc] += noteWeight;
+          totalWeight += noteWeight;
+        }
+      }
+
+      if (!track.isMidi) {
+        final stats = audioStatsByAnalysisKey[_promptAnalysisCacheKey(track)];
+        final audioWeight = _addAudioChromaToKeyWeights(
+          stats,
+          pitchClassWeights,
+          transpose: transpose,
+          durationMs: (track.trimEnd - track.trimStart).inMilliseconds,
+        );
+        totalWeight += audioWeight;
+      }
+
+      final hintedKey = _keyHintFromText('${track.label} ${track.file.path}');
+      if (hintedKey != null) {
+        final transposed = _transposeProjectKey(hintedKey, transpose);
+        final pc = _rootPitchClassForProjectKey(transposed);
+        if (pc != null) {
+          final hintWeight = track.isMidi ? 1.0 : 1.8;
+          pitchClassWeights[pc] += hintWeight;
+          totalWeight += hintWeight;
+        }
+      }
+    }
+
+    if (totalWeight <= 0.0) return const _ProjectKeyEstimate('', 0.0);
+
+    const majorProfile = <double>[
+      6.35,
+      2.23,
+      3.48,
+      2.33,
+      4.38,
+      4.09,
+      2.52,
+      5.19,
+      2.39,
+      3.66,
+      2.29,
+      2.88,
+    ];
+    const minorProfile = <double>[
+      6.33,
+      2.68,
+      3.52,
+      5.38,
+      2.60,
+      3.53,
+      2.54,
+      4.75,
+      3.98,
+      2.69,
+      3.34,
+      3.17,
+    ];
+
+    var bestKey = '';
+    var bestScore = double.negativeInfinity;
+    var secondScore = double.negativeInfinity;
+
+    for (var root = 0; root < 12; root++) {
+      for (final mode in kProjectKeyModes) {
+        final profile = mode == 'minor' ? minorProfile : majorProfile;
+        var score = 0.0;
+        for (var pc = 0; pc < 12; pc++) {
+          final relative = (pc - root) % 12;
+          score += pitchClassWeights[pc] *
+              profile[relative < 0 ? relative + 12 : relative];
+        }
+        final key = '${kProjectKeyRoots[root]} $mode';
+        if (score > bestScore) {
+          secondScore = bestScore;
+          bestScore = score;
+          bestKey = key;
+        } else if (score > secondScore) {
+          secondScore = score;
+        }
+      }
+    }
+
+    if (bestKey.isEmpty || !bestScore.isFinite || bestScore <= 0.0) {
+      return const _ProjectKeyEstimate('', 0.0);
+    }
+    final confidence = secondScore.isFinite && secondScore > 0.0
+        ? ((bestScore - secondScore) / bestScore).clamp(0.0, 1.0).toDouble()
+        : 1.0;
+    return _ProjectKeyEstimate(bestKey, confidence);
+  }
+
+  double _addAudioChromaToKeyWeights(
+    Map<String, double>? stats,
+    List<double> pitchClassWeights, {
+    required int transpose,
+    required int durationMs,
+  }) {
+    if (stats == null || stats.isEmpty) return 0.0;
+
+    final chroma = List<double>.generate(
+      _kKeyChromaBins,
+      (index) => (stats['key_pc_$index'] ?? 0.0)
+          .clamp(0.0, double.infinity)
+          .toDouble(),
+      growable: false,
+    );
+    final chromaSum = chroma.fold<double>(0.0, (sum, value) => sum + value);
+    if (chromaSum <= 1e-9) return 0.0;
+
+    final durationWeight = (durationMs / 1000.0).clamp(1.0, 30.0).toDouble();
+    final activity =
+        (stats['activity_ratio'] ?? 1.0).clamp(0.05, 1.0).toDouble();
+    final flatness =
+        (stats['spectral_flatness'] ?? 0.35).clamp(0.0, 1.0).toDouble();
+    final tonalWeight = (1.0 - flatness).clamp(0.15, 1.0).toDouble();
+    final weight = durationWeight * activity * tonalWeight * 0.35;
+    if (weight <= 1e-9) return 0.0;
+
+    for (var pc = 0; pc < _kKeyChromaBins; pc++) {
+      final transposed = (pc + transpose) % _kKeyChromaBins;
+      final targetPc =
+          transposed < 0 ? transposed + _kKeyChromaBins : transposed;
+      pitchClassWeights[targetPc] += (chroma[pc] / chromaSum) * weight;
+    }
+    return weight;
+  }
+
+  String? _keyHintFromText(String text) {
+    final normalized = text
+        .replaceAll('_', ' ')
+        .replaceAll('-', ' ')
+        .replaceAll('.', ' ')
+        .replaceAll('♯', '#')
+        .replaceAll('♭', 'b')
+        .toLowerCase();
+    final explicit = RegExp(
+      r'\b(?:key|in)\s+([a-g])\s*(#|b)?\s*(major|maj|minor|min|m)?\b',
+    ).firstMatch(normalized);
+    if (explicit != null) {
+      return normalizeProjectKey(
+        '${explicit.group(1)}${explicit.group(2) ?? ''} ${explicit.group(3) ?? 'major'}',
+      );
+    }
+    final compact = RegExp(
+      r'\b([a-g])\s*(#|b)?\s*(major|maj|minor|min|m)\b',
+    ).firstMatch(normalized);
+    if (compact == null) return null;
+    return normalizeProjectKey(
+      '${compact.group(1)}${compact.group(2) ?? ''} ${compact.group(3)}',
+    );
+  }
+
+  String _transposeProjectKey(String key, int semitones) {
+    final normalized = normalizeProjectKey(key);
+    if (normalized.isEmpty || semitones == 0) return normalized;
+    final parts = normalized.split(' ');
+    final rootIndex = kProjectKeyRoots.indexOf(parts.first);
+    if (rootIndex < 0) return normalized;
+    final transposedIndex = (rootIndex + semitones) % kProjectKeyRoots.length;
+    final nextRoot = kProjectKeyRoots[transposedIndex < 0
+        ? transposedIndex + kProjectKeyRoots.length
+        : transposedIndex];
+    return '$nextRoot ${parts.length > 1 ? parts[1] : 'major'}';
+  }
+
+  int? _rootPitchClassForProjectKey(String key) {
+    final normalized = normalizeProjectKey(key);
+    if (normalized.isEmpty) return null;
+    final root = normalized.split(' ').first;
+    final index = kProjectKeyRoots.indexOf(root);
+    return index < 0 ? null : index;
   }
 
   double _rowsOverlapRatio(List<ClipState> a, List<ClipState> b) {
@@ -1064,6 +1266,18 @@ Map<String, double> _analyzePcm16k(
       'high': 0,
       'sibilance': 0,
       'bassiness': 0,
+      'key_pc_0': 0,
+      'key_pc_1': 0,
+      'key_pc_2': 0,
+      'key_pc_3': 0,
+      'key_pc_4': 0,
+      'key_pc_5': 0,
+      'key_pc_6': 0,
+      'key_pc_7': 0,
+      'key_pc_8': 0,
+      'key_pc_9': 0,
+      'key_pc_10': 0,
+      'key_pc_11': 0,
     };
   }
 
@@ -1144,6 +1358,7 @@ Map<String, double> _analyzePcm16k(
   final sideRatio = (stereoStats['side_ratio'] ?? 0.0).clamp(0.0, 2.0);
   final stereoImbalance =
       (stereoStats['stereo_imbalance'] ?? 0.0).clamp(0.0, 1.0);
+  final keyChroma = _keyChroma16k(x, fs);
 
   return {
     'centroid_hz': centroidHz,
@@ -1177,7 +1392,49 @@ Map<String, double> _analyzePcm16k(
     'high': high,
     'sibilance': sibilance,
     'bassiness': bassiness,
+    for (var i = 0; i < _kKeyChromaBins; i++) 'key_pc_$i': keyChroma[i],
   };
+}
+
+List<double> _keyChroma16k(List<double> x, double fs) {
+  if (x.length < 2048 || fs <= 0.0) {
+    return List<double>.filled(_kKeyChromaBins, 0.0);
+  }
+
+  double sumSq = 0.0;
+  for (final sample in x) {
+    sumSq += sample * sample;
+  }
+  final rms = math.sqrt(sumSq / math.max(1, x.length));
+  if (rms < 0.003) return List<double>.filled(_kKeyChromaBins, 0.0);
+
+  final chroma = List<double>.filled(_kKeyChromaBins, 0.0);
+  for (var midi = _kKeyChromaMinMidi; midi <= _kKeyChromaMaxMidi; midi++) {
+    final freq = 440.0 * math.pow(2.0, (midi - 69) / 12.0).toDouble();
+    if (freq <= 45.0 || freq >= fs * 0.45) continue;
+    final mag = _goertzelMag(x, fs, freq);
+    chroma[midi % _kKeyChromaBins] += (mag * mag) / math.sqrt(freq);
+  }
+
+  final floor = chroma.fold<double>(double.infinity, math.min);
+  for (var i = 0; i < chroma.length; i++) {
+    chroma[i] = math.max(0.0, chroma[i] - floor * 0.75);
+  }
+
+  final peak = chroma.fold<double>(0.0, math.max);
+  if (peak <= 1e-12) return List<double>.filled(_kKeyChromaBins, 0.0);
+
+  var sum = 0.0;
+  for (var i = 0; i < chroma.length; i++) {
+    chroma[i] = math.sqrt(chroma[i] / peak);
+    sum += chroma[i];
+  }
+  if (sum <= 1e-12) return List<double>.filled(_kKeyChromaBins, 0.0);
+
+  for (var i = 0; i < chroma.length; i++) {
+    chroma[i] = (chroma[i] / sum).clamp(0.0, 1.0);
+  }
+  return chroma;
 }
 
 List<double> _sparsePromptAnalysisSlice(
@@ -1547,6 +1804,13 @@ class _CachedNativePromptAnalysis {
     required this.signature,
     required this.payload,
   });
+}
+
+class _ProjectKeyEstimate {
+  final String key;
+  final double confidence;
+
+  const _ProjectKeyEstimate(this.key, this.confidence);
 }
 
 class _CachedClipPromptAnalysis {

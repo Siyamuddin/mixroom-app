@@ -41,7 +41,10 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
   @override
   void initState() {
     super.initState();
-    _loadPreferences();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _loadPreferences();
+    });
   }
 
   Future<void> _loadPreferences() async {
@@ -201,24 +204,30 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
   Future<void> _requestDataExport() {
     return _openEmail(
       to: _privacyEmail,
-      subject: 'Data export request',
-      body: 'Hello Mixroom Privacy Team,\n\n'
-          'I would like to request a copy of my personal data.\n\n'
-          'Account email: \n'
-          'Full name: \n\n'
-          'Thank you.',
+      subject: L10n.translate(context, 'Data export request'),
+      body: L10n.translate(
+        context,
+        'Hello Mixroom Privacy Team,\n\n'
+        'I would like to request a copy of my personal data.\n\n'
+        'Account email: \n'
+        'Full name: \n\n'
+        'Thank you.',
+      ),
     );
   }
 
   Future<void> _requestDataCorrectionOrDeletion() {
     return _openEmail(
       to: _privacyEmail,
-      subject: 'Data correction/deletion request',
-      body: 'Hello Mixroom Privacy Team,\n\n'
-          'I would like to request a correction or deletion of my personal data.\n\n'
-          'Account email: \n'
-          'Request details: \n\n'
-          'Thank you.',
+      subject: L10n.translate(context, 'Data correction/deletion request'),
+      body: L10n.translate(
+        context,
+        'Hello Mixroom Privacy Team,\n\n'
+        'I would like to request a correction or deletion of my personal data.\n\n'
+        'Account email: \n'
+        'Request details: \n\n'
+        'Thank you.',
+      ),
     );
   }
 
@@ -448,8 +457,11 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                         subtitle: _privacyEmail,
                         onTap: () => _openEmail(
                           to: _privacyEmail,
-                          subject: 'Privacy inquiry',
-                          body: 'Hello Mixroom Privacy Team,\n\n',
+                          subject: L10n.translate(context, 'Privacy inquiry'),
+                          body: L10n.translate(
+                            context,
+                            'Hello Mixroom Privacy Team,\n\n',
+                          ),
                         ),
                       ),
                       _ActionItem(
@@ -458,8 +470,11 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                         subtitle: _supportEmail,
                         onTap: () => _openEmail(
                           to: _supportEmail,
-                          subject: 'Support request',
-                          body: 'Hello Mixroom Support,\n\n',
+                          subject: L10n.translate(context, 'Support request'),
+                          body: L10n.translate(
+                            context,
+                            'Hello Mixroom Support,\n\n',
+                          ),
                         ),
                       ),
                     ],
@@ -990,7 +1005,7 @@ class _LegalDocumentScreen extends StatelessWidget {
   final String intro;
   final List<_LegalSection> sections;
 
-  List<Widget> _buildDocumentSections() {
+  List<Widget> _buildDocumentSections(BuildContext context) {
     if (sections.isEmpty) return const [];
 
     final output = <Widget>[];
@@ -1003,7 +1018,7 @@ class _LegalDocumentScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                section.heading,
+                L10n.translate(context, section.heading),
                 style: const TextStyle(
                   fontFamily: 'Pretendard',
                   color: Color(0xFFF4F4F4),
@@ -1013,7 +1028,7 @@ class _LegalDocumentScreen extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               SelectableText(
-                section.body,
+                L10n.translate(context, section.body),
                 style: TextStyle(
                   fontFamily: 'Pretendard',
                   color: Colors.white.withValues(alpha: 0.72),
@@ -1086,7 +1101,8 @@ class _LegalDocumentScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'Last updated: $updatedAt',
+                          L10n.translate(context, 'Last updated: {date}')
+                              .replaceAll('{date}', updatedAt),
                           style: TextStyle(
                             fontFamily: 'Pretendard',
                             color: Colors.white.withValues(alpha: 0.64),
@@ -1096,7 +1112,7 @@ class _LegalDocumentScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 10),
                         SelectableText(
-                          intro,
+                          L10n.translate(context, intro),
                           style: TextStyle(
                             fontFamily: 'Pretendard',
                             color: Colors.white.withValues(alpha: 0.76),
@@ -1116,7 +1132,7 @@ class _LegalDocumentScreen extends StatelessWidget {
                     padding: const EdgeInsets.fromLTRB(18, 12, 18, 12),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      children: _buildDocumentSections(),
+                      children: _buildDocumentSections(context),
                     ),
                   ),
                 ],

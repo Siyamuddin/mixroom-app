@@ -7,6 +7,7 @@ import 'package:flutter_chat_core/flutter_chat_core.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:mixroom/helpers/desktop_file_ingress_service.dart';
 import 'package:mixroom/helpers/export_save_dialog.dart';
 import 'package:mixroom/helpers/open_mixroom_service.dart';
 import 'package:mixroom/l10n/l10n.dart';
@@ -75,6 +76,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   bool _loading = true;
   bool _filePickerInFlight = false;
   StreamSubscription<String>? _importSub;
+  StreamSubscription<List<DesktopFileDropItem>>? _desktopDropSub;
   String? _loadError;
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode(debugLabel: 'projects_search');
@@ -117,6 +119,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       if (initial != null) {
         await _importProjectFromIncomingFile(File(initial));
       }
+      final pendingDrops = DesktopFileIngressService.consumePendingBatches();
+      for (final items in pendingDrops) {
+        await _handleDesktopFinderDrop(items);
+      }
     });
 
     // Warm start
@@ -125,11 +131,17 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         await _importProjectFromIncomingFile(File(path));
       });
     });
+    _desktopDropSub = DesktopFileIngressService.stream.listen((items) async {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await _handleDesktopFinderDrop(items);
+      });
+    });
   }
 
   @override
   void dispose() {
     _importSub?.cancel();
+    _desktopDropSub?.cancel();
     ProjectManager.projectLibraryRevision.removeListener(
       _handleProjectLibraryChanged,
     );
@@ -141,6 +153,18 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   void _handleProjectLibraryChanged() {
     if (!mounted) return;
     unawaited(_refresh());
+  }
+
+  Future<void> _handleDesktopFinderDrop(
+    List<DesktopFileDropItem> items,
+  ) async {
+    if (!Platform.isMacOS || items.isEmpty) return;
+    final mixroomItems = items.where((item) => item.isMixroom).toList();
+    if (mixroomItems.isEmpty) return;
+    for (final item in mixroomItems) {
+      if (!mounted) return;
+      await _importProjectFromIncomingFile(File(item.path));
+    }
   }
 
   Future<void> _refresh() async {
@@ -222,6 +246,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   Future<FilePickerResult?> _pickFilesSafely({
     required FileType type,
+    List<String>? allowedExtensions,
     bool withData = false,
   }) async {
     if (_filePickerInFlight) return null;
@@ -231,6 +256,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       await SchedulerBinding.instance.endOfFrame;
       return await FilePicker.platform.pickFiles(
         type: type,
+        allowedExtensions: allowedExtensions,
         withData: withData,
       );
     } on PlatformException catch (e) {
@@ -239,6 +265,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       try {
         return await FilePicker.platform.pickFiles(
           type: type,
+          allowedExtensions: allowedExtensions,
           withData: withData,
         );
       } on PlatformException catch (retryError) {
@@ -1339,10 +1366,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     final searchFocused = _searchFocusNode.hasFocus;
     final showSearchClear = searchFocused || hasSearchQuery;
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
-    final dockOverlayBottom =
-        mixroomShellDockBottomInset(context) + kMixroomMainDockHeight;
-    final listBottomBaseline = dockOverlayBottom + 14;
-    final floatingControlsBottom = dockOverlayBottom + 14;
+    final useDesktopRail = mixroomUsesDesktopRailNavigation;
+    final dockOverlayBottom = useDesktopRail
+        ? 0.0
+        : mixroomShellDockBottomInset(context) + kMixroomMainDockHeight;
+    final listBottomBaseline = dockOverlayBottom + (useDesktopRail ? 28 : 14);
+    final floatingControlsBottom =
+        dockOverlayBottom + (useDesktopRail ? 28 : 14);
     final searchBarBottom = searchFocused && keyboardInset > 0
         ? keyboardInset + 14
         : floatingControlsBottom;
@@ -2079,7 +2109,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                   return;
                 }
                 final res = await _pickFilesSafely(
-                  type: FileType.any,
+                  type: FileType.custom,
+                  allowedExtensions: const <String>['mixroom'],
                   withData: false,
                 );
                 if (res == null || res.files.isEmpty) return;

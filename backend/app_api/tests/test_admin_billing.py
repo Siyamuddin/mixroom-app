@@ -1,0 +1,96 @@
+import importlib
+import unittest
+from unittest import mock
+
+from support import decode_json_response
+from src.common.billing_catalog import default_catalog
+
+module = importlib.import_module("src.handlers.api_admin_billing")
+
+
+class AdminBillingApiTests(unittest.TestCase):
+    def setUp(self):
+        self.original_catalog_repo = module.catalog_repo
+        self.original_collaboration_repo = module.collaboration_repo
+        self.original_access_repo = module.access_repo
+        self.original_admin_identity = module._admin_identity
+        module.catalog_repo = mock.Mock()
+        module.catalog_repo.get_catalog.return_value = default_catalog()
+        module.catalog_repo.replace_catalog.return_value = default_catalog()
+        module.collaboration_repo = mock.Mock()
+        module.collaboration_repo.is_configured.return_value = True
+        module.collaboration_repo.list_organizations.return_value = []
+        module.collaboration_repo.list_memberships.return_value = []
+        module.collaboration_repo.list_workspaces.return_value = []
+        module.collaboration_repo.list_cloud_projects.return_value = []
+        module.collaboration_repo.save_organization.return_value = {
+            "organization_id": "org-1",
+            "name": "Team",
+        }
+        module.access_repo = mock.Mock()
+        module.access_repo.is_email_allowed.return_value = True
+        module._admin_identity = lambda event: ("client-1", "admin-1", "andrew@mixroom.ai")
+
+    def tearDown(self):
+        module.catalog_repo = self.original_catalog_repo
+        module.collaboration_repo = self.original_collaboration_repo
+        module.access_repo = self.original_access_repo
+        module._admin_identity = self.original_admin_identity
+
+    def test_gets_billing_catalog(self):
+        response = module.handler(
+            {
+                "rawPath": "/v1/internal/admin/settings/billing-catalog",
+                "requestContext": {"http": {"method": "GET"}},
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertIn("plans", payload)
+        self.assertEqual(payload["requested_by"], "admin-1")
+
+    def test_replaces_billing_catalog(self):
+        response = module.handler(
+            {
+                "rawPath": "/v1/internal/admin/settings/billing-catalog",
+                "requestContext": {"http": {"method": "PUT"}},
+                "body": '{"plans":[],"products":[],"offers":[],"support":{}}',
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        module.catalog_repo.replace_catalog.assert_called_once()
+
+    def test_saves_organization(self):
+        response = module.handler(
+            {
+                "rawPath": "/v1/internal/admin/billing/organizations",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": '{"name":"Team"}',
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertEqual(payload["organization"]["organization_id"], "org-1")
+
+    def test_rejects_not_allowlisted_admin(self):
+        module.access_repo.is_email_allowed.return_value = False
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/internal/admin/settings/billing-catalog",
+                "requestContext": {"http": {"method": "GET"}},
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 403)
+
+
+if __name__ == "__main__":
+    unittest.main()

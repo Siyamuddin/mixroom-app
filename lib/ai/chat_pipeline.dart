@@ -63,6 +63,7 @@ class ChatPipeline {
     required List<double> rowPan,
     required List<List<AutomationPoint>> rowAutomation,
     required double bpmFallback,
+    String projectKey = '',
     List<String> rowNames = const [],
     String librarySnapshot = '',
     double masterGain0to3 = 1.0,
@@ -109,6 +110,7 @@ class ChatPipeline {
         rowGain: rowGain,
         rowPan: rowPan,
         rowAutomation: rowAutomation,
+        projectKey: projectKey,
         masterGain0to3: masterGain0to3,
         masterPan0to1: masterPan0to1,
         roleOverrides: _roleOverrides,
@@ -1000,6 +1002,11 @@ class ChatPipeline {
   }) {
     final b = StringBuffer();
     b.writeln('bpm=${p.bpm.toStringAsFixed(2)}');
+    b.writeln(
+      'project_key=${p.projectKey.isEmpty ? "unset" : p.projectKey} '
+      'estimated_key=${p.estimatedKey.isEmpty ? "unknown" : p.estimatedKey} '
+      'estimated_key_confidence=${p.estimatedKeyConfidence.toStringAsFixed(2)}',
+    );
     final tracksByRow = <int, List<AudioTrack>>{};
     for (final track in audioTracks) {
       final rowIndex = track.rowIndex;

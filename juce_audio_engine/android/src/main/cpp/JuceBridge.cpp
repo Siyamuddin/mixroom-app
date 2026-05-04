@@ -814,6 +814,13 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipPanJNI(JNIEnv *, jclass, 
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipFadesJNI(JNIEnv *, jclass, jint clipIndex, jdouble fadeInSec, jdouble fadeOutSec, jint fadeCurve)
+{
+    juce::MessageManager::getInstance()->callSync([clipIndex, fadeInSec, fadeOutSec, fadeCurve]
+                                                  { JuceEngine::get().setClipFades((int)clipIndex, (double)fadeInSec, (double)fadeOutSec, (int)fadeCurve); });
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipPitchJNI(JNIEnv *, jclass, jint clipIndex, jfloat semitones)
 {
     juce::MessageManager::getInstance()->callSync([clipIndex, semitones]
@@ -1505,6 +1512,13 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipGainJNI(JNIEnv *, jclass,
 {
     juce::MessageManager::getInstance()->callSync([clipIndex, gain]
                                                   { JuceEngine::get().setClipGain((int)clipIndex, (float)gain); });
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipExtraGainLinearJNI(JNIEnv *, jclass, jint clipIndex, jfloat gain)
+{
+    juce::MessageManager::getInstance()->callSync([clipIndex, gain]
+                                                  { JuceEngine::get().setClipExtraGainLinear((int)clipIndex, (float)gain); });
 }
 
 extern "C" JNIEXPORT void JNICALL

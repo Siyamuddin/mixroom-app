@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/widgets/app_shell_figma.dart';
 
 enum AppPopupTone { info, success, warning, error }
@@ -12,6 +13,7 @@ void showAppSnackBar(
   if (!context.mounted) return;
   final messenger = ScaffoldMessenger.of(context);
   final colors = Theme.of(context).colorScheme;
+  final localizedMessage = L10n.translate(context, message);
 
   IconData icon;
   Color stripe;
@@ -59,7 +61,7 @@ void showAppSnackBar(
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              message,
+              localizedMessage,
               style: const TextStyle(
                 fontFamily: 'Pretendard',
                 color: Color(0xFFF4F4F4),

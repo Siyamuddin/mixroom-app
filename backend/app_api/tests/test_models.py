@@ -49,6 +49,7 @@ class ModelTests(unittest.TestCase):
         snapshot = free_entitlement("u-1", allow_studio_tier=False).to_dict()
         self.assertEqual(snapshot["user_id"], "u-1")
         self.assertEqual(snapshot["tier"], "free")
+        self.assertEqual(snapshot["plan_code"], "free")
 
     def test_primary_subscription_prefers_active_over_later_expired(self):
         choice = choose_primary_subscription(

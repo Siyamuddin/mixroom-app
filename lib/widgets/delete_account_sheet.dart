@@ -44,6 +44,29 @@ class _DeleteAccountSheetState extends State<DeleteAccountSheet> {
   bool get _deleteConfirmed =>
       _confirmationController.text.trim().toUpperCase() == 'DELETE';
 
+  String _providerLabel(BuildContext context) {
+    return L10n.translate(context, _user?.provider.label ?? 'Email');
+  }
+
+  String _providerText(BuildContext context, String key) {
+    return L10n.translate(context, key).replaceAll(
+      '{provider}',
+      _providerLabel(context),
+    );
+  }
+
+  String _localizedError(BuildContext context, Object error) {
+    final message = error.toString().replaceFirst('Bad state: ', '').trim();
+    if (message.startsWith('Re-authenticate with ') &&
+        message.endsWith(' to delete this account.')) {
+      return _providerText(
+        context,
+        'Re-authenticate with {provider} to delete this account.',
+      );
+    }
+    return L10n.translate(context, message);
+  }
+
   @override
   void dispose() {
     _confirmationController.dispose();
@@ -54,25 +77,35 @@ class _DeleteAccountSheetState extends State<DeleteAccountSheet> {
   Future<void> _submit() async {
     final user = _user;
     if (user == null) {
-      setState(() => _inlineError = 'No active account.');
+      setState(
+        () => _inlineError = L10n.translate(context, 'No active account.'),
+      );
       return;
     }
     if (!_deleteConfirmed) {
       setState(() {
-        _inlineError = 'Type DELETE to confirm account deletion.';
+        _inlineError = L10n.translate(
+          context,
+          'Type DELETE to confirm account deletion.',
+        );
       });
       return;
     }
     if (_usesEmailPassword && _passwordController.text.isEmpty) {
       setState(() {
-        _inlineError = 'Enter your current password to delete this account.';
+        _inlineError = L10n.translate(
+          context,
+          'Enter your current password to delete this account.',
+        );
       });
       return;
     }
     if (!_usesEmailPassword && _socialReauthPayload == null) {
       setState(() {
-        _inlineError =
-            'Re-authenticate with ${user.provider.label} to delete this account.';
+        _inlineError = _providerText(
+          context,
+          'Re-authenticate with {provider} to delete this account.',
+        );
       });
       return;
     }
@@ -89,7 +122,7 @@ class _DeleteAccountSheetState extends State<DeleteAccountSheet> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _inlineError = e.toString().replaceFirst('Bad state: ', '');
+        _inlineError = _localizedError(context, e);
       });
     }
   }
@@ -108,7 +141,7 @@ class _DeleteAccountSheetState extends State<DeleteAccountSheet> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _inlineError = e.toString().replaceFirst('Bad state: ', '');
+        _inlineError = _localizedError(context, e);
       });
     } finally {
       if (mounted) {
@@ -309,7 +342,7 @@ class _DeleteAccountSheetState extends State<DeleteAccountSheet> {
                                 ),
                                 const Spacer(),
                                 Text(
-                                  user.provider.label,
+                                  _providerLabel(context),
                                   style: TextStyle(
                                     fontFamily: 'Pretendard',
                                     color: Colors.white.withValues(alpha: 0.62),
@@ -378,9 +411,9 @@ class _DeleteAccountSheetState extends State<DeleteAccountSheet> {
                                   ),
                                   const SizedBox(height: 2),
                                   Text(
-                                    L10n.translate(
+                                    _providerText(
                                       context,
-                                      'Signed in with ${user.provider.label}',
+                                      'Signed in with {provider}',
                                     ),
                                     style: TextStyle(
                                       fontFamily: 'Pretendard',
@@ -455,9 +488,9 @@ class _DeleteAccountSheetState extends State<DeleteAccountSheet> {
                                 children: [
                                   Expanded(
                                     child: Text(
-                                      L10n.translate(
+                                      _providerText(
                                         context,
-                                        'Confirm with ${user.provider.label}',
+                                        'Confirm with {provider}',
                                       ),
                                       style: const TextStyle(
                                         fontFamily: 'Pretendard',
@@ -481,9 +514,9 @@ class _DeleteAccountSheetState extends State<DeleteAccountSheet> {
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                L10n.translate(
+                                _providerText(
                                   context,
-                                  'Run one more ${user.provider.label} sign-in check before Mixroom deletes this account.',
+                                  'Run one more {provider} sign-in check before Mixroom deletes this account.',
                                 ),
                                 style: TextStyle(
                                   fontFamily: 'Pretendard',
@@ -530,9 +563,9 @@ class _DeleteAccountSheetState extends State<DeleteAccountSheet> {
                                         ],
                                         Text(
                                           _socialReauthPayload == null
-                                              ? L10n.translate(
+                                              ? _providerText(
                                                   context,
-                                                  'Re-auth with ${user.provider.label}',
+                                                  'Re-auth with {provider}',
                                                 )
                                               : L10n.translate(
                                                   context,
@@ -577,17 +610,18 @@ class _DeleteAccountSheetState extends State<DeleteAccountSheet> {
                                   : () => Navigator.of(context).pop(false),
                               child: Opacity(
                                 opacity: busy || _isReauthenticating ? 0.58 : 1,
-                                child: const MixroomShellSurface(
+                                child: MixroomShellSurface(
                                   radius: 22,
-                                  color: Color.fromRGBO(244, 244, 244, 0.12),
-                                  padding: EdgeInsets.symmetric(
+                                  color:
+                                      const Color.fromRGBO(244, 244, 244, 0.12),
+                                  padding: const EdgeInsets.symmetric(
                                     horizontal: 14,
                                     vertical: 13,
                                   ),
                                   child: Text(
-                                    'Cancel',
+                                    L10n.translate(context, 'Cancel'),
                                     textAlign: TextAlign.center,
-                                    style: TextStyle(
+                                    style: const TextStyle(
                                       fontFamily: 'Pretendard',
                                       color: Color(0xFFF4F4F4),
                                       fontSize: 14,
@@ -631,10 +665,13 @@ class _DeleteAccountSheetState extends State<DeleteAccountSheet> {
                                             ),
                                           ),
                                         )
-                                      : const Text(
-                                          'Delete Account',
+                                      : Text(
+                                          L10n.translate(
+                                            context,
+                                            'Delete Account',
+                                          ),
                                           textAlign: TextAlign.center,
-                                          style: TextStyle(
+                                          style: const TextStyle(
                                             fontFamily: 'Pretendard',
                                             color: Color(0xFFF4F4F4),
                                             fontSize: 14,

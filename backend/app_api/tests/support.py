@@ -87,6 +87,7 @@ class FakeBillingRepo:
         self.queued_projection_ids = []
         self.reconciliation_jobs = []
         self.user_profile_upserts = []
+        self.user_profile_newsletter_updates = []
 
     def put_billing_event_if_new(self, event):
         event_id = str(event["event_id"])
@@ -182,6 +183,26 @@ class FakeBillingRepo:
             {
                 "profile": payload,
                 "previous_username_lc": previous_username_lc,
+            }
+        )
+
+    def update_user_newsletter_subscription(
+        self,
+        user_id,
+        *,
+        newsletter_opt_in,
+        newsletter_opt_in_at,
+    ):
+        payload = dict(self.user_profiles[str(user_id)])
+        payload["newsletter_opt_in"] = bool(newsletter_opt_in)
+        payload["newsletter_opt_in_at"] = newsletter_opt_in_at
+        payload["updated_at"] = "updated"
+        self.user_profiles[str(user_id)] = payload
+        self.user_profile_newsletter_updates.append(
+            {
+                "user_id": str(user_id),
+                "newsletter_opt_in": bool(newsletter_opt_in),
+                "newsletter_opt_in_at": newsletter_opt_in_at,
             }
         )
 

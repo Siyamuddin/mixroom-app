@@ -95,6 +95,7 @@ class _FakeProjectStateBuilder extends ProjectStateBuilder {
     required List<double> rowGain,
     required List<double> rowPan,
     required List<List<AutomationPoint>> rowAutomation,
+    String projectKey = '',
     double masterGain0to3 = 1.0,
     double masterPan0to1 = 0.5,
     Map<int, String> roleOverrides = const {},

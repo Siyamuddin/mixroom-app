@@ -68,6 +68,79 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Entitlement'
+  /v1/billing/catalog:
+    get:
+      summary: Get billing catalog, plan configuration, and support metadata
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Billing catalog
+  /v1/organizations/me:
+    get:
+      summary: Get organizations and memberships available to the signed-in user
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Organization access snapshot
+  /v1/workspaces/me:
+    get:
+      summary: Get workspaces available to the signed-in user
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Workspace access snapshot
+  /v1/cloud-projects/me:
+    get:
+      summary: Get cloud projects available to the signed-in user
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Cloud project access snapshot
+  /v1/cloud-projects/{project_id}:
+    get:
+      summary: Get one accessible cloud project document and metadata
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cloud project detail
+    put:
+      summary: Update one accessible cloud project document with optimistic locking
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [document, expected_revision]
+              properties:
+                expected_revision:
+                  type: integer
+                name:
+                  type: string
+                document:
+                  type: object
+      responses:
+        '200':
+          description: Cloud project updated
   /v1/feedback:
     post:
       summary: Submit product feedback or a bug report
@@ -279,6 +352,127 @@ paths:
       responses:
         '200':
           description: Producer capture whitelist settings updated
+  /v1/internal/admin/settings/billing-catalog:
+    get:
+      summary: Get internal admin billing catalog and support settings
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Billing catalog and support settings
+    put:
+      summary: Replace internal admin billing catalog and support settings
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plans, products, offers, support]
+              properties:
+                plans:
+                  type: array
+                  items:
+                    type: object
+                products:
+                  type: array
+                  items:
+                    type: object
+                offers:
+                  type: array
+                  items:
+                    type: object
+                support:
+                  type: object
+      responses:
+        '200':
+          description: Billing catalog updated
+  /v1/internal/admin/billing/organizations:
+    get:
+      summary: List internal admin organizations for team billing
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Organization records
+    post:
+      summary: Create or update an internal admin organization for team billing
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Organization saved
+  /v1/internal/admin/billing/memberships:
+    get:
+      summary: List internal admin organization memberships
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Membership records
+    post:
+      summary: Create or update an internal admin organization membership
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Membership saved
+  /v1/internal/admin/billing/workspaces:
+    get:
+      summary: List internal admin team workspaces
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Workspace records
+    post:
+      summary: Create or update an internal admin team workspace
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Workspace saved
+  /v1/internal/admin/billing/cloud-projects:
+    get:
+      summary: List internal admin cloud project records
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Cloud project records
+    post:
+      summary: Create or update an internal admin cloud project
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Cloud project saved
   /v1/billing/web/checkout-session:
     post:
       summary: Create web checkout session (Paddle/Toss)
@@ -293,6 +487,8 @@ paths:
               required: [region_code]
               properties:
                 region_code:
+                  type: string
+                product_code:
                   type: string
                 success_url:
                   type: string
@@ -520,3 +716,26 @@ components:
           type: string
         revision:
           type: integer
+        plan_code:
+          type: string
+        plan_label:
+          type: string
+        plan_group:
+          type: string
+        limits:
+          type: object
+          additionalProperties: true
+        access_sources:
+          type: array
+          items:
+            type: object
+        workspace_access_summary:
+          type: object
+          additionalProperties: true
+        organizations:
+          type: array
+          items:
+            type: object
+        billing_support:
+          type: object
+          additionalProperties: true

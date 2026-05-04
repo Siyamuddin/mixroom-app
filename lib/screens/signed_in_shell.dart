@@ -571,51 +571,121 @@ class _SignedInShellState extends State<SignedInShell> {
   @override
   Widget build(BuildContext context) {
     context.watch<LocaleProvider>();
+    final useDesktopRail = mixroomUsesDesktopRailNavigation;
     return Scaffold(
       resizeToAvoidBottomInset: false,
       backgroundColor: const Color(0xFF090909),
       body: Stack(
         children: [
-          Positioned.fill(child: _buildPage(_selectedTab)),
-          if (_activeAnnouncement != null && _activeAnnouncement!.showsBanner)
-            Positioned(
-              left: 18,
-              right: 18,
-              top: MediaQuery.of(context).padding.top + 10,
-              child: SafeArea(
-                bottom: false,
-                child: RemoteAnnouncementBanner(
-                  announcement: _activeAnnouncement!,
-                  onPrimaryTap: () {
-                    unawaited(
-                      _handleAnnouncementAction(
-                        announcement: _activeAnnouncement!,
-                        action: 'primary',
+          if (useDesktopRail)
+            Positioned.fill(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SafeArea(
+                    right: false,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 12, 10, 18),
+                      child: MixroomMainSideRail(
+                        selectedTab: _selectedTab,
+                        onTabSelected: _setTab,
+                        onAddTap: _createMusicProject,
                       ),
-                    );
-                  },
-                  onDismissTap: () {
-                    unawaited(
-                      _handleAnnouncementAction(
-                        announcement: _activeAnnouncement!,
-                        action: 'dismissed',
-                      ),
-                    );
-                  },
+                    ),
+                  ),
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: Padding(
+                            padding: const EdgeInsets.only(right: 28),
+                            child: _buildPage(_selectedTab),
+                          ),
+                        ),
+                        if (_activeAnnouncement != null &&
+                            _activeAnnouncement!.showsBanner)
+                          Positioned(
+                            left: 0,
+                            right: 28,
+                            top: MediaQuery.of(context).padding.top + 10,
+                            child: SafeArea(
+                              bottom: false,
+                              child: Align(
+                                alignment: Alignment.topCenter,
+                                child: ConstrainedBox(
+                                  constraints:
+                                      const BoxConstraints(maxWidth: 980),
+                                  child: RemoteAnnouncementBanner(
+                                    announcement: _activeAnnouncement!,
+                                    onPrimaryTap: () {
+                                      unawaited(
+                                        _handleAnnouncementAction(
+                                          announcement: _activeAnnouncement!,
+                                          action: 'primary',
+                                        ),
+                                      );
+                                    },
+                                    onDismissTap: () {
+                                      unawaited(
+                                        _handleAnnouncementAction(
+                                          announcement: _activeAnnouncement!,
+                                          action: 'dismissed',
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else ...[
+            Positioned.fill(child: _buildPage(_selectedTab)),
+            if (_activeAnnouncement != null && _activeAnnouncement!.showsBanner)
+              Positioned(
+                left: 18,
+                right: 18,
+                top: MediaQuery.of(context).padding.top + 10,
+                child: SafeArea(
+                  bottom: false,
+                  child: RemoteAnnouncementBanner(
+                    announcement: _activeAnnouncement!,
+                    onPrimaryTap: () {
+                      unawaited(
+                        _handleAnnouncementAction(
+                          announcement: _activeAnnouncement!,
+                          action: 'primary',
+                        ),
+                      );
+                    },
+                    onDismissTap: () {
+                      unawaited(
+                        _handleAnnouncementAction(
+                          announcement: _activeAnnouncement!,
+                          action: 'dismissed',
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: MixroomMainBottomDock(
+                selectedTab: _selectedTab,
+                onTabSelected: _setTab,
+                addMenuOpen: false,
+                onAddTap: _createMusicProject,
+              ),
             ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: MixroomMainBottomDock(
-              selectedTab: _selectedTab,
-              onTabSelected: _setTab,
-              addMenuOpen: false,
-              onAddTap: _createMusicProject,
-            ),
-          ),
+          ],
         ],
       ),
     );
@@ -738,12 +808,7 @@ class _PlatformTabState extends State<_PlatformTab> {
                       alignment: Alignment.topCenter,
                       child: Padding(
                         padding: const EdgeInsets.only(top: 18),
-                        child: Image.asset(
-                          kMixroomShellBrandMarkAsset,
-                          width: 76,
-                          fit: BoxFit.contain,
-                          filterQuality: FilterQuality.high,
-                        ),
+                        child: const MixroomShellBrandMark(width: 76),
                       ),
                     ),
                     Positioned(
@@ -753,11 +818,9 @@ class _PlatformTabState extends State<_PlatformTab> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Image.asset(
-                            kMixroomShellWordmarkAsset,
+                          const MixroomShellWordmark(
                             width: 162,
-                            fit: BoxFit.contain,
-                            filterQuality: FilterQuality.high,
+                            alignment: Alignment.center,
                           ),
                           const SizedBox(height: 22),
                           ConstrainedBox(

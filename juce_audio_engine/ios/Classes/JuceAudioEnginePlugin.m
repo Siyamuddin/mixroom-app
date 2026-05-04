@@ -312,6 +312,14 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
                                              selector:@selector(handlePluginLoadedNotification:)
                                                  name:@"JUCEPluginLoaded"
                                                object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:_sharedInstance
+                                             selector:@selector(handlePluginLoadedNotification:)
+                                                 name:@"MixroomHostedPluginEditorSpacebarNotification"
+                                               object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:_sharedInstance
+                                             selector:@selector(handlePluginLoadedNotification:)
+                                                 name:@"MixroomHostedPluginEditorAutomationNotification"
+                                               object:nil];
     // [JuceBridge initialiseEngineObjC];
 }
 
@@ -407,14 +415,20 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSArray* arr = [JuceBridge getMasterPluginParametersObjC:effect];
         result(arr);
     } else if ([call.method isEqualToString:@"scanPlugins"]) {
-        NSArray* plugins = [JuceBridge scanPluginsObjC];
+        NSArray* plugins = [JuceBridge scanPluginsObjC:args[@"searchPaths"]];
         result(plugins);
+    } else if ([call.method isEqualToString:@"rescanPlugins"]) {
+        NSArray* plugins = [JuceBridge rescanPluginsObjC:args[@"searchPaths"]];
+        result(plugins);
+    } else if ([call.method isEqualToString:@"getEngineDiagnostics"]) {
+        NSDictionary* diagnostics = [JuceBridge getEngineDiagnosticsObjC];
+        result(diagnostics);
     } else if ([call.method isEqualToString:@"getEngineCapabilities"]) {
 #if TARGET_OS_OSX
         result(@{
             @"externalPluginHosting": @YES,
             @"supportedPluginFormats": @[@"AU", @"VST3"],
-            @"nativePluginEditor": @NO
+            @"nativePluginEditor": @YES
         });
 #else
         result(@{
@@ -553,6 +567,15 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"setLiveMidiInputTargetClip"]) {
         NSInteger clip = [args[@"clip"] integerValue];
         result(@([JuceBridge setLiveMidiInputTargetClipObjC:clip]));
+    } else if ([call.method isEqualToString:@"sendLiveMidiInputEvent"]) {
+        BOOL noteOn = [args[@"noteOn"] boolValue];
+        NSInteger channel = [args[@"channel"] integerValue];
+        NSInteger pitch = [args[@"pitch"] integerValue];
+        float velocity = [args[@"velocity"] floatValue];
+        result(@([JuceBridge sendLiveMidiInputEventObjC:noteOn
+                                                channel:channel
+                                                  pitch:pitch
+                                               velocity:velocity]));
     } else if ([call.method isEqualToString:@"playPreviewMidiNote"]) {
         NSInteger clip = [args[@"clip"] integerValue];
         NSInteger pitch = [args[@"pitch"] integerValue];
@@ -562,6 +585,21 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
                                                pitch:pitch
                                             velocity:velocity
                                           durationMs:durationMs]));
+    } else if ([call.method isEqualToString:@"openMidiClipPluginEditor"]) {
+        NSInteger clip = [args[@"clip"] integerValue];
+        result(@([JuceBridge openMidiClipPluginEditorObjC:clip]));
+    } else if ([call.method isEqualToString:@"getMidiClipPluginState"]) {
+        NSInteger clip = [args[@"clip"] integerValue];
+        result([JuceBridge getMidiClipPluginStateObjC:clip]);
+    } else if ([call.method isEqualToString:@"setMidiClipPluginState"]) {
+        NSInteger clip = [args[@"clip"] integerValue];
+        NSString *stateBase64 = args[@"stateBase64"] ?: @"";
+        result(@([JuceBridge setMidiClipPluginStateObjC:clip
+                                            stateBase64:stateBase64]));
+    } else if ([call.method isEqualToString:@"setHostedPluginWindowsDetached"]) {
+        BOOL detached = [args[@"detached"] boolValue];
+        [JuceBridge setHostedPluginWindowsDetachedObjC:detached];
+        result(nil);
     } else if ([call.method isEqualToString:@"consumeLiveMidiInputEvents"]) {
         result([JuceBridge consumeLiveMidiInputEventsObjC]);
     } else if ([call.method isEqualToString:@"getConnectedMidiInputDevices"]) {
@@ -596,10 +634,25 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         float gain     = [args[@"gain"] floatValue];
         [JuceBridge setClipGainObjC:clip gain:gain];
         result(nil);
+    } else if ([call.method isEqualToString:@"setClipExtraGainLinear"]) {
+        NSInteger clip = [args[@"clip"] integerValue];
+        float gain     = [args[@"gain"] floatValue];
+        [JuceBridge setClipExtraGainLinearObjC:clip gain:gain];
+        result(nil);
     } else if ([call.method isEqualToString:@"setClipPan"]) {
         NSInteger clip = [args[@"clip"] integerValue];
         float pan      = [args[@"pan"] floatValue];
         [JuceBridge setClipPanObjC:clip pan:pan];
+        result(nil);
+    } else if ([call.method isEqualToString:@"setClipFades"]) {
+        NSInteger clip = [args[@"clip"] integerValue];
+        double fadeInSec = [args[@"fadeInSec"] doubleValue];
+        double fadeOutSec = [args[@"fadeOutSec"] doubleValue];
+        NSInteger fadeCurve = [args[@"fadeCurve"] integerValue];
+        [JuceBridge setClipFadesObjC:clip
+                            fadeInSec:fadeInSec
+                           fadeOutSec:fadeOutSec
+                            fadeCurve:fadeCurve];
         result(nil);
     } else if ([call.method isEqualToString:@"setClipPitch"]) {
         NSInteger clip = [args[@"clip"] integerValue];
@@ -719,6 +772,21 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"getTrackEffectInstanceIdsForRow"]) {
         NSInteger row = [args[@"row"] integerValue];
         result([JuceBridge getTrackEffectInstanceIdsForRowObjC:row]);
+    } else if ([call.method isEqualToString:@"getTrackEffectState"]) {
+        NSInteger row = [args[@"row"] integerValue];
+        NSInteger effect = [args[@"effect"] integerValue];
+        result([JuceBridge getTrackEffectStateObjC:row effectIndex:effect]);
+    } else if ([call.method isEqualToString:@"setTrackEffectState"]) {
+        NSInteger row = [args[@"row"] integerValue];
+        NSInteger effect = [args[@"effect"] integerValue];
+        NSString *stateBase64 = args[@"stateBase64"] ?: @"";
+        result(@([JuceBridge setTrackEffectStateObjC:row
+                                         effectIndex:effect
+                                         stateBase64:stateBase64]));
+    } else if ([call.method isEqualToString:@"openTrackPluginEditor"]) {
+        NSInteger row = [args[@"row"] integerValue];
+        NSInteger effect = [args[@"effect"] integerValue];
+        result(@([JuceBridge openTrackPluginEditorObjC:row effectIndex:effect]));
     } else if ([call.method isEqualToString:@"setTrackEffect"]) {
         NSInteger row    = [args[@"row"] integerValue];
         NSInteger effect = [args[@"effect"] integerValue];
@@ -820,6 +888,17 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         result([JuceBridge getMasterEffectsObjC]);
     } else if ([call.method isEqualToString:@"getMasterEffectIds"]) {
         result([JuceBridge getMasterEffectIdsObjC]);
+    } else if ([call.method isEqualToString:@"getMasterEffectState"]) {
+        NSInteger effect = [args[@"effect"] integerValue];
+        result([JuceBridge getMasterEffectStateObjC:effect]);
+    } else if ([call.method isEqualToString:@"setMasterEffectState"]) {
+        NSInteger effect = [args[@"effect"] integerValue];
+        NSString *stateBase64 = args[@"stateBase64"] ?: @"";
+        result(@([JuceBridge setMasterEffectStateObjC:effect
+                                          stateBase64:stateBase64]));
+    } else if ([call.method isEqualToString:@"openMasterPluginEditor"]) {
+        NSInteger effect = [args[@"effect"] integerValue];
+        result(@([JuceBridge openMasterPluginEditorObjC:effect]));
     } else if ([call.method isEqualToString:@"setMasterEffect"]) {
         NSInteger effect = [args[@"effect"] integerValue];
         NSString *param  = args[@"paramId"];
@@ -936,6 +1015,11 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     else if ([call.method isEqualToString:@"getHostSampleRate"]) {
         double sr = [JuceBridge getHostSampleRateObjC];
         result(@(sr));
+    }
+    else if ([call.method isEqualToString:@"getRecentMasterWaveform"]) {
+        NSInteger sampleCount = [call.arguments[@"sampleCount"] integerValue];
+        NSArray* arr = [JuceBridge getRecentMasterWaveformObjC:sampleCount];
+        result(arr);
     }
     else if ([call.method isEqualToString:@"getRowEqWaveform"]) {
         NSInteger row = [call.arguments[@"row"] integerValue];
