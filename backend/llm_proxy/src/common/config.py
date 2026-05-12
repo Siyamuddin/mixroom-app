@@ -18,6 +18,7 @@ AI_PROMPT_LIMIT_SETTINGS_TABLE = os.environ.get(
     "AI_PROMPT_LIMIT_SETTINGS_TABLE", ""
 ).strip()
 ENTITLEMENTS_TABLE = os.environ.get("ENTITLEMENTS_TABLE", "").strip()
+COLLABORATION_TABLE = os.environ.get("COLLABORATION_TABLE", "").strip()
 LLM_MAX_OUTPUT_TOKENS = os.environ.get("LLM_MAX_OUTPUT_TOKENS", "").strip()
 AI_RUNTIME_DEFAULT_MODEL = os.environ.get(
     "AI_RUNTIME_DEFAULT_MODEL",

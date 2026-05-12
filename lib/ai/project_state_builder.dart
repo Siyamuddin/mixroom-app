@@ -2,6 +2,7 @@ import 'dart:collection';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
+import 'package:mixroom/helpers/effect_parameter_exposure.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
 
@@ -222,7 +223,10 @@ class ProjectStateBuilder {
 
       final names = await JuceAudioEngine.getTrackEffectsForRow(row);
       for (int i = 0; i < names.length; i++) {
-        final params = await JuceAudioEngine.getTrackPluginParameters(row, i);
+        final params = exposedEffectParameters(
+          names[i],
+          await JuceAudioEngine.getTrackPluginParameters(row, i),
+        );
 
         effects.add(
           EffectState(
@@ -554,7 +558,10 @@ class ProjectStateBuilder {
     final masterEffects = <EffectState>[];
     final masterNames = await JuceAudioEngine.getMasterEffects();
     for (int i = 0; i < masterNames.length; i++) {
-      final params = await JuceAudioEngine.getMasterPluginParameters(i);
+      final params = exposedEffectParameters(
+        masterNames[i],
+        await JuceAudioEngine.getMasterPluginParameters(i),
+      );
       masterEffects.add(
         EffectState(
           effectIndex: i,

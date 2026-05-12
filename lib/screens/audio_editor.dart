@@ -63,6 +63,7 @@ import 'package:accessing_security_scoped_resource/accessing_security_scoped_res
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:mixroom/helpers/app_popup.dart';
 import 'package:mixroom/helpers/audio_export_plan.dart';
 import 'package:mixroom/helpers/export_save_dialog.dart';
 import 'package:mixroom/l10n/l10n.dart';
@@ -70,10 +71,16 @@ import 'package:mixroom/providers/locale_provider.dart';
 import 'package:mixroom/config/llm_config.dart';
 import 'package:mixroom/config/app_api_config.dart';
 import 'package:mixroom/helpers/audio_project_persistence.dart';
+import 'package:mixroom/helpers/cloud_project_service.dart';
+import 'package:mixroom/helpers/cloud_sync_preferences.dart';
 import 'package:mixroom/helpers/desktop_file_ingress_service.dart';
-import 'package:mixroom/helpers/project_manager.dart';
-import 'package:mixroom/helpers/platform_capabilities.dart';
+import 'package:mixroom/helpers/effect_parameter_exposure.dart';
 import 'package:mixroom/helpers/entitlement_service.dart';
+import 'package:mixroom/helpers/project_manager.dart';
+import 'package:mixroom/helpers/project_undo_history_store.dart';
+import 'package:mixroom/helpers/project_version_preferences.dart';
+import 'package:mixroom/helpers/project_version_store.dart';
+import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/dbfs_meter_visuals.dart';
 import 'package:mixroom/helpers/glass_ui_tokens.dart';
 import 'package:mixroom/helpers/instrument_picker_categories.dart';
@@ -2596,7 +2603,7 @@ double _renderFallbackRawSample({
   }
 }
 
-enum _ExportAudioFormat { wav, mp3 }
+enum _ExportAudioFormat { wav, mp3, flac }
 
 enum _ExportChannelMode { stereo, mono }
 
@@ -2631,7 +2638,16 @@ class _AudioExportSettings {
     required this.resampleQuality,
   });
 
-  String get fileExtension => format == _ExportAudioFormat.wav ? 'wav' : 'mp3';
+  String get fileExtension {
+    switch (format) {
+      case _ExportAudioFormat.wav:
+        return 'wav';
+      case _ExportAudioFormat.mp3:
+        return 'mp3';
+      case _ExportAudioFormat.flac:
+        return 'flac';
+    }
+  }
 }
 
 class _CopiedClipGroupEntry {
@@ -2662,6 +2678,16 @@ class _CopiedRowEffectsEntry {
     required this.automationClips,
     this.selectedAutomationTargetId,
   });
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'effects': effects.toJson(),
+        'automationLanes':
+            automationLanes.map((lane) => lane.toJson()).toList(),
+        'automationClips':
+            automationClips.map((clip) => clip.toJson()).toList(),
+        if ((selectedAutomationTargetId ?? '').trim().isNotEmpty)
+          'selectedAutomationTargetId': selectedAutomationTargetId!.trim(),
+      };
 }
 
 class _EffectsClipboardEntry {
@@ -3643,13 +3669,15 @@ class AudioEditorScreen extends StatefulWidget {
   final Directory projectDir;
   final bool? isProEntitled;
   final AudioEditorInitialAction? initialAction;
+  final VoidCallback? onUpgradeRequested;
 
   const AudioEditorScreen(
       {Key? key,
       required this.mode,
       required this.projectDir,
       this.isProEntitled,
-      this.initialAction})
+      this.initialAction,
+      this.onUpgradeRequested})
       : super(key: key);
   @override
   State<AudioEditorScreen> createState() => _AudioEditorScreenState2();
@@ -3809,21 +3837,37 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _DawTutorialStepId.tutorialComplete,
   ];
 
-  bool _subscriptionCapabilityOrLegacy(String capability) {
+  bool _canUseSubscriptionCapability(String capability,
+      {bool fallback = true}) {
     try {
       return context.read<EntitlementService>().canUseCapability(capability);
     } catch (_) {
-      return widget.mode == 'Pro';
+      return fallback;
     }
   }
 
-  bool get _isProEntitled {
-    final explicit = widget.isProEntitled;
-    if (explicit != null) return explicit;
-    return _subscriptionCapabilityOrLegacy(SubscriptionCapability.proEditor);
+  bool get _isProEntitled => _canUseSubscriptionCapability(
+        SubscriptionCapability.allPlugins,
+        fallback: widget.isProEntitled ?? true,
+      );
+
+  void _showUpgradeRequired({
+    required String title,
+    required String message,
+    IconData icon = Icons.lock_outline_rounded,
+  }) {
+    unawaited(
+      showAppUpgradeDialog(
+        context: context,
+        title: title,
+        message: message,
+        icon: icon,
+        onUpgrade: widget.onUpgradeRequested,
+      ),
+    );
   }
 
-  String get _resolvedMode => _isProEntitled ? "Pro" : "Basic";
+  String get _resolvedMode => "Pro";
   PlatformCapabilities _platformCapabilities = PlatformCapabilities.current;
 
   bool get _desktopNativeWavOnlyExport =>
@@ -3838,6 +3882,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   late Directory _projectDir;
   String _projectId = '';
   String _projectName = "Untitled Project";
+  int _generatedClipIdCounter = 0;
+  String _cloudProjectId = '';
+  String _cloudWorkspaceId = '';
+  String _cloudOrganizationId = '';
+  int? _cloudDocumentRevision;
+  String _cloudSyncedAt = '';
+  CloudSyncMode _cloudSyncMode = CloudSyncMode.auto;
+  Timer? _cloudAutoSyncTimer;
+  bool _cloudAutoSyncDirty = false;
+  bool _cloudAutoSyncInFlight = false;
+  bool _cloudAutoSyncConflict = false;
+  int _cloudAutoSyncFailureCount = 0;
+  DateTime? _cloudAutoSyncBackoffUntil;
   bool _requiresProjectNaming = false;
   int _projectCreatedAtMs = 0;
   bool _loadedOnce = false;
@@ -3920,7 +3977,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   final int kMinSamples = 1024; // ensure enough resolution for short clips
   final int kMaxSamples = 200000; // safety cap for very long files
 
-  static const List<int> _kExportWavBitDepths = [16, 24, 32];
+  static const List<int> _kExportWavBitDepths = [16, 24];
   static const List<int> _kExportMp3Bitrates = [128, 192, 256, 320];
   static const List<int> _kExportMp3VbrQualities = [0, 2, 4, 6];
   static const List<double> _kExportNormalizeTargetsDb = [-0.3, -1.0, -2.0];
@@ -4403,6 +4460,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   final EditorUndoManager _undoManager = EditorUndoManager(maxHistory: 30);
   late final AudioProjectPersistence _projectPersistence;
   late final AutosaveCoordinator _projectAutosaveCoordinator;
+  final ProjectVersionStore _projectVersionStore = const ProjectVersionStore();
+  final ProjectUndoHistoryStore _projectUndoHistoryStore =
+      const ProjectUndoHistoryStore();
+  bool _localVersionSnapshotInFlight = false;
   final Map<int, RowEffectsSnapshot> _rowEffectSnapshotsByRowId =
       <int, RowEffectsSnapshot>{};
   MasterEffectsSnapshot _masterEffectSnapshot = MasterEffectsSnapshot(
@@ -5935,13 +5996,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _commitPendingProjectTempoUndo();
     final action = await _undoManager.undo();
     if (!mounted || action == null) return;
+    final message =
+        '${L10n.translate(context, 'Undo')}: ${L10n.translate(context, action.description)}';
+    await _persistUndoHistory();
+    if (!mounted) return;
     final messenger = ScaffoldMessenger.of(context);
     messenger.hideCurrentSnackBar();
     messenger.showSnackBar(
       SnackBar(
-        content: Text(
-          '${L10n.translate(context, 'Undo')}: ${L10n.translate(context, action.description)}',
-        ),
+        content: Text(message),
         duration: const Duration(milliseconds: 1200),
       ),
     );
@@ -5952,17 +6015,172 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _commitPendingProjectTempoUndo();
     final action = await _undoManager.redo();
     if (!mounted || action == null) return;
+    final message =
+        '${L10n.translate(context, 'Redo')}: ${L10n.translate(context, action.description)}';
+    await _persistUndoHistory();
+    if (!mounted) return;
     final messenger = ScaffoldMessenger.of(context);
     messenger.hideCurrentSnackBar();
     messenger.showSnackBar(
       SnackBar(
-        content: Text(
-          '${L10n.translate(context, 'Redo')}: ${L10n.translate(context, action.description)}',
-        ),
+        content: Text(message),
         duration: const Duration(milliseconds: 1200),
       ),
     );
     setState(() {});
+  }
+
+  void _showUndoHistorySheet() {
+    _showUndoRedoHistorySheet(isUndo: true);
+  }
+
+  void _showRedoHistorySheet() {
+    _showUndoRedoHistorySheet(isUndo: false);
+  }
+
+  void _showUndoRedoHistorySheet({required bool isUndo}) {
+    final entries = isUndo
+        ? _undoManager.undoHistoryNewestFirst
+        : _undoManager.redoHistoryNewestFirst;
+    if (entries.isEmpty) return;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.38),
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+            child: MixroomShellSurface(
+              radius: 24,
+              strong: true,
+              color: const Color.fromRGBO(18, 24, 34, 0.92),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 360),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      L10n.translate(
+                        context,
+                        isUndo ? 'Undo History' : 'Redo History',
+                      ),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Flexible(
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: entries.length,
+                        separatorBuilder: (_, __) => Divider(
+                          height: 1,
+                          color: Colors.white.withValues(alpha: 0.08),
+                        ),
+                        itemBuilder: (context, index) {
+                          final entry = entries[index];
+                          return ListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(
+                              L10n.translate(context, entry.description),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            subtitle: Text(
+                              _formatUndoHistorySubtitle(
+                                isUndo: isUndo,
+                                index: index,
+                                timestampMs: entry.timestampMs,
+                              ),
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.58),
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            onTap: () {
+                              Navigator.of(sheetContext).pop();
+                              unawaited(
+                                isUndo
+                                    ? _selectUndoHistoryEntry(entry)
+                                    : _selectRedoHistoryEntry(entry),
+                              );
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _selectUndoHistoryEntry(ProjectUndoSnapshotRecord entry) async {
+    try {
+      await _commitPendingProjectTempoUndo();
+      await _undoManager.undoToRecord(entry);
+      await _persistUndoHistory();
+      if (mounted) setState(() {});
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${L10n.translate(context, 'Undo failed')}: $error',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _selectRedoHistoryEntry(ProjectUndoSnapshotRecord entry) async {
+    try {
+      await _commitPendingProjectTempoUndo();
+      await _undoManager.redoToRecord(entry);
+      await _persistUndoHistory();
+      if (mounted) setState(() {});
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${L10n.translate(context, 'Redo failed')}: $error',
+          ),
+        ),
+      );
+    }
+  }
+
+  String _formatUndoHistorySubtitle({
+    required bool isUndo,
+    required int index,
+    required int timestampMs,
+  }) {
+    final sequence = index == 0
+        ? L10n.translate(context, isUndo ? 'Next undo' : 'Next redo')
+        : '${index + 1} ${L10n.translate(context, isUndo ? 'steps back' : 'steps forward')}';
+    final time = TimeOfDay.fromDateTime(
+      DateTime.fromMillisecondsSinceEpoch(timestampMs),
+    );
+    return '$sequence · ${time.format(context)}';
   }
 
   void _handleDesktopCopySelectedClipsShortcut() {
@@ -6147,6 +6365,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         debugPrint('Project autosave failed: $error');
       },
     );
+    unawaited(_loadCloudSyncMode());
     _undoManager.addListener(_handleUndoHistoryChanged);
 
     _classifier = InstrumentClassifier();
@@ -7145,14 +7364,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     },
     'chat_prompt_info_body': {
       'en':
-          'Ask for mix changes, editing help, or where tools live. This badge shows how many prompts you have left.',
-      'ko': '믹스 수정, 편집 도움, 기능 위치를 물어볼 수 있어요. 이 배지에서 남은 프롬프트 수를 확인할 수 있어요.',
-      'ja': 'ミックス修正や編集ヘルプ、機能の場所を質問できます。このバッジで残りのプロンプト数を確認できます。',
+          'Ask for mix changes, editing help, or where tools live. This badge shows the percentage of prompt usage you have left.',
+      'ko': '믹스 수정, 편집 도움, 기능 위치를 물어볼 수 있어요. 이 배지에서 남은 프롬프트 사용량 비율을 확인할 수 있어요.',
+      'ja': 'ミックス修正や編集ヘルプ、機能の場所を質問できます。このバッジで残りのプロンプト使用率を確認できます。',
     },
     'chat_prompt_info_helper': {
-      'en': 'This badge shows how many AI prompts are available.',
-      'ko': '이 배지는 사용 가능한 AI 프롬프트 수를 보여줍니다.',
-      'ja': 'このバッジは利用可能な AI プロンプト数を示します。',
+      'en': 'This badge shows the percentage of AI prompt usage left.',
+      'ko': '이 배지는 남은 AI 프롬프트 사용량 비율을 보여줍니다.',
+      'ja': 'このバッジは残りの AI プロンプト使用率を示します。',
     },
     'chat_send_title': {
       'en': 'Send this example.',
@@ -8404,6 +8623,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _chatTextController.dispose();
     _chatFocusNode.dispose();
     _chatListScrollController.dispose();
+    _cloudAutoSyncTimer?.cancel();
+    _cloudAutoSyncTimer = null;
     _projectAutosaveCoordinator.dispose();
     _producerCaptureAccessHttpClient.close();
     _copiedChatMessageTimer?.cancel();
@@ -8462,6 +8683,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           state == AppLifecycleState.hidden ||
           state == AppLifecycleState.detached) {
         _markProjectDirty(immediate: true);
+        _scheduleCloudAutoSync(reason: 'background', immediate: true);
+        _flushAndRequestLocalVersionSnapshot(
+          reason: ProjectVersionReason.background,
+          minInterval: const Duration(minutes: 10),
+        );
         debugPrint("App Paused or Inactive on Android - Disposing.");
         unawaited(_pausePlayback());
         setState(() {
@@ -8477,6 +8703,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           state == AppLifecycleState.hidden ||
           state == AppLifecycleState.detached) {
         _markProjectDirty(immediate: true);
+        _scheduleCloudAutoSync(reason: 'background', immediate: true);
+        _flushAndRequestLocalVersionSnapshot(
+          reason: ProjectVersionReason.background,
+          minInterval: const Duration(minutes: 10),
+        );
         unawaited(_pauseAudio(_safeAudioEditorStateSetter));
         setState(() {
           _isPlaying = false;
@@ -8757,6 +8988,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           DateTime.now().millisecondsSinceEpoch;
       final projectVersion = (json["version"] as num?)?.toInt() ?? 1;
       _projectName = (json["name"] ?? "Untitled Project") as String;
+      _cloudProjectId =
+          (json["cloudProjectId"] ?? json["cloud_project_id"] ?? '')
+              .toString()
+              .trim();
+      _cloudWorkspaceId =
+          (json["cloudWorkspaceId"] ?? json["cloud_workspace_id"] ?? '')
+              .toString()
+              .trim();
+      _cloudOrganizationId =
+          (json["cloudOrganizationId"] ?? json["cloud_organization_id"] ?? '')
+              .toString()
+              .trim();
+      final rawCloudDocumentRevision =
+          json["cloudDocumentRevision"] ?? json["cloud_document_revision"];
+      _cloudDocumentRevision = rawCloudDocumentRevision is num
+          ? rawCloudDocumentRevision.toInt()
+          : int.tryParse((rawCloudDocumentRevision ?? '').toString().trim());
+      _cloudSyncedAt = (json["cloudSyncedAt"] ?? json["cloud_synced_at"] ?? '')
+          .toString()
+          .trim();
       _requiresProjectNaming = _projectRequiresNameConfirmation(json);
       _tempo = (((json["tempoBpm"] as num?) ?? (json["bpm"] as num?) ?? _tempo)
               .toDouble())
@@ -8801,7 +9052,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             mode: AudioProjectSaveMode.autosave,
           );
         } catch (e) {
-          debugPrint('Failed to update project lastOpenedAt during load: $e');
+          debugPrint(
+            'Failed to update project lastOpenedAt during load: $e',
+          );
         }
       }());
 
@@ -8828,6 +9081,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         // Load all clips (audio + MIDI/instrument)
         for (final t in tracks) {
           final map = (t as Map).cast<String, dynamic>();
+          final savedClipId = _normalizePersistedClipId(map['clipId']);
           final fileName = (map["fileName"] as String?)?.trim() ?? '';
           if (fileName.isEmpty) {
             debugPrint('Skipping malformed track entry without fileName: $map');
@@ -8990,9 +9244,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 updateProjectDuration: false,
                 startWaveform: false,
                 assumeFreshEngineDefaults: true,
+                clipId: savedClipId,
               );
               if (_audioTracks.length > beforeCount) {
                 final tr = _audioTracks.last;
+                tr.clipId = savedClipId;
                 tr.crossfade = crossfade;
                 tr.gain = gain;
                 tr.normalizeVolume = normalizeVolume;
@@ -9062,6 +9318,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               updateProjectDuration: false,
               startWaveform: false,
               assumeFreshEngineDefaults: true,
+              clipId: savedClipId,
             );
           } else {
             await _addAudioTrackFromProjectFile(
@@ -9087,6 +9344,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               updateProjectDuration: false,
               startWaveform: false,
               assumeFreshEngineDefaults: true,
+              clipId: savedClipId,
             );
           }
           if (_audioTracks.length <= beforeCount) {
@@ -9096,6 +9354,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           // After _addAudioTrackFromFile, the newest track is last
           // I think this code is deprecated
           final tr = _audioTracks.last;
+          tr.clipId = savedClipId;
           tr.crossfade = crossfade;
           tr.gain = gain;
           tr.normalizeVolume = normalizeVolume;
@@ -9265,6 +9524,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ),
         ),
       );
+      await _restorePersistedUndoHistory(json);
       setState(() {});
       if (mounted && _projectLoadIssues.isNotEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -9457,6 +9717,219 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _projectAutosaveCoordinator.schedule(debounce: debounce);
   }
 
+  Future<void> _loadCloudSyncMode() async {
+    final mode = await CloudSyncPreferences.loadMode();
+    _cloudSyncMode = mode;
+  }
+
+  bool _cloudAutoSyncTargetIsWritable() {
+    final cloudProjectId = _cloudProjectId.trim();
+    final cloudWorkspaceId = _cloudWorkspaceId.trim();
+    if (cloudProjectId.isEmpty && cloudWorkspaceId.isEmpty) return true;
+    try {
+      final entitlement = context.read<EntitlementService>();
+      if (cloudProjectId.isNotEmpty) {
+        for (final project in entitlement.effectiveCloudProjects) {
+          if (project.projectId != cloudProjectId) continue;
+          return project.canWrite;
+        }
+      }
+      if (cloudWorkspaceId.isNotEmpty) {
+        for (final workspace in entitlement.effectiveWorkspaces) {
+          if (workspace.workspaceId != cloudWorkspaceId) continue;
+          return workspace.canWrite;
+        }
+      }
+    } catch (_) {
+      return true;
+    }
+    return true;
+  }
+
+  bool _canAttemptAutoCloudSync() {
+    if (_cloudSyncMode != CloudSyncMode.auto) return false;
+    if (!_loadedOnce || _isProjectLoading) return false;
+    if (_isRecording || _isMidiClipRecording || _recordTransitionInFlight) {
+      return false;
+    }
+    if (_cloudAutoSyncConflict) return false;
+    if (!_cloudAutoSyncTargetIsWritable()) return false;
+    return true;
+  }
+
+  void _scheduleCloudAutoSync({
+    String reason = 'autosave',
+    Duration debounce = const Duration(seconds: 60),
+    bool immediate = false,
+  }) {
+    if (!_canAttemptAutoCloudSync()) return;
+    _cloudAutoSyncDirty = true;
+    if (_cloudAutoSyncInFlight) return;
+
+    final now = DateTime.now();
+    final backoffUntil = _cloudAutoSyncBackoffUntil;
+    var delay = immediate ? Duration.zero : debounce;
+    if (backoffUntil != null && backoffUntil.isAfter(now)) {
+      final backoffDelay = backoffUntil.difference(now);
+      if (backoffDelay > delay) delay = backoffDelay;
+    }
+
+    _cloudAutoSyncTimer?.cancel();
+    _cloudAutoSyncTimer = Timer(delay, () {
+      _cloudAutoSyncTimer = null;
+      unawaited(_runCloudAutoSync(reason: reason));
+    });
+  }
+
+  void _requestCloudAutoSyncNow(String reason) {
+    if (!_canAttemptAutoCloudSync()) return;
+    _cloudAutoSyncDirty = true;
+    _cloudAutoSyncTimer?.cancel();
+    _cloudAutoSyncTimer = null;
+    unawaited(_runCloudAutoSync(reason: reason));
+  }
+
+  bool _isCloudAutoSyncNonRetryable(Object error) {
+    final raw = error.toString().toLowerCase();
+    return raw.contains('revision conflict') ||
+        raw.contains('current plan') ||
+        raw.contains('limit reached') ||
+        raw.contains('storage limit') ||
+        raw.contains('(403)');
+  }
+
+  Duration _nextCloudAutoSyncBackoff() {
+    final minutes = math.min(15, math.max(2, 1 << _cloudAutoSyncFailureCount));
+    return Duration(minutes: minutes);
+  }
+
+  Future<void> _runCloudAutoSync({
+    required String reason,
+  }) async {
+    if (!_cloudAutoSyncDirty || !_canAttemptAutoCloudSync()) return;
+    if (_cloudAutoSyncInFlight) return;
+
+    final auth = context.read<AuthService>();
+    final entitlement = context.read<EntitlementService>();
+    if (!auth.isSignedIn ||
+        !entitlement.canUseCapability(SubscriptionCapability.cloudProjects)) {
+      return;
+    }
+
+    _cloudAutoSyncInFlight = true;
+    _cloudAutoSyncDirty = false;
+    Duration? retryDelay;
+    try {
+      await _projectAutosaveCoordinator.flush();
+      if (!_canAttemptAutoCloudSync()) return;
+
+      final projectId = _projectId.trim().isNotEmpty
+          ? _projectId.trim()
+          : await ProjectManager.ensureProjectId(_projectDir);
+      _projectId = projectId;
+
+      final bundlePath = await ProjectBundle.exportMixroomBundle(
+        projectDir: _projectDir,
+        audioMode: BundleAudioMode.flacLossless,
+      );
+      final bundleFile = File(bundlePath);
+      if (!await bundleFile.exists() || await bundleFile.length() <= 0) {
+        return;
+      }
+
+      final service = CloudProjectService();
+      try {
+        var uploadWorkspaceId = _cloudWorkspaceId.trim();
+        var uploadOrganizationId = _cloudOrganizationId.trim();
+        final cloudProjectId =
+            _cloudProjectId.trim().isEmpty ? null : _cloudProjectId.trim();
+        if (cloudProjectId != null &&
+            (uploadWorkspaceId.isEmpty || uploadOrganizationId.isEmpty)) {
+          for (final project in entitlement.effectiveCloudProjects) {
+            if (project.projectId != cloudProjectId) continue;
+            uploadWorkspaceId = project.workspaceId.trim();
+            uploadOrganizationId = project.organizationId.trim();
+            break;
+          }
+        }
+        if (cloudProjectId == null && uploadWorkspaceId.isEmpty) {
+          final defaultWorkspaceId =
+              await CloudSyncPreferences.loadDefaultWorkspaceId();
+          if (defaultWorkspaceId.isNotEmpty) {
+            for (final workspace in entitlement.effectiveWorkspaces) {
+              if (workspace.workspaceId != defaultWorkspaceId) continue;
+              if (workspace.status.trim().toLowerCase() != 'active') continue;
+              uploadWorkspaceId = workspace.workspaceId;
+              uploadOrganizationId = workspace.organizationId;
+              break;
+            }
+          }
+        }
+        final result = await service.uploadBundle(
+          auth: auth,
+          bundleFile: bundleFile,
+          projectId: projectId,
+          name: _projectName,
+          cloudProjectId: cloudProjectId,
+          workspaceId: uploadWorkspaceId.isEmpty ? null : uploadWorkspaceId,
+          organizationId:
+              uploadOrganizationId.isEmpty ? null : uploadOrganizationId,
+          expectedRevision: _cloudDocumentRevision,
+        );
+        final syncedAt = DateTime.now().toUtc().toIso8601String();
+        _cloudProjectId = result.project.projectId;
+        _cloudWorkspaceId = result.project.workspaceId.trim();
+        _cloudOrganizationId = result.project.organizationId.trim();
+        _cloudDocumentRevision = result.project.documentRevision;
+        _cloudSyncedAt = syncedAt;
+        _cloudAutoSyncFailureCount = 0;
+        _cloudAutoSyncBackoffUntil = null;
+        _cloudAutoSyncConflict = false;
+
+        final json = await ProjectManager.readProjectJson(_projectDir);
+        json['cloudProjectId'] = _cloudProjectId;
+        if (_cloudWorkspaceId.isNotEmpty) {
+          json['cloudWorkspaceId'] = _cloudWorkspaceId;
+        } else {
+          json.remove('cloudWorkspaceId');
+        }
+        if (_cloudOrganizationId.isNotEmpty) {
+          json['cloudOrganizationId'] = _cloudOrganizationId;
+        } else {
+          json.remove('cloudOrganizationId');
+        }
+        json['cloudDocumentRevision'] = _cloudDocumentRevision;
+        json['cloudSyncedAt'] = _cloudSyncedAt;
+        await ProjectManager.writeProjectJson(_projectDir, json);
+        ProjectManager.notifyProjectLibraryChanged();
+      } finally {
+        service.close();
+      }
+    } catch (error) {
+      _cloudAutoSyncDirty = true;
+      final nonRetryable = _isCloudAutoSyncNonRetryable(error);
+      if (error.toString().toLowerCase().contains('revision conflict')) {
+        _cloudAutoSyncConflict = true;
+      }
+      if (!nonRetryable) {
+        _cloudAutoSyncFailureCount =
+            math.min(_cloudAutoSyncFailureCount + 1, 4);
+        retryDelay = _nextCloudAutoSyncBackoff();
+        _cloudAutoSyncBackoffUntil = DateTime.now().add(retryDelay);
+      }
+      debugPrint('Cloud auto sync skipped after $reason: $error');
+    } finally {
+      _cloudAutoSyncInFlight = false;
+      if (retryDelay != null && _canAttemptAutoCloudSync()) {
+        _cloudAutoSyncTimer?.cancel();
+        _cloudAutoSyncTimer = Timer(retryDelay, () {
+          _cloudAutoSyncTimer = null;
+          unawaited(_runCloudAutoSync(reason: 'retry:$reason'));
+        });
+      }
+    }
+  }
+
   Future<void> _refreshPersistedEffectSnapshotForRow(int row) async {
     if (row < 0 || row >= _rowCount) return;
     final snapshot = await captureRowSnapshot(row, rowId: _rowIdAt(row));
@@ -9619,6 +10092,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (fileName.isEmpty) continue;
       tracksJson.add({
         "fileName": fileName,
+        "clipId": tr.clipId,
         "label": tr.label,
         "clipType": tr.clipKind.wireName,
         "trimStartMs": tr.trimStart.inMilliseconds,
@@ -9710,6 +10184,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         "loopEndMs": _loopEndMs,
       },
     };
+    if (_cloudProjectId.isNotEmpty) {
+      json["cloudProjectId"] = _cloudProjectId;
+    }
+    if (_cloudWorkspaceId.isNotEmpty) {
+      json["cloudWorkspaceId"] = _cloudWorkspaceId;
+    }
+    if (_cloudOrganizationId.isNotEmpty) {
+      json["cloudOrganizationId"] = _cloudOrganizationId;
+    }
+    final cloudDocumentRevision = _cloudDocumentRevision;
+    if (cloudDocumentRevision != null) {
+      json["cloudDocumentRevision"] = cloudDocumentRevision;
+    }
+    if (_cloudSyncedAt.isNotEmpty) {
+      json["cloudSyncedAt"] = _cloudSyncedAt;
+    }
     if (assistantChat != null) {
       json["assistantChat"] = assistantChat;
     }
@@ -9720,11 +10210,1287 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _syncEffectSnapshotCacheToCurrentRows();
     await _refreshHostedInstrumentStatesForPersistence();
     final json = _buildProjectJsonSnapshot();
+    _attachPersistedUndoHistoryToProjectJson(json);
     await _projectPersistence.saveProjectState(
       projectDir: _projectDir,
       projectState: json,
       mode: AudioProjectSaveMode.autosave,
     );
+    if (!_cloudAutoSyncInFlight) {
+      _scheduleCloudAutoSync(reason: 'autosave');
+    }
+    _requestLocalVersionSnapshot(
+      reason: ProjectVersionReason.autosave,
+      minInterval: ProjectVersionStore.defaultPeriodicInterval,
+    );
+    await _persistUndoHistory();
+  }
+
+  void _attachPersistedUndoHistoryToProjectJson(Map<String, dynamic> json) {
+    final undo = _undoManager.persistableUndoRecords;
+    final redo = _undoManager.persistableRedoRecords;
+    if (undo.isEmpty && redo.isEmpty) {
+      json.remove('undoHistory');
+      return;
+    }
+    json['undoHistory'] = ProjectUndoHistorySnapshot(
+      undo: undo,
+      redo: redo,
+    ).toJson(maxEntries: _undoManager.maxHistory);
+  }
+
+  Future<void> _restorePersistedUndoHistory(
+    Map<String, dynamic> projectJson,
+  ) async {
+    try {
+      var history = ProjectUndoHistorySnapshot.fromJsonValue(
+        projectJson['undoHistory'],
+      );
+      if (history.isEmpty) {
+        history = await _projectUndoHistoryStore.load(_projectDir);
+      }
+      _undoManager.restoreCommandHistory(
+        undo: history.undo,
+        redo: history.redo,
+        actionFactory: _editorUndoActionFromPersistedRecord,
+        notify: false,
+      );
+    } catch (error) {
+      debugPrint('Project undo history restore skipped: $error');
+    }
+  }
+
+  Future<void> _persistUndoHistory() async {
+    try {
+      final json = await ProjectManager.readProjectJson(_projectDir);
+      _attachPersistedUndoHistoryToProjectJson(json);
+      await ProjectManager.writeProjectJson(_projectDir, json);
+      await _projectUndoHistoryStore.save(
+        projectDir: _projectDir,
+        undo: _undoManager.persistableUndoRecords,
+        redo: _undoManager.persistableRedoRecords,
+        maxEntries: _undoManager.maxHistory,
+      );
+    } catch (error) {
+      debugPrint('Project undo history save skipped: $error');
+    }
+  }
+
+  EditorUndoAction? _editorUndoActionFromPersistedRecord(
+    ProjectUndoSnapshotRecord record,
+  ) {
+    final command = record.command;
+    if (command == null) return null;
+    return _editorUndoActionFromPersistedCommand(
+      command,
+      fallbackDescription: record.description,
+    );
+  }
+
+  EditorUndoAction? _editorUndoActionFromPersistedCommand(
+    Map<String, dynamic> command, {
+    String fallbackDescription = '',
+  }) {
+    final type = (command['type'] ?? '').toString();
+    final clipIndex = _commandInt(command, 'clipIndex');
+    final clipId = _commandClipId(command);
+    switch (type) {
+      case 'compound':
+        final rawActions = command['actions'];
+        if (rawActions is! List || rawActions.isEmpty) return null;
+        final actions = <EditorUndoAction>[];
+        for (final rawAction in rawActions) {
+          final actionCommand = rawAction is Map<String, dynamic>
+              ? rawAction
+              : rawAction is Map
+                  ? rawAction.cast<String, dynamic>()
+                  : null;
+          if (actionCommand == null) return null;
+          final action = _editorUndoActionFromPersistedCommand(actionCommand);
+          if (action == null) return null;
+          actions.add(action);
+        }
+        return CompoundUndoAction(
+          (command['description'] ?? fallbackDescription).toString(),
+          actions,
+        );
+      case 'clipPresenceAdd':
+      case 'clipPresenceDelete':
+        final rawClip = command['clip'];
+        final clipPayload = rawClip is Map<String, dynamic>
+            ? rawClip
+            : rawClip is Map
+                ? rawClip.cast<String, dynamic>()
+                : null;
+        if (clipPayload == null) return null;
+        return _PersistedClipPresenceAction(
+          descriptionText:
+              (command['description'] ?? fallbackDescription).toString().trim(),
+          addedByRedo: type == 'clipPresenceAdd',
+          clipPayload: clipPayload,
+          fallbackIndex: _commandInt(command, 'fallbackIndex') ?? -1,
+          addClip: _addClipFromUndoPayload,
+          removeClip: _removeClipForUndo,
+        );
+      case 'trimClip':
+        if (clipIndex == null && clipId.isEmpty) return null;
+        return TrimClipAction(
+          tracks: _audioTracks,
+          originalIndex: clipIndex ?? -1,
+          clipId: clipId,
+          oldTrimStart: Duration(
+            milliseconds: _commandInt(command, 'oldTrimStartMs') ?? 0,
+          ),
+          oldTrimEnd: Duration(
+            milliseconds: _commandInt(command, 'oldTrimEndMs') ?? 0,
+          ),
+          oldOffset: _commandDouble(command, 'oldOffset') ?? 0.0,
+          newTrimStart: Duration(
+            milliseconds: _commandInt(command, 'newTrimStartMs') ?? 0,
+          ),
+          newTrimEnd: Duration(
+            milliseconds: _commandInt(command, 'newTrimEndMs') ?? 0,
+          ),
+          newOffset: _commandDouble(command, 'newOffset'),
+          onChange: () => _handlePersistedClipTimingUndo(
+            clipIndex ?? -1,
+            clipId: clipId,
+          ),
+        );
+      case 'moveClip':
+        if (clipIndex == null && clipId.isEmpty) return null;
+        return MoveClipAction(
+          tracks: _audioTracks,
+          originalIndex: clipIndex ?? -1,
+          clipId: clipId,
+          oldOffset: _commandDouble(command, 'oldOffset') ?? 0.0,
+          oldRow: _commandInt(command, 'oldRow') ?? 0,
+          newOffset: _commandDouble(command, 'newOffset') ?? 0.0,
+          newRow: _commandInt(command, 'newRow') ?? 0,
+          onChange: () => _handlePersistedClipTimingUndo(
+            clipIndex ?? -1,
+            clipId: clipId,
+          ),
+        );
+      case 'clipGain':
+        if (clipIndex == null && clipId.isEmpty) return null;
+        return SetClipGainAction(
+          tracks: _audioTracks,
+          originalIndex: clipIndex ?? -1,
+          clipId: clipId,
+          oldGain: _commandDouble(command, 'oldGain') ?? kDefaultGainUi,
+          newGain: _commandDouble(command, 'newGain') ?? kDefaultGainUi,
+          applyToState: _applyPersistedClipGainState,
+        );
+      case 'clipNormalize':
+        if (clipIndex == null && clipId.isEmpty) return null;
+        return _SetClipNormalizeAction(
+          tracks: _audioTracks,
+          originalIndex: clipIndex ?? -1,
+          clipId: clipId,
+          oldSnapshot: _commandClipNormalizeSnapshot(command['oldSnapshot']),
+          newSnapshot: _commandClipNormalizeSnapshot(command['newSnapshot']),
+          applyToState: _applyPersistedClipNormalizeState,
+        );
+      case 'clipPitch':
+        if (clipIndex == null && clipId.isEmpty) return null;
+        return SetClipPitchAction(
+          tracks: _audioTracks,
+          originalIndex: clipIndex ?? -1,
+          clipId: clipId,
+          oldPitch: _commandDouble(command, 'oldPitch') ?? 0.0,
+          newPitch: _commandDouble(command, 'newPitch') ?? 0.0,
+          applyToState: _applyPersistedClipPitchState,
+        );
+      case 'clipReverse':
+        if (clipIndex == null && clipId.isEmpty) return null;
+        return SetClipReverseAction(
+          tracks: _audioTracks,
+          originalIndex: clipIndex ?? -1,
+          clipId: clipId,
+          oldReversed: _commandBool(command, 'oldReversed') ?? false,
+          newReversed: _commandBool(command, 'newReversed') ?? false,
+          applyToState: _applyPersistedClipReverseState,
+        );
+      case 'clipLabel':
+        if (clipIndex == null && clipId.isEmpty) return null;
+        return SetClipLabelAction(
+          tracks: _audioTracks,
+          originalIndex: clipIndex ?? -1,
+          clipId: clipId,
+          oldLabel: (command['oldLabel'] ?? '').toString(),
+          newLabel: (command['newLabel'] ?? '').toString(),
+          applyToState: _applyPersistedClipLabelState,
+        );
+      case 'midiEdit':
+        if (clipIndex == null && clipId.isEmpty) return null;
+        return EditMidiClipAction(
+          tracks: _audioTracks,
+          originalIndex: clipIndex ?? -1,
+          clipId: clipId,
+          oldNotes: _commandMidiNotes(command['oldNotes']),
+          newNotes: _commandMidiNotes(command['newNotes']),
+          oldInstrumentId: (command['oldInstrumentId'] ?? '').toString(),
+          oldInstrumentName: (command['oldInstrumentName'] ?? '').toString(),
+          oldInstrumentParams:
+              _commandDoubleMap(command['oldInstrumentParams']),
+          oldHostedInstrumentStateBase64:
+              (command['oldHostedInstrumentStateB64'] ?? '').toString(),
+          newInstrumentId: (command['newInstrumentId'] ?? '').toString(),
+          newInstrumentName: (command['newInstrumentName'] ?? '').toString(),
+          newInstrumentParams:
+              _commandDoubleMap(command['newInstrumentParams']),
+          newHostedInstrumentStateBase64:
+              (command['newHostedInstrumentStateB64'] ?? '').toString(),
+          applyToClip: _applyPersistedMidiClipState,
+        );
+      case 'clipStretch':
+        if (clipIndex == null && clipId.isEmpty) return null;
+        return _StretchClipResizeAction(
+          descriptionText:
+              (command['description'] ?? 'Stretch clip').toString(),
+          tracks: _audioTracks,
+          originalIndex: clipIndex ?? -1,
+          clipId: clipId,
+          oldSnapshot: _commandClipStretchSnapshot(command['oldSnapshot']),
+          newSnapshot: _commandClipStretchSnapshot(command['newSnapshot']),
+          applySnapshot: _applyPersistedClipStretchSnapshot,
+        );
+      case 'rowGain':
+        final row = _commandInt(command, 'row');
+        if (row == null || !_isValidRowIndex(row)) return null;
+        return SetRowGainAction(
+          row: row,
+          oldGain: _commandDouble(command, 'oldGain') ?? _kGainUiUnity,
+          newGain: _commandDouble(command, 'newGain') ?? _kGainUiUnity,
+          applyToState: _applyPersistedRowGainState,
+        );
+      case 'rowPan':
+        final row = _commandInt(command, 'row');
+        if (row == null || !_isValidRowIndex(row)) return null;
+        return SetRowPanAction(
+          row: row,
+          oldPan: _commandDouble(command, 'oldPan') ?? 0.5,
+          newPan: _commandDouble(command, 'newPan') ?? 0.5,
+          applyToState: _applyPersistedRowPanState,
+        );
+      case 'masterGain':
+        return SetMasterGainAction(
+          oldGain: _commandDouble(command, 'oldGain') ?? _kGainUiUnity,
+          newGain: _commandDouble(command, 'newGain') ?? _kGainUiUnity,
+          applyToState: _applyPersistedMasterGainState,
+        );
+      case 'masterPan':
+        return SetMasterPanAction(
+          oldPan: _commandDouble(command, 'oldPan') ?? 0.5,
+          newPan: _commandDouble(command, 'newPan') ?? 0.5,
+          applyToState: _applyPersistedMasterPanState,
+        );
+      case 'projectKey':
+        return _ProjectKeyChangeAction(
+          before: normalizeProjectKey((command['before'] ?? '').toString()),
+          after: normalizeProjectKey((command['after'] ?? '').toString()),
+          applyKey: _applyProjectKeySnapshot,
+        );
+      case 'projectTempo':
+        return _ProjectTempoChangeAction(
+          before: _commandProjectTempoSnapshot(command['before']),
+          after: _commandProjectTempoSnapshot(command['after']),
+          applySnapshot: _applyProjectTempoSnapshot,
+        );
+      case 'tempoStretchUiMode':
+        return _TempoStretchUiModeAction(
+          before: _commandTempoStretchUiModeSnapshot(command['before']),
+          after: _commandTempoStretchUiModeSnapshot(command['after']),
+          applySnapshot: _applyTempoStretchUiModeSnapshot,
+        );
+      case 'rowLayout':
+        return _RowLayoutSnapshotAction(
+          descriptionText:
+              (command['description'] ?? fallbackDescription).toString(),
+          before: _commandRowLayoutSnapshot(command['before']),
+          after: _commandRowLayoutSnapshot(command['after']),
+          applySnapshot: _applyRowLayoutSnapshot,
+        );
+      case 'deleteRow':
+        return _PersistedDeleteRowAction(
+          currentRowId: _commandInt(command, 'currentRowId') ?? -1,
+          fallbackIndex: _commandInt(command, 'fallbackIndex') ?? 0,
+          snapshot: (command['snapshot'] is Map<String, dynamic>)
+              ? command['snapshot'] as Map<String, dynamic>
+              : (command['snapshot'] is Map)
+                  ? (command['snapshot'] as Map).cast<String, dynamic>()
+                  : const <String, dynamic>{},
+          deleteRow: _deletePersistedRowForUndo,
+          restoreRow: _restoreDeletedRowFromPersistedSnapshot,
+        );
+      case 'rowAutomation':
+        final row = _commandInt(command, 'row');
+        if (row == null || !_isValidRowIndex(row)) return null;
+        return SetAutomationPointsAction(
+          row: row,
+          oldPoints: _commandAutomationPoints(command['oldPoints']),
+          newPoints: _commandAutomationPoints(command['newPoints']),
+          applyToState: _applyPersistedRowAutomationState,
+          onApplied: (r, _) async {
+            await _syncNativeAutomationForRow(r);
+          },
+        );
+      case 'targetAutomation':
+        final row = _commandInt(command, 'row');
+        final targetId = (command['targetId'] ?? '').toString().trim();
+        if (row == null || !_isValidRowIndex(row) || targetId.isEmpty) {
+          return null;
+        }
+        return SetTargetAutomationPointsAction(
+          row: row,
+          targetId: targetId,
+          oldPoints: _commandAutomationPoints(command['oldPoints']),
+          newPoints: _commandAutomationPoints(command['newPoints']),
+          applyToState: _applyPersistedTargetAutomationState,
+          onApplied: (r, laneId, _) async {
+            _lastAppliedAutomationNormalized.remove('$r|$laneId');
+            await _syncNativePluginAutomationForRow(r);
+            await _syncAutomationTargetToCurrentTime(r, laneId);
+          },
+        );
+      case 'targetAutomationClips':
+        final row = _commandInt(command, 'row');
+        final targetId = (command['targetId'] ?? '').toString().trim();
+        if (row == null || !_isValidRowIndex(row) || targetId.isEmpty) {
+          return null;
+        }
+        return SetTargetAutomationClipsAction(
+          row: row,
+          targetId: targetId,
+          oldClips: _commandAutomationClips(command['oldClips']),
+          newClips: _commandAutomationClips(command['newClips']),
+          applyToState: _applyPersistedTargetAutomationClipsState,
+          onApplied: (r, _, __) async {
+            await _ensureAutomationClipDisplayRowExists(r);
+            await _syncNativeAutomationForRow(r);
+          },
+        );
+      case 'rowEffectBypass':
+        final row = _commandInt(command, 'row');
+        final effectIndex = _commandInt(command, 'effectIndex');
+        if (row == null ||
+            !_isValidRowIndex(row) ||
+            effectIndex == null ||
+            effectIndex < 0) {
+          return null;
+        }
+        return BypassEffectAction(
+          row: row,
+          effectIndex: effectIndex,
+          oldState: _commandBool(command, 'oldState') ?? false,
+          newState: _commandBool(command, 'newState') ?? false,
+          onChange: () => _handlePersistedRowEffectUndo(row),
+        );
+      case 'rowEffectInsert':
+        final row = _commandInt(command, 'row');
+        final pathOrName = (command['pathOrName'] ?? '').toString().trim();
+        if (row == null || !_isValidRowIndex(row) || pathOrName.isEmpty) {
+          return null;
+        }
+        return InsertEffectAction(
+          row: row,
+          pathOrName: pathOrName,
+          insertedIndex: _commandInt(command, 'insertedIndex'),
+          inserted: _commandBool(command, 'inserted') ?? true,
+          onChange: () => _handlePersistedRowEffectUndo(row),
+        );
+      case 'rowEffectRemove':
+        final row = _commandInt(command, 'row');
+        final effectIndex = _commandInt(command, 'effectIndex');
+        final pathOrName = (command['pathOrName'] ?? '').toString().trim();
+        if (row == null ||
+            !_isValidRowIndex(row) ||
+            effectIndex == null ||
+            effectIndex < 0 ||
+            pathOrName.isEmpty) {
+          return null;
+        }
+        return RemoveEffectAction(
+          row: row,
+          effectIndex: effectIndex,
+          pathOrName: pathOrName,
+          onChange: () => _handlePersistedRowEffectUndo(row),
+        );
+      case 'rowEffectReorder':
+        final row = _commandInt(command, 'row');
+        final from = _commandInt(command, 'from');
+        final to = _commandInt(command, 'to');
+        if (row == null ||
+            !_isValidRowIndex(row) ||
+            from == null ||
+            to == null) {
+          return null;
+        }
+        return ReorderEffectAction(
+          row: row,
+          from: from,
+          to: to,
+          onChange: () => _handlePersistedRowEffectUndo(row),
+        );
+      case 'rowEffectParam':
+        final row = _commandInt(command, 'row');
+        final effectIndex = _commandInt(command, 'effectIndex');
+        final paramId = (command['paramId'] ?? '').toString().trim();
+        if (row == null ||
+            !_isValidRowIndex(row) ||
+            effectIndex == null ||
+            effectIndex < 0 ||
+            paramId.isEmpty) {
+          return null;
+        }
+        return SetEffectParamAction(
+          row: row,
+          effectIndex: effectIndex,
+          paramId: paramId,
+          oldValue: command['oldValue'],
+          newValue: command['newValue'],
+          onChange: () => _handlePersistedRowEffectParamUndo(
+            row: row,
+            effectIndex: effectIndex,
+            paramId: paramId,
+          ),
+        );
+      case 'rowEffectsSnapshot':
+        final row = _commandInt(command, 'row');
+        if (row == null || !_isValidRowIndex(row)) return null;
+        return _RowEffectsAutomationSnapshotAction(
+          descriptionText:
+              (command['description'] ?? fallbackDescription).toString(),
+          before: _commandCopiedRowEffectsEntry(command['before']),
+          after: _commandCopiedRowEffectsEntry(command['after']),
+          applySnapshot: (snap) => _applyCopiedRowEffectsEntry(row, snap),
+        );
+      case 'trackPreset':
+        final before = _commandRowEffectsSnapshot(command['before']);
+        final after = _commandRowEffectsSnapshot(command['after']);
+        final row = after.row;
+        if (!_isValidRowIndex(row)) return null;
+        return TrackPresetChangeAction(
+          before: before,
+          after: after,
+          onChange: () => _handlePersistedRowEffectUndo(row),
+        );
+      case 'masterEffectBypass':
+        final effectIndex = _commandInt(command, 'effectIndex');
+        if (effectIndex == null || effectIndex < 0) return null;
+        return BypassMasterEffectAction(
+          effectIndex: effectIndex,
+          oldState: _commandBool(command, 'oldState') ?? false,
+          newState: _commandBool(command, 'newState') ?? false,
+          onChange: _handlePersistedMasterEffectUndo,
+        );
+      case 'masterEffectInsert':
+        final pathOrName = (command['pathOrName'] ?? '').toString().trim();
+        if (pathOrName.isEmpty) return null;
+        return InsertMasterEffectAction(
+          pathOrName: pathOrName,
+          insertedIndex: _commandInt(command, 'insertedIndex'),
+          inserted: _commandBool(command, 'inserted') ?? true,
+          onChange: _handlePersistedMasterEffectUndo,
+        );
+      case 'masterEffectRemove':
+        final effectIndex = _commandInt(command, 'effectIndex');
+        final pathOrName = (command['pathOrName'] ?? '').toString().trim();
+        if (effectIndex == null || effectIndex < 0 || pathOrName.isEmpty) {
+          return null;
+        }
+        return RemoveMasterEffectAction(
+          effectIndex: effectIndex,
+          pathOrName: pathOrName,
+          onChange: _handlePersistedMasterEffectUndo,
+        );
+      case 'masterEffectReorder':
+        final from = _commandInt(command, 'from');
+        final to = _commandInt(command, 'to');
+        if (from == null || to == null) return null;
+        return ReorderMasterEffectAction(
+          from: from,
+          to: to,
+          onChange: _handlePersistedMasterEffectUndo,
+        );
+      case 'masterEffectParam':
+        final effectIndex = _commandInt(command, 'effectIndex');
+        final paramId = (command['paramId'] ?? '').toString().trim();
+        if (effectIndex == null || effectIndex < 0 || paramId.isEmpty) {
+          return null;
+        }
+        return SetMasterEffectParamAction(
+          effectIndex: effectIndex,
+          paramId: paramId,
+          oldValue: command['oldValue'],
+          newValue: command['newValue'],
+          onChange: () => _handlePersistedMasterEffectParamUndo(
+            effectIndex: effectIndex,
+            paramId: paramId,
+          ),
+        );
+      case 'masterEffectsSnapshot':
+        return _MasterEffectsSnapshotAction(
+          descriptionText:
+              (command['description'] ?? fallbackDescription).toString(),
+          before: _commandMasterEffectsSnapshot(command['before']),
+          after: _commandMasterEffectsSnapshot(command['after']),
+          applySnapshot: _restoreMasterSnapshot,
+          onChange: _handlePersistedMasterEffectUndo,
+        );
+      case 'masterPreset':
+        return MasterPresetChangeAction(
+          before: _commandMasterEffectsSnapshot(command['before']),
+          after: _commandMasterEffectsSnapshot(command['after']),
+          onChange: _handlePersistedMasterEffectUndo,
+        );
+      default:
+        return null;
+    }
+  }
+
+  bool _isValidClipIndex(int clipIndex) {
+    return clipIndex >= 0 && clipIndex < _audioTracks.length;
+  }
+
+  String _normalizePersistedClipId(Object? raw) {
+    final trimmed = (raw ?? '').toString().trim();
+    if (trimmed.isNotEmpty) return trimmed;
+    _generatedClipIdCounter += 1;
+    return 'clip_${DateTime.now().microsecondsSinceEpoch}_$_generatedClipIdCounter';
+  }
+
+  int _clipIndexForPersistentId(String clipId) {
+    final id = clipId.trim();
+    if (id.isEmpty) return -1;
+    return _audioTracks.indexWhere((clip) => clip.clipId == id);
+  }
+
+  bool _isValidRowIndex(int row) {
+    return row >= 0 && row < _rowCount;
+  }
+
+  int? _commandInt(Map<String, dynamic> command, String key) {
+    final value = command[key];
+    if (value is num) return value.toInt();
+    return int.tryParse((value ?? '').toString());
+  }
+
+  String _commandClipId(Map<String, dynamic> command) {
+    return (command['clipId'] ?? '').toString().trim();
+  }
+
+  double? _commandDouble(Map<String, dynamic> command, String key) {
+    final value = command[key];
+    if (value is num) return value.toDouble();
+    return double.tryParse((value ?? '').toString());
+  }
+
+  bool? _commandBool(Map<String, dynamic> command, String key) {
+    final value = command[key];
+    if (value is bool) return value;
+    final raw = (value ?? '').toString().trim().toLowerCase();
+    if (raw == 'true') return true;
+    if (raw == 'false') return false;
+    return null;
+  }
+
+  Map<String, double> _commandDoubleMap(Object? raw) {
+    final map = raw is Map<String, dynamic>
+        ? raw
+        : raw is Map
+            ? raw.cast<String, dynamic>()
+            : const <String, dynamic>{};
+    return map.map((key, value) {
+      final parsed = value is num
+          ? value.toDouble()
+          : double.tryParse((value ?? '').toString()) ?? 0.0;
+      return MapEntry(key, parsed);
+    });
+  }
+
+  List<MidiNote> _commandMidiNotes(Object? raw) {
+    final list = raw is List ? raw : const <Object?>[];
+    final notes = <MidiNote>[];
+    for (final item in list) {
+      if (item is Map<String, dynamic>) {
+        notes.add(MidiNote.fromJson(item));
+      } else if (item is Map) {
+        notes.add(MidiNote.fromJson(item.cast<String, dynamic>()));
+      }
+    }
+    return notes;
+  }
+
+  _ClipNormalizeSnapshot _commandClipNormalizeSnapshot(Object? raw) {
+    final map = raw is Map<String, dynamic>
+        ? raw
+        : raw is Map
+            ? raw.cast<String, dynamic>()
+            : const <String, dynamic>{};
+    return _ClipNormalizeSnapshot(
+      normalizeVolume: _valueBool(map['normalizeVolume']) ?? false,
+      normalizeGain: _valueDouble(map['normalizeGain']) ?? 1.0,
+    );
+  }
+
+  _ClipStretchSnapshot _commandClipStretchSnapshot(Object? raw) {
+    final map = raw is Map<String, dynamic>
+        ? raw
+        : raw is Map
+            ? raw.cast<String, dynamic>()
+            : const <String, dynamic>{};
+    return _ClipStretchSnapshot(
+      offsetSec: _valueDouble(map['offsetSec']) ?? 0.0,
+      sourceTempoBpm: _valueDouble(map['sourceTempoBpm']) ?? 0.0,
+      stretchToProjectTempo: _valueBool(map['stretchToProjectTempo']) ?? false,
+      tempoStretchPreservePitch:
+          _valueBool(map['tempoStretchPreservePitch']) ?? true,
+      tempoStretchEnabled: _valueBool(map['tempoStretchEnabled']),
+      tempoStretchPreservePitchDefault:
+          _valueBool(map['tempoStretchPreservePitchDefault']),
+    );
+  }
+
+  _RowLayoutSnapshot _commandRowLayoutSnapshot(Object? raw) {
+    final map = raw is Map<String, dynamic>
+        ? raw
+        : raw is Map
+            ? raw.cast<String, dynamic>()
+            : const <String, dynamic>{};
+    final rawRows = map['rows'];
+    final rows = <TimelineRow>[];
+    if (rawRows is List) {
+      for (final item in rawRows) {
+        final rowMap = item is Map<String, dynamic>
+            ? item
+            : item is Map
+                ? item.cast<String, dynamic>()
+                : null;
+        if (rowMap == null) continue;
+        rows.add(
+          TimelineRow(
+            rowId: _valueInt(rowMap['rowId']) ?? -1,
+            name: (rowMap['name'] ?? '').toString(),
+            iconId: _valueInt(rowMap['iconId']) ?? 0,
+          ),
+        );
+      }
+    }
+    if (rows.isEmpty) {
+      rows.add(TimelineRow(rowId: -1, name: 'Track 1', iconId: 0));
+    }
+    return _RowLayoutSnapshot(rows: rows);
+  }
+
+  _ProjectTempoSnapshot _commandProjectTempoSnapshot(Object? raw) {
+    final map = raw is Map<String, dynamic>
+        ? raw
+        : raw is Map
+            ? raw.cast<String, dynamic>()
+            : const <String, dynamic>{};
+    return _ProjectTempoSnapshot(
+      tempo: _valueDouble(map['tempo']) ?? _tempo,
+      clipOffsetsSec: _commandDoubleList(map['clipOffsetsSec']),
+      clipVolumeAutomation:
+          _commandAutomationPointLists(map['clipVolumeAutomation']),
+      rowVolumeAutomation:
+          _commandAutomationPointLists(map['rowVolumeAutomation']),
+      rowPluginAutomation:
+          _commandNestedAutomationPointsByRow(map['rowPluginAutomation']),
+      rowAutomationClips:
+          _commandNestedAutomationClipsByRow(map['rowAutomationClips']),
+      loopEnabled: _valueBool(map['loopEnabled']) ?? false,
+      loopStartMs: _valueInt(map['loopStartMs']) ?? 0,
+      loopEndMs: _valueInt(map['loopEndMs']) ?? 0,
+    );
+  }
+
+  _TempoStretchUiModeSnapshot _commandTempoStretchUiModeSnapshot(Object? raw) {
+    final map = raw is Map<String, dynamic>
+        ? raw
+        : raw is Map
+            ? raw.cast<String, dynamic>()
+            : const <String, dynamic>{};
+    final rawSnapshots = map['clipSnapshots'];
+    final snapshots = <int, _ClipStretchSnapshot>{};
+    final snapshotMap = rawSnapshots is Map<String, dynamic>
+        ? rawSnapshots
+        : rawSnapshots is Map
+            ? rawSnapshots.cast<String, dynamic>()
+            : const <String, dynamic>{};
+    for (final entry in snapshotMap.entries) {
+      final index = int.tryParse(entry.key);
+      if (index == null) continue;
+      snapshots[index] = _commandClipStretchSnapshot(entry.value);
+    }
+    return _TempoStretchUiModeSnapshot(
+      enabled: _valueBool(map['enabled']) ?? false,
+      preservePitchDefault: _valueBool(map['preservePitchDefault']) ?? true,
+      clipSnapshots: snapshots,
+    );
+  }
+
+  _CopiedRowEffectsEntry _commandCopiedRowEffectsEntry(Object? raw) {
+    final map = raw is Map<String, dynamic>
+        ? raw
+        : raw is Map
+            ? raw.cast<String, dynamic>()
+            : const <String, dynamic>{};
+    return _CopiedRowEffectsEntry(
+      effects: _commandRowEffectsSnapshot(map['effects']),
+      automationLanes: _commandAutomationLanes(map['automationLanes']),
+      automationClips: _commandAutomationClips(map['automationClips']),
+      selectedAutomationTargetId:
+          (map['selectedAutomationTargetId'] ?? '').toString().trim(),
+    );
+  }
+
+  RowEffectsSnapshot _commandRowEffectsSnapshot(Object? raw) {
+    final map = raw is Map<String, dynamic>
+        ? raw
+        : raw is Map
+            ? raw.cast<String, dynamic>()
+            : const <String, dynamic>{};
+    try {
+      return RowEffectsSnapshotJson.fromJson(map);
+    } catch (_) {
+      return RowEffectsSnapshot(0, const <EffectSnapshot>[]);
+    }
+  }
+
+  MasterEffectsSnapshot _commandMasterEffectsSnapshot(Object? raw) {
+    final map = raw is Map<String, dynamic>
+        ? raw
+        : raw is Map
+            ? raw.cast<String, dynamic>()
+            : const <String, dynamic>{};
+    try {
+      return MasterEffectsSnapshotJson.fromJson(map);
+    } catch (_) {
+      return MasterEffectsSnapshot(const <EffectSnapshot>[]);
+    }
+  }
+
+  _DeletedRowUiState _commandDeletedRowUiState(Object? raw) {
+    final map = raw is Map<String, dynamic>
+        ? raw
+        : raw is Map
+            ? raw.cast<String, dynamic>()
+            : const <String, dynamic>{};
+    return _DeletedRowUiState(
+      muted: _valueBool(map['muted']) ?? false,
+      soloed: _valueBool(map['soloed']) ?? false,
+      muteApplied: _valueBool(map['muteApplied']),
+      expanded: _valueBool(map['expanded']) ?? false,
+      expandedTab: _valueInt(map['expandedTab']) ?? 0,
+      gainSnapshot: _valueDouble(map['gainSnapshot']) ?? _kGainUiUnity,
+      panSnapshot: _valueDouble(map['panSnapshot']) ?? 0.5,
+      automationSnapshot: _commandAutomationPoints(map['automationSnapshot']),
+      peakHoldDb: _valueDouble(map['peakHoldDb']),
+      peakHoldLastUpdate: _dateTimeFromMs(map['peakHoldLastUpdateMs']),
+      peakHoldFreezeUntil: _dateTimeFromMs(map['peakHoldFreezeUntilMs']),
+    );
+  }
+
+  List<double> _commandDoubleList(Object? raw) {
+    final list = raw is List ? raw : const <Object?>[];
+    return list.map(_valueDouble).whereType<double>().toList(growable: false);
+  }
+
+  List<List<AutomationPoint>> _commandAutomationPointLists(Object? raw) {
+    final list = raw is List ? raw : const <Object?>[];
+    return list.map(_commandAutomationPoints).toList(growable: false);
+  }
+
+  Map<int, Map<String, List<AutomationPoint>>>
+      _commandNestedAutomationPointsByRow(Object? raw) {
+    final map = raw is Map<String, dynamic>
+        ? raw
+        : raw is Map
+            ? raw.cast<String, dynamic>()
+            : const <String, dynamic>{};
+    return map.map((rowKey, laneRaw) {
+      final laneMap = laneRaw is Map<String, dynamic>
+          ? laneRaw
+          : laneRaw is Map
+              ? laneRaw.cast<String, dynamic>()
+              : const <String, dynamic>{};
+      return MapEntry(
+        int.tryParse(rowKey) ?? -1,
+        laneMap.map(
+          (targetId, pointsRaw) =>
+              MapEntry(targetId, _commandAutomationPoints(pointsRaw)),
+        ),
+      );
+    })
+      ..removeWhere((row, _) => row < 0);
+  }
+
+  Map<int, Map<String, List<AutomationClipSnapshot>>>
+      _commandNestedAutomationClipsByRow(Object? raw) {
+    final map = raw is Map<String, dynamic>
+        ? raw
+        : raw is Map
+            ? raw.cast<String, dynamic>()
+            : const <String, dynamic>{};
+    return map.map((rowKey, laneRaw) {
+      final laneMap = laneRaw is Map<String, dynamic>
+          ? laneRaw
+          : laneRaw is Map
+              ? laneRaw.cast<String, dynamic>()
+              : const <String, dynamic>{};
+      return MapEntry(
+        int.tryParse(rowKey) ?? -1,
+        laneMap.map(
+          (targetId, clipsRaw) =>
+              MapEntry(targetId, _commandAutomationClips(clipsRaw)),
+        ),
+      );
+    })
+      ..removeWhere((row, _) => row < 0);
+  }
+
+  double? _valueDouble(Object? value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse((value ?? '').toString());
+  }
+
+  int? _valueInt(Object? value) {
+    if (value is num) return value.toInt();
+    return int.tryParse((value ?? '').toString());
+  }
+
+  bool? _valueBool(Object? value) {
+    if (value is bool) return value;
+    final raw = (value ?? '').toString().trim().toLowerCase();
+    if (raw == 'true') return true;
+    if (raw == 'false') return false;
+    return null;
+  }
+
+  DateTime? _dateTimeFromMs(Object? raw) {
+    final ms = _valueInt(raw);
+    if (ms == null || ms <= 0) return null;
+    return DateTime.fromMillisecondsSinceEpoch(ms);
+  }
+
+  List<AutomationPoint> _commandAutomationPoints(Object? raw) {
+    final list = raw is List ? raw : const <Object?>[];
+    final points = <AutomationPoint>[];
+    for (final item in list) {
+      if (item is Map<String, dynamic>) {
+        points.add(AutomationPointJson.fromJson(item));
+      } else if (item is Map) {
+        points.add(AutomationPointJson.fromJson(item.cast<String, dynamic>()));
+      }
+    }
+    return points;
+  }
+
+  List<AutomationLaneSnapshot> _commandAutomationLanes(Object? raw) {
+    final list = raw is List ? raw : const <Object?>[];
+    final lanes = <AutomationLaneSnapshot>[];
+    for (final item in list) {
+      if (item is Map<String, dynamic>) {
+        lanes.add(AutomationLaneSnapshot.fromJson(item));
+      } else if (item is Map) {
+        lanes
+            .add(AutomationLaneSnapshot.fromJson(item.cast<String, dynamic>()));
+      }
+    }
+    return lanes;
+  }
+
+  List<AutomationClipSnapshot> _commandAutomationClips(Object? raw) {
+    final list = raw is List ? raw : const <Object?>[];
+    final clips = <AutomationClipSnapshot>[];
+    for (final item in list) {
+      if (item is Map<String, dynamic>) {
+        clips.add(AutomationClipSnapshot.fromJson(item));
+      } else if (item is Map) {
+        clips
+            .add(AutomationClipSnapshot.fromJson(item.cast<String, dynamic>()));
+      }
+    }
+    return clips;
+  }
+
+  List<Map<String, dynamic>> _commandClipPayloads(Object? raw) {
+    final list = raw is List ? raw : const <Object?>[];
+    return list
+        .map((item) => item is Map<String, dynamic>
+            ? item
+            : item is Map
+                ? item.cast<String, dynamic>()
+                : null)
+        .whereType<Map<String, dynamic>>()
+        .toList(growable: false);
+  }
+
+  void _handlePersistedClipTimingUndo(int clipIndex, {String clipId = ''}) {
+    final resolvedIndex = clipId.trim().isNotEmpty
+        ? _clipIndexForPersistentId(clipId)
+        : clipIndex;
+    if (!_isValidClipIndex(resolvedIndex)) return;
+    final clip = _audioTracks[resolvedIndex];
+    if (_isValidRowIndex(clip.rowIndex)) {
+      clip.rowId = _rowIdAt(clip.rowIndex);
+    }
+    unawaited(_syncClipTimingToEngine(resolvedIndex));
+    _updateOverallDurationIfNeeded();
+    if (mounted) setState(() {});
+  }
+
+  void _applyPersistedClipGainState(AudioTrack clip, double gain) {
+    clip.gain = gain;
+    if (mounted) setState(() {});
+  }
+
+  void _applyPersistedClipNormalizeState(
+    AudioTrack clip,
+    _ClipNormalizeSnapshot snapshot,
+  ) {
+    clip.normalizeVolume = snapshot.normalizeVolume;
+    clip.normalizeGain = snapshot.normalizeGain
+        .clamp(_kClipNormalizeGainMin, _kClipNormalizeGainMax)
+        .toDouble();
+    if (mounted) setState(() {});
+  }
+
+  void _applyPersistedClipPitchState(AudioTrack clip, double pitch) {
+    clip.pitchSemitones = pitch;
+    if (mounted) setState(() {});
+  }
+
+  void _applyPersistedClipReverseState(AudioTrack clip, bool reversed) {
+    clip.isReversed = reversed;
+    if (mounted) setState(() {});
+  }
+
+  void _applyPersistedClipLabelState(AudioTrack clip, String label) {
+    clip.label = label;
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _applyPersistedMidiClipState(
+    AudioTrack clip,
+    List<MidiNote> notes,
+    String instrumentId,
+    String instrumentName,
+    Map<String, double> instrumentParams,
+    String hostedInstrumentStateBase64,
+  ) async {
+    _applyMidiClipStateLocally(
+      clip,
+      notes: notes,
+      instrumentId: instrumentId,
+      instrumentName: instrumentName,
+      instrumentParams: instrumentParams,
+    );
+    clip.hostedInstrumentStateBase64 = hostedInstrumentStateBase64.trim();
+    _scheduleMidiClipEngineRefresh(
+      clip,
+      failureNotice: 'Could not switch instrument for this MIDI clip.',
+    );
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _applyPersistedClipStretchSnapshot(
+    AudioTrack clip,
+    _ClipStretchSnapshot snapshot,
+  ) async {
+    clip.offset = snapshot.offsetSec;
+    clip.sourceTempoBpm = snapshot.sourceTempoBpm;
+    clip.stretchToProjectTempo = snapshot.stretchToProjectTempo;
+    clip.tempoStretchPreservePitch = snapshot.tempoStretchPreservePitch;
+    _tempoStretchEnabled = snapshot.tempoStretchEnabled ??
+        _audioTracks.where((track) => !track.isMidi).any(
+              (track) => track.stretchToProjectTempo,
+            );
+    _tempoStretchPreservePitchDefault =
+        snapshot.tempoStretchPreservePitchDefault ??
+            _tempoStretchPreservePitchDefault;
+    final clipIndex = _audioTracks.indexOf(clip);
+    if (clipIndex >= 0) {
+      await _syncClipTimingToEngine(clipIndex);
+    }
+    await _syncClipMixToEngine(clip);
+    _updateOverallDurationIfNeeded();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _addClipFromUndoPayload(Map<String, dynamic> payload) async {
+    final clipId = _normalizePersistedClipId(payload['clipId']);
+    if (_clipIndexForPersistentId(clipId) >= 0) return;
+
+    final fileName = (payload['fileName'] ?? '').toString().trim();
+    final file =
+        File(p.join(ProjectManager.audioDir(_projectDir).path, fileName));
+    final kind = ClipKindWire.fromWire((payload['clipType'] ?? '').toString());
+    final row = (_valueInt(payload['rowIndex']) ?? 0)
+        .clamp(0, math.max(0, _rowCount - 1))
+        .toInt();
+    final timeMs = (_valueDouble(payload['offset']) ?? 0.0) * 1000.0;
+    final trimStart = Duration(
+      milliseconds: _valueInt(payload['trimStartMs']) ?? 0,
+    );
+    final trimEnd = Duration(
+      milliseconds: _valueInt(payload['trimEndMs']) ??
+          math.max(0, _valueInt(payload['audioDurationMs']) ?? 0),
+    );
+    final automation = _commandAutomationPoints(payload['automation']);
+
+    if (kind == ClipKind.midi) {
+      await _addMidiTrack(
+        instrumentId: (payload['instrumentId'] ?? '').toString(),
+        instrumentName: (payload['instrumentName'] ?? '').toString(),
+        instrumentParams: _commandDoubleMap(payload['instrumentParams']),
+        midiNotes: _commandMidiNotes(payload['midiNotes']),
+        row: row,
+        timeMs: timeMs,
+        trimStartRequested: trimStart,
+        trimEndRequested: trimEnd,
+        renderedFile: file.existsSync() ? file : null,
+        label: (payload['label'] ?? '').toString(),
+        gain: _valueDouble(payload['gain']),
+        pitchSemitones: _valueDouble(payload['pitchSemitones']),
+        sourceTempoBpm: _valueDouble(payload['sourceTempoBpm']),
+        stretchToProjectTempo: _valueBool(payload['stretchToProjectTempo']),
+        tempoStretchPreservePitch:
+            _valueBool(payload['tempoStretchPreservePitch']),
+        crossfade: _valueDouble(payload['crossfade']),
+        automation: automation,
+        hostedInstrumentStateBase64:
+            (payload['hostedInstrumentStateB64'] ?? '').toString(),
+        clipId: clipId,
+      );
+      return;
+    }
+
+    if (!file.existsSync()) {
+      throw StateError('Missing audio file for undo history: $fileName');
+    }
+    await _addAudioTrackFromProjectFile(
+      projectAudioFile: file,
+      label: (payload['label'] ?? '').toString(),
+      row: row,
+      timeMs: timeMs,
+      trimStartRequested: trimStart,
+      trimEndRequested: trimEnd,
+      gain: _valueDouble(payload['gain']),
+      normalizeVolume: _valueBool(payload['normalizeVolume']),
+      normalizeGain: _valueDouble(payload['normalizeGain']),
+      preNormalizeGain: _valueDouble(payload['preNormalizeGain']),
+      pitchSemitones: _valueDouble(payload['pitchSemitones']),
+      isReversed: _valueBool(payload['isReversed']) ?? false,
+      sourceTempoBpm: _valueDouble(payload['sourceTempoBpm']),
+      stretchToProjectTempo: _valueBool(payload['stretchToProjectTempo']),
+      tempoStretchPreservePitch:
+          _valueBool(payload['tempoStretchPreservePitch']),
+      crossfade: _valueDouble(payload['crossfade']),
+      automation: automation,
+      clipId: clipId,
+    );
+  }
+
+  Future<void> _removeClipForUndo(String clipId, int fallbackIndex) async {
+    var index = _clipIndexForPersistentId(clipId);
+    if (index < 0 && _isValidClipIndex(fallbackIndex)) {
+      index = fallbackIndex;
+    }
+    if (!_isValidClipIndex(index)) return;
+
+    final clip = _audioTracks[index];
+    clip.audioStartTimer?.cancel();
+    if (_activeMidiClipEngineId == clip.engineClipId) {
+      _closeMidiClipEditor();
+    }
+    _audioTracks.removeAt(index);
+    if (clip.engineClipId >= 0) {
+      await JuceAudioEngine.removeTrack(clip.engineClipId);
+    }
+    await _syncAllClipFadesToEngine();
+    _updateOverallDurationIfNeeded();
+    if (mounted) setState(() {});
+  }
+
+  void _applyPersistedRowGainState(int row, double gain) {
+    if (!_isValidRowIndex(row)) return;
+    setState(() => _rowGain[row] = gain);
+  }
+
+  void _applyPersistedRowPanState(int row, double pan) {
+    if (!_isValidRowIndex(row)) return;
+    setState(() => _rowPan[row] = pan);
+  }
+
+  void _applyPersistedMasterGainState(double gain) {
+    setState(() => _masterGain = gain);
+  }
+
+  void _applyPersistedMasterPanState(double pan) {
+    setState(() => _masterPan = pan);
+  }
+
+  void _applyPersistedRowAutomationState(
+    int row,
+    List<AutomationPoint> points,
+  ) {
+    if (!_isValidRowIndex(row)) return;
+    setState(() {
+      _rowVolumeAutomation[row] =
+          points.map((p) => p.copy()).toList(growable: false);
+    });
+  }
+
+  void _applyPersistedTargetAutomationState(
+    int row,
+    String targetId,
+    List<AutomationPoint> points,
+  ) {
+    if (!_isValidRowIndex(row) || targetId.isEmpty) return;
+    setState(() {
+      final rowMap = _rowPluginAutomation.putIfAbsent(
+        row,
+        () => <String, List<AutomationPoint>>{},
+      );
+      rowMap[targetId] = points.map((p) => p.copy()).toList(growable: false);
+    });
+  }
+
+  void _applyPersistedTargetAutomationClipsState(
+    int row,
+    String targetId,
+    List<AutomationClipSnapshot> clips,
+  ) {
+    if (!_isValidRowIndex(row) || targetId.isEmpty) return;
+    setState(() {
+      final rowMap = _rowAutomationClips.putIfAbsent(
+        row,
+        () => <String, List<AutomationClipSnapshot>>{},
+      );
+      rowMap[targetId] = _copyAutomationClipList(clips);
+    });
+  }
+
+  void _handlePersistedRowEffectUndo(int row) {
+    _refreshAudioEditorView();
+    if (_isValidRowIndex(row)) {
+      _refreshRowFx(row);
+      unawaited(_refreshAutomationTargetsForRow(row));
+    }
+  }
+
+  void _handlePersistedMasterEffectUndo() {
+    _refreshAudioEditorView();
+    unawaited(_refreshAutomationTargetsForAllRows());
+  }
+
+  void _handlePersistedRowEffectParamUndo({
+    required int row,
+    required int effectIndex,
+    required String paramId,
+  }) {
+    _handlePersistedRowEffectUndo(row);
+    unawaited(() async {
+      try {
+        final params = await JuceAudioEngine.getTrackPluginParameters(
+          row,
+          effectIndex,
+        );
+        final value = _pluginParamValueById(params, paramId);
+        if (value != null) {
+          _updateAutomationTargetBaselineForEffectParameter(
+            row: row,
+            effectIndex: effectIndex,
+            paramId: paramId,
+            value: value,
+            master: false,
+          );
+        }
+      } catch (_) {}
+    }());
+  }
+
+  void _handlePersistedMasterEffectParamUndo({
+    required int effectIndex,
+    required String paramId,
+  }) {
+    _handlePersistedMasterEffectUndo();
+    unawaited(() async {
+      try {
+        final params = await JuceAudioEngine.getMasterPluginParameters(
+          effectIndex,
+        );
+        final value = _pluginParamValueById(params, paramId);
+        if (value != null) {
+          _updateAutomationTargetBaselineForEffectParameter(
+            effectIndex: effectIndex,
+            paramId: paramId,
+            value: value,
+            master: true,
+          );
+        }
+      } catch (_) {}
+    }());
+  }
+
+  dynamic _pluginParamValueById(
+    List<Map<String, dynamic>> params,
+    String paramId,
+  ) {
+    for (final param in params) {
+      final id = (param['id'] ?? param['name'] ?? '').toString();
+      if (id == paramId) return param['value'];
+    }
+    return null;
+  }
+
+  void _requestLocalVersionSnapshot({
+    required ProjectVersionReason reason,
+    required Duration minInterval,
+  }) {
+    if (_localVersionSnapshotInFlight) return;
+    _localVersionSnapshotInFlight = true;
+    unawaited(() async {
+      try {
+        if (!await ProjectVersionPreferences.isEnabled()) return;
+        await _projectVersionStore.maybeCreateSnapshot(
+          projectDir: _projectDir,
+          reason: reason,
+          minInterval: minInterval,
+        );
+      } catch (error) {
+        debugPrint('Project version snapshot skipped: $error');
+      } finally {
+        _localVersionSnapshotInFlight = false;
+      }
+    }());
+  }
+
+  void _flushAndRequestLocalVersionSnapshot({
+    required ProjectVersionReason reason,
+    required Duration minInterval,
+  }) {
+    if (_localVersionSnapshotInFlight) return;
+    _localVersionSnapshotInFlight = true;
+    unawaited(() async {
+      try {
+        if (!await ProjectVersionPreferences.isEnabled()) return;
+        await _projectAutosaveCoordinator.flush();
+        await _projectVersionStore.maybeCreateSnapshot(
+          projectDir: _projectDir,
+          reason: reason,
+          minInterval: minInterval,
+        );
+      } catch (error) {
+        debugPrint('Project version snapshot skipped: $error');
+      } finally {
+        _localVersionSnapshotInFlight = false;
+      }
+    }());
   }
 
   Future<void> _uploadProjectTelemetrySnapshot(
@@ -9818,6 +11584,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _refreshAllPersistedEffectSnapshots();
       await _refreshHostedInstrumentStatesForPersistence();
       final json = _buildProjectJsonSnapshot();
+      _attachPersistedUndoHistoryToProjectJson(json);
       await _projectPersistence.saveProjectState(
         projectDir: _projectDir,
         projectState: json,
@@ -9825,6 +11592,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       _projectAutosaveCoordinator.clearDirty();
       await _uploadProjectTelemetrySnapshot(json);
+      _requestCloudAutoSyncNow('save');
+      _requestLocalVersionSnapshot(
+        reason: ProjectVersionReason.manualSave,
+        minInterval: ProjectVersionStore.defaultSaveInterval,
+      );
+      await _persistUndoHistory();
 
       if (mounted && showSnackBar) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -10348,6 +12121,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<_AudioExportSettings?> _showAudioExportSettingsSheet() async {
+    final highQualityExport = _canUseSubscriptionCapability(
+      SubscriptionCapability.highQualityExport,
+      fallback: widget.isProEntitled ?? true,
+    );
     final normalizedCurrentSettings =
         _normalizeAudioExportSettings(_audioExportSettings);
     _ExportAudioFormat selectedFormat = normalizedCurrentSettings.format;
@@ -10364,8 +12141,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _audioExportSettings.resampleQuality;
     bool showAdvanced = false;
     final nativeWavOnly = _desktopNativeWavOnlyExport;
+    if (!highQualityExport && selectedFormat == _ExportAudioFormat.wav) {
+      selectedFormat = _ExportAudioFormat.mp3;
+    }
     if (nativeWavOnly) {
       selectedFormat = _ExportAudioFormat.wav;
+      selectedChannelMode = _ExportChannelMode.stereo;
+      selectedNormalize = false;
+      selectedResampleQuality = _ExportResampleQuality.best;
+    }
+    if (!highQualityExport) {
+      selectedSampleRate = 44100;
+      selectedWavBitDepth = 16;
       selectedChannelMode = _ExportChannelMode.stereo;
       selectedNormalize = false;
       selectedResampleQuality = _ExportResampleQuality.best;
@@ -10471,16 +12258,80 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             );
           }
 
+          Widget buildLockedUpgradeRow({
+            required String label,
+            required IconData icon,
+          }) {
+            return GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _showUpgradeRequired(
+                title: 'Upgrade for higher quality export',
+                message:
+                    'WAV export and 24-bit / 48 kHz quality are available on Starter and higher plans.',
+                icon: Icons.lock_outline_rounded,
+              ),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.035),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.08),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      icon,
+                      color: Colors.white.withValues(alpha: 0.44),
+                      size: 17,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        L10n.translate(context, label),
+                        style: TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: Colors.white.withValues(alpha: 0.48),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      Icons.lock_outline_rounded,
+                      color: Colors.white.withValues(alpha: 0.52),
+                      size: 16,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      L10n.translate(context, 'Starter'),
+                      style: TextStyle(
+                        fontFamily: 'Pretendard',
+                        color: Colors.white.withValues(alpha: 0.58),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
           return StatefulBuilder(
             builder: (context, setSheetState) {
-              final sampleRateOptions = _exportSampleRatesForFormat(
-                nativeWavOnly ? _ExportAudioFormat.wav : selectedFormat,
-              );
+              final effectiveFormat =
+                  nativeWavOnly ? _ExportAudioFormat.wav : selectedFormat;
+              final sampleRateOptions = highQualityExport
+                  ? _exportSampleRatesForFormat(effectiveFormat)
+                  : const <int>[44100];
 
               Widget buildFormatOption({
                 required _ExportAudioFormat format,
                 required String label,
-                required bool isLeft,
+                required BorderRadius borderRadius,
                 required bool enabled,
               }) {
                 final isSelected = selectedFormat == format;
@@ -10490,13 +12341,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     onTap: enabled
                         ? () => setSheetState(() {
                               selectedFormat = format;
-                              selectedSampleRate =
-                                  _normalizeExportSampleRateForFormat(
-                                format,
-                                selectedSampleRate,
-                              );
+                              selectedSampleRate = highQualityExport
+                                  ? _normalizeExportSampleRateForFormat(
+                                      format,
+                                      selectedSampleRate,
+                                    )
+                                  : 44100;
                             })
-                        : null,
+                        : () {
+                            if (!highQualityExport &&
+                                format == _ExportAudioFormat.wav) {
+                              _showUpgradeRequired(
+                                title: 'Upgrade to export WAV',
+                                message:
+                                    'WAV export and 24-bit / 48 kHz quality are available on Starter and higher plans.',
+                                icon: Icons.audio_file_outlined,
+                              );
+                            }
+                          },
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 140),
                       height: 48,
@@ -10506,12 +12368,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             : (enabled
                                 ? Colors.transparent
                                 : Colors.white.withValues(alpha: 0.025)),
-                        borderRadius: BorderRadius.horizontal(
-                          left:
-                              isLeft ? const Radius.circular(24) : Radius.zero,
-                          right:
-                              isLeft ? Radius.zero : const Radius.circular(24),
-                        ),
+                        borderRadius: borderRadius,
                         border: Border.all(
                           color: isSelected
                               ? Colors.white.withValues(alpha: 0.34)
@@ -10524,6 +12381,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
+                          if (!enabled &&
+                              !nativeWavOnly &&
+                              format == _ExportAudioFormat.wav) ...[
+                            Icon(
+                              Icons.lock_outline_rounded,
+                              size: 15,
+                              color: Colors.white.withValues(alpha: 0.52),
+                            ),
+                            const SizedBox(width: 5),
+                          ],
                           Text(
                             label,
                             style: TextStyle(
@@ -10643,8 +12510,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               buildFormatOption(
                                                 format: _ExportAudioFormat.wav,
                                                 label: 'WAV',
-                                                isLeft: true,
-                                                enabled: true,
+                                                borderRadius:
+                                                    const BorderRadius.only(
+                                                  topLeft: Radius.circular(24),
+                                                  bottomLeft:
+                                                      Radius.circular(24),
+                                                ),
+                                                enabled: highQualityExport,
                                               ),
                                               Container(
                                                 width: 1,
@@ -10655,7 +12527,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               buildFormatOption(
                                                 format: _ExportAudioFormat.mp3,
                                                 label: 'MP3',
-                                                isLeft: false,
+                                                borderRadius: BorderRadius.zero,
+                                                enabled: !nativeWavOnly,
+                                              ),
+                                              Container(
+                                                width: 1,
+                                                height: 48,
+                                                color: Colors.white
+                                                    .withValues(alpha: 0.12),
+                                              ),
+                                              buildFormatOption(
+                                                format: _ExportAudioFormat.flac,
+                                                label: 'FLAC',
+                                                borderRadius:
+                                                    const BorderRadius.only(
+                                                  topRight: Radius.circular(24),
+                                                  bottomRight:
+                                                      Radius.circular(24),
+                                                ),
                                                 enabled: !nativeWavOnly,
                                               ),
                                             ],
@@ -10795,7 +12684,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                               });
                                                             },
                                                           ),
-                                                          if (!nativeWavOnly) ...[
+                                                          if (!nativeWavOnly &&
+                                                              !highQualityExport) ...[
+                                                            const SizedBox(
+                                                                height: 10),
+                                                            buildLockedUpgradeRow(
+                                                              label:
+                                                                  '48 kHz export',
+                                                              icon: Icons
+                                                                  .graphic_eq_rounded,
+                                                            ),
+                                                            const SizedBox(
+                                                                height: 10),
+                                                            buildLockedUpgradeRow(
+                                                              label:
+                                                                  '24-bit WAV export',
+                                                              icon: Icons
+                                                                  .audio_file_outlined,
+                                                            ),
+                                                          ],
+                                                          if (!nativeWavOnly &&
+                                                              highQualityExport) ...[
                                                             const SizedBox(
                                                                 height: 10),
                                                             buildDropdownField(
@@ -10905,6 +12814,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                             ),
                                                           ],
                                                           if (!nativeWavOnly &&
+                                                              highQualityExport &&
                                                               selectedNormalize) ...[
                                                             const SizedBox(
                                                                 height: 4),
@@ -11258,22 +13168,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             color: Colors.transparent,
                                             child: InkWell(
                                               onTap: () {
+                                                final finalFormat =
+                                                    nativeWavOnly
+                                                        ? _ExportAudioFormat.wav
+                                                        : selectedFormat;
                                                 Navigator.pop(
                                                   dialogContext,
                                                   _AudioExportSettings(
-                                                    format: nativeWavOnly
-                                                        ? _ExportAudioFormat.wav
-                                                        : selectedFormat,
-                                                    sampleRate:
-                                                        _normalizeExportSampleRateForFormat(
-                                                      nativeWavOnly
-                                                          ? _ExportAudioFormat
-                                                              .wav
-                                                          : selectedFormat,
-                                                      selectedSampleRate,
-                                                    ),
+                                                    format: finalFormat,
+                                                    sampleRate: highQualityExport
+                                                        ? _normalizeExportSampleRateForFormat(
+                                                            finalFormat,
+                                                            selectedSampleRate,
+                                                          )
+                                                        : 44100,
                                                     wavBitDepth:
-                                                        selectedWavBitDepth,
+                                                        highQualityExport
+                                                            ? selectedWavBitDepth
+                                                            : 16,
                                                     wavDithering:
                                                         selectedWavDithering,
                                                     mp3BitrateKbps:
@@ -11281,16 +13193,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                     mp3Mode: selectedMp3Mode,
                                                     mp3VbrQuality:
                                                         selectedMp3VbrQuality,
-                                                    channelMode: nativeWavOnly
+                                                    channelMode: nativeWavOnly ||
+                                                            !highQualityExport
                                                         ? _ExportChannelMode
                                                             .stereo
                                                         : selectedChannelMode,
-                                                    normalize: nativeWavOnly
+                                                    normalize: nativeWavOnly ||
+                                                            !highQualityExport
                                                         ? false
                                                         : selectedNormalize,
                                                     normalizeTargetDb:
                                                         selectedNormalizeTargetDb,
-                                                    resampleQuality: nativeWavOnly
+                                                    resampleQuality: nativeWavOnly ||
+                                                            !highQualityExport
                                                         ? _ExportResampleQuality
                                                             .best
                                                         : selectedResampleQuality,
@@ -13179,6 +15094,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool transcodeTo48k = true,
     bool showLoadingOverlay = true,
     String uploadMethod = 'import',
+    String? clipId,
   }) async {
     if (_audioTracks.length >= kNumClips) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -13301,6 +15217,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         rowIndex: safeRow,
         rowId: rowId,
         engineClipId: engineClipId,
+        clipId: clipId,
         label: baseNameNoExt,
         isReversed: false,
       );
@@ -13339,6 +15256,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     double timeMs, {
     Duration? trimStartRequested,
     Duration? trimEndRequested,
+    String? clipId,
   }) async {
     if (_audioTracks.length >= kNumClips) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -13393,6 +15311,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         rowIndex: safeRow,
         rowId: rowId,
         engineClipId: engineClipId,
+        clipId: clipId,
         label: clip.label,
         isReversed: clip.isReversed,
       );
@@ -13447,6 +15366,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool updateProjectDuration = true,
     bool startWaveform = true,
     bool assumeFreshEngineDefaults = false,
+    String? clipId,
   }) async {
     // no FFmpeg, no temp renaming
     if (!rowAlreadyEnsured) {
@@ -13498,6 +15418,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         rowIndex: safeRow,
         rowId: rowId,
         engineClipId: engineClipId,
+        clipId: clipId,
         label: label,
         isReversed: false,
       );
@@ -16300,6 +18221,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool startWaveform = true,
     bool assumeFreshEngineDefaults = false,
     String hostedInstrumentStateBase64 = '',
+    String? clipId,
   }) async {
     if (_audioTracks.length >= kNumClips) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -16396,6 +18318,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             updateProjectDuration: updateProjectDuration,
             startWaveform: startWaveform,
             assumeFreshEngineDefaults: assumeFreshEngineDefaults,
+            clipId: clipId,
           );
           return;
         }
@@ -16426,6 +18349,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         rowIndex: safeRow,
         rowId: rowId,
         engineClipId: engineClipId,
+        clipId: clipId,
         label: label ?? instrumentName,
         clipKind: ClipKind.midi,
         instrumentId: instrumentId,
@@ -16481,6 +18405,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     double timeMs, {
     Duration? trimStartRequested,
     Duration? trimEndRequested,
+    String? clipId,
   }) async {
     if (!clip.isMidi) return;
     await _addMidiTrack(
@@ -16499,6 +18424,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       stretchToProjectTempo: clip.stretchToProjectTempo,
       tempoStretchPreservePitch: clip.tempoStretchPreservePitch,
       hostedInstrumentStateBase64: clip.hostedInstrumentStateBase64,
+      clipId: clipId,
     );
   }
 
@@ -16526,6 +18452,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool startWaveform = true,
     bool assumeFreshEngineDefaults = false,
     String hostedInstrumentStateBase64 = '',
+    String? clipId,
   }) async {
     await _addMidiTrack(
       instrumentId: instrumentId,
@@ -16551,6 +18478,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       startWaveform: startWaveform,
       assumeFreshEngineDefaults: assumeFreshEngineDefaults,
       hostedInstrumentStateBase64: hostedInstrumentStateBase64,
+      clipId: clipId,
     );
   }
 
@@ -18372,36 +20300,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return _kSampleAudioExtensions.contains(ext);
   }
 
-  Future<bool> _ensureCanAddAnotherClip({
-    required String basicModeMessage,
-  }) async {
-    if (_isProEntitled || _audioTracks.length < 3) {
-      return true;
-    }
-    await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF2C2C2C),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          L10n.translate(context, 'Pro Mode Feature'),
-          style: const TextStyle(color: Colors.white),
-        ),
-        content: Text(
-          L10n.translate(context, basicModeMessage),
-          style: const TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(L10n.translate(context, 'OK')),
-          ),
-        ],
-      ),
-    );
-    return false;
-  }
-
   Future<bool> _insertAudioFileAtTimeline(
     String filePath, {
     int? row,
@@ -18411,12 +20309,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool showLoadingOverlay = true,
   }) async {
     if (enforceKnownAudioExtension && !_isSampleAudioFile(filePath)) {
-      return false;
-    }
-    if (!await _ensureCanAddAnotherClip(
-      basicModeMessage:
-          'Upgrade to Pro mode to import more than 3 audio tracks.',
-    )) {
       return false;
     }
     if (!File(filePath).existsSync()) {
@@ -18467,13 +20359,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _pickAndInsertAudioTrack() async {
-    if (!await _ensureCanAddAnotherClip(
-      basicModeMessage:
-          'Upgrade to Pro mode to import more than 3 audio tracks.',
-    )) {
-      return;
-    }
-
     if (!await _ensureAndroidMediaLibraryAccess()) {
       return;
     }
@@ -20077,12 +21962,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _addInstrumentClipFromPicker() async {
-    if (!await _ensureCanAddAnotherClip(
-      basicModeMessage: 'Upgrade to Pro mode to add more than 3 clips.',
-    )) {
-      return;
-    }
-
     if (!mounted) return;
     if (!mounted) return;
     await _ensureDesktopHostedInstrumentCatalogLoaded();
@@ -21151,6 +23030,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       key: ValueKey("master_effects_panel"),
       mode: _resolvedMode,
       isProEntitled: _isProEntitled,
+      onUpgradeRequested: widget.onUpgradeRequested,
       getMasterEffects: () => JuceAudioEngine.getMasterEffects(),
       getMasterEffectIds: () => JuceAudioEngine.getMasterEffectIds(),
       getMasterEffectBypassState: (i) =>
@@ -22519,6 +24399,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Widget _buildProjectSettingsPopup() {
     if (!_isProjectSettingsOpen) return const SizedBox.shrink();
+    final showRecoveryLauncher =
+        PlatformCapabilities.current.isDesktop || _projectLoadIssues.isNotEmpty;
     final _TopPopupLayout popupLayout = _resolveTopPopupLayout(
       anchorKey: _projectSettingsButtonKey,
       desiredWidth: 232,
@@ -22634,6 +24516,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 const SizedBox(height: 9),
                                 _buildProducerCaptureUiToggle(),
                               ],
+                              if (showRecoveryLauncher) ...[
+                                const SizedBox(height: 9),
+                                _buildProjectRecoveryLauncher(),
+                              ],
                               if (PlatformCapabilities.current.isDesktop) ...[
                                 const SizedBox(height: 9),
                                 _buildDesktopKeyboardMidiToggle(),
@@ -22645,8 +24531,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 _buildDesktopPluginManagerLauncher(),
                                 const SizedBox(height: 9),
                                 _buildDesktopDiagnosticsLauncher(),
-                                const SizedBox(height: 9),
-                                _buildProjectRecoveryLauncher(),
                               ],
                               const SizedBox(height: 12),
                               const SizedBox(height: 2),
@@ -30505,44 +32389,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _syncNativeMasterAutomation();
   }
 
-  static const Map<String, Set<String>> _kAutomationVisibleParamsByEffect =
-      <String, Set<String>>{
-    'Reverb': <String>{'Room Size', 'Mix', 'Predelay'},
-    'Compressor': <String>{
-      'Threshold',
-      'Attack',
-      'Release',
-      'Ratio',
-      'Makeup',
-      'Mix',
-    },
-    'Limiter': <String>{'Threshold', 'Release', 'Ceiling'},
-    'Clipper': <String>{'Threshold', 'Ceiling'},
-    'EQ Parametric': <String>{
-      'HPF Frequency',
-      'HPF Slope',
-      'Band 1 Frequency',
-      'Band 1 Gain',
-      'Band 1 Q',
-      'Band 2 Frequency',
-      'Band 2 Gain',
-      'Band 2 Q',
-      'Band 3 Frequency',
-      'Band 3 Gain',
-      'Band 3 Q',
-      'Band 4 Frequency',
-      'Band 4 Gain',
-      'Band 4 Q',
-      'LPF Slope',
-      'LPF Frequency',
-    },
-    'EQ 3-Band': <String>{'Low Gain', 'Mid Gain', 'High Gain'},
-    'Delay': <String>{'Delay Time', 'Feedback', 'Mix'},
-    'Gain': <String>{'Volume'},
-  };
-
   Set<String>? _visibleAutomationParamsForEffect(String effectName) {
-    return _kAutomationVisibleParamsByEffect[effectName.trim()];
+    final allowedNames = kExposedEffectParameterNames[effectName.trim()];
+    return allowedNames?.toSet();
   }
 
   bool _isAutomationTargetVisibleInMenu(_AutomationTargetMeta target) {
@@ -30578,9 +32427,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     for (int effectIndex = 0;
         effectIndex < masterEffects.length;
         effectIndex++) {
-      final params =
-          await JuceAudioEngine.getMasterPluginParameters(effectIndex);
       final effectName = masterEffects[effectIndex].trim();
+      final params = exposedEffectParameters(
+        effectName,
+        await JuceAudioEngine.getMasterPluginParameters(effectIndex),
+      );
       final visibleParams = _visibleAutomationParamsForEffect(effectName);
       final displayEffectName = effectIndex < masterEffectDisplayLabels.length
           ? masterEffectDisplayLabels[effectIndex].displayName
@@ -30788,9 +32639,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final effectOrdinalById = <String, int>{};
       final discoveredRowTargets = <_DiscoveredAutomationTarget>[];
       for (int effectIndex = 0; effectIndex < effects.length; effectIndex++) {
-        final params =
-            await JuceAudioEngine.getTrackPluginParameters(row, effectIndex);
         final effectName = effects[effectIndex].trim();
+        final params = exposedEffectParameters(
+          effectName,
+          await JuceAudioEngine.getTrackPluginParameters(row, effectIndex),
+        );
         final visibleParams = _visibleAutomationParamsForEffect(effectName);
         final displayEffectName = effectIndex < effectDisplayLabels.length
             ? effectDisplayLabels[effectIndex].displayName
@@ -32429,15 +34282,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     int row = -1,
     required int effectIndex,
   }) async {
-    final params = master
-        ? await JuceAudioEngine.getMasterPluginParameters(effectIndex)
-        : await JuceAudioEngine.getTrackPluginParameters(row, effectIndex);
-    if (!mounted) return;
-    if (params.isEmpty) {
-      _showSmallNotice('No automatable parameters found for this plugin.');
-      return;
-    }
-
     final effectNames = master
         ? await JuceAudioEngine.getMasterEffects()
         : await JuceAudioEngine.getTrackEffectsForRow(row);
@@ -32445,6 +34289,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final effectName = effectIndex >= 0 && effectIndex < effectNames.length
         ? effectNames[effectIndex]
         : 'Plugin';
+    final params = exposedEffectParameters(
+      effectName,
+      master
+          ? await JuceAudioEngine.getMasterPluginParameters(effectIndex)
+          : await JuceAudioEngine.getTrackPluginParameters(row, effectIndex),
+    );
+    if (!mounted) return;
+    if (params.isEmpty) {
+      _showSmallNotice('No automatable parameters found for this plugin.');
+      return;
+    }
     final selected = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (dialogContext) {
@@ -36122,8 +37977,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
             final paramsRaw =
                 await JuceAudioEngine.getTrackPluginParameters(row, fxIndex);
-            final params =
-                paramsRaw.map((e) => Map<String, dynamic>.from(e)).toList();
+            final params = exposedEffectParameters(
+              effects[fxIndex],
+              paramsRaw.map((e) => Map<String, dynamic>.from(e)).toList(),
+            );
 
             final exactParamName = a.data['param_name'] as String?;
             final containsAny = (a.data['param_name_contains_any'] as List?)
@@ -36266,8 +38123,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
             final paramsRaw =
                 await JuceAudioEngine.getMasterPluginParameters(fxIndex);
-            final params =
-                paramsRaw.map((e) => Map<String, dynamic>.from(e)).toList();
+            final params = exposedEffectParameters(
+              effects[fxIndex],
+              paramsRaw.map((e) => Map<String, dynamic>.from(e)).toList(),
+            );
 
             final exactParamName = a.data['param_name'] as String?;
             final containsAny = (a.data['param_name_contains_any'] as List?)
@@ -37163,7 +39022,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final masterEffects = await JuceAudioEngine.getMasterEffects();
     final masterFx = <Map<String, dynamic>>[];
     for (int i = 0; i < masterEffects.length; i++) {
-      final params = await JuceAudioEngine.getMasterPluginParameters(i);
+      final params = exposedEffectParameters(
+        masterEffects[i],
+        await JuceAudioEngine.getMasterPluginParameters(i),
+      );
       final bypassed = await JuceAudioEngine.getMasterEffectBypassState(i);
       masterFx.add({
         'index': i,
@@ -37680,10 +39542,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final weekly = status.weekly;
         final extraPromptBank = status.extraPromptBank;
         final leftLabel = L10n.translate(dialogContext, 'left');
+        String formatPercentLeft(AiPromptRateLimitWindow window) {
+          return '${window.remainingPercent}% $leftLabel';
+        }
+
         Widget buildLimitRow({
           required String label,
-          required int remaining,
-          required int limit,
+          required AiPromptRateLimitWindow window,
           required DateTime? resetsAt,
           required bool preferDateWhenFar,
         }) {
@@ -37712,7 +39577,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 ),
                 Expanded(
                   child: Text(
-                    '$remaining/$limit $leftLabel',
+                    formatPercentLeft(window),
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       fontFamily: 'Pretendard',
@@ -37793,36 +39658,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               height: 1.35,
                             ),
                           ),
-                          if (extraPromptBank.available) ...[
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    L10n.translate(
-                                      dialogContext,
-                                      'Extra prompt bank',
-                                    ),
-                                    style: TextStyle(
-                                      fontFamily: 'Pretendard',
-                                      color: Color(0xFFF4F4F4),
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                                Text(
-                                  '${extraPromptBank.remaining} $leftLabel',
-                                  style: const TextStyle(
-                                    fontFamily: 'Pretendard',
-                                    color: Color(0xFFF4F4F4),
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
                           const SizedBox(height: 14),
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -37843,7 +39678,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 ),
                                 Expanded(
                                   child: Text(
-                                    L10n.translate(dialogContext, 'Left'),
+                                    L10n.translate(dialogContext, 'Remaining'),
                                     textAlign: TextAlign.center,
                                     style: TextStyle(
                                       fontFamily: 'Pretendard',
@@ -37873,16 +39708,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           const SizedBox(height: 6),
                           buildLimitRow(
                             label: L10n.translate(dialogContext, 'Daily'),
-                            remaining: daily.remaining,
-                            limit: daily.limit,
+                            window: daily,
                             resetsAt: daily.resetsAt,
                             preferDateWhenFar: false,
                           ),
                           const SizedBox(height: 6),
                           buildLimitRow(
                             label: L10n.translate(dialogContext, 'Weekly'),
-                            remaining: weekly.remaining,
-                            limit: weekly.limit,
+                            window: weekly,
                             resetsAt: weekly.resetsAt,
                             preferDateWhenFar: true,
                           ),
@@ -40538,6 +42371,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                             _performEditorUndo(),
                                                           )
                                                       : null,
+                                                  onLongPress: canUndo
+                                                      ? () =>
+                                                          _showUndoHistorySheet()
+                                                      : null,
                                                   radius:
                                                       const BorderRadius.only(
                                                     topLeft:
@@ -40559,6 +42396,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                       ? () => unawaited(
                                                             _performEditorRedo(),
                                                           )
+                                                      : null,
+                                                  onLongPress: canRedo
+                                                      ? () =>
+                                                          _showRedoHistorySheet()
                                                       : null,
                                                   radius:
                                                       const BorderRadius.only(
@@ -40831,6 +42672,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         onTap: canUndo
                             ? () => unawaited(_performEditorUndo())
                             : null,
+                        onLongPress:
+                            canUndo ? () => _showUndoHistorySheet() : null,
                         radius: const BorderRadius.only(
                           topLeft: Radius.circular(18),
                           bottomLeft: Radius.circular(18),
@@ -40846,6 +42689,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         onTap: canRedo
                             ? () => unawaited(_performEditorRedo())
                             : null,
+                        onLongPress:
+                            canRedo ? () => _showRedoHistorySheet() : null,
                         radius: const BorderRadius.only(
                           topRight: Radius.circular(18),
                           bottomRight: Radius.circular(18),
@@ -40989,6 +42834,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Widget _transportSegment({
     required IconData icon,
     required VoidCallback? onTap,
+    VoidCallback? onLongPress,
     BorderRadius? radius,
     double iconSize = 20,
     Color? iconColor,
@@ -41022,6 +42868,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           },
         ),
         onTap: onTap,
+        onLongPress: onLongPress,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 120),
           decoration: BoxDecoration(
@@ -41826,6 +43673,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   automation:
                       clip.volumeAutomation.map((p) => p.copy()).toList(),
                   hostedInstrumentStateBase64: clip.hostedInstrumentStateBase64,
+                  clipId: clip.clipId,
                 )
               : _addAudioTrackFromProjectFile(
                   projectAudioFile: clip.file,
@@ -41845,6 +43693,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   crossfade: clip.crossfade,
                   automation:
                       clip.volumeAutomation.map((p) => p.copy()).toList(),
+                  clipId: clip.clipId,
                 ),
       onChange: () {
         _updateOverallDurationIfNeeded();
@@ -42880,6 +44729,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           crossfade: clip.crossfade,
           automation: clip.volumeAutomation.map((p) => p.copy()).toList(),
           hostedInstrumentStateBase64: clip.hostedInstrumentStateBase64,
+          clipId: clip.clipId,
           rowAlreadyEnsured: true,
           notifyUi: false,
           updateProjectDuration: false,
@@ -42906,6 +44756,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         tempoStretchPreservePitch: clip.tempoStretchPreservePitch,
         crossfade: clip.crossfade,
         automation: clip.volumeAutomation.map((p) => p.copy()).toList(),
+        clipId: clip.clipId,
         rowAlreadyEnsured: true,
         notifyUi: false,
         updateProjectDuration: false,
@@ -43071,6 +44922,137 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return restoredRowId;
   }
 
+  Future<void> _restoreDeletedRowClipPayloads(
+    int row,
+    List<Map<String, dynamic>> clipPayloads,
+  ) async {
+    for (final payload in clipPayloads) {
+      final adjusted = Map<String, dynamic>.from(payload);
+      adjusted['rowIndex'] = row;
+      await _addClipFromUndoPayload(adjusted);
+    }
+  }
+
+  Future<int> _restoreDeletedRowFromPersistedSnapshot(
+    Map<String, dynamic> snapshot,
+  ) async {
+    final originalIndex = _valueInt(snapshot['originalIndex']) ?? 0;
+    final rowMap = snapshot['row'] is Map<String, dynamic>
+        ? snapshot['row'] as Map<String, dynamic>
+        : snapshot['row'] is Map
+            ? (snapshot['row'] as Map).cast<String, dynamic>()
+            : const <String, dynamic>{};
+    final rowName =
+        (rowMap['name'] ?? 'Track ${originalIndex + 1}').toString().trim();
+    final rowIconId = _valueInt(rowMap['iconId']) ?? 0;
+    final wasOnlyRow = _valueBool(snapshot['wasOnlyRow']) ?? false;
+    final uiState = _commandDeletedRowUiState(snapshot['uiState']);
+    final rowState = snapshot['rowState'] is Map<String, dynamic>
+        ? RowStateSnapshot.fromJson(snapshot['rowState'])
+        : snapshot['rowState'] is Map
+            ? RowStateSnapshot.fromJson(
+                (snapshot['rowState'] as Map).cast<String, dynamic>(),
+              )
+            : RowStateSnapshot(
+                row: originalIndex,
+                rowId: -1,
+                gain: _kGainUiUnity,
+                pan: 0.5,
+                volumeAutomation: <AutomationPoint>[
+                  AutomationPoint(x: 0.0, volume: 0.75),
+                ],
+              );
+    final rowEffects = _commandRowEffectsSnapshot(snapshot['rowEffects']);
+    final clipPayloads = _commandClipPayloads(snapshot['clips']);
+
+    var restoredRowIndex = originalIndex;
+    var restoredRowId = _valueInt(rowMap['rowId']) ?? -1;
+
+    if (wasOnlyRow) {
+      if (_rowCount == 0) {
+        restoredRowId =
+            await JuceAudioEngine.addRow(rowName, iconId: rowIconId);
+        if (restoredRowId < 0) return _valueInt(rowMap['rowId']) ?? -1;
+      } else {
+        restoredRowIndex = 0;
+        restoredRowId = _rowIdAt(0);
+        await JuceAudioEngine.renameRow(restoredRowId, rowName);
+        await JuceAudioEngine.setRowIcon(restoredRowId, rowIconId);
+      }
+      await _applyRowsToEditorState(
+        <TimelineRow>[
+          TimelineRow(rowId: restoredRowId, name: rowName, iconId: rowIconId),
+        ],
+        refreshAutomationTargets: false,
+        syncClipRows: false,
+      );
+    } else {
+      final desiredIndex = originalIndex.clamp(0, _rowCount);
+      if (_rowCount == 0) {
+        restoredRowId =
+            await JuceAudioEngine.addRow(rowName, iconId: rowIconId);
+        restoredRowIndex = 0;
+      } else if (desiredIndex >= _rowCount) {
+        restoredRowId = await JuceAudioEngine.insertRowBelow(
+          _rowIdAt(_rowCount - 1),
+          rowName,
+          iconId: rowIconId,
+        );
+        restoredRowIndex = _rowCount;
+      } else {
+        restoredRowId = await JuceAudioEngine.insertRowAbove(
+          _rowIdAt(desiredIndex),
+          rowName,
+          iconId: rowIconId,
+        );
+        restoredRowIndex = desiredIndex;
+      }
+      if (restoredRowId < 0) return _valueInt(rowMap['rowId']) ?? -1;
+
+      final nextRows = List<TimelineRow>.from(_rows)
+        ..insert(
+          restoredRowIndex,
+          TimelineRow(rowId: restoredRowId, name: rowName, iconId: rowIconId),
+        );
+      await _applyRowsToEditorState(
+        nextRows,
+        refreshAutomationTargets: false,
+        syncClipRows: true,
+      );
+    }
+
+    await _restoreDeletedRowClipPayloads(restoredRowIndex, clipPayloads);
+    await _restoreRowSnapshot(
+      RowEffectsSnapshot(
+        restoredRowIndex,
+        rowEffects.effects,
+        rowId: restoredRowId,
+      ),
+    );
+    await _restoreDeletedRowState(restoredRowIndex, rowState, uiState);
+    await _recomputeAudibleState();
+    _updateOverallDurationIfNeeded();
+    _refreshRowFx(restoredRowIndex);
+    _refreshAudioEditorView();
+    return restoredRowId;
+  }
+
+  Future<void> _deletePersistedRowForUndo(
+    int currentRowId,
+    int fallbackIndex,
+    bool closesMidiEditor,
+  ) async {
+    var targetRow = _rowIndexForId(currentRowId);
+    if (targetRow < 0 && _rowCount > 0) {
+      targetRow = fallbackIndex.clamp(0, _rowCount - 1).toInt();
+    }
+    if (targetRow < 0 || targetRow >= _rowCount) return;
+    await _deleteRowImpl(targetRow);
+    if (closesMidiEditor) {
+      _closeMidiClipEditor();
+    }
+  }
+
   Future<bool> _deleteRowImpl(int row) async {
     if (row < 0 || row >= _rowCount) return false;
     if (_rowCount == 1) {
@@ -43122,6 +45104,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _undoManager.execute(
       _DeleteRowAction(
         initialRowId: snapshot.row.rowId,
+        fallbackIndex: snapshot.originalIndex,
+        snapshot: snapshot,
         deleteRow: (currentRowId) async {
           var targetRow = _rowIndexForId(currentRowId);
           if (targetRow < 0 || targetRow >= _rowCount) {
@@ -43367,6 +45351,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         builder:
                             (BuildContext context, StateSetter setLocalState) {
                           _audioEditorStateSetter = setLocalState;
+                          EntitlementService? entitlementService;
+                          try {
+                            entitlementService =
+                                context.watch<EntitlementService>();
+                          } catch (_) {
+                            entitlementService = null;
+                          }
+                          final allPluginsEntitled =
+                              entitlementService?.canUseCapability(
+                                    SubscriptionCapability.allPlugins,
+                                  ) ??
+                                  widget.isProEntitled ??
+                                  true;
                           return Stack(
                             key: _editorContentStackKey,
                             fit: StackFit.expand,
@@ -43385,6 +45382,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           const HaloKey('tutorial:timeline'),
                                       borderRadius: BorderRadius.circular(12),
                                       child: AudioCanvasTimeline(
+                                        allPluginsEntitled: allPluginsEntitled,
+                                        onUpgradeRequested:
+                                            widget.onUpgradeRequested,
                                         controller: _timelineController,
                                         transportClockListenable:
                                             _transportClock,
@@ -47678,6 +49678,23 @@ class _DeletedRowUiState {
     this.peakHoldLastUpdate,
     this.peakHoldFreezeUntil,
   });
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'muted': muted,
+        'soloed': soloed,
+        if (muteApplied != null) 'muteApplied': muteApplied,
+        'expanded': expanded,
+        'expandedTab': expandedTab,
+        'gainSnapshot': gainSnapshot,
+        'panSnapshot': panSnapshot,
+        'automationSnapshot':
+            automationSnapshot.map((point) => point.toJson()).toList(),
+        if (peakHoldDb != null) 'peakHoldDb': peakHoldDb,
+        if (peakHoldLastUpdate != null)
+          'peakHoldLastUpdateMs': peakHoldLastUpdate!.millisecondsSinceEpoch,
+        if (peakHoldFreezeUntil != null)
+          'peakHoldFreezeUntilMs': peakHoldFreezeUntil!.millisecondsSinceEpoch,
+      };
 }
 
 class _DeletedRowSnapshot {
@@ -47700,6 +49717,21 @@ class _DeletedRowSnapshot {
     required this.clips,
     required this.closesMidiEditor,
   });
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'originalIndex': originalIndex,
+        'row': <String, dynamic>{
+          'rowId': row.rowId,
+          'name': row.name,
+          'iconId': row.iconId,
+        },
+        'wasOnlyRow': wasOnlyRow,
+        'uiState': uiState.toJson(),
+        'rowState': rowState.toJson(),
+        'rowEffects': rowEffects.toJson(),
+        'clips': clips.map(_persistedClipPayload).toList(),
+        'closesMidiEditor': closesMidiEditor,
+      };
 }
 
 class _RowLayoutSnapshot {
@@ -47708,19 +49740,81 @@ class _RowLayoutSnapshot {
   _RowLayoutSnapshot({
     required this.rows,
   });
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'rows': rows
+            .map(
+              (row) => <String, dynamic>{
+                'rowId': row.rowId,
+                'name': row.name,
+                'iconId': row.iconId,
+              },
+            )
+            .toList(growable: false),
+      };
 }
 
 abstract class EditorUndoAction {
   String get description;
+  Map<String, dynamic>? toPersistedUndoCommand() => null;
 
   Future<void> undo();
   Future<void> redo();
 }
 
+const int _kMaxPersistedUndoCommandJsonBytes = 256 * 1024;
+
+Map<String, dynamic> _persistedClipPayload(AudioTrack clip) {
+  return <String, dynamic>{
+    'clipId': clip.clipId,
+    'fileName': p.basename(clip.file.path),
+    'label': clip.label,
+    'clipType': clip.clipKind.wireName,
+    'audioDurationMs': clip.audioDuration.inMilliseconds,
+    'trimStartMs': clip.trimStart.inMilliseconds,
+    'trimEndMs': clip.trimEnd.inMilliseconds,
+    'offset': clip.offset,
+    'crossfade': clip.crossfade,
+    'gain': clip.gain,
+    'normalizeVolume': clip.normalizeVolume,
+    'normalizeGain': clip.normalizeGain,
+    'preNormalizeGain': clip.preNormalizeGain,
+    'pitchSemitones': clip.pitchSemitones,
+    'isReversed': clip.isReversed,
+    'sourceTempoBpm': clip.sourceTempoBpm,
+    'stretchToProjectTempo': clip.stretchToProjectTempo,
+    'tempoStretchPreservePitch': clip.tempoStretchPreservePitch,
+    'rowIndex': clip.rowIndex,
+    'rowId': clip.rowId,
+    'automation': clip.volumeAutomation.map((p) => p.toJson()).toList(),
+    'instrumentId': clip.instrumentId,
+    'instrumentName': clip.instrumentName,
+    'instrumentParams': clip.instrumentParams,
+    'midiNotes': clip.midiNotes.map((n) => n.toJson()).toList(),
+    if (clip.hostedInstrumentStateBase64.trim().isNotEmpty)
+      'hostedInstrumentStateB64': clip.hostedInstrumentStateBase64.trim(),
+  };
+}
+
+String _persistedClipIdFor(List<AudioTrack> tracks, int index) {
+  if (index < 0 || index >= tracks.length) return '';
+  return tracks[index].clipId;
+}
+
+class _EditorUndoStackEntry {
+  _EditorUndoStackEntry({
+    required this.action,
+    required this.snapshot,
+  });
+
+  final EditorUndoAction action;
+  final ProjectUndoSnapshotRecord? snapshot;
+}
+
 class EditorUndoManager extends ChangeNotifier {
   final int maxHistory;
-  final List<EditorUndoAction> _undo = [];
-  final List<EditorUndoAction> _redo = [];
+  final List<_EditorUndoStackEntry> _undo = [];
+  final List<_EditorUndoStackEntry> _redo = [];
   EditorUndoAction? _lastAction;
 
   EditorUndoManager({this.maxHistory = 5});
@@ -47728,10 +49822,35 @@ class EditorUndoManager extends ChangeNotifier {
   bool get canUndo => _undo.isNotEmpty;
   bool get canRedo => _redo.isNotEmpty;
   EditorUndoAction? get lastAction => _lastAction;
+  List<ProjectUndoSnapshotRecord> get undoSnapshotRecords =>
+      List.unmodifiable(_snapshotRecords(_undo));
+  List<ProjectUndoSnapshotRecord> get redoSnapshotRecords =>
+      List.unmodifiable(_snapshotRecords(_redo));
+  List<ProjectUndoSnapshotRecord> get undoHistoryNewestFirst =>
+      List.unmodifiable(_snapshotRecords(_undo.reversed));
+  List<ProjectUndoSnapshotRecord> get redoHistoryNewestFirst =>
+      List.unmodifiable(_snapshotRecords(_redo.reversed));
+  List<ProjectUndoSnapshotRecord> get persistableUndoRecords =>
+      List.unmodifiable(_persistableTail(_undo));
+  List<ProjectUndoSnapshotRecord> get persistableRedoRecords =>
+      List.unmodifiable(_persistableTail(_redo));
+
+  int? undoStepCountForRecord(ProjectUndoSnapshotRecord record) {
+    return _stepCountForRecord(_undo, record);
+  }
+
+  int? redoStepCountForRecord(ProjectUndoSnapshotRecord record) {
+    return _stepCountForRecord(_redo, record);
+  }
 
   Future<void> execute(EditorUndoAction action) async {
     await action.redo();
-    _undo.add(action);
+    _undo.add(
+      _EditorUndoStackEntry(
+        action: action,
+        snapshot: _recordForAction(action),
+      ),
+    );
     if (_undo.length > maxHistory) {
       _undo.removeAt(0);
     }
@@ -47749,7 +49868,12 @@ class EditorUndoManager extends ChangeNotifier {
 
   // same comment here as above
   Future<void> addWithoutExecute(EditorUndoAction action) async {
-    _undo.add(action);
+    _undo.add(
+      _EditorUndoStackEntry(
+        action: action,
+        snapshot: _recordForAction(action),
+      ),
+    );
     if (_undo.length > maxHistory) {
       _undo.removeAt(0);
     }
@@ -47760,9 +49884,10 @@ class EditorUndoManager extends ChangeNotifier {
 
   Future<EditorUndoAction?> undo() async {
     if (_undo.isEmpty) return null;
-    final a = _undo.removeLast();
+    final entry = _undo.removeLast();
+    final a = entry.action;
     await a.undo();
-    _redo.add(a);
+    _redo.add(entry);
     _lastAction = a;
     notifyListeners();
     return a;
@@ -47770,12 +49895,76 @@ class EditorUndoManager extends ChangeNotifier {
 
   Future<EditorUndoAction?> redo() async {
     if (_redo.isEmpty) return null;
-    final a = _redo.removeLast();
+    final entry = _redo.removeLast();
+    final a = entry.action;
     await a.redo();
-    _undo.add(a);
+    _undo.add(entry);
     _lastAction = a;
     notifyListeners();
     return a;
+  }
+
+  Future<void> undoSteps(int count) async {
+    for (var i = 0; i < count && _undo.isNotEmpty; i++) {
+      await undo();
+    }
+  }
+
+  Future<void> redoSteps(int count) async {
+    for (var i = 0; i < count && _redo.isNotEmpty; i++) {
+      await redo();
+    }
+  }
+
+  Future<EditorUndoAction?> undoToRecord(
+    ProjectUndoSnapshotRecord record,
+  ) async {
+    final index = _indexForRecord(_undo, record);
+    if (index < 0) return null;
+    return _stepUndoToIndex(index);
+  }
+
+  Future<EditorUndoAction?> redoToRecord(
+    ProjectUndoSnapshotRecord record,
+  ) async {
+    final index = _indexForRecord(_redo, record);
+    if (index < 0) return null;
+    return _stepRedoToIndex(index);
+  }
+
+  Future<EditorUndoAction?> _stepUndoToIndex(int index) async {
+    final stepCount = _undo.length - index;
+    EditorUndoAction? last;
+    for (var i = 0; i < stepCount && _undo.isNotEmpty; i++) {
+      last = await undo();
+    }
+    return last;
+  }
+
+  Future<EditorUndoAction?> _stepRedoToIndex(int index) async {
+    final stepCount = _redo.length - index;
+    EditorUndoAction? last;
+    for (var i = 0; i < stepCount && _redo.isNotEmpty; i++) {
+      last = await redo();
+    }
+    return last;
+  }
+
+  void restoreCommandHistory({
+    required List<ProjectUndoSnapshotRecord> undo,
+    required List<ProjectUndoSnapshotRecord> redo,
+    required EditorUndoAction? Function(ProjectUndoSnapshotRecord record)
+        actionFactory,
+    bool notify = true,
+  }) {
+    _undo
+      ..clear()
+      ..addAll(_restoreCommandEntries(undo, actionFactory));
+    _redo
+      ..clear()
+      ..addAll(_restoreCommandEntries(redo, actionFactory));
+    _lastAction = null;
+    if (notify) notifyListeners();
   }
 
   void clear() {
@@ -47783,6 +49972,80 @@ class EditorUndoManager extends ChangeNotifier {
     _undo.clear();
     _redo.clear();
     notifyListeners();
+  }
+
+  ProjectUndoSnapshotRecord _recordForAction(EditorUndoAction action) {
+    var command = action.toPersistedUndoCommand();
+    if (command != null) {
+      final sizeBytes = utf8.encode(jsonEncode(command)).length;
+      if (sizeBytes > _kMaxPersistedUndoCommandJsonBytes) {
+        command = null;
+      }
+    }
+    return ProjectUndoSnapshotRecord(
+      id: 'undo_${DateTime.now().microsecondsSinceEpoch}',
+      description: action.description,
+      timestampMs: DateTime.now().millisecondsSinceEpoch,
+      before: const <String, dynamic>{},
+      after: const <String, dynamic>{},
+      command: command,
+    );
+  }
+
+  List<ProjectUndoSnapshotRecord> _snapshotRecords(
+    Iterable<_EditorUndoStackEntry> entries,
+  ) {
+    final records = <ProjectUndoSnapshotRecord>[];
+    for (final entry in entries) {
+      final snapshot = entry.snapshot;
+      if (snapshot != null) records.add(snapshot);
+    }
+    return records;
+  }
+
+  int? _stepCountForRecord(
+    List<_EditorUndoStackEntry> entries,
+    ProjectUndoSnapshotRecord record,
+  ) {
+    var steps = 0;
+    for (final entry in entries.reversed) {
+      steps += 1;
+      if (entry.snapshot?.id == record.id) return steps;
+    }
+    return null;
+  }
+
+  int _indexForRecord(
+    List<_EditorUndoStackEntry> entries,
+    ProjectUndoSnapshotRecord record,
+  ) {
+    return entries.indexWhere((entry) => entry.snapshot?.id == record.id);
+  }
+
+  static List<_EditorUndoStackEntry> _restoreCommandEntries(
+    List<ProjectUndoSnapshotRecord> records,
+    EditorUndoAction? Function(ProjectUndoSnapshotRecord record) actionFactory,
+  ) {
+    final entries = <_EditorUndoStackEntry>[];
+    for (final record in records) {
+      if (record.command == null) continue;
+      final action = actionFactory(record);
+      if (action == null) continue;
+      entries.add(_EditorUndoStackEntry(action: action, snapshot: record));
+    }
+    return entries;
+  }
+
+  static List<ProjectUndoSnapshotRecord> _persistableTail(
+    List<_EditorUndoStackEntry> entries,
+  ) {
+    final records = <ProjectUndoSnapshotRecord>[];
+    for (final entry in entries.reversed) {
+      final snapshot = entry.snapshot;
+      if (snapshot?.command == null) break;
+      records.add(snapshot!);
+    }
+    return records.reversed.toList(growable: false);
   }
 }
 
@@ -47803,6 +50066,14 @@ class _RowLayoutSnapshotAction extends EditorUndoAction {
   String get description => descriptionText;
 
   @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'rowLayout',
+        'description': descriptionText,
+        'before': before.toJson(),
+        'after': after.toJson(),
+      };
+
+  @override
   Future<void> redo() => applySnapshot(after);
 
   @override
@@ -47811,11 +50082,15 @@ class _RowLayoutSnapshotAction extends EditorUndoAction {
 
 class _DeleteRowAction extends EditorUndoAction {
   int _currentRowId;
+  final int fallbackIndex;
+  final _DeletedRowSnapshot? snapshot;
   final Future<void> Function(int currentRowId) deleteRow;
   final Future<int> Function() restoreRow;
 
   _DeleteRowAction({
     required int initialRowId,
+    this.fallbackIndex = 0,
+    this.snapshot,
     required this.deleteRow,
     required this.restoreRow,
   }) : _currentRowId = initialRowId;
@@ -47824,11 +50099,70 @@ class _DeleteRowAction extends EditorUndoAction {
   String get description => 'Delete row';
 
   @override
+  Map<String, dynamic>? toPersistedUndoCommand() {
+    final snap = snapshot;
+    if (snap == null) return null;
+    return <String, dynamic>{
+      'type': 'deleteRow',
+      'currentRowId': _currentRowId,
+      'fallbackIndex': fallbackIndex,
+      'snapshot': snap.toJson(),
+    };
+  }
+
+  @override
   Future<void> redo() => deleteRow(_currentRowId);
 
   @override
   Future<void> undo() async {
     _currentRowId = await restoreRow();
+  }
+}
+
+class _PersistedDeleteRowAction extends EditorUndoAction {
+  int currentRowId;
+  final int fallbackIndex;
+  final Map<String, dynamic> snapshot;
+  final Future<void> Function(
+    int currentRowId,
+    int fallbackIndex,
+    bool closesMidiEditor,
+  ) deleteRow;
+  final Future<int> Function(Map<String, dynamic> snapshot) restoreRow;
+
+  _PersistedDeleteRowAction({
+    required this.currentRowId,
+    required this.fallbackIndex,
+    required Map<String, dynamic> snapshot,
+    required this.deleteRow,
+    required this.restoreRow,
+  }) : snapshot = Map<String, dynamic>.from(snapshot);
+
+  @override
+  String get description => 'Delete row';
+
+  bool get closesMidiEditor {
+    final value = snapshot['closesMidiEditor'];
+    if (value is bool) return value;
+    return (value ?? '').toString().trim().toLowerCase() == 'true';
+  }
+
+  @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'deleteRow',
+        'currentRowId': currentRowId,
+        'fallbackIndex': fallbackIndex,
+        'snapshot': snapshot,
+      };
+
+  @override
+  Future<void> redo() {
+    return deleteRow(currentRowId, fallbackIndex, closesMidiEditor);
+  }
+
+  @override
+  Future<void> undo() async {
+    currentRowId = await restoreRow(snapshot);
   }
 }
 
@@ -48256,6 +50590,18 @@ class AddAudioTrackAction extends EditorUndoAction {
   String get description => 'Add audio clip';
 
   @override
+  Map<String, dynamic>? toPersistedUndoCommand() {
+    final track = _addedTrack;
+    if (track == null) return null;
+    return <String, dynamic>{
+      'type': 'clipPresenceAdd',
+      'description': description,
+      'fallbackIndex': tracks.indexOf(track),
+      'clip': _persistedClipPayload(track),
+    };
+  }
+
+  @override
   Future<void> redo() async {
     final beforeCount = tracks.length;
 
@@ -48325,6 +50671,18 @@ class PasteAudioClipAction extends EditorUndoAction {
 
   @override
   String get description => 'Paste audio clip';
+
+  @override
+  Map<String, dynamic>? toPersistedUndoCommand() {
+    final track = _addedTrack;
+    if (track == null) return null;
+    return <String, dynamic>{
+      'type': 'clipPresenceAdd',
+      'description': description,
+      'fallbackIndex': tracks.indexOf(track),
+      'clip': _persistedClipPayload(track),
+    };
+  }
 
   @override
   Future<void> redo() async {
@@ -48401,6 +50759,18 @@ class AddMidiClipAction extends EditorUndoAction {
   String get description => 'Add instrument clip';
 
   @override
+  Map<String, dynamic>? toPersistedUndoCommand() {
+    final track = _addedTrack;
+    if (track == null) return null;
+    return <String, dynamic>{
+      'type': 'clipPresenceAdd',
+      'description': description,
+      'fallbackIndex': tracks.indexOf(track),
+      'clip': _persistedClipPayload(track),
+    };
+  }
+
+  @override
   Future<void> redo() async {
     final beforeCount = tracks.length;
     await addMidiClip(
@@ -48466,6 +50836,18 @@ class PasteMidiClipAction extends EditorUndoAction {
   String get description => 'Paste instrument clip';
 
   @override
+  Map<String, dynamic>? toPersistedUndoCommand() {
+    final track = _addedTrack;
+    if (track == null) return null;
+    return <String, dynamic>{
+      'type': 'clipPresenceAdd',
+      'description': description,
+      'fallbackIndex': tracks.indexOf(track),
+      'clip': _persistedClipPayload(track),
+    };
+  }
+
+  @override
   Future<void> redo() async {
     final beforeCount = tracks.length;
     await pasteMidiClip(
@@ -48501,6 +50883,7 @@ class PasteMidiClipAction extends EditorUndoAction {
 class EditMidiClipAction extends EditorUndoAction {
   final List<AudioTrack> tracks;
   final int originalIndex;
+  final String clipId;
 
   final List<MidiNote> oldNotes;
   final List<MidiNote> newNotes;
@@ -48524,6 +50907,7 @@ class EditMidiClipAction extends EditorUndoAction {
   EditMidiClipAction({
     required this.tracks,
     required this.originalIndex,
+    String? clipId,
     required this.oldNotes,
     required this.newNotes,
     required this.oldInstrumentId,
@@ -48535,14 +50919,33 @@ class EditMidiClipAction extends EditorUndoAction {
     required this.newInstrumentParams,
     this.newHostedInstrumentStateBase64 = '',
     required this.applyToClip,
-  });
+  }) : clipId = (clipId ?? _persistedClipIdFor(tracks, originalIndex)).trim();
 
   @override
   String get description => 'Edit MIDI clip';
 
   @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'midiEdit',
+        'clipIndex': originalIndex,
+        'clipId': clipId,
+        'oldNotes': oldNotes.map((note) => note.toJson()).toList(),
+        'newNotes': newNotes.map((note) => note.toJson()).toList(),
+        'oldInstrumentId': oldInstrumentId,
+        'oldInstrumentName': oldInstrumentName,
+        'oldInstrumentParams': oldInstrumentParams,
+        if (oldHostedInstrumentStateBase64.trim().isNotEmpty)
+          'oldHostedInstrumentStateB64': oldHostedInstrumentStateBase64.trim(),
+        'newInstrumentId': newInstrumentId,
+        'newInstrumentName': newInstrumentName,
+        'newInstrumentParams': newInstrumentParams,
+        if (newHostedInstrumentStateBase64.trim().isNotEmpty)
+          'newHostedInstrumentStateB64': newHostedInstrumentStateBase64.trim(),
+      };
+
+  @override
   Future<void> redo() async {
-    final clip = _resolveClip(tracks, originalIndex);
+    final clip = _resolveClip(tracks, originalIndex, clipId: clipId);
     if (clip == null) return;
     await applyToClip(
       clip,
@@ -48556,7 +50959,7 @@ class EditMidiClipAction extends EditorUndoAction {
 
   @override
   Future<void> undo() async {
-    final clip = _resolveClip(tracks, originalIndex);
+    final clip = _resolveClip(tracks, originalIndex, clipId: clipId);
     if (clip == null) return;
     await applyToClip(
       clip,
@@ -48572,6 +50975,7 @@ class EditMidiClipAction extends EditorUndoAction {
 class DeleteClipAction extends EditorUndoAction {
   final List<AudioTrack> tracks;
   final AudioTrack clip;
+  late final int originalIndex;
 
   final Future<void> Function({
     required AudioTrack clip,
@@ -48597,6 +51001,7 @@ class DeleteClipAction extends EditorUndoAction {
     required this.addTrack,
     required this.onChange,
   }) {
+    originalIndex = tracks.indexOf(clip);
     file = clip.file;
     row = clip.rowIndex;
     timeMs = clip.offset * 1000.0;
@@ -48607,6 +51012,14 @@ class DeleteClipAction extends EditorUndoAction {
   @override
   String get description =>
       clip.isMidi ? 'Delete instrument clip' : 'Delete audio clip';
+
+  @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'clipPresenceDelete',
+        'description': description,
+        'fallbackIndex': originalIndex,
+        'clip': _persistedClipPayload(clip),
+      };
 
   @override
   Future<void> redo() async {
@@ -48638,9 +51051,58 @@ class DeleteClipAction extends EditorUndoAction {
   }
 }
 
+class _PersistedClipPresenceAction extends EditorUndoAction {
+  final String descriptionText;
+  final bool addedByRedo;
+  final Map<String, dynamic> clipPayload;
+  final int fallbackIndex;
+  final Future<void> Function(Map<String, dynamic> payload) addClip;
+  final Future<void> Function(String clipId, int fallbackIndex) removeClip;
+
+  _PersistedClipPresenceAction({
+    required String descriptionText,
+    required this.addedByRedo,
+    required Map<String, dynamic> clipPayload,
+    required this.fallbackIndex,
+    required this.addClip,
+    required this.removeClip,
+  })  : descriptionText = descriptionText.trim().isEmpty
+            ? (addedByRedo ? 'Add audio clip' : 'Delete audio clip')
+            : descriptionText.trim(),
+        clipPayload = Map<String, dynamic>.from(clipPayload);
+
+  String get clipId => (clipPayload['clipId'] ?? '').toString().trim();
+
+  @override
+  String get description => descriptionText;
+
+  @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': addedByRedo ? 'clipPresenceAdd' : 'clipPresenceDelete',
+        'description': descriptionText,
+        'fallbackIndex': fallbackIndex,
+        'clip': clipPayload,
+      };
+
+  @override
+  Future<void> redo() {
+    return addedByRedo
+        ? addClip(clipPayload)
+        : removeClip(clipId, fallbackIndex);
+  }
+
+  @override
+  Future<void> undo() {
+    return addedByRedo
+        ? removeClip(clipId, fallbackIndex)
+        : addClip(clipPayload);
+  }
+}
+
 class TrimClipAction extends EditorUndoAction {
   final List<AudioTrack> tracks;
   final int originalIndex;
+  final String clipId;
 
   final Duration oldTrimStart;
   final Duration oldTrimEnd;
@@ -48655,6 +51117,7 @@ class TrimClipAction extends EditorUndoAction {
   TrimClipAction({
     required this.tracks,
     required this.originalIndex,
+    String? clipId,
     required this.oldTrimStart,
     required this.oldTrimEnd,
     required this.oldOffset,
@@ -48662,14 +51125,27 @@ class TrimClipAction extends EditorUndoAction {
     required this.newTrimEnd,
     required this.newOffset,
     required this.onChange,
-  });
+  }) : clipId = (clipId ?? _persistedClipIdFor(tracks, originalIndex)).trim();
 
   @override
   String get description => 'Trim audio clip';
 
   @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'trimClip',
+        'clipIndex': originalIndex,
+        'clipId': clipId,
+        'oldTrimStartMs': oldTrimStart.inMilliseconds,
+        'oldTrimEndMs': oldTrimEnd.inMilliseconds,
+        'oldOffset': oldOffset,
+        'newTrimStartMs': newTrimStart.inMilliseconds,
+        'newTrimEndMs': newTrimEnd.inMilliseconds,
+        if (newOffset != null) 'newOffset': newOffset,
+      };
+
+  @override
   Future<void> redo() async {
-    final clip = _resolveClip(tracks, originalIndex);
+    final clip = _resolveClip(tracks, originalIndex, clipId: clipId);
     if (clip == null) return;
 
     clip.trimStart = newTrimStart;
@@ -48681,7 +51157,7 @@ class TrimClipAction extends EditorUndoAction {
 
   @override
   Future<void> undo() async {
-    final clip = _resolveClip(tracks, originalIndex);
+    final clip = _resolveClip(tracks, originalIndex, clipId: clipId);
     if (clip == null) return;
 
     clip.trimStart = oldTrimStart;
@@ -48695,6 +51171,7 @@ class TrimClipAction extends EditorUndoAction {
 class MoveClipAction extends EditorUndoAction {
   final List<AudioTrack> tracks;
   final int originalIndex;
+  final String clipId;
 
   final double oldOffset;
   final int oldRow;
@@ -48707,19 +51184,31 @@ class MoveClipAction extends EditorUndoAction {
   MoveClipAction({
     required this.tracks,
     required this.originalIndex,
+    String? clipId,
     required this.oldOffset,
     required this.oldRow,
     required this.newOffset,
     required this.newRow,
     required this.onChange,
-  });
+  }) : clipId = (clipId ?? _persistedClipIdFor(tracks, originalIndex)).trim();
 
   @override
   String get description => 'Move audio clip';
 
   @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'moveClip',
+        'clipIndex': originalIndex,
+        'clipId': clipId,
+        'oldOffset': oldOffset,
+        'oldRow': oldRow,
+        'newOffset': newOffset,
+        'newRow': newRow,
+      };
+
+  @override
   Future<void> redo() async {
-    final clip = _resolveClip(tracks, originalIndex);
+    final clip = _resolveClip(tracks, originalIndex, clipId: clipId);
     if (clip == null) return;
 
     clip.offset = newOffset;
@@ -48729,7 +51218,7 @@ class MoveClipAction extends EditorUndoAction {
 
   @override
   Future<void> undo() async {
-    final clip = _resolveClip(tracks, originalIndex);
+    final clip = _resolveClip(tracks, originalIndex, clipId: clipId);
     if (clip == null) return;
 
     clip.offset = oldOffset;
@@ -48760,6 +51249,42 @@ class _ProjectTempoSnapshot {
     required this.loopStartMs,
     required this.loopEndMs,
   });
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'tempo': tempo,
+        'clipOffsetsSec': clipOffsetsSec,
+        'clipVolumeAutomation': clipVolumeAutomation
+            .map((points) => points.map((point) => point.toJson()).toList())
+            .toList(growable: false),
+        'rowVolumeAutomation': rowVolumeAutomation
+            .map((points) => points.map((point) => point.toJson()).toList())
+            .toList(growable: false),
+        'rowPluginAutomation': rowPluginAutomation.map(
+          (row, laneMap) => MapEntry(
+            row.toString(),
+            laneMap.map(
+              (targetId, points) => MapEntry(
+                targetId,
+                points.map((point) => point.toJson()).toList(),
+              ),
+            ),
+          ),
+        ),
+        'rowAutomationClips': rowAutomationClips.map(
+          (row, laneMap) => MapEntry(
+            row.toString(),
+            laneMap.map(
+              (targetId, clips) => MapEntry(
+                targetId,
+                clips.map((clip) => clip.toJson()).toList(),
+              ),
+            ),
+          ),
+        ),
+        'loopEnabled': loopEnabled,
+        'loopStartMs': loopStartMs,
+        'loopEndMs': loopEndMs,
+      };
 }
 
 class _ProjectTempoChangeAction extends EditorUndoAction {
@@ -48775,6 +51300,13 @@ class _ProjectTempoChangeAction extends EditorUndoAction {
 
   @override
   String get description => 'Change BPM';
+
+  @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'projectTempo',
+        'before': before.toJson(),
+        'after': after.toJson(),
+      };
 
   @override
   Future<void> redo() => applySnapshot(after);
@@ -48796,6 +51328,13 @@ class _ProjectKeyChangeAction extends EditorUndoAction {
 
   @override
   String get description => 'Change project key';
+
+  @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'projectKey',
+        'before': before,
+        'after': after,
+      };
 
   @override
   Future<void> redo() => applyKey(after);
@@ -48830,6 +51369,17 @@ class _ClipStretchSnapshot {
         tempoStretchPreservePitchDefault ==
             other.tempoStretchPreservePitchDefault;
   }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'offsetSec': offsetSec,
+        'sourceTempoBpm': sourceTempoBpm,
+        'stretchToProjectTempo': stretchToProjectTempo,
+        'tempoStretchPreservePitch': tempoStretchPreservePitch,
+        if (tempoStretchEnabled != null)
+          'tempoStretchEnabled': tempoStretchEnabled,
+        if (tempoStretchPreservePitchDefault != null)
+          'tempoStretchPreservePitchDefault': tempoStretchPreservePitchDefault,
+      };
 }
 
 class _TempoStretchUiModeSnapshot {
@@ -48842,6 +51392,14 @@ class _TempoStretchUiModeSnapshot {
     required this.preservePitchDefault,
     required this.clipSnapshots,
   });
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'enabled': enabled,
+        'preservePitchDefault': preservePitchDefault,
+        'clipSnapshots': clipSnapshots.map(
+          (index, snapshot) => MapEntry(index.toString(), snapshot.toJson()),
+        ),
+      };
 }
 
 class _TempoStretchUiModeAction extends EditorUndoAction {
@@ -48860,6 +51418,13 @@ class _TempoStretchUiModeAction extends EditorUndoAction {
   String get description => 'Change stretch mode';
 
   @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'tempoStretchUiMode',
+        'before': before.toJson(),
+        'after': after.toJson(),
+      };
+
+  @override
   Future<void> redo() => applySnapshot(after);
 
   @override
@@ -48869,6 +51434,7 @@ class _TempoStretchUiModeAction extends EditorUndoAction {
 class _StretchClipResizeAction extends EditorUndoAction {
   final List<AudioTrack> tracks;
   final int originalIndex;
+  final String clipId;
   final _ClipStretchSnapshot oldSnapshot;
   final _ClipStretchSnapshot newSnapshot;
   final String descriptionText;
@@ -48879,24 +51445,35 @@ class _StretchClipResizeAction extends EditorUndoAction {
     this.descriptionText = 'Stretch clip',
     required this.tracks,
     required this.originalIndex,
+    String? clipId,
     required this.oldSnapshot,
     required this.newSnapshot,
     required this.applySnapshot,
-  });
+  }) : clipId = (clipId ?? _persistedClipIdFor(tracks, originalIndex)).trim();
 
   @override
   String get description => descriptionText;
 
   @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'clipStretch',
+        'description': descriptionText,
+        'clipIndex': originalIndex,
+        'clipId': clipId,
+        'oldSnapshot': oldSnapshot.toJson(),
+        'newSnapshot': newSnapshot.toJson(),
+      };
+
+  @override
   Future<void> redo() async {
-    final clip = _resolveClip(tracks, originalIndex);
+    final clip = _resolveClip(tracks, originalIndex, clipId: clipId);
     if (clip == null) return;
     await applySnapshot(clip, newSnapshot);
   }
 
   @override
   Future<void> undo() async {
-    final clip = _resolveClip(tracks, originalIndex);
+    final clip = _resolveClip(tracks, originalIndex, clipId: clipId);
     if (clip == null) return;
     await applySnapshot(clip, oldSnapshot);
   }
@@ -48905,6 +51482,7 @@ class _StretchClipResizeAction extends EditorUndoAction {
 class SetClipGainAction extends EditorUndoAction {
   final List<AudioTrack> tracks;
   final int originalIndex;
+  final String clipId;
   final double oldGain;
   final double newGain;
   final void Function(AudioTrack clip, double gain) applyToState;
@@ -48912,17 +51490,27 @@ class SetClipGainAction extends EditorUndoAction {
   SetClipGainAction({
     required this.tracks,
     required this.originalIndex,
+    String? clipId,
     required this.oldGain,
     required this.newGain,
     required this.applyToState,
-  });
+  }) : clipId = (clipId ?? _persistedClipIdFor(tracks, originalIndex)).trim();
 
   @override
   String get description => 'Change clip gain';
 
   @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'clipGain',
+        'clipIndex': originalIndex,
+        'clipId': clipId,
+        'oldGain': oldGain,
+        'newGain': newGain,
+      };
+
+  @override
   Future<void> redo() async {
-    final clip = _resolveClip(tracks, originalIndex);
+    final clip = _resolveClip(tracks, originalIndex, clipId: clipId);
     if (clip == null || clip.engineClipId < 0) return;
     applyToState(clip, newGain);
     await JuceAudioEngine.setClipGain(clip.engineClipId, newGain);
@@ -48930,7 +51518,7 @@ class SetClipGainAction extends EditorUndoAction {
 
   @override
   Future<void> undo() async {
-    final clip = _resolveClip(tracks, originalIndex);
+    final clip = _resolveClip(tracks, originalIndex, clipId: clipId);
     if (clip == null || clip.engineClipId < 0) return;
     applyToState(clip, oldGain);
     await JuceAudioEngine.setClipGain(clip.engineClipId, oldGain);
@@ -48957,11 +51545,17 @@ class _ClipNormalizeSnapshot {
     return normalizeVolume == other.normalizeVolume &&
         (normalizeGain - other.normalizeGain).abs() < 0.0005;
   }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'normalizeVolume': normalizeVolume,
+        'normalizeGain': normalizeGain,
+      };
 }
 
 class _SetClipNormalizeAction extends EditorUndoAction {
   final List<AudioTrack> tracks;
   final int originalIndex;
+  final String clipId;
   final _ClipNormalizeSnapshot oldSnapshot;
   final _ClipNormalizeSnapshot newSnapshot;
   final void Function(AudioTrack clip, _ClipNormalizeSnapshot snapshot)
@@ -48970,16 +51564,26 @@ class _SetClipNormalizeAction extends EditorUndoAction {
   _SetClipNormalizeAction({
     required this.tracks,
     required this.originalIndex,
+    String? clipId,
     required this.oldSnapshot,
     required this.newSnapshot,
     required this.applyToState,
-  });
+  }) : clipId = (clipId ?? _persistedClipIdFor(tracks, originalIndex)).trim();
 
   @override
   String get description => 'Normalize clip volume';
 
+  @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'clipNormalize',
+        'clipIndex': originalIndex,
+        'clipId': clipId,
+        'oldSnapshot': oldSnapshot.toJson(),
+        'newSnapshot': newSnapshot.toJson(),
+      };
+
   Future<void> _apply(_ClipNormalizeSnapshot snapshot) async {
-    final clip = _resolveClip(tracks, originalIndex);
+    final clip = _resolveClip(tracks, originalIndex, clipId: clipId);
     if (clip == null || clip.engineClipId < 0 || clip.isMidi) return;
     applyToState(clip, snapshot);
     await JuceAudioEngine.setClipExtraGainLinear(
@@ -48998,6 +51602,7 @@ class _SetClipNormalizeAction extends EditorUndoAction {
 class SetClipPitchAction extends EditorUndoAction {
   final List<AudioTrack> tracks;
   final int originalIndex;
+  final String clipId;
   final double oldPitch;
   final double newPitch;
   final void Function(AudioTrack clip, double pitch) applyToState;
@@ -49005,17 +51610,27 @@ class SetClipPitchAction extends EditorUndoAction {
   SetClipPitchAction({
     required this.tracks,
     required this.originalIndex,
+    String? clipId,
     required this.oldPitch,
     required this.newPitch,
     required this.applyToState,
-  });
+  }) : clipId = (clipId ?? _persistedClipIdFor(tracks, originalIndex)).trim();
 
   @override
   String get description => 'Change clip pitch';
 
   @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'clipPitch',
+        'clipIndex': originalIndex,
+        'clipId': clipId,
+        'oldPitch': oldPitch,
+        'newPitch': newPitch,
+      };
+
+  @override
   Future<void> redo() async {
-    final clip = _resolveClip(tracks, originalIndex);
+    final clip = _resolveClip(tracks, originalIndex, clipId: clipId);
     if (clip == null || clip.engineClipId < 0) return;
     await JuceAudioEngine.setClipPitch(clip.engineClipId, newPitch);
     applyToState(clip, newPitch);
@@ -49023,7 +51638,7 @@ class SetClipPitchAction extends EditorUndoAction {
 
   @override
   Future<void> undo() async {
-    final clip = _resolveClip(tracks, originalIndex);
+    final clip = _resolveClip(tracks, originalIndex, clipId: clipId);
     if (clip == null || clip.engineClipId < 0) return;
     await JuceAudioEngine.setClipPitch(clip.engineClipId, oldPitch);
     applyToState(clip, oldPitch);
@@ -49033,6 +51648,7 @@ class SetClipPitchAction extends EditorUndoAction {
 class SetClipReverseAction extends EditorUndoAction {
   final List<AudioTrack> tracks;
   final int originalIndex;
+  final String clipId;
   final bool oldReversed;
   final bool newReversed;
   final void Function(AudioTrack clip, bool reversed) applyToState;
@@ -49040,17 +51656,27 @@ class SetClipReverseAction extends EditorUndoAction {
   SetClipReverseAction({
     required this.tracks,
     required this.originalIndex,
+    String? clipId,
     required this.oldReversed,
     required this.newReversed,
     required this.applyToState,
-  });
+  }) : clipId = (clipId ?? _persistedClipIdFor(tracks, originalIndex)).trim();
 
   @override
   String get description => 'Reverse clip';
 
   @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'clipReverse',
+        'clipIndex': originalIndex,
+        'clipId': clipId,
+        'oldReversed': oldReversed,
+        'newReversed': newReversed,
+      };
+
+  @override
   Future<void> redo() async {
-    final clip = _resolveClip(tracks, originalIndex);
+    final clip = _resolveClip(tracks, originalIndex, clipId: clipId);
     if (clip == null || clip.engineClipId < 0 || clip.isMidi) return;
     await JuceAudioEngine.setClipReversed(clip.engineClipId, newReversed);
     applyToState(clip, newReversed);
@@ -49058,7 +51684,7 @@ class SetClipReverseAction extends EditorUndoAction {
 
   @override
   Future<void> undo() async {
-    final clip = _resolveClip(tracks, originalIndex);
+    final clip = _resolveClip(tracks, originalIndex, clipId: clipId);
     if (clip == null || clip.engineClipId < 0 || clip.isMidi) return;
     await JuceAudioEngine.setClipReversed(clip.engineClipId, oldReversed);
     applyToState(clip, oldReversed);
@@ -49068,6 +51694,7 @@ class SetClipReverseAction extends EditorUndoAction {
 class SetClipLabelAction extends EditorUndoAction {
   final List<AudioTrack> tracks;
   final int originalIndex;
+  final String clipId;
   final String oldLabel;
   final String newLabel;
   final void Function(AudioTrack clip, String label) applyToState;
@@ -49075,24 +51702,34 @@ class SetClipLabelAction extends EditorUndoAction {
   SetClipLabelAction({
     required this.tracks,
     required this.originalIndex,
+    String? clipId,
     required this.oldLabel,
     required this.newLabel,
     required this.applyToState,
-  });
+  }) : clipId = (clipId ?? _persistedClipIdFor(tracks, originalIndex)).trim();
 
   @override
   String get description => 'Rename clip';
 
   @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'clipLabel',
+        'clipIndex': originalIndex,
+        'clipId': clipId,
+        'oldLabel': oldLabel,
+        'newLabel': newLabel,
+      };
+
+  @override
   Future<void> redo() async {
-    final clip = _resolveClip(tracks, originalIndex);
+    final clip = _resolveClip(tracks, originalIndex, clipId: clipId);
     if (clip == null) return;
     applyToState(clip, newLabel);
   }
 
   @override
   Future<void> undo() async {
-    final clip = _resolveClip(tracks, originalIndex);
+    final clip = _resolveClip(tracks, originalIndex, clipId: clipId);
     if (clip == null) return;
     applyToState(clip, oldLabel);
   }
@@ -49112,6 +51749,14 @@ class SetRowGainAction extends EditorUndoAction {
 
   @override
   String get description => 'Change track gain';
+
+  @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'rowGain',
+        'row': row,
+        'oldGain': oldGain,
+        'newGain': newGain,
+      };
 
   @override
   Future<void> redo() async {
@@ -49142,6 +51787,14 @@ class SetRowPanAction extends EditorUndoAction {
   String get description => 'Change track pan';
 
   @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'rowPan',
+        'row': row,
+        'oldPan': oldPan,
+        'newPan': newPan,
+      };
+
+  @override
   Future<void> redo() async {
     await JuceAudioEngine.setRowPan(row, newPan);
     applyToState(row, newPan);
@@ -49168,6 +51821,13 @@ class SetMasterGainAction extends EditorUndoAction {
   String get description => 'Change master gain';
 
   @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'masterGain',
+        'oldGain': oldGain,
+        'newGain': newGain,
+      };
+
+  @override
   Future<void> redo() async {
     await JuceAudioEngine.setMasterGain(newGain);
     applyToState(newGain);
@@ -49190,6 +51850,13 @@ class SetMasterPanAction extends EditorUndoAction {
 
   @override
   String get description => 'Change master pan';
+
+  @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'masterPan',
+        'oldPan': oldPan,
+        'newPan': newPan,
+      };
 
   @override
   Future<void> redo() async {
@@ -49226,6 +51893,14 @@ class SetAutomationPointsAction extends EditorUndoAction {
 
   @override
   String get description => 'Edit volume automation';
+
+  @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'rowAutomation',
+        'row': row,
+        'oldPoints': oldPoints.map((point) => point.toJson()).toList(),
+        'newPoints': newPoints.map((point) => point.toJson()).toList(),
+      };
 
   @override
   Future<void> redo() async {
@@ -49273,6 +51948,15 @@ class SetTargetAutomationPointsAction extends EditorUndoAction {
 
   @override
   String get description => 'Edit automation';
+
+  @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'targetAutomation',
+        'row': row,
+        'targetId': targetId,
+        'oldPoints': oldPoints.map((point) => point.toJson()).toList(),
+        'newPoints': newPoints.map((point) => point.toJson()).toList(),
+      };
 
   @override
   Future<void> redo() async {
@@ -49323,6 +52007,15 @@ class SetTargetAutomationClipsAction extends EditorUndoAction {
   String get description => 'Edit automation clips';
 
   @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'targetAutomationClips',
+        'row': row,
+        'targetId': targetId,
+        'oldClips': oldClips.map((clip) => clip.toJson()).toList(),
+        'newClips': newClips.map((clip) => clip.toJson()).toList(),
+      };
+
+  @override
   Future<void> redo() async {
     applyToState(row, targetId, newClips);
     if (onApplied != null) {
@@ -49358,6 +52051,15 @@ class BypassEffectAction extends EditorUndoAction {
   String get description => 'Bypass track effect';
 
   @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'rowEffectBypass',
+        'row': row,
+        'effectIndex': effectIndex,
+        'oldState': oldState,
+        'newState': newState,
+      };
+
+  @override
   Future<void> redo() async {
     await JuceAudioEngine.bypassRowEffect(row, effectIndex, newState);
     onChange();
@@ -49378,11 +52080,28 @@ class InsertEffectAction extends EditorUndoAction {
   bool inserted = false;
   int? insertedIndex;
 
-  InsertEffectAction(
-      {required this.row, required this.pathOrName, required this.onChange});
+  InsertEffectAction({
+    required this.row,
+    required this.pathOrName,
+    required this.onChange,
+    this.inserted = false,
+    this.insertedIndex,
+  });
 
   @override
   String get description => 'Insert track effect';
+
+  @override
+  Map<String, dynamic>? toPersistedUndoCommand() {
+    if (insertedIndex == null) return null;
+    return <String, dynamic>{
+      'type': 'rowEffectInsert',
+      'row': row,
+      'pathOrName': pathOrName,
+      'inserted': inserted,
+      'insertedIndex': insertedIndex,
+    };
+  }
 
   @override
   Future<void> redo() async {
@@ -49417,6 +52136,14 @@ class RemoveEffectAction extends EditorUndoAction {
 
   @override
   String get description => 'Remove track effect';
+
+  @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'rowEffectRemove',
+        'row': row,
+        'effectIndex': effectIndex,
+        'pathOrName': pathOrName,
+      };
 
   @override
   Future<void> redo() async {
@@ -49456,6 +52183,14 @@ class ReorderEffectAction extends EditorUndoAction {
   String get description => 'Reorder track effect';
 
   @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'rowEffectReorder',
+        'row': row,
+        'from': from,
+        'to': to,
+      };
+
+  @override
   Future<void> redo() async {
     await JuceAudioEngine.reorderTrackEffects(row, from, to);
     onChange();
@@ -49475,10 +52210,26 @@ class InsertMasterEffectAction extends EditorUndoAction {
   bool inserted = false;
   int? insertedIndex;
 
-  InsertMasterEffectAction({required this.pathOrName, required this.onChange});
+  InsertMasterEffectAction({
+    required this.pathOrName,
+    required this.onChange,
+    this.inserted = false,
+    this.insertedIndex,
+  });
 
   @override
   String get description => 'Insert master effect';
+
+  @override
+  Map<String, dynamic>? toPersistedUndoCommand() {
+    if (insertedIndex == null) return null;
+    return <String, dynamic>{
+      'type': 'masterEffectInsert',
+      'pathOrName': pathOrName,
+      'inserted': inserted,
+      'insertedIndex': insertedIndex,
+    };
+  }
 
   @override
   Future<void> redo() async {
@@ -49512,6 +52263,13 @@ class RemoveMasterEffectAction extends EditorUndoAction {
   String get description => 'Remove master effect';
 
   @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'masterEffectRemove',
+        'effectIndex': effectIndex,
+        'pathOrName': pathOrName,
+      };
+
+  @override
   Future<void> redo() async {
     await JuceAudioEngine.removeMasterEffect(effectIndex);
     onChange();
@@ -49538,6 +52296,13 @@ class ReorderMasterEffectAction extends EditorUndoAction {
 
   @override
   String get description => 'Reorder master effect';
+
+  @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'masterEffectReorder',
+        'from': from,
+        'to': to,
+      };
 
   @override
   Future<void> redo() async {
@@ -49567,6 +52332,14 @@ class BypassMasterEffectAction extends EditorUndoAction {
 
   @override
   String get description => 'Bypass master effect';
+
+  @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'masterEffectBypass',
+        'effectIndex': effectIndex,
+        'oldState': oldState,
+        'newState': newState,
+      };
 
   @override
   Future<void> redo() async {
@@ -49602,6 +52375,16 @@ class SetEffectParamAction extends EditorUndoAction {
   String get description => 'Set track effect parameter';
 
   @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'rowEffectParam',
+        'row': row,
+        'effectIndex': effectIndex,
+        'paramId': paramId,
+        'oldValue': oldValue,
+        'newValue': newValue,
+      };
+
+  @override
   Future<void> redo() async {
     await JuceAudioEngine.setTrackEffect(row, effectIndex, paramId, newValue);
     onChange();
@@ -49631,6 +52414,15 @@ class SetMasterEffectParamAction extends EditorUndoAction {
 
   @override
   String get description => 'Set master effect parameter';
+
+  @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'masterEffectParam',
+        'effectIndex': effectIndex,
+        'paramId': paramId,
+        'oldValue': oldValue,
+        'newValue': newValue,
+      };
 
   @override
   Future<void> redo() async {
@@ -49680,6 +52472,21 @@ class CompoundUndoAction extends EditorUndoAction {
   String get description => _description;
 
   @override
+  Map<String, dynamic>? toPersistedUndoCommand() {
+    final commands = <Map<String, dynamic>>[];
+    for (final action in actions) {
+      final command = action.toPersistedUndoCommand();
+      if (command == null) return null;
+      commands.add(command);
+    }
+    return <String, dynamic>{
+      'type': 'compound',
+      'description': _description,
+      'actions': commands,
+    };
+  }
+
+  @override
   Future<void> redo() async {
     for (final a in actions) {
       await a.redo();
@@ -49711,6 +52518,15 @@ class _RowEffectsAutomationSnapshotAction extends EditorUndoAction {
   String get description => descriptionText;
 
   @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'rowEffectsSnapshot',
+        'description': descriptionText,
+        'row': after.effects.row,
+        'before': before.toJson(),
+        'after': after.toJson(),
+      };
+
+  @override
   Future<void> redo() => applySnapshot(after);
 
   @override
@@ -49736,14 +52552,15 @@ Future<RowEffectsSnapshot> captureRowSnapshot(
   for (int i = 0; i < count; i++) {
     final params = await JuceAudioEngine.getTrackPluginParameters(row, i);
     final isBypassed = await JuceAudioEngine.getRowEffectBypassState(row, i);
+    final effectName = i < effects.length ? effects[i] : effectIds[i];
     final stateBase64 = await JuceAudioEngine.getTrackEffectState(row, i);
     snapshots.add(
       EffectSnapshot(
         effectIds[i],
         isBypassed,
-        {for (final p in params) p['name']: p['value']},
-        displayName: i < effects.length ? effects[i] : effectIds[i],
-        stateBase64: stateBase64,
+        _effectSnapshotParamValues(effectName, params),
+        displayName: effectName,
+        stateBase64: _effectSnapshotState(effectName, stateBase64),
       ),
     );
   }
@@ -49793,6 +52610,31 @@ Set<String> _pluginParameterKeys(List<Map<String, dynamic>> params) {
     if (name.isNotEmpty) keys.add(name);
   }
   return keys;
+}
+
+String _effectSnapshotName(EffectSnapshot fx) {
+  final displayName = fx.displayName.trim();
+  return displayName.isNotEmpty ? displayName : fx.effectId.trim();
+}
+
+Map<String, dynamic> _effectSnapshotParamValues(
+  String effectName,
+  List<Map<String, dynamic>> params,
+) {
+  return exposedEffectParameterValues(effectName, params);
+}
+
+String _effectSnapshotState(String effectName, String stateBase64) {
+  return hasCanonicalExposedEffectParameters(effectName) ? '' : stateBase64;
+}
+
+bool _shouldRestoreEffectStateChunk(EffectSnapshot fx) {
+  return fx.stateBase64.trim().isNotEmpty &&
+      !hasCanonicalExposedEffectParameters(_effectSnapshotName(fx));
+}
+
+Map<String, dynamic> _restorableEffectSnapshotParams(EffectSnapshot fx) {
+  return exposedEffectParameterValueMap(_effectSnapshotName(fx), fx.params);
 }
 
 Future<void> _waitForTrackEffectParameters(
@@ -49870,7 +52712,7 @@ Future<_EffectRestoreResult> _restoreRowSnapshot(
       continue;
     }
     insertedCount += 1;
-    final expectsState = fx.stateBase64.trim().isNotEmpty;
+    final expectsState = _shouldRestoreEffectStateChunk(fx);
     var stateApplied = false;
     if (expectsState) {
       stateApplied = await JuceAudioEngine.setTrackEffectState(
@@ -49879,9 +52721,11 @@ Future<_EffectRestoreResult> _restoreRowSnapshot(
         stateBase64: fx.stateBase64,
       );
     }
-    if (!stateApplied && fx.params.isNotEmpty) {
-      await _waitForTrackEffectParameters(snap.row, insertedIndex, fx.params);
-      for (final e in fx.params.entries) {
+    final fallbackParams = _restorableEffectSnapshotParams(fx);
+    if (!stateApplied && fallbackParams.isNotEmpty) {
+      await _waitForTrackEffectParameters(
+          snap.row, insertedIndex, fallbackParams);
+      for (final e in fallbackParams.entries) {
         await JuceAudioEngine.setTrackEffect(
           snap.row,
           insertedIndex,
@@ -49922,14 +52766,15 @@ Future<MasterEffectsSnapshot> captureMasterSnapshot() async {
   for (int i = 0; i < count; i++) {
     final params = await JuceAudioEngine.getMasterPluginParameters(i);
     final isBypassed = await JuceAudioEngine.getMasterEffectBypassState(i);
+    final effectName = i < effects.length ? effects[i] : effectIds[i];
     final stateBase64 = await JuceAudioEngine.getMasterEffectState(i);
     snapshots.add(
       EffectSnapshot(
         effectIds[i],
         isBypassed,
-        {for (final p in params) p['name']: p['value']},
-        displayName: i < effects.length ? effects[i] : effectIds[i],
-        stateBase64: stateBase64,
+        _effectSnapshotParamValues(effectName, params),
+        displayName: effectName,
+        stateBase64: _effectSnapshotState(effectName, stateBase64),
       ),
     );
   }
@@ -49972,7 +52817,7 @@ Future<_EffectRestoreResult> _restoreMasterSnapshot(
       continue;
     }
     insertedCount += 1;
-    final expectsState = fx.stateBase64.trim().isNotEmpty;
+    final expectsState = _shouldRestoreEffectStateChunk(fx);
     var stateApplied = false;
     if (expectsState) {
       stateApplied = await JuceAudioEngine.setMasterEffectState(
@@ -49980,9 +52825,10 @@ Future<_EffectRestoreResult> _restoreMasterSnapshot(
         stateBase64: fx.stateBase64,
       );
     }
-    if (!stateApplied && fx.params.isNotEmpty) {
-      await _waitForMasterEffectParameters(insertedIndex, fx.params);
-      for (final e in fx.params.entries) {
+    final fallbackParams = _restorableEffectSnapshotParams(fx);
+    if (!stateApplied && fallbackParams.isNotEmpty) {
+      await _waitForMasterEffectParameters(insertedIndex, fallbackParams);
+      for (final e in fallbackParams.entries) {
         await JuceAudioEngine.setMasterEffect(insertedIndex, e.key, e.value);
       }
     }
@@ -50018,6 +52864,13 @@ class TrackPresetChangeAction extends EditorUndoAction {
   String get description => 'Load track preset';
 
   @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'trackPreset',
+        'before': before.toJson(),
+        'after': after.toJson(),
+      };
+
+  @override
   Future<void> redo() async {
     await _restoreRowSnapshot(after);
     onChange();
@@ -50040,6 +52893,13 @@ class MasterPresetChangeAction extends EditorUndoAction {
 
   @override
   String get description => 'Load master preset';
+
+  @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'masterPreset',
+        'before': before.toJson(),
+        'after': after.toJson(),
+      };
 
   @override
   Future<void> redo() async {
@@ -50073,6 +52933,14 @@ class _MasterEffectsSnapshotAction extends EditorUndoAction {
   String get description => descriptionText;
 
   @override
+  Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
+        'type': 'masterEffectsSnapshot',
+        'description': descriptionText,
+        'before': before.toJson(),
+        'after': after.toJson(),
+      };
+
+  @override
   Future<void> redo() async {
     await applySnapshot(after);
     onChange();
@@ -50085,7 +52953,17 @@ class _MasterEffectsSnapshotAction extends EditorUndoAction {
   }
 }
 
-AudioTrack? _resolveClip(List<AudioTrack> tracks, int index) {
+AudioTrack? _resolveClip(
+  List<AudioTrack> tracks,
+  int index, {
+  String clipId = '',
+}) {
+  final id = clipId.trim();
+  if (id.isNotEmpty) {
+    for (final track in tracks) {
+      if (track.clipId == id) return track;
+    }
+  }
   if (index < 0 || index >= tracks.length) return null;
   return tracks[index];
 }
@@ -50185,20 +53063,7 @@ class _ChatBar extends StatelessWidget {
   });
 
   String _badgeLabel(BuildContext context) {
-    if (promptRateLimitStatus == null) {
-      return L10n.translate(context, 'Limits');
-    }
-    if (promptRateLimitStatus!.canSubmit) {
-      return '${promptRateLimitStatus!.daily.remaining} ${L10n.translate(context, 'Left')}';
-    }
-    final resetsAt = promptRateLimitStatus!.blockedResetAt?.toLocal();
-    if (resetsAt == null) return L10n.translate(context, 'Wait');
-    final remaining = resetsAt.difference(DateTime.now());
-    final waitLabel = L10n.translate(context, 'wait');
-    if (remaining.inDays >= 1) return '${remaining.inDays}d $waitLabel';
-    if (remaining.inHours >= 1) return '${remaining.inHours}h $waitLabel';
-    if (remaining.inMinutes >= 1) return '${remaining.inMinutes}m $waitLabel';
-    return L10n.translate(context, 'Wait');
+    return L10n.translate(context, 'Usage');
   }
 
   String _badgeTooltip(BuildContext context) {
@@ -50209,11 +53074,11 @@ class _ChatBar extends StatelessWidget {
     final weekly = promptRateLimitStatus!.weekly;
     final extraPromptBank = promptRateLimitStatus!.extraPromptBank;
     final extraBankCopy = extraPromptBank.available
-        ? ' ${L10n.translate(context, 'Extra bank')}: ${extraPromptBank.remaining} ${L10n.translate(context, 'left')}, ${L10n.translate(context, 'used first')}.'
+        ? ' ${L10n.translate(context, 'Extra bank')}: ${L10n.translate(context, 'used first')}.'
         : '';
     if (promptRateLimitStatus!.canSubmit) {
-      return '${L10n.translate(context, 'Daily')} ${daily.remaining}/${daily.limit} ${L10n.translate(context, 'left')}, '
-          '${L10n.translate(context, 'Weekly')} ${weekly.remaining}/${weekly.limit} ${L10n.translate(context, 'left')}.$extraBankCopy';
+      return '${L10n.translate(context, 'Daily')} ${daily.remainingPercent}% ${L10n.translate(context, 'left')}, '
+          '${L10n.translate(context, 'Weekly')} ${weekly.remainingPercent}% ${L10n.translate(context, 'left')}.$extraBankCopy';
     }
     return '${L10n.translate(context, 'Prompt limit reached. Tap to see reset time.')}$extraBankCopy';
   }
@@ -50269,43 +53134,16 @@ class _ChatBar extends StatelessWidget {
               ],
             ),
             alignment: Alignment.center,
-            child: status != null && status.canSubmit
-                ? RichText(
-                    textAlign: TextAlign.center,
-                    text: TextSpan(
-                      style: const TextStyle(
-                        fontFamily: 'Pretendard',
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w400,
-                        height: 1.0,
-                        color: Colors.white,
-                      ),
-                      children: <InlineSpan>[
-                        TextSpan(
-                          text: '${status.daily.remaining}',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13,
-                          ),
-                        ),
-                        TextSpan(
-                          text: ' ${L10n.translate(context, 'Left')}',
-                          style: const TextStyle(fontSize: 11.5),
-                        ),
-                      ],
-                    ),
-                  )
-                : Text(
-                    _badgeLabel(context),
-                    style: const TextStyle(
-                      fontFamily: 'Pretendard',
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.white,
-                      letterSpacing: -0.1,
-                      height: 1.0,
-                    ),
-                  ),
+            child: Text(
+              _badgeLabel(context),
+              style: const TextStyle(
+                fontFamily: 'Pretendard',
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: Colors.white,
+                height: 1.0,
+              ),
+            ),
           ),
         ),
       );

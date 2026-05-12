@@ -18,7 +18,7 @@ from common.apple_app_store import verify_apple_purchase
 from common.billing_catalog_repository import BillingCatalogRepository
 from common.events import RequestBodyError, build_event_record, parse_json_body
 from common.google_play import verify_google_purchase
-from common.models import free_entitlement
+from common.models import free_entitlement, status_has_active_access, subscription_effective_status
 from common.provider_support import ProviderVerificationError
 from common.providers import checkout_url, choose_web_provider, portal_url
 from common.repository import BillingRepository
@@ -46,9 +46,9 @@ def _provider_event_id(prefix: str, payload: Dict[str, Any]) -> str:
     return f"{prefix}-{digest[:20]}"
 
 
-def _persist_event(record: Dict[str, Any]) -> bool:
+def _persist_event(record: Dict[str, Any], *, enqueue_projection: bool = True) -> bool:
     is_new = repo.put_billing_event_if_new(record)
-    if is_new:
+    if is_new and enqueue_projection:
         repo.enqueue_projection(record["event_id"])
     return is_new
 
@@ -65,6 +65,20 @@ def _handle_checkout(event: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         product = catalog_repo.get_product(product_code)
         if not product or not bool(product.get("enabled")):
             raise RequestBodyError("Unknown or disabled billing product.")
+        if (
+            str(product.get("type") or "").strip().lower() == "contract"
+            or str(product.get("management_channel") or "").strip().lower() == "admin"
+        ):
+            raise RequestBodyError(
+                "This plan is handled by sales. Contact sales@mixroom.ai to continue.",
+                status_code=409,
+            )
+
+    _assert_no_conflicting_active_subscription(
+        user_id=user_id,
+        target_provider=provider,
+        target_plan_code=str(product.get("plan_code") or ""),
+    )
 
     payload = {
         **body,
@@ -88,7 +102,7 @@ def _handle_checkout(event: Dict[str, Any], user_id: str) -> Dict[str, Any]:
             "plan_code": str(product.get("plan_code") or ""),
         },
     )
-    _persist_event(record)
+    _persist_event(record, enqueue_projection=False)
 
     return json_response(
         200,
@@ -99,6 +113,32 @@ def _handle_checkout(event: Dict[str, Any], user_id: str) -> Dict[str, Any]:
             "product": product,
             "support": catalog.get("support") or {},
         },
+    )
+
+
+def _assert_no_conflicting_active_subscription(
+    *,
+    user_id: str,
+    target_provider: str,
+    target_plan_code: str = "",
+) -> None:
+    if str(target_plan_code or "").strip().lower() in {"studio", "enterprise", "education"}:
+        return
+    entitlement = repo.get_entitlement(user_id) or {}
+    plan_code = str(entitlement.get("plan_code") or entitlement.get("tier") or "free").strip().lower()
+    if plan_code in {"", "free"}:
+        return
+    if not status_has_active_access(subscription_effective_status(entitlement)):
+        return
+    source_provider = str(entitlement.get("source_provider") or "").strip().lower()
+    target = str(target_provider or "").strip().lower()
+    if not source_provider or source_provider in {"unknown", "admin_grant"}:
+        return
+    if source_provider == target:
+        return
+    raise RequestBodyError(
+        "You already have an active subscription. Manage or cancel it before starting a new checkout.",
+        status_code=409,
     )
 
 
@@ -158,7 +198,7 @@ def _handle_mobile_verify(event: Dict[str, Any], user_id: str, provider: str) ->
                 user_id=str(record.get("user_id") or user_id),
                 client_context=client_context,
                 extra={
-                    "plan": str(normalized.get("tier") or "pro"),
+                    "plan": str(normalized.get("plan_code") or "producer"),
                     "price": price,
                     "billing_cycle": billing_cycle or _infer_billing_cycle(normalized),
                     "provider": provider,
@@ -224,13 +264,32 @@ def _handle_portal_url(user_id: str) -> Dict[str, Any]:
     if not entitlement:
         entitlement = free_entitlement(
             user_id=user_id,
-            allow_studio_tier=config.ALLOW_STUDIO_TIER,
         ).to_dict()
     provider = str(entitlement.get("source_provider") or "unknown")
+    management_channel = str(entitlement.get("management_channel") or provider).strip().lower()
+    normalized_provider = provider.strip().lower()
+    if normalized_provider == "apple":
+        label = "Manage in App Store"
+        manage_in_app = True
+    elif normalized_provider == "google":
+        label = "Manage in Play Store"
+        manage_in_app = True
+    elif normalized_provider in {"paddle", "toss"} or management_channel == "web":
+        label = "Manage on web"
+        manage_in_app = False
+    elif management_channel == "admin":
+        label = "Contact sales"
+        manage_in_app = False
+    else:
+        label = "Manage subscription"
+        manage_in_app = False
     return json_response(
         200,
         {
             "provider": provider,
+            "management_channel": management_channel,
+            "manage_in_app": manage_in_app,
+            "label": label,
             "url": portal_url(provider),
         },
     )

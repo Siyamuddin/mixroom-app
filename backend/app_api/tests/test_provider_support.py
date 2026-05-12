@@ -73,35 +73,142 @@ class ProviderSupportTests(unittest.TestCase):
                 "expired",
             )
 
-    def test_resolve_tier_for_product_uses_catalog_before_fallback(self):
+    def test_resolve_access_for_product_uses_mapping_before_fallback(self):
         repo = FakeBillingRepo()
         repo.catalog_mappings["apple:mixroom_pro_monthly"] = {
             "provider_product_key": "apple:mixroom_pro_monthly",
-            "tier": "studio",
+            "plan_code": "studio",
+            "product_code": "studio_monthly",
         }
 
-        self.assertEqual(
-            module.resolve_tier_for_product(repo, "apple", "mixroom_pro_monthly"),
-            "studio",
+        access = module.resolve_access_for_product(
+            repo,
+            "apple",
+            "mixroom_pro_monthly",
         )
         self.assertEqual(
-            module.resolve_tier_for_product(
+            access,
+            {"plan_code": "studio", "product_code": "studio_monthly"},
+        )
+        self.assertEqual(
+            module.resolve_access_for_product(
                 repo,
-                "apple",
-                "mixroom_pro_monthly",
-                fallback_tier="pro",
+                "google",
+                "mixroom_producer_monthly",
+                fallback_plan_code="producer",
             ),
-            "studio",
+            {"plan_code": "producer", "product_code": "producer_monthly"},
         )
         self.assertEqual(
-            module.resolve_tier_for_product(
+            module.resolve_access_for_product(
                 repo,
                 "google",
                 "mixroom_pro_monthly",
-                fallback_tier="pro",
-            ),
-            "pro",
+            )["plan_code"],
+            "producer",
         )
+
+    def test_resolve_access_for_product_preserves_mapped_plan_code(self):
+        repo = FakeBillingRepo()
+        repo.catalog_mappings["apple:mixroom_starter_monthly"] = {
+            "provider_product_key": "apple:mixroom_starter_monthly",
+            "plan_code": "starter",
+            "product_code": "starter_monthly",
+        }
+
+        access = module.resolve_access_for_product(
+            repo,
+            "apple",
+            "mixroom_starter_monthly",
+        )
+
+        self.assertEqual(access["plan_code"], "starter")
+        self.assertEqual(access["product_code"], "starter_monthly")
+
+    def test_resolve_access_for_product_preserves_custom_mapped_plan_code(self):
+        repo = FakeBillingRepo()
+        repo.catalog_mappings["paddle:mixroom_founder_monthly"] = {
+            "provider_product_key": "paddle:mixroom_founder_monthly",
+            "plan_code": "founder",
+            "product_code": "founder_monthly",
+        }
+
+        access = module.resolve_access_for_product(
+            repo,
+            "paddle",
+            "mixroom_founder_monthly",
+        )
+
+        self.assertEqual(access["plan_code"], "founder")
+        self.assertEqual(access["product_code"], "founder_monthly")
+
+    def test_resolve_access_for_product_rejects_disabled_provider_product(self):
+        repo = FakeBillingRepo()
+        catalog = {
+            "plans": [{"code": "producer", "label": "Producer"}],
+            "products": [
+                {
+                    "code": "producer_monthly",
+                    "plan_code": "producer",
+                    "enabled": True,
+                }
+            ],
+            "provider_products": [
+                {
+                    "provider": "apple",
+                    "provider_product_id": "mixroom_producer_monthly",
+                    "product_code": "producer_monthly",
+                    "enabled": False,
+                }
+            ],
+        }
+
+        with mock.patch(
+            "src.common.billing_catalog_repository.BillingCatalogRepository",
+            return_value=mock.Mock(get_catalog=mock.Mock(return_value=catalog)),
+        ):
+            with self.assertRaises(module.ProviderVerificationError) as ctx:
+                module.resolve_access_for_product(
+                    repo,
+                    "apple",
+                    "mixroom_producer_monthly",
+                )
+
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_resolve_access_for_product_rejects_disabled_catalog_product(self):
+        repo = FakeBillingRepo()
+        catalog = {
+            "plans": [{"code": "producer", "label": "Producer"}],
+            "products": [
+                {
+                    "code": "producer_monthly",
+                    "plan_code": "producer",
+                    "enabled": False,
+                }
+            ],
+            "provider_products": [
+                {
+                    "provider": "google",
+                    "provider_product_id": "mixroom_producer_monthly",
+                    "product_code": "producer_monthly",
+                    "enabled": True,
+                }
+            ],
+        }
+
+        with mock.patch(
+            "src.common.billing_catalog_repository.BillingCatalogRepository",
+            return_value=mock.Mock(get_catalog=mock.Mock(return_value=catalog)),
+        ):
+            with self.assertRaises(module.ProviderVerificationError) as ctx:
+                module.resolve_access_for_product(
+                    repo,
+                    "google",
+                    "mixroom_producer_monthly",
+                )
+
+        self.assertEqual(ctx.exception.status_code, 409)
 
 
 if __name__ == "__main__":

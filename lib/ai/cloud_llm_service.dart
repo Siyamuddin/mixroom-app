@@ -24,6 +24,13 @@ class AiPromptRateLimitWindow {
     required this.resetsAt,
   });
 
+  double get remainingFraction {
+    if (limit <= 0) return remaining > 0 ? 1.0 : 0.0;
+    return (remaining / limit).clamp(0.0, 1.0).toDouble();
+  }
+
+  int get remainingPercent => (remainingFraction * 100).round();
+
   factory AiPromptRateLimitWindow.fromJson(Map<String, dynamic>? json) {
     final data = json ?? const <String, dynamic>{};
     final resetsAtRaw = data['resets_at']?.toString().trim() ?? '';

@@ -4,6 +4,8 @@ import base64
 import json
 import urllib.error
 import urllib.request
+from datetime import date, datetime
+from enum import Enum
 from typing import Any, Dict, Optional
 
 from . import config
@@ -14,7 +16,8 @@ from .provider_support import (
     first_present,
     maybe_link_customer,
     parse_datetime,
-    resolve_tier_for_product,
+    resolve_access_for_product,
+    resolve_purchase_user_link,
     utc_now,
 )
 from .repository import BillingRepository
@@ -65,7 +68,7 @@ def verify_apple_notification(
         raise ProviderVerificationError("Apple signedPayload is required.")
 
     environment = _resolve_signed_environment(payload)
-    verifier = _signed_data_verifier(environment)
+    verifier = _signed_data_verifier(environment, signed_payload=payload)
 
     try:
         notification = verifier.verify_and_decode_notification(payload)
@@ -123,7 +126,7 @@ def verify_apple_notification(
         provider="Apple",
     )
 
-    tier = resolve_tier_for_product(repo, "apple", product_id)
+    access = resolve_access_for_product(repo, "apple", product_id)
     notification_type = str(_field(notification, "notificationType") or "").strip().upper()
     subtype = str(_field(notification, "subtype") or "").strip().upper()
     expires_at = datetime_to_iso(
@@ -162,7 +165,6 @@ def verify_apple_notification(
         "normalized": {
             "provider": "apple",
             "subscription_id": original_transaction_id or transaction_id,
-            "tier": tier,
             "status": status,
             "effective_at": first_present(
                 datetime_to_iso(_field(transaction, "purchaseDate")),
@@ -177,6 +179,8 @@ def verify_apple_notification(
             ),
             "management_channel": "apple",
             "product_id": product_id,
+            "product_code": access.get("product_code") or "",
+            "plan_code": access.get("plan_code") or "",
         },
     }
 
@@ -190,7 +194,7 @@ def _verify_apple_signed_transaction(
     client_app_account_token: str,
 ) -> Dict[str, Any]:
     environment = _resolve_signed_environment(signed_transaction)
-    verifier = _signed_data_verifier(environment)
+    verifier = _signed_data_verifier(environment, signed_payload=signed_transaction)
 
     try:
         transaction = verifier.verify_and_decode_signed_transaction(signed_transaction)
@@ -212,26 +216,34 @@ def _verify_apple_signed_transaction(
 
     original_transaction_id = str(_field(transaction, "originalTransactionId") or "").strip()
     transaction_id = str(_field(transaction, "transactionId") or "").strip()
-    account_token = str(
-        first_present(
-            _field(transaction, "appAccountToken"),
-            client_app_account_token,
-        )
-        or ""
-    ).strip()
+    store_account_token = str(_field(transaction, "appAccountToken") or "").strip()
+    client_account_token = str(client_app_account_token or "").strip()
+    allow_active_reclaim = bool(
+        expected_user_id
+        and client_account_token
+        and client_account_token == expected_user_id
+    )
+    account_token = (
+        client_account_token
+        if allow_active_reclaim
+        else str(first_present(store_account_token, client_account_token) or "").strip()
+    )
     existing_link = (
         repo.get_customer_link("apple", f"subscription:{original_transaction_id}")
         if original_transaction_id
         else None
     ) or {}
-    user_id = assert_user_link_available(
+    user_id, reclaimed_from_user_id = resolve_purchase_user_link(
+        repo,
         resolved_user_id=account_token,
         expected_user_id=expected_user_id,
         existing_link_user_id=str(existing_link.get("user_id") or "").strip(),
         provider="Apple",
+        subscription_id=original_transaction_id or transaction_id,
+        allow_active_reclaim=allow_active_reclaim,
     )
 
-    tier = resolve_tier_for_product(repo, "apple", product_id)
+    access = resolve_access_for_product(repo, "apple", product_id)
     expires_at = datetime_to_iso(_field(transaction, "expiresDate"))
     status = _normalize_apple_status(
         notification_type="",
@@ -269,7 +281,6 @@ def _verify_apple_signed_transaction(
         "normalized": {
             "provider": "apple",
             "subscription_id": original_transaction_id or transaction_id,
-            "tier": tier,
             "status": status,
             "effective_at": first_present(
                 datetime_to_iso(_field(transaction, "purchaseDate")),
@@ -282,6 +293,9 @@ def _verify_apple_signed_transaction(
             ),
             "management_channel": "apple",
             "product_id": product_id,
+            "product_code": access.get("product_code") or "",
+            "plan_code": access.get("plan_code") or "",
+            "reclaimed_from_user_id": reclaimed_from_user_id,
         },
     }
 
@@ -331,7 +345,7 @@ def _verify_apple_receipt(
         provider="Apple",
     )
 
-    tier = resolve_tier_for_product(repo, "apple", product_id)
+    access = resolve_access_for_product(repo, "apple", product_id)
     expires_at = datetime_to_iso(receipt_info.get("expires_date_ms"))
     status = _normalize_apple_status(
         notification_type="",
@@ -365,7 +379,6 @@ def _verify_apple_receipt(
         "normalized": {
             "provider": "apple",
             "subscription_id": original_transaction_id or transaction_id,
-            "tier": tier,
             "status": status,
             "effective_at": first_present(
                 datetime_to_iso(receipt_info.get("purchase_date_ms")),
@@ -378,14 +391,14 @@ def _verify_apple_receipt(
             ),
             "management_channel": "apple",
             "product_id": product_id,
+            "product_code": access.get("product_code") or "",
+            "plan_code": access.get("plan_code") or "",
         },
     }
 
 
-def _signed_data_verifier(environment: str):
+def _signed_data_verifier(environment: str, *, signed_payload: str = ""):
     env_key = environment.upper()
-    if env_key in _verifier_cache:
-        return _verifier_cache[env_key]
 
     try:
         from appstoreserverlibrary.models.Environment import Environment
@@ -398,9 +411,13 @@ def _signed_data_verifier(environment: str):
 
     from .secrets import load_apple_root_certificates
 
-    bundle_id = config.APPLE_BUNDLE_ID
+    bundle_id = _resolve_signed_bundle_id(signed_payload)
     if not bundle_id:
         raise ProviderVerificationError("APPLE_BUNDLE_ID is not configured.", status_code=500)
+
+    cache_key = f"{env_key}:{bundle_id}"
+    if cache_key in _verifier_cache:
+        return _verifier_cache[cache_key]
 
     if env_key == _APPLE_SANDBOX:
         lib_env = Environment.SANDBOX
@@ -416,7 +433,7 @@ def _signed_data_verifier(environment: str):
         bundle_id,
         app_id,
     )
-    _verifier_cache[env_key] = verifier
+    _verifier_cache[cache_key] = verifier
     return verifier
 
 
@@ -491,6 +508,37 @@ def _resolve_signed_environment(signed_payload: str) -> str:
     return _APPLE_PRODUCTION
 
 
+def _configured_bundle_ids() -> list[str]:
+    return [
+        value.strip()
+        for value in str(config.APPLE_BUNDLE_ID or "").split(",")
+        if value.strip()
+    ]
+
+
+def _resolve_signed_bundle_id(signed_payload: str) -> str:
+    allowed = _configured_bundle_ids()
+    if not allowed:
+        return ""
+
+    payload = _decode_unverified_jws_payload(signed_payload)
+    candidates = []
+    data = payload.get("data")
+    if isinstance(data, dict):
+        candidates.append(str(data.get("bundleId") or "").strip())
+        signed_transaction = str(data.get("signedTransactionInfo") or "").strip()
+        if signed_transaction:
+            tx_payload = _decode_unverified_jws_payload(signed_transaction)
+            candidates.append(str(tx_payload.get("bundleId") or "").strip())
+    candidates.append(str(payload.get("bundleId") or "").strip())
+
+    allowed_set = set(allowed)
+    for candidate in candidates:
+        if candidate and candidate in allowed_set:
+            return candidate
+    return allowed[0]
+
+
 def _decode_unverified_jws_payload(signed_payload: str) -> Dict[str, Any]:
     parts = signed_payload.split(".")
     if len(parts) != 3:
@@ -544,20 +592,36 @@ def _field(obj: Any, name: str) -> Any:
 
 
 def _to_plain_dict(obj: Any) -> Dict[str, Any]:
-    if obj is None:
-        return {}
-    if isinstance(obj, dict):
-        return obj
-    if hasattr(obj, "__dict__"):
-        plain: Dict[str, Any] = {}
-        for key, value in vars(obj).items():
+    plain = _to_plain_value(obj)
+    return plain if isinstance(plain, dict) else {}
+
+
+def _to_plain_value(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, (str, int, bool)):
+        return value
+    if isinstance(value, float):
+        return str(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, dict):
+        return {str(key): _to_plain_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_to_plain_value(item) for item in value]
+    if hasattr(value, "model_dump"):
+        dumped = value.model_dump()
+        return _to_plain_value(dumped)
+    if hasattr(value, "dict"):
+        dumped = value.dict()
+        return _to_plain_value(dumped)
+    if hasattr(value, "__dict__"):
+        plain_obj: Dict[str, Any] = {}
+        for key, item in vars(value).items():
             if key.startswith("_"):
                 continue
-            if isinstance(value, (str, int, float, bool)) or value is None:
-                plain[key] = value
-            elif hasattr(value, "__dict__"):
-                plain[key] = _to_plain_dict(value)
-            else:
-                plain[key] = str(value)
-        return plain
-    return {"value": str(obj)}
+            plain_obj[str(key)] = _to_plain_value(item)
+        return plain_obj
+    return str(value)

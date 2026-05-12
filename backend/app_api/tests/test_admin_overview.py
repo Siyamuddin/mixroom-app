@@ -302,9 +302,9 @@ class AdminOverviewRepositoryTests(unittest.TestCase):
         repo._list_recent_ai_events = mock.Mock(return_value=[])
         repo._build_tier_breakdown_fast = mock.Mock(
             return_value=[
-                {"tier": "free", "user_count": 0, "active_user_count": 0},
-                {"tier": "pro", "user_count": 0, "active_user_count": 0},
-                {"tier": "studio", "user_count": 0, "active_user_count": 0},
+                {"plan_code": "free", "user_count": 0, "active_user_count": 0},
+                {"plan_code": "producer", "user_count": 0, "active_user_count": 0},
+                {"plan_code": "studio", "user_count": 0, "active_user_count": 0},
             ]
         )
         repo._describe_item_count = mock.Mock(return_value=0)
@@ -366,9 +366,9 @@ class AdminOverviewRepositoryTests(unittest.TestCase):
         )
         repo._build_tier_breakdown_fast = mock.Mock(
             return_value=[
-                {"tier": "free", "user_count": 0, "active_user_count": 0},
-                {"tier": "pro", "user_count": 0, "active_user_count": 0},
-                {"tier": "studio", "user_count": 0, "active_user_count": 0},
+                {"plan_code": "free", "user_count": 0, "active_user_count": 0},
+                {"plan_code": "producer", "user_count": 0, "active_user_count": 0},
+                {"plan_code": "studio", "user_count": 0, "active_user_count": 0},
             ]
         )
         repo._describe_item_count = mock.Mock(return_value=0)
@@ -400,9 +400,9 @@ class AdminOverviewRepositoryTests(unittest.TestCase):
         repo._describe_item_count = mock.Mock(return_value=5)
         repo._scan_tier_breakdown = mock.Mock(
             return_value=[
-                {"tier": "free", "user_count": 5, "active_user_count": 5},
-                {"tier": "pro", "user_count": 0, "active_user_count": 0},
-                {"tier": "studio", "user_count": 0, "active_user_count": 0},
+                {"plan_code": "free", "user_count": 5, "active_user_count": 5},
+                {"plan_code": "producer", "user_count": 0, "active_user_count": 0},
+                {"plan_code": "studio", "user_count": 0, "active_user_count": 0},
             ]
         )
         warnings: list[str] = []
@@ -422,7 +422,7 @@ class AdminOverviewRepositoryTests(unittest.TestCase):
         )
         repo._entitlements = object()
         repo._count_entitlements = mock.Mock(
-            side_effect=[5, 5, 0, 0, 0, 0]
+            side_effect=[5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         )
         repo._describe_item_count = mock.Mock(return_value=5)
         repo._scan_tier_breakdown = mock.Mock()
@@ -433,7 +433,7 @@ class AdminOverviewRepositoryTests(unittest.TestCase):
             warnings,
         )
 
-        self.assertEqual(result[0]["tier"], "free")
+        self.assertEqual(result[0]["plan_code"], "free")
         self.assertEqual(result[0]["user_count"], 5)
         repo._scan_tier_breakdown.assert_not_called()
         self.assertEqual(warnings, [])
@@ -452,9 +452,9 @@ class AdminOverviewRepositoryTests(unittest.TestCase):
         repo._list_recent_ai_events = mock.Mock(return_value=[])
         repo._build_tier_breakdown_fast = mock.Mock(
             return_value=[
-                {"tier": "free", "user_count": 0, "active_user_count": 0},
-                {"tier": "pro", "user_count": 0, "active_user_count": 0},
-                {"tier": "studio", "user_count": 0, "active_user_count": 0},
+                {"plan_code": "free", "user_count": 0, "active_user_count": 0},
+                {"plan_code": "producer", "user_count": 0, "active_user_count": 0},
+                {"plan_code": "studio", "user_count": 0, "active_user_count": 0},
             ]
         )
         repo._describe_item_count = mock.Mock(return_value=0)
@@ -537,9 +537,9 @@ class AdminOverviewRepositoryTests(unittest.TestCase):
         )
         repo._build_tier_breakdown_fast = mock.Mock(
             return_value=[
-                {"tier": "free", "user_count": 0, "active_user_count": 0},
-                {"tier": "pro", "user_count": 0, "active_user_count": 0},
-                {"tier": "studio", "user_count": 0, "active_user_count": 0},
+                {"plan_code": "free", "user_count": 0, "active_user_count": 0},
+                {"plan_code": "producer", "user_count": 0, "active_user_count": 0},
+                {"plan_code": "studio", "user_count": 0, "active_user_count": 0},
             ]
         )
         repo._describe_item_count = mock.Mock(return_value=0)

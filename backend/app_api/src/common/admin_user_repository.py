@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import hashlib
 from typing import Any, Dict
+from uuid import uuid4
 
 try:
     import boto3
@@ -28,10 +30,15 @@ from .billing_catalog_repository import BillingCatalogRepository
 from .collaboration_repository import CollaborationRepository
 from .models import (
     choose_primary_subscription,
+    entitlement_capabilities_for_status,
+    entitlement_limits_for_status,
+    legacy_tier_for_plan_code,
+    normalize_plan_code,
     normalize_provider,
     normalize_status,
-    normalize_tier,
     status_has_active_access,
+    subscription_effective_status,
+    free_entitlement,
 )
 try:
     from .repository import BillingRepository
@@ -85,6 +92,16 @@ def _datetime_to_iso(value: Any) -> str:
     return _safe_str(value)
 
 
+def _expected_admin_first_name(email: str) -> str:
+    local = _safe_str(email).lower().split("@", 1)[0]
+    return local.replace("-", ".").replace("_", ".").split(".", 1)[0]
+
+
+def _stable_admin_org_id(plan_code: str, user_id: str) -> str:
+    digest = hashlib.sha256(_safe_str(user_id).encode("utf-8")).hexdigest()[:16]
+    return f"admin-override-{normalize_plan_code(plan_code)}-{digest}"
+
+
 def _later_iso(current: str, candidate: str) -> str:
     current_dt = _parse_iso(current)
     candidate_dt = _parse_iso(candidate)
@@ -128,6 +145,7 @@ class AdminUserRepository:
         self._customer_links = None
         self._purchase_tokens = None
         self._tombstones = None
+        self._entitlement_overrides = None
         self._catalog_repo = BillingCatalogRepository()
         self._collaboration_repo = CollaborationRepository()
         self._billing_repo = (
@@ -150,6 +168,10 @@ class AdminUserRepository:
             self._purchase_tokens = self._ddb.Table(config.PURCHASE_TOKENS_TABLE)
         if self._ddb is not None and config.USER_TOMBSTONES_TABLE:
             self._tombstones = self._ddb.Table(config.USER_TOMBSTONES_TABLE)
+        if self._ddb is not None and config.ADMIN_ENTITLEMENT_OVERRIDES_TABLE:
+            self._entitlement_overrides = self._ddb.Table(
+                config.ADMIN_ENTITLEMENT_OVERRIDES_TABLE
+            )
         if boto3 is not None and config.COGNITO_USER_POOL_ID:
             self._cognito = boto3.client("cognito-idp")
 
@@ -253,9 +275,9 @@ class AdminUserRepository:
         entitlement = self._get_entitlement(safe_user_id, warnings)
         subscriptions = self._list_subscriptions_for_user(safe_user_id, warnings)
         usage_state = self._get_ai_usage_state(safe_user_id, warnings)
-        subscription_tier = normalize_tier(
+        subscription_plan_code = normalize_plan_code(
             _safe_str(
-                entitlement.get("tier")
+                entitlement.get("plan_code")
                 or usage_state.get("subscription_tier")
                 or "free"
             )
@@ -273,7 +295,7 @@ class AdminUserRepository:
                     "ai_tokens_month_reset": current[:7],
                     "ai_prompts_day_reset": current[:10],
                     "ai_prompts_week_reset": current[:10],
-                    "subscription_tier": subscription_tier,
+                    "subscription_tier": subscription_plan_code,
                     "updated_at": current,
                     "admin_prompt_grants_total": 0,
                     "admin_prompt_grants_remaining": 0,
@@ -297,7 +319,7 @@ class AdminUserRepository:
                 ":updated_at": current,
                 ":updated_by": _safe_str(granted_by_user_id),
                 ":updated_email": _safe_str(granted_by_email).lower(),
-                ":subscription_tier": subscription_tier,
+                ":subscription_tier": subscription_plan_code,
             },
             ReturnValues="ALL_NEW",
         )
@@ -319,6 +341,215 @@ class AdminUserRepository:
             "user": user_record,
             "warnings": warnings,
         }
+
+    def apply_entitlement_override(
+        self,
+        *,
+        user_id: str,
+        plan_code: str,
+        expires_at: str,
+        reason: str,
+        confirm_identifier: str,
+        confirm_admin_first_name: str,
+        granted_by_user_id: str,
+        granted_by_email: str,
+        seat_limit: int | None = None,
+        organization_name: str = "",
+    ) -> Dict[str, Any]:
+        safe_user_id = _safe_str(user_id)
+        safe_plan_code = normalize_plan_code(plan_code)
+        if not safe_user_id:
+            raise ValueError("User ID is required.")
+        if safe_plan_code not in {"starter", "producer", "studio", "enterprise", "education"}:
+            raise ValueError("Admin overrides can only grant paid plans.")
+        safe_reason = _safe_str(reason)
+        if len(safe_reason) < 8:
+            raise ValueError("Override reason must be at least 8 characters.")
+        if self._entitlement_overrides is None:
+            raise RuntimeError("Admin entitlement override audit table is not configured.")
+        if self._billing_repo is None:
+            raise RuntimeError("Billing repository is not available.")
+
+        current = datetime.now(timezone.utc)
+        expiry_dt = _parse_iso(expires_at)
+        if expiry_dt is None:
+            raise ValueError("Expiry date must be a valid ISO timestamp.")
+        if expiry_dt <= current:
+            raise ValueError("Expiry date must be in the future.")
+        if expiry_dt > current + timedelta(days=370):
+            raise ValueError("Admin entitlement overrides can last at most 1 year.")
+        safe_expires_at = expiry_dt.isoformat()
+        retention_expires_at = (expiry_dt + timedelta(days=90)).isoformat()
+
+        expected_admin_name = _expected_admin_first_name(granted_by_email)
+        if not expected_admin_name:
+            raise ValueError("Admin email is required.")
+        if _safe_str(confirm_admin_first_name).lower() != expected_admin_name:
+            raise ValueError("Type your admin first name exactly to confirm.")
+
+        warnings: list[str] = []
+        app_profile = self._get_user_profile(safe_user_id, warnings)
+        auth_account = self._get_auth_account(safe_user_id, warnings)
+        if not app_profile and not auth_account:
+            raise AdminUserNotFoundError("User not found.")
+        cognito_profile = {}
+        entitlement = self._get_entitlement(safe_user_id, warnings)
+        subscriptions = self._list_subscriptions_for_user(safe_user_id, warnings)
+        customer_links = self._list_customer_link_items(safe_user_id, warnings)
+        snapshot = self._build_user_record(
+            safe_user_id,
+            app_profile=app_profile,
+            auth_account=auth_account,
+            cognito_profile=cognito_profile,
+            warnings=warnings,
+            customer_links=customer_links,
+            entitlement=entitlement,
+            subscriptions=subscriptions,
+        )
+
+        accepted_identifiers = {
+            _safe_str(snapshot.get("email")).lower(),
+            _safe_str(auth_account.get("email")).lower(),
+            _safe_str(app_profile.get("email")).lower(),
+            _safe_str(snapshot.get("username")).lower(),
+            _safe_str(app_profile.get("username")).lower(),
+            safe_user_id.lower(),
+        }
+        accepted_identifiers.discard("")
+        if _safe_str(confirm_identifier).lower() not in accepted_identifiers:
+            raise ValueError("Type the user's email, username, or user ID exactly to confirm.")
+
+        plan = catalog_plan_by_code(safe_plan_code, catalog=self._catalog_repo.get_catalog())
+        resolved_seat_limit = self._normalize_override_seat_limit(
+            safe_plan_code,
+            seat_limit,
+            plan=plan,
+        )
+
+        created_at = current.isoformat()
+        override_id = uuid4().hex
+        subscription_id = f"admin_grant:{safe_plan_code}:{override_id}"
+        product_code = f"{safe_plan_code}_admin_override"
+        audit_record = {
+            "override_id": override_id,
+            "created_at": created_at,
+            "updated_at": created_at,
+            "status": "applying",
+            "target_user_id": safe_user_id,
+            "target_email": _safe_str(snapshot.get("email")).lower(),
+            "target_username": _safe_str(snapshot.get("username")),
+            "admin_user_id": _safe_str(granted_by_user_id),
+            "admin_email": _safe_str(granted_by_email).lower(),
+            "plan_code": safe_plan_code,
+            "plan_label": _safe_str(plan.get("label")) or safe_plan_code.title(),
+            "seat_limit": resolved_seat_limit,
+            "effective_at": created_at,
+            "expires_at": safe_expires_at,
+            "retention_expires_at": retention_expires_at,
+            "reason": safe_reason,
+            "source_subscription_id": subscription_id,
+            "previous_entitlement": entitlement,
+            "previous_subscription_count": len(subscriptions),
+            "target_snapshot": snapshot,
+            "warnings": warnings,
+            "schema_version": 1,
+        }
+        self._put_override_audit(audit_record)
+
+        try:
+            subscription = {
+                "subscription_id": subscription_id,
+                "user_id": safe_user_id,
+                "provider": "admin_grant",
+                "tier": legacy_tier_for_plan_code(safe_plan_code),
+                "plan_code": safe_plan_code,
+                "status": "active",
+                "effective_at": created_at,
+                "expires_at": safe_expires_at,
+                "retention_expires_at": retention_expires_at,
+                "product_code": product_code,
+                "source_event_id": override_id,
+                "source_occurred_at": created_at,
+                "management_channel": "admin_override",
+                "seat_limit": resolved_seat_limit,
+                "updated_at": created_at,
+            }
+            self._billing_repo.upsert_subscription(subscription)
+
+            organization = {}
+            workspace = {}
+            membership = {}
+            if safe_plan_code in {"studio", "enterprise", "education"}:
+                organization_payload = self._provision_admin_team_access(
+                    user_id=safe_user_id,
+                    email=_safe_str(snapshot.get("email")),
+                    username=_safe_str(snapshot.get("username")),
+                    plan_code=safe_plan_code,
+                    seat_limit=resolved_seat_limit,
+                    organization_name=organization_name,
+                    subscription=subscription,
+                    updated_by_user_id=granted_by_user_id,
+                    updated_by_email=granted_by_email,
+                )
+                organization = organization_payload.get("organization") or {}
+                workspace = organization_payload.get("workspace") or {}
+                membership = (
+                    organization_payload.get("membership")
+                    or organization_payload.get("teacher_membership")
+                    or {}
+                )
+                self._ensure_free_entitlement_if_missing(safe_user_id)
+            else:
+                self._project_personal_entitlement(
+                    safe_user_id,
+                    subscription,
+                    existing_subscriptions=subscriptions,
+                    existing_entitlement=entitlement,
+                )
+
+            updated_entitlement = self._get_entitlement(safe_user_id, warnings)
+            updated_subscriptions = self._list_subscriptions_for_user(safe_user_id, warnings)
+            updated_snapshot = self._build_user_record(
+                safe_user_id,
+                app_profile=app_profile,
+                auth_account=auth_account,
+                cognito_profile=cognito_profile,
+                warnings=warnings,
+                entitlement=updated_entitlement,
+                subscriptions=updated_subscriptions,
+            )
+            audit_record.update(
+                {
+                    "updated_at": _utc_now_iso(),
+                    "status": "applied",
+                    "organization_id": _safe_str(organization.get("organization_id")),
+                    "workspace_id": _safe_str(workspace.get("workspace_id")),
+                    "membership_entity_id": _safe_str(membership.get("entity_id")),
+                    "resulting_entitlement": updated_entitlement,
+                    "result_snapshot": updated_snapshot,
+                }
+            )
+            self._put_override_audit(audit_record)
+            return {
+                "overridden": True,
+                "override_id": override_id,
+                "subscription": subscription,
+                "organization": organization,
+                "workspace": workspace,
+                "membership": membership,
+                "user": updated_snapshot,
+                "warnings": warnings,
+            }
+        except Exception as exc:
+            audit_record.update(
+                {
+                    "updated_at": _utc_now_iso(),
+                    "status": "failed",
+                    "error": str(exc),
+                }
+            )
+            self._put_override_audit(audit_record)
+            raise
 
     def delete_user(
         self,
@@ -484,6 +715,200 @@ class AdminUserRepository:
             "warnings": warnings,
         }
 
+    def _normalize_override_seat_limit(
+        self,
+        plan_code: str,
+        raw_seat_limit: int | None,
+        *,
+        plan: Dict[str, Any],
+    ) -> int:
+        limits = plan.get("limits") if isinstance(plan, dict) else {}
+        if plan_code == "studio":
+            seat_limit = _safe_int(raw_seat_limit) or _safe_int(
+                (limits or {}).get("members"),
+            ) or 5
+            if seat_limit < 5:
+                raise ValueError("Studio seat limit must be at least 5.")
+            if seat_limit > 5000:
+                raise ValueError("Studio seat limit is too large.")
+            return seat_limit
+        if plan_code == "education":
+            seat_limit = _safe_int(raw_seat_limit) or _safe_int(
+                (limits or {}).get("default_seats"),
+            ) or 20
+            if seat_limit not in {10, 20, 30}:
+                raise ValueError("Education seat limit must be 10, 20, or 30.")
+            return seat_limit
+        if plan_code == "enterprise":
+            seat_limit = _safe_int(raw_seat_limit) or _safe_int(
+                (limits or {}).get("members"),
+            ) or 500
+            if seat_limit < 1:
+                raise ValueError("Enterprise seat limit must be at least 1.")
+            if seat_limit > 5000:
+                raise ValueError("Enterprise seat limit is too large.")
+            return seat_limit
+        return 0
+
+    def _put_override_audit(self, record: Dict[str, Any]) -> None:
+        if self._entitlement_overrides is None:
+            raise RuntimeError("Admin entitlement override audit table is not configured.")
+        self._entitlement_overrides.put_item(Item=dict(record))
+
+    def _project_personal_entitlement(
+        self,
+        user_id: str,
+        subscription: Dict[str, Any],
+        *,
+        existing_subscriptions: list[Dict[str, Any]],
+        existing_entitlement: Dict[str, Any],
+    ) -> None:
+        subscriptions = [
+            item
+            for item in existing_subscriptions
+            if isinstance(item, dict)
+            and _safe_str(item.get("subscription_id"))
+            != _safe_str(subscription.get("subscription_id"))
+            and normalize_plan_code(item.get("plan_code") or item.get("tier")) not in {"studio", "enterprise", "education"}
+        ]
+        subscriptions.append(subscription)
+        primary = choose_primary_subscription(subscriptions)
+        revision = int((existing_entitlement or {}).get("revision") or 0) + 1
+        if not primary:
+            self._billing_repo.put_entitlement(
+                free_entitlement(user_id=user_id, revision=revision).to_dict()
+            )
+            return
+        selected_status = subscription_effective_status(primary)
+        selected_plan_code = normalize_plan_code(
+            primary.get("plan_code") or primary.get("tier") or "free"
+        )
+        self._billing_repo.put_entitlement(
+            {
+                "user_id": user_id,
+                "tier": legacy_tier_for_plan_code(selected_plan_code),
+                "status": selected_status,
+                "effective_at": primary.get("effective_at") or _utc_now_iso(),
+                "expires_at": primary.get("expires_at"),
+                "source_provider": normalize_provider(
+                    _safe_str(primary.get("provider") or "unknown")
+                ),
+                "source_subscription_id": _safe_str(primary.get("subscription_id")),
+                "capabilities": entitlement_capabilities_for_status(
+                    selected_plan_code,
+                    selected_status,
+                ),
+                "limits": entitlement_limits_for_status(selected_plan_code, selected_status),
+                "management_channel": primary.get("management_channel")
+                or primary.get("provider")
+                or "unknown",
+                "plan_code": selected_plan_code,
+                "product_code": primary.get("product_code"),
+                "source_occurred_at": primary.get("source_occurred_at"),
+                "revision": revision,
+            }
+        )
+
+    def _ensure_free_entitlement_if_missing(self, user_id: str) -> None:
+        if self._billing_repo.get_entitlement(user_id):
+            return
+        self._billing_repo.put_entitlement(free_entitlement(user_id=user_id).to_dict())
+
+    def _provision_admin_team_access(
+        self,
+        *,
+        user_id: str,
+        email: str,
+        username: str,
+        plan_code: str,
+        seat_limit: int,
+        organization_name: str,
+        subscription: Dict[str, Any],
+        updated_by_user_id: str,
+        updated_by_email: str,
+    ) -> Dict[str, Any]:
+        organization_id = _stable_admin_org_id(plan_code, user_id)
+        fallback_name = (
+            f"{_safe_str(username) or _safe_str(email) or user_id} "
+            f"{plan_code.title()}"
+        )
+        name = _safe_str(organization_name) or fallback_name
+        if plan_code == "education":
+            return self._collaboration_repo.provision_education_organization(
+                {
+                    "organization_id": organization_id,
+                    "teacher_user_id": user_id,
+                    "teacher_email": email,
+                    "name": name,
+                    "seat_limit": seat_limit,
+                    "status": "active",
+                    "source_provider": "admin_grant",
+                    "source_subscription_id": subscription.get("subscription_id"),
+                    "last_active_subscription_id": subscription.get("subscription_id"),
+                    "support_notes": "Created by admin entitlement override.",
+                    "locked_at": "",
+                    "retention_expires_at": "",
+                    "archived_at": "",
+                    "purge_pending_at": "",
+                    "purged_at": "",
+                },
+                updated_by_user_id=updated_by_user_id,
+                updated_by_email=updated_by_email,
+            )
+
+        organization = self._collaboration_repo.save_organization(
+            {
+                "organization_id": organization_id,
+                "name": name,
+                "status": "active",
+                "plan_code": plan_code,
+                "seat_limit": seat_limit,
+                "owner_user_id": user_id,
+                "source_provider": "admin_grant",
+                "source_subscription_id": subscription.get("subscription_id"),
+                "last_active_subscription_id": subscription.get("subscription_id"),
+                "shared_workspace_enabled": True,
+                "support_notes": "Created by admin entitlement override.",
+                "locked_at": "",
+                "retention_expires_at": "",
+                "archived_at": "",
+                "purge_pending_at": "",
+                "purged_at": "",
+            },
+            updated_by_user_id=updated_by_user_id,
+            updated_by_email=updated_by_email,
+        )
+        workspace = self._collaboration_repo.save_workspace(
+            {
+                "workspace_id": f"{organization_id}-shared",
+                "organization_id": organization_id,
+                "owner_user_id": user_id,
+                "name": f"{name} Shared Cloud",
+                "visibility": "organization",
+                "default_project_privacy": "workspace",
+                "status": "active",
+            },
+            updated_by_user_id=updated_by_user_id,
+            updated_by_email=updated_by_email,
+        )
+        membership = self._collaboration_repo.save_membership(
+            {
+                "organization_id": organization_id,
+                "user_id": user_id,
+                "email": email,
+                "role": "owner",
+                "status": "active",
+                "seat_consumed": True,
+            },
+            updated_by_user_id=updated_by_user_id,
+            updated_by_email=updated_by_email,
+        )
+        return {
+            "organization": organization,
+            "workspace": workspace,
+            "membership": membership,
+        }
+
     def _build_user_record(
         self,
         user_id: str,
@@ -561,8 +986,8 @@ class AdminUserRepository:
             or created_at
         )
 
-        subscription_tier = normalize_tier(
-            _safe_str(entitlement.get("tier") or primary_subscription.get("tier"))
+        subscription_plan_code = normalize_plan_code(
+            _safe_str(entitlement.get("plan_code") or primary_subscription.get("plan_code"))
         )
         subscription_status = normalize_status(
             _safe_str(entitlement.get("status") or primary_subscription.get("status"))
@@ -573,7 +998,7 @@ class AdminUserRepository:
             )
         )
         has_active_subscription = (
-            subscription_tier in ("pro", "studio")
+            subscription_plan_code != "free"
             and status_has_active_access(subscription_status)
         )
         catalog_repo = getattr(self, "_catalog_repo", BillingCatalogRepository())
@@ -582,10 +1007,7 @@ class AdminUserRepository:
             "_collaboration_repo",
             CollaborationRepository(),
         )
-        plan_code = infer_plan_code(
-            _safe_str(entitlement.get("plan_code")),
-            subscription_tier,
-        )
+        plan_code = infer_plan_code(_safe_str(entitlement.get("plan_code"))) if _safe_str(entitlement.get("plan_code")) else subscription_plan_code
         plan = catalog_plan_by_code(
             plan_code,
             catalog=catalog_repo.get_catalog(),
@@ -647,7 +1069,7 @@ class AdminUserRepository:
                 auth_account.get("legacy_cognito_migrated_at")
             ),
             "legacy_auth_status": _safe_str(cognito_profile.get("auth_status")),
-            "subscription_tier": subscription_tier,
+            "subscription_tier": subscription_plan_code,
             "subscription_status": subscription_status,
             "subscription_provider": subscription_provider,
             "has_active_subscription": has_active_subscription,
@@ -1033,7 +1455,7 @@ class AdminUserRepository:
         return [
             {
                 "subscription_id": _safe_str(item.get("subscription_id")),
-                "tier": normalize_tier(_safe_str(item.get("tier"))),
+                "plan_code": normalize_plan_code(_safe_str(item.get("plan_code"))),
                 "status": normalize_status(_safe_str(item.get("status"))),
                 "provider": normalize_provider(_safe_str(item.get("provider"))),
                 "effective_at": _safe_str(item.get("effective_at")),

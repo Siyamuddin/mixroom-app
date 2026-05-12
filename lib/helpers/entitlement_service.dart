@@ -9,12 +9,26 @@ import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/models/entitlement_models.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+class EducationInviteResult {
+  const EducationInviteResult({
+    required this.membership,
+    required this.emailSent,
+    required this.emailError,
+  });
+
+  final OrganizationMembershipItem? membership;
+  final bool emailSent;
+  final String emailError;
+}
+
 class EntitlementService extends ChangeNotifier {
   EntitlementService({
     http.Client? httpClient,
   }) : _httpClient = httpClient ?? http.Client();
 
   static const String _prefsKeyPrefix = 'mixroom.subscription.entitlement.v1';
+  static const String _catalogPrefsKeyPrefix =
+      'mixroom.subscription.billing_catalog.v1';
 
   final http.Client _httpClient;
 
@@ -45,7 +59,11 @@ class EntitlementService extends ChangeNotifier {
   Map<String, String> _accountSurfaceWarnings = <String, String>{};
 
   EntitlementSnapshot? get entitlement => _entitlement;
-  BillingCatalogSnapshot? get billingCatalog => _billingCatalog;
+  BillingCatalogSnapshot? get billingCatalog =>
+      _billingCatalog ??
+      BillingCatalogSnapshot.localDefaults(
+        requestedByUserId: _boundUserId ?? _auth?.signedInUser?.userId ?? '',
+      );
   OrganizationAccessSnapshot? get organizationsAccess => _organizationsAccess;
   WorkspaceAccessSnapshot? get workspacesAccess => _workspacesAccess;
   CloudProjectAccessSnapshot? get cloudProjectsAccess => _cloudProjectsAccess;
@@ -66,14 +84,12 @@ class EntitlementService extends ChangeNotifier {
 
   bool get isEnforcementEnabled => AppApiConfig.enforceSubscriptions;
 
-  bool get isShadowModeEnabled => AppApiConfig.subscriptionShadowMode;
-
   String? get storeAccountToken {
     final raw = _auth?.signedInUser?.userId.trim() ?? '';
     return raw.isEmpty ? null : raw;
   }
 
-  PlanTier get currentTier => _entitlement?.tier ?? PlanTier.free;
+  String get currentPlanCode => _entitlement?.planCode ?? 'free';
 
   BillingSupportInfo get effectiveBillingSupport =>
       _billingCatalog?.support ??
@@ -117,15 +133,8 @@ class EntitlementService extends ChangeNotifier {
   List<AccountAccessSource> get effectiveAccessSources =>
       _entitlement?.accessSources ?? const <AccountAccessSource>[];
 
-  bool get isProEntitled {
-    final current = _entitlement;
-    if (current == null || !current.isAccessActive) return false;
-    return current.tier == PlanTier.pro || current.tier == PlanTier.studio;
-  }
-
   bool canUseCapability(String capability) {
     if (!isEnforcementEnabled) return true;
-    if (isShadowModeEnabled) return true;
     final current = _entitlement;
     if (current == null || !current.isAccessActive) return false;
     return current.hasCapability(capability);
@@ -190,7 +199,7 @@ class EntitlementService extends ChangeNotifier {
         json,
         fallbackUserId: user.userId,
       );
-      AnalyticsService.instance.setSubscriptionTier(_entitlement?.tier.value);
+      AnalyticsService.instance.setSubscriptionTier(_entitlement?.planCode);
       _lastSyncedAtUtc = DateTime.now().toUtc();
       _lastError = null;
       _isInitialized = true;
@@ -239,30 +248,55 @@ class EntitlementService extends ChangeNotifier {
         return;
       }
 
-      final results = await Future.wait<_AccountEndpointResult<dynamic>>(
+      final catalogFuture = _fetchAccountEndpoint(
+        endpointKey: 'catalog',
+        path: '/v1/billing/catalog',
+        parser: (json) => BillingCatalogSnapshot.fromJson(json),
+      );
+      final organizationsFuture = _fetchAccountEndpoint(
+        endpointKey: 'organizations',
+        path: '/v1/organizations/me',
+        parser: (json) => OrganizationAccessSnapshot.fromJson(json),
+      );
+      final workspacesFuture = _fetchAccountEndpoint(
+        endpointKey: 'workspaces',
+        path: '/v1/workspaces/me',
+        parser: (json) => WorkspaceAccessSnapshot.fromJson(json),
+      );
+      final cloudProjectsFuture = _fetchAccountEndpoint(
+        endpointKey: 'cloud_projects',
+        path: '/v1/cloud-projects/me',
+        parser: (json) => CloudProjectAccessSnapshot.fromJson(json),
+      );
+
+      final catalogResult = await catalogFuture;
+      final catalogWarnings = <String, String>{};
+      if (catalogResult.error != null && catalogResult.error!.isNotEmpty) {
+        catalogWarnings[catalogResult.endpointKey] = catalogResult.error!;
+      }
+      final catalog = catalogResult.data;
+      if (catalog is BillingCatalogSnapshot) {
+        _billingCatalog = catalog;
+        await _writeCachedBillingCatalog(user.userId, catalog);
+      }
+      _accountSurfaceWarnings = catalogWarnings;
+      _accountSurfaceError = catalogWarnings.isEmpty
+          ? null
+          : 'Some account details are temporarily unavailable.';
+      notifyListeners();
+
+      final remainingResults =
+          await Future.wait<_AccountEndpointResult<dynamic>>(
         <Future<_AccountEndpointResult<dynamic>>>[
-          _fetchAccountEndpoint(
-            endpointKey: 'catalog',
-            path: '/v1/billing/catalog',
-            parser: (json) => BillingCatalogSnapshot.fromJson(json),
-          ),
-          _fetchAccountEndpoint(
-            endpointKey: 'organizations',
-            path: '/v1/organizations/me',
-            parser: (json) => OrganizationAccessSnapshot.fromJson(json),
-          ),
-          _fetchAccountEndpoint(
-            endpointKey: 'workspaces',
-            path: '/v1/workspaces/me',
-            parser: (json) => WorkspaceAccessSnapshot.fromJson(json),
-          ),
-          _fetchAccountEndpoint(
-            endpointKey: 'cloud_projects',
-            path: '/v1/cloud-projects/me',
-            parser: (json) => CloudProjectAccessSnapshot.fromJson(json),
-          ),
+          organizationsFuture,
+          workspacesFuture,
+          cloudProjectsFuture,
         ],
       );
+      final results = <_AccountEndpointResult<dynamic>>[
+        catalogResult,
+        ...remainingResults,
+      ];
 
       final warnings = <String, String>{};
       for (final result in results) {
@@ -271,14 +305,10 @@ class EntitlementService extends ChangeNotifier {
         }
       }
 
-      final catalogResult = results[0].data;
       final organizationsResult = results[1].data;
       final workspacesResult = results[2].data;
       final cloudProjectsResult = results[3].data;
 
-      if (catalogResult is BillingCatalogSnapshot) {
-        _billingCatalog = catalogResult;
-      }
       if (organizationsResult is OrganizationAccessSnapshot) {
         _organizationsAccess = organizationsResult;
       }
@@ -400,6 +430,99 @@ class EntitlementService extends ChangeNotifier {
     return raw.isEmpty ? null : raw;
   }
 
+  Future<EducationAdminSnapshot> fetchEducationAdmin() async {
+    final json = await _getAuthed('/v1/education/me');
+    return EducationAdminSnapshot.fromJson(json);
+  }
+
+  Future<EducationInviteResult> inviteEducationStudent({
+    required String organizationId,
+    required String email,
+  }) async {
+    final payload = await _postAuthed(
+      '/v1/education/me/invites',
+      body: <String, dynamic>{
+        'organization_id': organizationId,
+        'email': email,
+      },
+    );
+    await refreshAccountSurface(force: true);
+    final membership = payload['membership'];
+    final emailSent = payload['email_sent'] == true;
+    final emailError = (payload['email_error'] ?? '').toString();
+    if (membership is Map<String, dynamic>) {
+      return EducationInviteResult(
+        membership: OrganizationMembershipItem.fromJson(membership),
+        emailSent: emailSent,
+        emailError: emailError,
+      );
+    }
+    if (membership is Map) {
+      return EducationInviteResult(
+        membership: OrganizationMembershipItem.fromJson(
+          membership.map((key, value) => MapEntry(key.toString(), value)),
+        ),
+        emailSent: emailSent,
+        emailError: emailError,
+      );
+    }
+    return EducationInviteResult(
+      membership: null,
+      emailSent: emailSent,
+      emailError: emailError,
+    );
+  }
+
+  Future<OrganizationMembershipItem?> updateEducationMembership({
+    required String organizationId,
+    required String userId,
+    required String status,
+    String role = 'student',
+    String? email,
+  }) async {
+    final payload = await _postAuthed(
+      '/v1/education/me/memberships',
+      body: <String, dynamic>{
+        'organization_id': organizationId,
+        'user_id': userId,
+        'status': status,
+        'role': role,
+        if ((email ?? '').trim().isNotEmpty) 'email': email,
+      },
+    );
+    await refreshAccountSurface(force: true);
+    final membership = payload['membership'];
+    if (membership is Map<String, dynamic>) {
+      return OrganizationMembershipItem.fromJson(membership);
+    }
+    if (membership is Map) {
+      return OrganizationMembershipItem.fromJson(
+        membership.map((key, value) => MapEntry(key.toString(), value)),
+      );
+    }
+    return null;
+  }
+
+  Future<OrganizationMembershipItem?> acceptEducationInvite({
+    required String inviteToken,
+  }) async {
+    final safeToken = Uri.encodeComponent(inviteToken.trim());
+    final payload =
+        await _postAuthed('/v1/education/invites/$safeToken/accept');
+    await refresh(force: true);
+    await refreshAccountSurface(force: true);
+    final membership = payload['membership'];
+    if (membership is Map<String, dynamic>) {
+      return OrganizationMembershipItem.fromJson(membership);
+    }
+    if (membership is Map) {
+      return OrganizationMembershipItem.fromJson(
+        membership.map((key, value) => MapEntry(key.toString(), value)),
+      );
+    }
+    return null;
+  }
+
   @override
   void dispose() {
     _detachAuthListener();
@@ -488,28 +611,7 @@ class EntitlementService extends ChangeNotifier {
       throw StateError('Subscription API base URL is not configured.');
     }
 
-    final initialToken = await auth.getIdTokenOrNull();
-    if ((initialToken ?? '').trim().isEmpty) {
-      throw StateError('Session expired. Please sign in again.');
-    }
-
-    var response = await send(initialToken!);
-    if (!_isUnauthorizedResponse(response)) {
-      return response;
-    }
-
-    final refreshedToken = await auth.refreshIdTokenOrNull();
-    if ((refreshedToken ?? '').trim().isEmpty) {
-      throw StateError('Session expired. Please sign in again.');
-    }
-
-    response = await send(refreshedToken!);
-    if (_isUnauthorizedResponse(response)) {
-      throw StateError(
-        'Authenticated request failed (${response.statusCode}).',
-      );
-    }
-    return response;
+    return auth.authorizedRequest(send);
   }
 
   Map<String, dynamic> _decodeResponse({
@@ -565,7 +667,7 @@ class EntitlementService extends ChangeNotifier {
     _organizationsAccess = null;
     _workspacesAccess = null;
     _cloudProjectsAccess = null;
-    AnalyticsService.instance.setSubscriptionTier(_entitlement?.tier.value);
+    AnalyticsService.instance.setSubscriptionTier(_entitlement?.planCode);
     _lastSyncedAtUtc = null;
     _accountSurfaceLastSyncedAtUtc = null;
     _lastError = null;
@@ -577,6 +679,7 @@ class EntitlementService extends ChangeNotifier {
 
     unawaited(
       _loadCachedEntitlement(userId).then((_) async {
+        await _loadCachedBillingCatalog(userId);
         await refresh(force: true);
         await refreshAccountSurface(force: true);
       }),
@@ -595,7 +698,7 @@ class EntitlementService extends ChangeNotifier {
         data,
         fallbackUserId: userId,
       );
-      AnalyticsService.instance.setSubscriptionTier(_entitlement?.tier.value);
+      AnalyticsService.instance.setSubscriptionTier(_entitlement?.planCode);
       _lastSyncedAtUtc = DateTime.now().toUtc();
       _isInitialized = true;
       notifyListeners();
@@ -615,6 +718,32 @@ class EntitlementService extends ChangeNotifier {
     );
   }
 
+  Future<void> _loadCachedBillingCatalog(String userId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_catalogCacheKey(userId));
+      if (raw == null || raw.trim().isEmpty) return;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return;
+      final data = decoded.map((key, value) => MapEntry(key.toString(), value));
+      _billingCatalog = BillingCatalogSnapshot.fromJson(data);
+      notifyListeners();
+    } catch (_) {
+      // Ignore cache parse failures and fallback to local/default catalog.
+    }
+  }
+
+  Future<void> _writeCachedBillingCatalog(
+    String userId,
+    BillingCatalogSnapshot catalog,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _catalogCacheKey(userId),
+      jsonEncode(catalog.toJson()),
+    );
+  }
+
   Future<void> _clearCachedEntitlement(String userId) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_cacheKey(userId));
@@ -622,9 +751,11 @@ class EntitlementService extends ChangeNotifier {
 
   String _cacheKey(String userId) => '$_prefsKeyPrefix.$userId';
 
+  String _catalogCacheKey(String userId) => '$_catalogPrefsKeyPrefix.$userId';
+
   void _setFallbackFreeEntitlement(String userId) {
-    _entitlement ??= EntitlementSnapshot.free(userId: userId);
-    AnalyticsService.instance.setSubscriptionTier(_entitlement?.tier.value);
+    _entitlement = EntitlementSnapshot.free(userId: userId);
+    AnalyticsService.instance.setSubscriptionTier(_entitlement?.planCode);
     _lastSyncedAtUtc = DateTime.now().toUtc();
     _isInitialized = true;
   }
@@ -693,10 +824,6 @@ class EntitlementService extends ChangeNotifier {
   int _maxInt(int a, int b, int c) {
     final maxAB = a > b ? a : b;
     return maxAB > c ? maxAB : c;
-  }
-
-  bool _isUnauthorizedResponse(http.Response response) {
-    return response.statusCode == 401 || response.statusCode == 403;
   }
 }
 

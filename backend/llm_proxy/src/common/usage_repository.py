@@ -20,6 +20,7 @@ except ModuleNotFoundError:  # pragma: no cover - local dev/test fallback
     boto3 = None
 
 _ACTIVE_ENTITLEMENT_STATUSES = {"trialing", "active", "grace_period"}
+_ORG_PLAN_CODES = {"starter", "producer", "studio", "enterprise", "education"}
 
 
 def _utc_now() -> datetime:
@@ -28,6 +29,34 @@ def _utc_now() -> datetime:
 
 def _utc_now_iso(now: datetime | None = None) -> str:
     return (now or _utc_now()).isoformat()
+
+
+def _parse_datetime(raw: Any) -> datetime | None:
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        return raw.astimezone(timezone.utc)
+    text = str(raw).strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(
+            timezone.utc
+        )
+    except Exception:
+        return None
+
+
+def _effective_entitlement_status(item: dict[str, Any]) -> str:
+    status = str(item.get("status") or "active").strip().lower()
+    expires_at = _parse_datetime(item.get("expires_at"))
+    if (
+        status in _ACTIVE_ENTITLEMENT_STATUSES
+        and expires_at is not None
+        and expires_at <= _utc_now()
+    ):
+        return "expired"
+    return status
 
 
 def _current_day_key(now: datetime | None = None) -> str:
@@ -131,6 +160,7 @@ class AiUsageRepository:
         self._state_table = None
         self._events_table = None
         self._entitlements_table = None
+        self._collaboration_table = None
         if self._ddb is None:
             return
         if config.AI_USAGE_STATE_TABLE:
@@ -139,11 +169,14 @@ class AiUsageRepository:
             self._events_table = self._ddb.Table(config.AI_USAGE_EVENTS_TABLE)
         if config.ENTITLEMENTS_TABLE:
             self._entitlements_table = self._ddb.Table(config.ENTITLEMENTS_TABLE)
+        if config.COLLABORATION_TABLE:
+            self._collaboration_table = self._ddb.Table(config.COLLABORATION_TABLE)
 
     def load_user_context(self, user_id: str) -> dict[str, Any]:
         if not user_id:
             return {}
 
+        entitlement_context: dict[str, Any] | None = None
         if self._entitlements_table is not None:
             item = (
                 self._entitlements_table.get_item(
@@ -152,17 +185,36 @@ class AiUsageRepository:
                 ).get("Item")
                 or {}
             )
-            status = str(item.get("status") or "active").strip().lower()
-            tier = str(item.get("tier") or "free").strip().lower()
+            status = _effective_entitlement_status(item)
+            tier = str(
+                item.get("plan_code") or item.get("tier") or "free"
+            ).strip().lower()
             if status not in _ACTIVE_ENTITLEMENT_STATUSES:
                 tier = "free"
             if tier:
-                return {
+                context = {
                     "user_id": user_id,
                     "subscription_tier": tier,
                     "tier": tier,
                     "entitlement_status": status,
                 }
+                if (
+                    status in _ACTIVE_ENTITLEMENT_STATUSES
+                    and isinstance(item.get("limits"), dict)
+                ):
+                    context["limits"] = item.get("limits") or {}
+                entitlement_context = context
+
+        organization_context = self._load_organization_entitlement_context(user_id)
+        if entitlement_context and organization_context:
+            return self._higher_prompt_limit_context(
+                entitlement_context,
+                organization_context,
+            )
+        if entitlement_context:
+            return entitlement_context
+        if organization_context:
+            return organization_context
 
         item = self.get_usage_state(user_id)
         if not item:
@@ -174,6 +226,91 @@ class AiUsageRepository:
             "subscription_tier": tier,
             "tier": tier,
         }
+
+    def _load_organization_entitlement_context(self, user_id: str) -> dict[str, Any]:
+        if getattr(self, "_collaboration_table", None) is None:
+            return {}
+        try:
+            memberships = (
+                self._collaboration_table.query(
+                    IndexName="user_updated_idx",
+                    KeyConditionExpression="#user_id = :user_id",
+                    ExpressionAttributeNames={"#user_id": "user_id"},
+                    ExpressionAttributeValues={":user_id": user_id},
+                ).get("Items")
+                or []
+            )
+        except Exception:
+            return {}
+
+        best_context: dict[str, Any] = {}
+        for membership in memberships:
+            if str(membership.get("entity_type") or "") != "membership":
+                continue
+            if str(membership.get("status") or "").strip().lower() != "active":
+                continue
+            organization_id = str(membership.get("organization_id") or "").strip()
+            if not organization_id:
+                continue
+            organization = self._load_organization(organization_id)
+            if not organization:
+                continue
+            if str(organization.get("status") or "").strip().lower() != "active":
+                continue
+            plan_code = str(organization.get("plan_code") or "").strip().lower()
+            if plan_code not in _ORG_PLAN_CODES:
+                continue
+            context = {
+                "user_id": user_id,
+                "subscription_tier": plan_code,
+                "tier": plan_code,
+                "entitlement_status": "active",
+                "source_type": "organization",
+                "organization_id": organization_id,
+            }
+            best_context = self._higher_prompt_limit_context(best_context, context)
+        return best_context
+
+    def _load_organization(self, organization_id: str) -> dict[str, Any]:
+        if getattr(self, "_collaboration_table", None) is None:
+            return {}
+        try:
+            return (
+                self._collaboration_table.get_item(
+                    Key={"entity_id": f"organization#{organization_id}"},
+                    ConsistentRead=True,
+                ).get("Item")
+                or {}
+            )
+        except Exception:
+            return {}
+
+    def _higher_prompt_limit_context(
+        self,
+        current: dict[str, Any],
+        candidate: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not current:
+            return candidate
+        if not candidate:
+            return current
+        current_limits = get_prompt_limits(
+            str(current.get("subscription_tier") or "free"),
+            current.get("limits") if isinstance(current.get("limits"), dict) else None,
+        )
+        candidate_limits = get_prompt_limits(
+            str(candidate.get("subscription_tier") or "free"),
+            candidate.get("limits") if isinstance(candidate.get("limits"), dict) else None,
+        )
+        current_score = (
+            int(current_limits.get("daily_prompts") or 0),
+            int(current_limits.get("weekly_prompts") or 0),
+        )
+        candidate_score = (
+            int(candidate_limits.get("daily_prompts") or 0),
+            int(candidate_limits.get("weekly_prompts") or 0),
+        )
+        return candidate if candidate_score > current_score else current
 
     def ensure_usage_state(
         self,

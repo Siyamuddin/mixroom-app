@@ -26,7 +26,7 @@ class GooglePlayTests(unittest.TestCase):
                 },
                 "lineItems": [
                     {
-                        "productId": "mixroom_pro_monthly",
+                        "productId": "mixroom_producer_monthly",
                         "expiryTime": "2099-04-20T00:00:00+00:00",
                         "basePlanId": "monthly",
                         "offerId": "launch",
@@ -61,7 +61,7 @@ class GooglePlayTests(unittest.TestCase):
                 },
                 "lineItems": [
                     {
-                        "productId": "mixroom_pro_monthly",
+                        "productId": "mixroom_producer_monthly",
                         "expiryTime": "2099-04-20T00:00:00+00:00",
                     }
                 ],
@@ -73,6 +73,160 @@ class GooglePlayTests(unittest.TestCase):
                     purchase_token="purchase-token",
                     package_name="ai.mixroom.test",
                     expected_user_id="user-1",
+                )
+
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_verify_google_purchase_resolves_user_from_linked_purchase_token(self):
+        self.repo.put_purchase_token(
+            "google",
+            "old-token",
+            {
+                "user_id": "user-1",
+                "subscription_id": "old-order",
+                "product_id": "mixroom_starter_monthly",
+            },
+        )
+        with mock.patch.object(
+            module,
+            "_fetch_subscription_purchase",
+            return_value={
+                "subscriptionState": "SUBSCRIPTION_STATE_ACTIVE",
+                "startTime": "2026-03-20T00:00:00+00:00",
+                "latestOrderId": "new-order",
+                "linkedPurchaseToken": "old-token",
+                "lineItems": [
+                    {
+                        "productId": "mixroom_producer_monthly",
+                        "expiryTime": "2099-04-20T00:00:00+00:00",
+                    }
+                ],
+            },
+        ):
+            result = module.verify_google_purchase(
+                self.repo,
+                purchase_token="new-token",
+                package_name="ai.mixroom.test",
+            )
+
+        self.assertEqual(result["user_id"], "user-1")
+        self.assertEqual(
+            self.repo.get_purchase_token("google", "new-token")["user_id"],
+            "user-1",
+        )
+
+    def test_verify_google_purchase_reclaims_expired_linked_purchase_token(self):
+        self.repo.put_purchase_token(
+            "google",
+            "old-token",
+            {
+                "user_id": "old-user",
+                "subscription_id": "old-order",
+                "product_id": "mixroom_starter_monthly",
+            },
+        )
+        self.repo.put_entitlement(
+            {
+                "user_id": "old-user",
+                "plan_code": "starter",
+                "status": "expired",
+                "source_provider": "google",
+                "source_subscription_id": "old-order",
+                "capabilities": {},
+                "management_channel": "google",
+                "revision": 2,
+            }
+        )
+        self.repo.upsert_subscription(
+            {
+                "subscription_id": "old-order",
+                "user_id": "old-user",
+                "provider": "google",
+                "plan_code": "starter",
+                "status": "expired",
+                "expires_at": "2026-01-01T00:00:00+00:00",
+            }
+        )
+        with mock.patch.object(
+            module,
+            "_fetch_subscription_purchase",
+            return_value={
+                "subscriptionState": "SUBSCRIPTION_STATE_ACTIVE",
+                "startTime": "2026-03-20T00:00:00+00:00",
+                "latestOrderId": "new-order",
+                "linkedPurchaseToken": "old-token",
+                "externalAccountIdentifiers": {
+                    "obfuscatedExternalAccountId": "new-user",
+                },
+                "lineItems": [
+                    {
+                        "productId": "mixroom_producer_monthly",
+                        "expiryTime": "2099-04-20T00:00:00+00:00",
+                    }
+                ],
+            },
+        ):
+            result = module.verify_google_purchase(
+                self.repo,
+                purchase_token="new-token",
+                package_name="ai.mixroom.test",
+                expected_user_id="new-user",
+            )
+
+        self.assertEqual(result["user_id"], "new-user")
+        self.assertEqual(result["normalized"]["reclaimed_from_user_id"], "old-user")
+        self.assertEqual(
+            self.repo.get_purchase_token("google", "new-token")["user_id"],
+            "new-user",
+        )
+
+    def test_verify_google_purchase_blocks_reclaim_when_old_link_has_access(self):
+        self.repo.put_purchase_token(
+            "google",
+            "old-token",
+            {
+                "user_id": "old-user",
+                "subscription_id": "old-order",
+                "product_id": "mixroom_starter_monthly",
+            },
+        )
+        self.repo.put_entitlement(
+            {
+                "user_id": "old-user",
+                "plan_code": "starter",
+                "status": "active",
+                "expires_at": "2099-04-20T00:00:00+00:00",
+                "source_provider": "google",
+                "source_subscription_id": "old-order",
+                "capabilities": {},
+                "management_channel": "google",
+                "revision": 2,
+            }
+        )
+        with mock.patch.object(
+            module,
+            "_fetch_subscription_purchase",
+            return_value={
+                "subscriptionState": "SUBSCRIPTION_STATE_ACTIVE",
+                "latestOrderId": "new-order",
+                "linkedPurchaseToken": "old-token",
+                "externalAccountIdentifiers": {
+                    "obfuscatedExternalAccountId": "new-user",
+                },
+                "lineItems": [
+                    {
+                        "productId": "mixroom_producer_monthly",
+                        "expiryTime": "2099-04-20T00:00:00+00:00",
+                    }
+                ],
+            },
+        ):
+            with self.assertRaises(module.ProviderVerificationError) as ctx:
+                module.verify_google_purchase(
+                    self.repo,
+                    purchase_token="new-token",
+                    package_name="ai.mixroom.test",
+                    expected_user_id="new-user",
                 )
 
         self.assertEqual(ctx.exception.status_code, 409)
@@ -100,7 +254,7 @@ class GooglePlayTests(unittest.TestCase):
                 "normalized": {
                     "provider": "google",
                     "subscription_id": "sub-1",
-                    "tier": "pro",
+                    "plan_code": "producer",
                     "status": "active",
                     "source_occurred_at": "2026-03-20T00:00:00+00:00",
                 },
@@ -128,7 +282,7 @@ class GooglePlayTests(unittest.TestCase):
             {
                 "user_id": "user-1",
                 "subscription_id": "sub-1",
-                "product_id": "mixroom_pro_monthly",
+                "product_id": "mixroom_producer_monthly",
                 "package_name": "ai.mixroom.test",
             },
         )

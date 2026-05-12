@@ -12,10 +12,6 @@ Parameters:
   CognitoAppClientId:
     Type: String
     Default: ''
-  AllowStudioTier:
-    Type: String
-    AllowedValues: ['true', 'false']
-    Default: 'false'
   AiUsageStateTableName:
     Type: String
     Default: ''
@@ -213,6 +209,25 @@ Parameters:
   AlarmTopicArn:
     Type: String
     Default: ''
+  CloudProjectStorageProvider:
+    Type: String
+    AllowedValues: ['s3', 'r2']
+    Default: 's3'
+  CloudProjectR2BucketName:
+    Type: String
+    Default: ''
+  CloudProjectR2AccountId:
+    Type: String
+    Default: ''
+  CloudProjectR2EndpointUrl:
+    Type: String
+    Default: ''
+  CloudProjectR2AccessKeyId:
+    Type: String
+    Default: ''
+  CloudProjectR2SecretAccessKeySecretArn:
+    Type: String
+    Default: ''
 
 Conditions:
   ApiDetailedMetricsEnabledCondition: !Equals [!Ref ApiDetailedMetricsEnabled, 'true']
@@ -234,6 +249,8 @@ Conditions:
   HasTossWebhookSecretArn: !Not [!Equals [!Ref TossWebhookSecretArn, '']]
   HasAlarmTopicArn: !Not [!Equals [!Ref AlarmTopicArn, '']]
   HasPostHogPersonalApiKeySecretArn: !Not [!Equals [!Ref PostHogPersonalApiKeySecretArn, '']]
+  IsCloudProjectR2Storage: !Equals [!Ref CloudProjectStorageProvider, 'r2']
+  HasCloudProjectR2SecretAccessKeySecretArn: !Not [!Equals [!Ref CloudProjectR2SecretAccessKeySecretArn, '']]
   HasBillingSecrets: !Or
     - !Condition HasAppleRootCaSecretArn
     - !Condition HasAppleSharedSecretSecretArn
@@ -267,6 +284,7 @@ Globals:
         RECONCILIATION_JOBS_TABLE: !Ref ReconciliationJobsTable
         PROJECTION_QUEUE_URL: !Ref BillingProjectionQueue
         USER_TOMBSTONES_TABLE: !Ref UserTombstonesTable
+        ADMIN_ENTITLEMENT_OVERRIDES_TABLE: !Ref AdminEntitlementOverridesTable
         SOCIAL_AUTH_SECRET_ARN: !Ref SocialAuthSecretArn
         APP_AUTH_SECRET_ARN: !Ref AppAuthSecretArn
         APP_AUTH_ISSUER: !Ref AppAuthIssuer
@@ -278,7 +296,6 @@ Globals:
         POSTMARK_MESSAGE_STREAM: !Ref PostmarkMessageStream
         APP_AUTH_ACCESS_TOKEN_TTL_SECONDS: !Ref AppAuthAccessTokenTtlSeconds
         APP_AUTH_REFRESH_TOKEN_TTL_SECONDS: !Ref AppAuthRefreshTokenTtlSeconds
-        ALLOW_STUDIO_TIER: !Ref AllowStudioTier
         SECRET_CACHE_TTL_SECONDS: !Ref SecretCacheTtlSeconds
         HTTP_TIMEOUT_SECONDS: !Ref HttpTimeoutSeconds
         APP_API_MAX_REQUEST_BYTES: !Ref AppApiMaxRequestBytes
@@ -300,7 +317,15 @@ Globals:
         POSTHOG_HOST: !Ref PostHogHost
         SENTRY_DSN: !Ref SentryDsn
         ENVIRONMENT: !Ref StageName
-        CLOUD_PROJECT_DOCUMENTS_BUCKET: !Ref CloudProjectDocumentsBucket
+        CLOUD_PROJECT_DOCUMENTS_BUCKET: !If
+          - IsCloudProjectR2Storage
+          - !Ref CloudProjectR2BucketName
+          - !Ref CloudProjectDocumentsBucket
+        CLOUD_PROJECT_STORAGE_PROVIDER: !Ref CloudProjectStorageProvider
+        CLOUD_PROJECT_R2_ACCOUNT_ID: !Ref CloudProjectR2AccountId
+        CLOUD_PROJECT_R2_ENDPOINT_URL: !Ref CloudProjectR2EndpointUrl
+        CLOUD_PROJECT_R2_ACCESS_KEY_ID: !Ref CloudProjectR2AccessKeyId
+        CLOUD_PROJECT_R2_SECRET_ACCESS_KEY_SECRET_ARN: !Ref CloudProjectR2SecretAccessKeySecretArn
 
 Resources:
   BillingApi:
@@ -782,6 +807,46 @@ Resources:
         - AttributeName: deleted_at
           KeyType: RANGE
 
+  AdminEntitlementOverridesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub mixroom-admin-entitlement-overrides-${StageName}
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: override_id
+          AttributeType: S
+        - AttributeName: target_user_id
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+        - AttributeName: admin_email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: override_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: target_user_created_idx
+          KeySchema:
+            - AttributeName: target_user_id
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: admin_created_idx
+          KeySchema:
+            - AttributeName: admin_email
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
   FeedbackSubmissionsTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -841,6 +906,16 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpirePendingCloudProjectUploads
+            Status: Enabled
+            Prefix: pending-uploads/
+            ExpirationInDays: 1
+          - Id: ExpireNoncurrentCloudProjectVersions
+            Status: Enabled
+            Prefix: users/
+            NoncurrentVersionExpirationInDays: 30
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -849,6 +924,15 @@ Resources:
       OwnershipControls:
         Rules:
           - ObjectOwnership: BucketOwnerEnforced
+      Tags:
+        - Key: DataCategory
+          Value: cloud-projects
+        - Key: DataClassification
+          Value: user-content
+        - Key: ContainsUserData
+          Value: 'true'
+        - Key: RetentionModel
+          Value: user-controlled
 
   EntitlementApiFunction:
     Type: AWS::Serverless::Function
@@ -912,10 +996,33 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref CollaborationTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EntitlementsCurrentTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CatalogMappingsTable
         - S3CrudPolicy:
             BucketName: !Ref CloudProjectDocumentsBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:ListBucketVersions
+              Resource: !Sub arn:${AWS::Partition}:s3:::${CloudProjectDocumentsBucket}
+            - Effect: Allow
+              Action:
+                - s3:DeleteObjectVersion
+              Resource: !Sub arn:${AWS::Partition}:s3:::${CloudProjectDocumentsBucket}/*
+        - !If
+          - HasCloudProjectR2SecretAccessKeySecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref CloudProjectR2SecretAccessKeySecretArn
+          - !Ref AWS::NoValue
         - DynamoDBReadPolicy:
             TableName: !Ref AuthAccountsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
         - DynamoDBCrudPolicy:
             TableName: !Ref AuthSessionsTable
         - Statement:
@@ -923,6 +1030,14 @@ Resources:
               Action:
                 - secretsmanager:GetSecretValue
               Resource: !Ref AppAuthSecretArn
+        - !If
+          - HasPostmarkServerTokenSecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref PostmarkServerTokenSecretArn
+          - !Ref AWS::NoValue
       Events:
         OrganizationsMe:
           Type: Api
@@ -930,6 +1045,36 @@ Resources:
             RestApiId: !Ref BillingApi
             Path: /v1/organizations/me
             Method: get
+        EducationMe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/education/me
+            Method: get
+        EducationInvites:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/education/me/invites
+            Method: post
+        EducationMemberships:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/education/me/memberships
+            Method: post
+        EducationInviteGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/education/invites/{invite_token}
+            Method: get
+        EducationInviteAccept:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/education/invites/{invite_token}/accept
+            Method: post
         WorkspacesMe:
           Type: Api
           Properties:
@@ -942,6 +1087,12 @@ Resources:
             RestApiId: !Ref BillingApi
             Path: /v1/cloud-projects/me
             Method: get
+        CloudProjectsMePost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/cloud-projects/me
+            Method: post
         CloudProjectDetailGet:
           Type: Api
           Properties:
@@ -954,6 +1105,24 @@ Resources:
             RestApiId: !Ref BillingApi
             Path: /v1/cloud-projects/{project_id}
             Method: put
+        CloudProjectDetailDelete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/cloud-projects/{project_id}
+            Method: delete
+        CloudProjectUploadComplete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/cloud-projects/{project_id}/complete
+            Method: post
+        CloudProjectDownload:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/cloud-projects/{project_id}/download
+            Method: get
 
   UsersApiFunction:
     Type: AWS::Serverless::Function
@@ -1319,11 +1488,15 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref SubscriptionsTable
         - DynamoDBCrudPolicy:
+            TableName: !Ref CollaborationTable
+        - DynamoDBCrudPolicy:
             TableName: !Ref CustomerLinksTable
         - DynamoDBCrudPolicy:
             TableName: !Ref PurchaseTokensTable
         - DynamoDBCrudPolicy:
             TableName: !Ref UserTombstonesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AdminEntitlementOverridesTable
         - !If
           - HasAiUsageStateTableName
           - DynamoDBCrudPolicy:
@@ -1356,6 +1529,12 @@ Resources:
             RestApiId: !Ref BillingApi
             Path: /v1/internal/admin/users/grant-prompts
             Method: post
+        AdminUsersEntitlementOverride:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/users/entitlement-override
+            Method: post
 
   AdminBillingApiFunction:
     Type: AWS::Serverless::Function
@@ -1382,6 +1561,14 @@ Resources:
             TableName: !Ref CollaborationTable
         - S3CrudPolicy:
             BucketName: !Ref CloudProjectDocumentsBucket
+        - !If
+          - HasCloudProjectR2SecretAccessKeySecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref CloudProjectR2SecretAccessKeySecretArn
+          - !Ref AWS::NoValue
       Events:
         AdminBillingCatalogGet:
           Type: Api
@@ -1406,6 +1593,12 @@ Resources:
           Properties:
             RestApiId: !Ref BillingApi
             Path: /v1/internal/admin/billing/organizations
+            Method: post
+        AdminBillingEducationProvisioningPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/billing/education-provisioning
             Method: post
         AdminBillingMembershipsGet:
           Type: Api
@@ -1683,6 +1876,12 @@ Resources:
             TableName: !Ref BillingEventsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CatalogMappingsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CustomerLinksTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PurchaseTokensTable
         - SQSSendMessagePolicy:
             QueueName: !GetAtt BillingProjectionQueue.QueueName
         - !If
@@ -1769,6 +1968,8 @@ Resources:
             TableName: !Ref SubscriptionsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref EntitlementsCurrentTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CollaborationTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ReconciliationJobsTable
       Events:
@@ -2210,6 +2411,8 @@ Outputs:
     Value: !Ref SubscriptionsTable
   EntitlementsCurrentTableName:
     Value: !Ref EntitlementsCurrentTable
+  AdminEntitlementOverridesTableName:
+    Value: !Ref AdminEntitlementOverridesTable
   UsersTableName:
     Value: !Ref UsersTable
   UsernameClaimsTableName:

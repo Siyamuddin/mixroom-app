@@ -8,29 +8,44 @@ class IapConfig {
     defaultValue: false,
   );
 
-  static const String appleProMonthlyProductId = String.fromEnvironment(
-    'IAP_APPLE_PRO_MONTHLY_PRODUCT_ID',
-    defaultValue: 'mixroom_pro_monthly',
+  static const String appleStarterMonthlyProductId = String.fromEnvironment(
+    'IAP_APPLE_STARTER_MONTHLY_PRODUCT_ID',
+    defaultValue: 'mixroom_starter_monthly',
   );
 
-  static const String googleProMonthlyProductId = String.fromEnvironment(
-    'IAP_GOOGLE_PRO_MONTHLY_PRODUCT_ID',
-    defaultValue: 'mixroom_pro_monthly',
+  static const String appleStarterYearlyProductId = String.fromEnvironment(
+    'IAP_APPLE_STARTER_YEARLY_PRODUCT_ID',
+    defaultValue: 'mixroom_starter_yearly',
   );
 
-  static const bool includeStudioTier = bool.fromEnvironment(
-    'IAP_INCLUDE_STUDIO_TIER',
-    defaultValue: false,
+  static const String googleStarterMonthlyProductId = String.fromEnvironment(
+    'IAP_GOOGLE_STARTER_MONTHLY_PRODUCT_ID',
+    defaultValue: 'mixroom_starter_monthly',
   );
 
-  static const String appleStudioMonthlyProductId = String.fromEnvironment(
-    'IAP_APPLE_STUDIO_MONTHLY_PRODUCT_ID',
-    defaultValue: 'mixroom_studio_monthly',
+  static const String googleStarterYearlyProductId = String.fromEnvironment(
+    'IAP_GOOGLE_STARTER_YEARLY_PRODUCT_ID',
+    defaultValue: 'mixroom_starter_yearly',
   );
 
-  static const String googleStudioMonthlyProductId = String.fromEnvironment(
-    'IAP_GOOGLE_STUDIO_MONTHLY_PRODUCT_ID',
-    defaultValue: 'mixroom_studio_monthly',
+  static const String appleProducerMonthlyProductId = String.fromEnvironment(
+    'IAP_APPLE_PRODUCER_MONTHLY_PRODUCT_ID',
+    defaultValue: 'mixroom_producer_monthly',
+  );
+
+  static const String appleProducerYearlyProductId = String.fromEnvironment(
+    'IAP_APPLE_PRODUCER_YEARLY_PRODUCT_ID',
+    defaultValue: 'mixroom_producer_yearly',
+  );
+
+  static const String googleProducerMonthlyProductId = String.fromEnvironment(
+    'IAP_GOOGLE_PRODUCER_MONTHLY_PRODUCT_ID',
+    defaultValue: 'mixroom_producer_monthly',
+  );
+
+  static const String googleProducerYearlyProductId = String.fromEnvironment(
+    'IAP_GOOGLE_PRODUCER_YEARLY_PRODUCT_ID',
+    defaultValue: 'mixroom_producer_yearly',
   );
 
   static bool get isMobileTarget =>
@@ -41,12 +56,20 @@ class IapConfig {
     final ids = <String>{};
     switch (defaultTargetPlatform) {
       case TargetPlatform.iOS:
-        ids.add(appleProMonthlyProductId);
-        if (includeStudioTier) ids.add(appleStudioMonthlyProductId);
+        ids.addAll({
+          appleStarterMonthlyProductId,
+          appleStarterYearlyProductId,
+          appleProducerMonthlyProductId,
+          appleProducerYearlyProductId,
+        });
         break;
       case TargetPlatform.android:
-        ids.add(googleProMonthlyProductId);
-        if (includeStudioTier) ids.add(googleStudioMonthlyProductId);
+        ids.addAll({
+          googleStarterMonthlyProductId,
+          googleStarterYearlyProductId,
+          googleProducerMonthlyProductId,
+          googleProducerYearlyProductId,
+        });
         break;
       default:
         break;
@@ -57,9 +80,9 @@ class IapConfig {
   static String primaryProductIdForCurrentPlatform() {
     switch (defaultTargetPlatform) {
       case TargetPlatform.iOS:
-        return appleProMonthlyProductId;
+        return appleProducerMonthlyProductId;
       case TargetPlatform.android:
-        return googleProMonthlyProductId;
+        return googleProducerMonthlyProductId;
       default:
         return '';
     }

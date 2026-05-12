@@ -54,7 +54,7 @@ class WebhookHandlerTests(unittest.TestCase):
                 "normalized": {
                     "provider": "apple",
                     "subscription_id": "sub-1",
-                    "tier": "pro",
+                    "plan_code": "producer",
                     "status": "active",
                     "source_occurred_at": "2026-03-20T00:00:00+00:00",
                 },
@@ -84,7 +84,7 @@ class WebhookHandlerTests(unittest.TestCase):
                 "normalized": {
                     "provider": "google",
                     "subscription_id": "sub-1",
-                    "tier": "pro",
+                    "plan_code": "producer",
                     "status": "active",
                     "source_occurred_at": "2026-03-21T00:00:00+00:00",
                 },

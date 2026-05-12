@@ -40,7 +40,7 @@ void showAppSnackBar(
   messenger.showSnackBar(
     SnackBar(
       behavior: SnackBarBehavior.floating,
-      backgroundColor: const Color.fromRGBO(70, 80, 95, 0.86),
+      backgroundColor: const Color.fromRGBO(50, 58, 70, 0.96),
       elevation: 0,
       showCloseIcon: true,
       closeIconColor: const Color(0xFFF4F4F4),
@@ -105,4 +105,102 @@ Future<void> showAppMessageDialog({
       ],
     ),
   );
+}
+
+Future<void> showAppUpgradeDialog({
+  required BuildContext context,
+  required String title,
+  required String message,
+  String primaryLabel = 'View plans',
+  String secondaryLabel = 'Not now',
+  IconData icon = Icons.lock_outline_rounded,
+  VoidCallback? onUpgrade,
+}) async {
+  if (!context.mounted) return;
+  final action = await showDialog<bool>(
+    context: context,
+    barrierColor: Colors.black.withValues(alpha: 0.58),
+    builder: (_) {
+      return AlertDialog(
+        backgroundColor: const Color(0xFF5F666D),
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+          side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+        ),
+        titlePadding: const EdgeInsets.fromLTRB(22, 22, 22, 8),
+        contentPadding: const EdgeInsets.fromLTRB(22, 0, 22, 8),
+        actionsPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+        title: Row(
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.11),
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+              ),
+              child: Icon(icon, color: Colors.white, size: 18),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                L10n.translate(context, title),
+                style: const TextStyle(
+                  fontFamily: 'Pretendard',
+                  color: Color(0xFFF4F4F4),
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  height: 1.15,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          L10n.translate(context, message),
+          style: TextStyle(
+            fontFamily: 'Pretendard',
+            color: Colors.white.withValues(alpha: 0.82),
+            fontSize: 13.5,
+            fontWeight: FontWeight.w500,
+            height: 1.35,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(
+              L10n.translate(context, secondaryLabel),
+              style: TextStyle(
+                fontFamily: 'Pretendard',
+                color: Colors.white.withValues(alpha: 0.72),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF258AE6),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(18),
+              ),
+              textStyle: const TextStyle(
+                fontFamily: 'Pretendard',
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(L10n.translate(context, primaryLabel)),
+          ),
+        ],
+      );
+    },
+  );
+  if (action == true) {
+    onUpgrade?.call();
+  }
 }

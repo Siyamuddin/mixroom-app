@@ -99,6 +99,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 payload = catalog_repo.replace_catalog(
                     plans=body.get("plans"),
                     products=body.get("products"),
+                    provider_products=body.get("provider_products"),
                     offers=body.get("offers"),
                     support=body.get("support"),
                     updated_by_user_id=admin_user_id,
@@ -125,6 +126,16 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     updated_by_email=admin_email,
                 )
                 return _finalize(json_response(200, {"organization": organization}))
+
+        if path.endswith("/v1/internal/admin/billing/education-provisioning"):
+            if method == "POST":
+                body = parse_json_body(event)
+                payload = collaboration_repo.provision_education_organization(
+                    body,
+                    updated_by_user_id=admin_user_id,
+                    updated_by_email=admin_email,
+                )
+                return _finalize(json_response(200, payload))
 
         if path.endswith("/v1/internal/admin/billing/memberships"):
             if method == "GET":

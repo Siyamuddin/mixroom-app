@@ -3,7 +3,6 @@ from __future__ import annotations
 import time
 from typing import Any, Dict
 
-from common import config
 from common.auth import extract_user_id_from_event, json_response, unauthorized
 from common.billing_catalog import (
     catalog_plan_by_code,
@@ -18,9 +17,10 @@ from common.monitoring import capture_exception, init_sentry
 from common.models import (
     entitlement_capabilities_for_status,
     free_entitlement,
+    legacy_tier_for_plan_code,
     normalize_status,
-    normalize_tier,
     status_has_active_access,
+    subscription_effective_status,
 )
 from common.repository import BillingRepository
 
@@ -28,6 +28,34 @@ repo = BillingRepository()
 catalog_repo = BillingCatalogRepository()
 collaboration_repo = CollaborationRepository()
 init_sentry("mixroom-app-api-entitlements")
+
+
+def _empty_collaboration_snapshot() -> Dict[str, Any]:
+    return {
+        "organizations": [],
+        "memberships": [],
+        "workspaces": [],
+        "cloud_projects": [],
+        "summary": {
+            "organization_count": 0,
+            "workspace_count": 0,
+            "cloud_project_count": 0,
+        },
+    }
+
+
+def _safe_collaboration_snapshot(user_id: str) -> Dict[str, Any]:
+    try:
+        return collaboration_repo.build_user_access_snapshot(user_id)
+    except Exception as exc:
+        capture_exception(
+            exc,
+            tags={
+                "service": "subscriptions_entitlements",
+                "dependency": "collaboration",
+            },
+        )
+        return _empty_collaboration_snapshot()
 
 
 def _coerce_bool_map(raw: Any) -> Dict[str, bool]:
@@ -40,6 +68,22 @@ def _coerce_bool_map(raw: Any) -> Dict[str, bool]:
     }
 
 
+def _plan_rank(plan: Dict[str, Any]) -> int:
+    try:
+        return int(plan.get("rank") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _explicit_limit_overrides(raw: Dict[str, Any]) -> Dict[str, Any]:
+    overrides = raw.get("limit_overrides")
+    if isinstance(overrides, dict):
+        return overrides
+    if raw.get("limits_are_overrides") is True and isinstance(raw.get("limits"), dict):
+        return raw["limits"]
+    return {}
+
+
 def _active_org_access(
     snapshot: Dict[str, Any],
     catalog: Dict[str, Any],
@@ -49,28 +93,29 @@ def _active_org_access(
     access_sources: list[Dict[str, Any]] = []
     organizations: list[Dict[str, Any]] = []
     for organization in snapshot.get("organizations") or []:
-        if str(organization.get("status") or "").strip().lower() != "active":
+        org_status = str(organization.get("status") or "").strip().lower()
+        org_is_active = org_status in {"active", "past_due"}
+        org_is_visible = org_is_active or org_status in {"locked", "suspended"}
+        if not org_is_visible:
             continue
         if str(organization.get("membership_status") or "").strip().lower() != "active":
             continue
-        plan_code = infer_plan_code(
-            organization.get("plan_code"),
-            organization.get("legacy_tier"),
-        )
+        plan_code = str(organization.get("plan_code") or "").strip().lower() or infer_plan_code("")
         plan = catalog_plan_by_code(plan_code, catalog=catalog)
-        capabilities = merge_capabilities(capabilities, plan.get("capabilities") or {})
-        limits = merge_limits(limits, plan.get("limits") or {})
-        access_sources.append(
-            {
-                "source_type": "organization",
-                "organization_id": organization.get("organization_id"),
-                "organization_name": organization.get("name"),
-                "role": organization.get("membership_role"),
-                "plan_code": plan.get("code"),
-                "plan_label": plan.get("label"),
-                "plan_group": plan.get("group"),
-            }
-        )
+        if org_is_active:
+            capabilities = merge_capabilities(capabilities, plan.get("capabilities") or {})
+            limits = merge_limits(limits, plan.get("limits") or {})
+            access_sources.append(
+                {
+                    "source_type": "organization",
+                    "organization_id": organization.get("organization_id"),
+                    "organization_name": organization.get("name"),
+                    "role": organization.get("membership_role"),
+                    "plan_code": plan.get("code"),
+                    "plan_label": plan.get("label"),
+                    "plan_group": plan.get("group"),
+                }
+            )
         organizations.append(
             {
                 "organization_id": organization.get("organization_id"),
@@ -80,6 +125,18 @@ def _active_org_access(
                 "plan_group": plan.get("group"),
                 "role": organization.get("membership_role"),
                 "status": organization.get("status"),
+                "membership_status": organization.get("membership_status"),
+                "seat_limit": organization.get("seat_limit"),
+                "seats_used": organization.get("seats_used"),
+                "seats_active": organization.get("seats_active"),
+                "seats_invited": organization.get("seats_invited"),
+                "seats_available": organization.get("seats_available"),
+                "shared_workspace_enabled": organization.get("shared_workspace_enabled"),
+                "support_notes": organization.get("support_notes"),
+                "can_write": organization.get("can_write"),
+                "access_status": organization.get("access_status"),
+                "locked_at": organization.get("locked_at"),
+                "retention_expires_at": organization.get("retention_expires_at"),
             }
         )
     return capabilities, limits, access_sources, organizations
@@ -87,46 +144,64 @@ def _active_org_access(
 
 def _normalize_entitlement(raw: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     catalog = catalog_repo.get_catalog()
-    collaboration = collaboration_repo.build_user_access_snapshot(user_id)
-    tier = normalize_tier(str(raw.get("tier") or "free"))
-    status = normalize_status(str(raw.get("status") or "active"))
-    plan_code = infer_plan_code(raw.get("plan_code"), tier)
-    plan = catalog_plan_by_code(plan_code, catalog=catalog)
+    collaboration = _safe_collaboration_snapshot(user_id)
+    personal_status = subscription_effective_status(raw)
+    personal_plan_code = infer_plan_code(raw.get("plan_code") or raw.get("tier") or "")
+    personal_plan = catalog_plan_by_code(personal_plan_code, catalog=catalog)
     free_plan = catalog_plan_by_code("free", catalog=catalog)
-    personal_active = status_has_active_access(status)
+    personal_active = status_has_active_access(personal_status)
 
     personal_capabilities = _coerce_bool_map(raw.get("capabilities"))
     if not personal_capabilities or not personal_active:
         personal_capabilities = entitlement_capabilities_for_status(
-            tier,
-            status,
-            config.ALLOW_STUDIO_TIER,
+            personal_plan_code,
+            personal_status,
         )
     personal_capabilities = merge_capabilities(
-        plan.get("capabilities") or {},
+        personal_plan.get("capabilities") or {},
         personal_capabilities,
     )
     effective_capabilities = merge_capabilities(free_plan.get("capabilities") or {})
     effective_limits = merge_limits(free_plan.get("limits") or {})
     access_sources = []
+    effective_plan = free_plan
+    effective_status = "active"
+    effective_source_provider = "admin_grant"
+    effective_source_subscription_id = "free-default"
+    effective_management_channel = "free"
+    effective_expires_at = None
+    effective_product_code = ""
 
     if personal_active:
+        effective_plan = personal_plan
+        effective_status = personal_status
+        effective_source_provider = raw.get("source_provider") or "admin_grant"
+        effective_source_subscription_id = (
+            raw.get("source_subscription_id") or "free-default"
+        )
+        effective_management_channel = raw.get("management_channel") or "free"
+        effective_expires_at = raw.get("expires_at")
+        effective_product_code = raw.get("product_code") or ""
         effective_capabilities = merge_capabilities(
             effective_capabilities,
             personal_capabilities,
         )
         effective_limits = merge_limits(
             effective_limits,
-            plan.get("limits") or {},
-            raw.get("limits") if isinstance(raw.get("limits"), dict) else {},
+            personal_plan.get("limits") or {},
+            _explicit_limit_overrides(raw),
         )
         access_sources.append(
             {
                 "source_type": "personal",
-                "plan_code": plan.get("code"),
-                "plan_label": plan.get("label"),
-                "plan_group": plan.get("group"),
-                "status": status,
+                "plan_code": personal_plan.get("code"),
+                "plan_label": personal_plan.get("label"),
+                "plan_group": personal_plan.get("group"),
+                "status": personal_status,
+                "source_provider": raw.get("source_provider") or "admin_grant",
+                "source_subscription_id": raw.get("source_subscription_id") or "free-default",
+                "management_channel": raw.get("management_channel") or "free",
+                "product_code": raw.get("product_code") or "",
             }
         )
 
@@ -143,21 +218,34 @@ def _normalize_entitlement(raw: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         org_limits,
     )
     access_sources.extend(org_access_sources)
+    for source in org_access_sources:
+        source_plan = catalog_plan_by_code(source.get("plan_code") or "", catalog=catalog)
+        if _plan_rank(source_plan) > _plan_rank(effective_plan):
+            effective_plan = source_plan
+            effective_status = "active"
+            effective_source_provider = "admin_grant"
+            effective_source_subscription_id = (
+                source.get("organization_id") or effective_source_subscription_id
+            )
+            effective_management_channel = "admin"
+            effective_expires_at = None
+            effective_product_code = ""
 
     snapshot = {
         "user_id": user_id,
-        "tier": tier,
-        "status": status,
+        "tier": legacy_tier_for_plan_code(effective_plan.get("code")),
+        "status": normalize_status(effective_status),
         "effective_at": raw.get("effective_at"),
-        "expires_at": raw.get("expires_at"),
-        "source_provider": raw.get("source_provider") or "admin_grant",
-        "source_subscription_id": raw.get("source_subscription_id") or "free-default",
+        "expires_at": effective_expires_at,
+        "source_provider": effective_source_provider,
+        "source_subscription_id": effective_source_subscription_id,
         "capabilities": effective_capabilities,
-        "management_channel": raw.get("management_channel") or "free",
+        "management_channel": effective_management_channel,
         "revision": int(raw.get("revision") or 0),
-        "plan_code": plan.get("code"),
-        "plan_label": plan.get("label"),
-        "plan_group": plan.get("group"),
+        "plan_code": effective_plan.get("code"),
+        "plan_label": effective_plan.get("label"),
+        "plan_group": effective_plan.get("group"),
+        "product_code": effective_product_code,
         "limits": effective_limits,
         "access_sources": access_sources,
         "workspace_access_summary": collaboration.get("summary") or {},
@@ -189,7 +277,6 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         if not existing:
             default_snapshot = free_entitlement(
                 user_id=user_id,
-                allow_studio_tier=config.ALLOW_STUDIO_TIER,
             ).to_dict()
             repo.put_entitlement(default_snapshot)
             return _finalize(

@@ -21,7 +21,8 @@ from . import billing_catalog, config
 
 _PLAN_PREFIX = "billing_plan#"
 _PRODUCT_PREFIX = "billing_product#"
-_OFFER_PREFIX = "billing_offer#"
+_PROVIDER_PRODUCT_PREFIX = "billing_provider_product#"
+_LEGACY_OFFER_PREFIX = "billing_offer#"
 _SUPPORT_KEY = "billing_support#default"
 
 
@@ -49,7 +50,7 @@ class BillingCatalogRepository:
 
         remote_plans: Dict[str, Dict[str, Any]] = {}
         remote_products: Dict[str, Dict[str, Any]] = {}
-        remote_offers: Dict[str, Dict[str, Any]] = {}
+        remote_provider_products: Dict[str, Dict[str, Any]] = {}
         support = billing_catalog.default_support_settings()
         updated_at = ""
 
@@ -65,10 +66,10 @@ class BillingCatalogRepository:
                 code = _safe_str(item.get("code") or payload.get("code")).lower()
                 if code:
                     remote_products[code] = payload
-            elif key.startswith(_OFFER_PREFIX):
+            elif key.startswith(_PROVIDER_PRODUCT_PREFIX) or key.startswith(_LEGACY_OFFER_PREFIX):
                 code = _safe_str(item.get("code") or payload.get("code")).lower()
                 if code:
-                    remote_offers[code] = payload
+                    remote_provider_products[code] = payload
             elif key == _SUPPORT_KEY:
                 support = billing_catalog.normalize_support_settings(payload)
 
@@ -97,15 +98,18 @@ class BillingCatalogRepository:
         }
         products_by_code.update(remote_products)
 
-        offers_by_code = {
-            item["code"]: item for item in billing_catalog.default_catalog()["offers"]
+        provider_products_by_code = {
+            item["code"]: item
+            for item in billing_catalog.default_catalog()["provider_products"]
         }
-        offers_by_code.update(remote_offers)
+        provider_products_by_code.update(remote_provider_products)
 
         return {
             "plans": billing_catalog.sort_plans(plans_by_code.values()),
             "products": billing_catalog.sort_products(products_by_code.values()),
-            "offers": billing_catalog.sort_offers(offers_by_code.values()),
+            "provider_products": billing_catalog.sort_provider_products(
+                provider_products_by_code.values()
+            ),
             "support": support,
             "configurable": True,
             "updated_at": updated_at,
@@ -120,7 +124,8 @@ class BillingCatalogRepository:
         *,
         plans: Any,
         products: Any,
-        offers: Any,
+        provider_products: Any = None,
+        offers: Any = None,
         support: Any,
         updated_by_user_id: str,
         updated_by_email: str,
@@ -131,6 +136,7 @@ class BillingCatalogRepository:
         normalized = billing_catalog.normalize_catalog_payload(
             plans=plans,
             products=products,
+            provider_products=provider_products,
             offers=offers,
             support=support,
         )
@@ -193,13 +199,15 @@ class BillingCatalogRepository:
                     "updated_by_email": actor_email,
                 }
             )
-        for offer in normalized.get("offers") or []:
+        for provider_product in normalized.get("provider_products") or []:
             items.append(
                 {
-                    "provider_product_key": f"{_OFFER_PREFIX}{offer['code']}",
-                    "kind": "offer",
-                    "code": offer["code"],
-                    "payload": offer,
+                    "provider_product_key": (
+                        f"{_PROVIDER_PRODUCT_PREFIX}{provider_product['code']}"
+                    ),
+                    "kind": "provider_product",
+                    "code": provider_product["code"],
+                    "payload": provider_product,
                     "updated_at": now,
                     "updated_by_user_id": actor_user_id,
                     "updated_by_email": actor_email,
@@ -249,6 +257,7 @@ class BillingCatalogRepository:
         return (
             key.startswith(_PLAN_PREFIX)
             or key.startswith(_PRODUCT_PREFIX)
-            or key.startswith(_OFFER_PREFIX)
+            or key.startswith(_PROVIDER_PRODUCT_PREFIX)
+            or key.startswith(_LEGACY_OFFER_PREFIX)
             or key == _SUPPORT_KEY
         )

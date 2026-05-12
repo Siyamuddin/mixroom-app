@@ -115,7 +115,6 @@ Environment variables (set by template and per-stage overrides):
 - `PROJECTION_QUEUE_URL`
 - `CLOUD_PROJECT_DOCUMENTS_BUCKET`
 - `AWS_REGION`
-- `ALLOW_STUDIO_TIER`
 
 Provider secrets should be stored in Secrets Manager and read by handlers:
 
@@ -130,7 +129,7 @@ Provider secrets should be stored in Secrets Manager and read by handlers:
 - `GET /v1/users/me` auto-creates or refreshes the app-level user row from verified Cognito claims.
 - `PATCH /v1/users/me` updates app-profile fields like username and bio.
 - `DELETE /v1/users/me` deletes Mixroom-side user/profile/link data, but intentionally refuses if the user still has an active paid subscription.
-- `GET /v1/billing/catalog` is now the source of truth for visible plans, products, offers, and support URLs. The hardcoded `free/pro/studio` tier is preserved only as the compatibility rail for the existing projector.
+- `GET /v1/billing/catalog` is the source of truth for visible plans, products, offers, and support URLs. Plan codes are `free`, `starter`, `producer`, `studio`, `enterprise`, and `education`.
 - `GET /v1/organizations/me`, `GET /v1/workspaces/me`, and `GET /v1/cloud-projects/me` expose the shared-workspace and cloud-project layer used by Studio, Enterprise, and Education plans.
 - `GET|PUT /v1/cloud-projects/{project_id}` adds a minimal authenticated cloud-project document rail with optimistic locking via `expected_revision`.
 - The admin billing endpoints are the intended control plane for plan configuration, manual contract activation, org seats, workspaces, and cloud-project metadata.
@@ -139,7 +138,7 @@ Provider secrets should be stored in Secrets Manager and read by handlers:
 - Apple purchases are verified through signed transaction JWS or legacy receipt fallback.
 - Google purchases are verified against the Play Developer API.
 - Apple server notifications and Google RTDN are intended to be the canonical renewal/refund/revoke sources once configured.
-- Team-plan cloud projects are intentionally split from telemetry. Use `COLLABORATION_TABLE` for authoritative org/workspace/project metadata and `CLOUD_PROJECT_DOCUMENTS_BUCKET` for versioned project document blobs.
+- Team-plan cloud projects are intentionally split from telemetry. Use `COLLABORATION_TABLE` for authoritative org/workspace/project metadata and `CLOUD_PROJECT_DOCUMENTS_BUCKET` for project document blobs. Set `CloudProjectStorageProvider=r2` plus the R2 account/key parameters when heavy cloud-project storage should use Cloudflare R2 instead of the retained AWS S3 fallback bucket. New bundle records use `storage_mode=blob_mixroom` and `storage_provider=r2|s3`; legacy `storage_mode=s3_mixroom` remains readable for backward compatibility. The client API contract remains signed-upload/signed-download based.
 - The backend now verifies Cognito JWTs itself when API Gateway authorizers are not present.
 - Event projector is deterministic and idempotent; stale revisions do not overwrite newer entitlement snapshots.
 

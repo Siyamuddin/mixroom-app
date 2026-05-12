@@ -7,12 +7,18 @@ import sys
 from typing import Dict, List
 
 
-def _build_record(provider: str, product_id: str, tier: str) -> Dict[str, str]:
+def _build_record(
+    provider: str,
+    product_id: str,
+    plan_code: str,
+    product_code: str,
+) -> Dict[str, str]:
     return {
         "provider_product_key": f"{provider}:{product_id}",
         "provider": provider,
         "product_id": product_id,
-        "tier": tier,
+        "plan_code": plan_code,
+        "product_code": product_code,
     }
 
 
@@ -21,19 +27,39 @@ def _build_records(args: argparse.Namespace) -> List[Dict[str, str]]:
 
     if args.apple_product_id:
         records.append(
-            _build_record("apple", args.apple_product_id, args.apple_tier)
+            _build_record(
+                "apple",
+                args.apple_product_id,
+                args.apple_plan_code,
+                args.apple_product_code,
+            )
         )
     if args.google_product_id:
         records.append(
-            _build_record("google", args.google_product_id, args.google_tier)
+            _build_record(
+                "google",
+                args.google_product_id,
+                args.google_plan_code,
+                args.google_product_code,
+            )
         )
     if args.apple_studio_product_id:
         records.append(
-            _build_record("apple", args.apple_studio_product_id, "studio")
+            _build_record(
+                "apple",
+                args.apple_studio_product_id,
+                "studio",
+                "studio_monthly",
+            )
         )
     if args.google_studio_product_id:
         records.append(
-            _build_record("google", args.google_studio_product_id, "studio")
+            _build_record(
+                "google",
+                args.google_studio_product_id,
+                "studio",
+                "studio_monthly",
+            )
         )
 
     return records
@@ -75,35 +101,45 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--apple-product-id",
-        default="mixroom_pro_monthly",
-        help="Apple product ID for the Pro tier.",
+        default="mixroom_producer_monthly",
+        help="Apple product ID for the default Producer monthly product.",
     )
     parser.add_argument(
         "--google-product-id",
-        default="mixroom_pro_monthly",
-        help="Google product ID for the Pro tier.",
+        default="mixroom_producer_monthly",
+        help="Google product ID for the default Producer monthly product.",
     )
     parser.add_argument(
-        "--apple-tier",
-        choices=("free", "pro", "studio"),
-        default="pro",
-        help="Tier mapped from the Apple product ID.",
+        "--apple-plan-code",
+        choices=("free", "starter", "producer", "studio", "enterprise", "education"),
+        default="producer",
+        help="Plan code mapped from the Apple product ID.",
     )
     parser.add_argument(
-        "--google-tier",
-        choices=("free", "pro", "studio"),
-        default="pro",
-        help="Tier mapped from the Google product ID.",
+        "--apple-product-code",
+        default="producer_monthly",
+        help="Catalog product code mapped from the Apple product ID.",
+    )
+    parser.add_argument(
+        "--google-plan-code",
+        choices=("free", "starter", "producer", "studio", "enterprise", "education"),
+        default="producer",
+        help="Plan code mapped from the Google product ID.",
+    )
+    parser.add_argument(
+        "--google-product-code",
+        default="producer_monthly",
+        help="Catalog product code mapped from the Google product ID.",
     )
     parser.add_argument(
         "--apple-studio-product-id",
         default="",
-        help="Optional Apple product ID for a Studio tier.",
+        help="Optional Apple product ID for a Studio plan.",
     )
     parser.add_argument(
         "--google-studio-product-id",
         default="",
-        help="Optional Google product ID for a Studio tier.",
+        help="Optional Google product ID for a Studio plan.",
     )
     parser.add_argument(
         "--json-lines",

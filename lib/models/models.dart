@@ -91,6 +91,7 @@ class AudioTrack {
   int rowIndex; // -1 = unassigned (shouldn't exist), can be 0-x where 0 is first row at top
   int rowId; // stable JUCE row identifier
   int engineClipId; // stable JUCE clip slot identifier
+  String clipId; // stable Mixroom clip identifier
   String label; // UI name (renameable, non-unique)
   ClipKind clipKind;
   String instrumentId; // non-empty only for MIDI/instrument clips
@@ -128,6 +129,7 @@ class AudioTrack {
     this.rowIndex = -1,
     this.rowId = -1,
     this.engineClipId = -1,
+    String? clipId,
     required this.label,
     this.clipKind = ClipKind.audio,
     this.instrumentId = '',
@@ -135,7 +137,8 @@ class AudioTrack {
     Map<String, double>? instrumentParams,
     List<MidiNote>? midiNotes,
     this.hostedInstrumentStateBase64 = '',
-  })  : currentPosition = currentPosition ?? Duration.zero,
+  })  : clipId = _normalizeAudioTrackClipId(clipId),
+        currentPosition = currentPosition ?? Duration.zero,
         instrumentParams = instrumentParams ?? const <String, double>{},
         midiNotes = midiNotes ?? const <MidiNote>[],
         volumeAutomation = volumeAutomation ??
@@ -172,6 +175,7 @@ class AudioTrack {
     int rowIndex = -1,
     int rowId = -1,
     int engineClipId = -1,
+    String? clipId,
     required String label,
     ClipKind clipKind = ClipKind.audio,
     String instrumentId = '',
@@ -210,6 +214,7 @@ class AudioTrack {
       rowIndex: rowIndex,
       rowId: rowId,
       engineClipId: engineClipId,
+      clipId: clipId,
       label: label,
       clipKind: clipKind,
       instrumentId: instrumentId,
@@ -233,6 +238,15 @@ class AudioTrack {
     _reversedWaveformCache = reversed;
     return reversed;
   }
+}
+
+int _audioTrackClipIdCounter = 0;
+
+String _normalizeAudioTrackClipId(String? raw) {
+  final trimmed = (raw ?? '').trim();
+  if (trimmed.isNotEmpty) return trimmed;
+  _audioTrackClipIdCounter += 1;
+  return 'clip_${DateTime.now().microsecondsSinceEpoch}_$_audioTrackClipIdCounter';
 }
 
 class TimelineRow {
@@ -470,6 +484,7 @@ extension AudioTrackSerialization on AudioTrack {
       "tempoStretchPreservePitch": tempoStretchPreservePitch,
       "rowIndex": rowIndex,
       "rowId": rowId,
+      "clipId": clipId,
       "automation": volumeAutomation.map((e) => e.toJson()).toList(),
       "instrumentId": instrumentId,
       "instrumentName": instrumentName,

@@ -46,9 +46,97 @@ class ApiBillingTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 200)
         payload = decode_json_response(response)
         self.assertEqual(payload["provider"], "toss")
-        self.assertEqual(len(self.repo.queued_projection_ids), 1)
-        event = self.repo.get_billing_event(self.repo.queued_projection_ids[0])
+        self.assertEqual(self.repo.queued_projection_ids, [])
+        event = next(iter(self.repo.billing_events.values()))
         self.assertEqual(event["event_type"], "checkout_session_created")
+
+    def test_checkout_session_rejects_contract_products(self):
+        module.catalog_repo.get_product.return_value = {
+            "code": "enterprise_contract",
+            "type": "contract",
+            "plan_code": "enterprise",
+            "enabled": True,
+            "management_channel": "admin",
+        }
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/checkout-session",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps({"product_code": "enterprise_contract"}),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 409)
+        self.assertIn("sales@mixroom.ai", response["body"])
+        self.assertEqual(self.repo.billing_events, {})
+
+    def test_checkout_session_rejects_conflicting_active_subscription(self):
+        self.repo.put_entitlement(
+            {
+                "user_id": "user-1",
+                "plan_code": "producer",
+                "status": "active",
+                "expires_at": "2099-04-20T00:00:00+00:00",
+                "source_provider": "apple",
+                "source_subscription_id": "apple-sub-1",
+                "capabilities": {},
+                "management_channel": "apple",
+                "revision": 2,
+            }
+        )
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/checkout-session",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps({"region_code": "US"}),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 409)
+        self.assertIn("already have an active subscription", response["body"])
+        self.assertEqual(self.repo.billing_events, {})
+
+    def test_checkout_session_allows_team_plan_with_active_personal_subscription(self):
+        self.repo.put_entitlement(
+            {
+                "user_id": "user-1",
+                "plan_code": "producer",
+                "status": "active",
+                "expires_at": "2099-04-20T00:00:00+00:00",
+                "source_provider": "apple",
+                "source_subscription_id": "apple-sub-1",
+                "capabilities": {},
+                "management_channel": "apple",
+                "revision": 2,
+            }
+        )
+        module.catalog_repo.get_product.return_value = {
+            "code": "studio_monthly",
+            "type": "subscription",
+            "plan_code": "studio",
+            "enabled": True,
+            "management_channel": "web",
+        }
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/checkout-session",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps(
+                    {"region_code": "US", "product_code": "studio_monthly"}
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertEqual(payload["product"]["plan_code"], "studio")
+        self.assertEqual(len(self.repo.billing_events), 1)
 
     def test_mobile_verify_google_persists_event_and_tracks_analytics(self):
         module.verify_google_purchase = mock.Mock(
@@ -59,9 +147,10 @@ class ApiBillingTests(unittest.TestCase):
                 "normalized": {
                     "provider": "google",
                     "subscription_id": "sub-1",
-                    "tier": "pro",
                     "status": "active",
-                    "product_id": "mixroom_pro_monthly",
+                    "product_id": "mixroom_producer_monthly",
+                    "product_code": "producer_monthly",
+                    "plan_code": "producer",
                     "source_occurred_at": "2026-03-20T00:00:00+00:00",
                     "management_channel": "google",
                 },
@@ -75,7 +164,7 @@ class ApiBillingTests(unittest.TestCase):
                 "body": json.dumps(
                     {
                         "purchase_token": "purchase-token",
-                        "product_id": "mixroom_pro_monthly",
+                        "product_id": "mixroom_producer_monthly",
                         "price": 9.99,
                         "currency_code": "USD",
                         "client_context": {"distinct_id": "device-1"},
@@ -89,6 +178,7 @@ class ApiBillingTests(unittest.TestCase):
         payload = decode_json_response(response)
         self.assertTrue(payload["accepted"])
         self.assertEqual(payload["normalized"]["subscription_id"], "sub-1")
+        self.assertEqual(payload["normalized"]["plan_code"], "producer")
         module.capture_event.assert_called_once()
         tracked_args = module.capture_event.call_args.args
         tracked_kwargs = module.capture_event.call_args.kwargs
@@ -106,9 +196,9 @@ class ApiBillingTests(unittest.TestCase):
                 "normalized": {
                     "provider": "apple",
                     "subscription_id": "apple-sub-1",
-                    "tier": "pro",
                     "status": "active",
-                    "product_id": "mixroom_pro_monthly",
+                    "product_id": "mixroom_producer_monthly",
+                    "plan_code": "producer",
                     "source_occurred_at": "2026-03-20T00:00:00+00:00",
                     "management_channel": "apple",
                 },
@@ -147,7 +237,7 @@ class ApiBillingTests(unittest.TestCase):
         self.repo.put_entitlement(
             {
                 "user_id": "user-1",
-                "tier": "pro",
+                "plan_code": "producer",
                 "status": "active",
                 "source_provider": "google",
                 "source_subscription_id": "sub-1",
@@ -168,7 +258,36 @@ class ApiBillingTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 200)
         payload = decode_json_response(response)
         self.assertEqual(payload["provider"], "google")
+        self.assertEqual(payload["label"], "Manage in Play Store")
+        self.assertTrue(payload["manage_in_app"])
         self.assertIn("play.google.com", payload["url"])
+
+    def test_portal_url_labels_web_subscriptions_as_web_managed(self):
+        self.repo.put_entitlement(
+            {
+                "user_id": "user-1",
+                "plan_code": "studio",
+                "status": "active",
+                "source_provider": "paddle",
+                "source_subscription_id": "sub-1",
+                "capabilities": {},
+                "management_channel": "web",
+                "revision": 2,
+            }
+        )
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/portal-url",
+                "requestContext": {"http": {"method": "GET"}},
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertEqual(payload["label"], "Manage on web")
+        self.assertFalse(payload["manage_in_app"])
 
     def test_verification_conflict_returns_409(self):
         module.verify_google_purchase = mock.Mock(

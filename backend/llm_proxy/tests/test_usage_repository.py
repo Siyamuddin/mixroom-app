@@ -22,7 +22,169 @@ class _FakeStateTable:
         return {}
 
 
+class _FakeEntitlementsTable:
+    def __init__(self, item: dict) -> None:
+        self.item = item
+
+    def get_item(self, **_kwargs: object) -> dict:
+        return {"Item": dict(self.item)}
+
+
+class _FakeCollaborationTable:
+    def __init__(self, memberships: list[dict], organizations: dict[str, dict]) -> None:
+        self.memberships = memberships
+        self.organizations = organizations
+
+    def query(self, **_kwargs: object) -> dict:
+        return {"Items": [dict(item) for item in self.memberships]}
+
+    def get_item(self, Key: dict, **_kwargs: object) -> dict:
+        entity_id = str(Key.get("entity_id") or "")
+        organization_id = entity_id.removeprefix("organization#")
+        organization = self.organizations.get(organization_id)
+        return {"Item": dict(organization)} if organization else {}
+
+
 class UsageRepositoryTests(unittest.TestCase):
+    def test_load_user_context_prefers_plan_code_over_legacy_tier(self) -> None:
+        repo = object.__new__(AiUsageRepository)
+        repo._state_table = None
+        repo._events_table = None
+        repo._entitlements_table = _FakeEntitlementsTable(
+            {
+                "user_id": "user-123",
+                "tier": "pro",
+                "plan_code": "starter",
+                "status": "active",
+                "limits": {
+                    "ai_prompts_daily": 400,
+                    "ai_prompts_weekly": 1500,
+                },
+            }
+        )
+
+        context = repo.load_user_context("user-123")
+
+        self.assertEqual(context["subscription_tier"], "starter")
+        self.assertEqual(context["tier"], "starter")
+        self.assertEqual(context["limits"]["ai_prompts_daily"], 400)
+
+    def test_load_user_context_uses_active_education_membership(self) -> None:
+        repo = object.__new__(AiUsageRepository)
+        repo._state_table = None
+        repo._events_table = None
+        repo._entitlements_table = _FakeEntitlementsTable(
+            {
+                "user_id": "user-123",
+                "plan_code": "free",
+                "status": "active",
+            }
+        )
+        repo._collaboration_table = _FakeCollaborationTable(
+            [
+                {
+                    "entity_type": "membership",
+                    "user_id": "user-123",
+                    "organization_id": "edu-1",
+                    "status": "active",
+                    "role": "student",
+                }
+            ],
+            {
+                "edu-1": {
+                    "entity_type": "organization",
+                    "organization_id": "edu-1",
+                    "plan_code": "education",
+                    "status": "active",
+                }
+            },
+        )
+
+        context = repo.load_user_context("user-123")
+
+        self.assertEqual(context["subscription_tier"], "education")
+        self.assertEqual(context["source_type"], "organization")
+
+    def test_load_user_context_keeps_higher_personal_plan_over_education(self) -> None:
+        repo = object.__new__(AiUsageRepository)
+        repo._state_table = None
+        repo._events_table = None
+        repo._entitlements_table = _FakeEntitlementsTable(
+            {
+                "user_id": "user-123",
+                "plan_code": "producer",
+                "status": "active",
+            }
+        )
+        repo._collaboration_table = _FakeCollaborationTable(
+            [
+                {
+                    "entity_type": "membership",
+                    "user_id": "user-123",
+                    "organization_id": "edu-1",
+                    "status": "active",
+                    "role": "student",
+                }
+            ],
+            {
+                "edu-1": {
+                    "entity_type": "organization",
+                    "organization_id": "edu-1",
+                    "plan_code": "education",
+                    "status": "active",
+                }
+            },
+        )
+
+        context = repo.load_user_context("user-123")
+
+        self.assertEqual(context["subscription_tier"], "producer")
+        self.assertNotIn("source_type", context)
+
+    def test_load_user_context_omits_paid_limits_for_inactive_entitlement(self) -> None:
+        repo = object.__new__(AiUsageRepository)
+        repo._state_table = None
+        repo._events_table = None
+        repo._entitlements_table = _FakeEntitlementsTable(
+            {
+                "user_id": "user-123",
+                "plan_code": "producer",
+                "status": "expired",
+                "limits": {
+                    "ai_prompts_daily": 1000,
+                    "ai_prompts_weekly": 4000,
+                },
+            }
+        )
+
+        context = repo.load_user_context("user-123")
+
+        self.assertEqual(context["subscription_tier"], "free")
+        self.assertNotIn("limits", context)
+
+    def test_load_user_context_omits_paid_limits_for_expired_active_entitlement(self) -> None:
+        repo = object.__new__(AiUsageRepository)
+        repo._state_table = None
+        repo._events_table = None
+        repo._entitlements_table = _FakeEntitlementsTable(
+            {
+                "user_id": "user-123",
+                "plan_code": "starter",
+                "status": "active",
+                "expires_at": "2026-03-10T00:00:00+00:00",
+                "limits": {
+                    "ai_prompts_daily": 400,
+                    "ai_prompts_weekly": 1500,
+                },
+            }
+        )
+
+        context = repo.load_user_context("user-123")
+
+        self.assertEqual(context["subscription_tier"], "free")
+        self.assertEqual(context["entitlement_status"], "expired")
+        self.assertNotIn("limits", context)
+
     def test_reserve_usage_omits_unused_limit_placeholders(self) -> None:
         repo = object.__new__(AiUsageRepository)
         repo._state_table = _FakeStateTable()

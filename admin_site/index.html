@@ -307,12 +307,12 @@
             <article class="panel">
               <div class="panel-header">
                 <div>
-                  <p class="panel-label" data-i18n="panel.tiers.label">Subscription Tier</p>
-                  <h2 data-i18n="panel.tiers.title">Tiers</h2>
+                  <p class="panel-label" data-i18n="panel.tiers.label">Subscription Plan</p>
+                  <h2 data-i18n="panel.tiers.title">Plans</h2>
                 </div>
               </div>
               <div id="tier-breakdown" class="tier-list empty-state" data-i18n="empty.signInTierDistribution">
-                Sign in to load tier distribution.
+                Sign in to load plan distribution.
               </div>
             </article>
           </section>
@@ -408,7 +408,7 @@
                 <thead>
                   <tr>
                     <th data-i18n="table.user">User</th>
-                    <th data-i18n="table.tier">Tier</th>
+                    <th data-i18n="table.tier">Plan</th>
                     <th data-i18n="table.status">Status</th>
                     <th data-i18n="table.aiRequests">AI Requests</th>
                     <th data-i18n="table.creditsToday">Credits Today</th>
@@ -728,7 +728,7 @@
                   <div class="panel-header">
                     <div>
                       <p class="panel-label" data-i18n="panel.aiPromptLimits.label">AI Prompt Limits</p>
-                      <h2 data-i18n="panel.aiPromptLimits.title">Free tier defaults</h2>
+                      <h2 data-i18n="panel.aiPromptLimits.title">Free plan defaults</h2>
                     </div>
                     <p id="ai-prompt-limits-meta" class="panel-meta" data-i18n="panel.aiPromptLimits.meta">
                       Server-enforced prompt limits for free users.
@@ -909,7 +909,9 @@
                 <div class="panel-header">
                   <div>
                     <p class="panel-label" data-i18n="panel.billingCatalog.label">Billing Catalog</p>
-                    <h2 data-i18n="panel.billingCatalog.title">Plans, products, offers, and support</h2>
+                    <h2 data-i18n="panel.billingCatalog.title">
+                      Plans, products, provider products, and support
+                    </h2>
                   </div>
                   <p id="billing-catalog-meta" class="panel-meta" data-i18n="panel.billingCatalog.meta">
                     Control the catalog the app reads for pricing, entitlements, and support links.
@@ -928,7 +930,7 @@
                 </div>
                 <form id="billing-catalog-form" class="form-stack hidden">
                   <p id="billing-catalog-editor-note" class="panel-meta" data-i18n="billing.catalog.replaceNotice">
-                    Save replaces the full billing catalog document. Review plan, product, and offer JSON together before applying.
+                    Save replaces the full billing catalog document. Review plan, product, and provider product JSON together before applying.
                   </p>
                   <div class="inspector-grid">
                     <label class="search-input-wrap" for="billing-catalog-support-email">
@@ -1030,10 +1032,12 @@
                       spellcheck="false"
                     ></textarea>
                   </label>
-                  <label class="search-input-wrap" for="billing-catalog-offers-input">
-                    <span class="search-label" data-i18n="billing.editor.offers">Offers JSON</span>
+                  <label class="search-input-wrap" for="billing-catalog-provider-products-input">
+                    <span class="search-label" data-i18n="billing.editor.providerProducts">
+                      Provider products JSON
+                    </span>
                     <textarea
-                      id="billing-catalog-offers-input"
+                      id="billing-catalog-provider-products-input"
                       class="text-area text-area-code"
                       rows="10"
                       spellcheck="false"
@@ -1087,6 +1091,103 @@
                   <div class="table-footer">
                     <p id="billing-organizations-page-meta" class="panel-meta"></p>
                   </div>
+                  <div id="billing-education-summary" class="billing-summary-card">
+                    <div>
+                      <p class="panel-label">Education plan</p>
+                      <h3 id="billing-education-current-plan">Current plan: Education</h3>
+                      <p id="billing-education-seats" class="panel-meta">Student seats used: 0 / 0</p>
+                    </div>
+                    <div class="billing-seat-actions" aria-label="Education student seat presets">
+                      <button class="button button-ghost" type="button" data-education-seat-preset="10">
+                        10 student seats
+                      </button>
+                      <button class="button button-ghost" type="button" data-education-seat-preset="20">
+                        20 student seats
+                      </button>
+                      <button class="button button-secondary" type="button" data-education-seat-preset="30">
+                        Upgrade to 30 student seats
+                      </button>
+                    </div>
+                  </div>
+                  <form id="billing-education-provision-form" class="form-stack billing-provision-card">
+                    <div>
+                      <p class="panel-label">Education quick setup</p>
+                      <h3>Provision teacher account</h3>
+                      <p class="panel-meta">
+                        Creates the Education org, assigns the teacher outside the student seat count, and creates the classroom workspace together.
+                      </p>
+                    </div>
+                    <div class="inspector-grid">
+                      <label class="search-input-wrap" for="billing-education-provision-org-id">
+                        <span class="search-label">Organization ID</span>
+                        <input
+                          id="billing-education-provision-org-id"
+                          class="text-input"
+                          type="text"
+                          autocomplete="off"
+                          spellcheck="false"
+                          placeholder="optional"
+                        />
+                      </label>
+                      <label class="search-input-wrap" for="billing-education-provision-name">
+                        <span class="search-label">Organization name</span>
+                        <input
+                          id="billing-education-provision-name"
+                          class="text-input"
+                          type="text"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </label>
+                    </div>
+                    <div class="inspector-grid">
+                      <label class="search-input-wrap" for="billing-education-provision-seats">
+                        <span class="search-label">Student seats</span>
+                        <select id="billing-education-provision-seats" class="select-input">
+                          <option value="10">10 student seats</option>
+                          <option value="20" selected>20 student seats</option>
+                          <option value="30">30 student seats</option>
+                        </select>
+                      </label>
+                      <label class="search-input-wrap" for="billing-education-provision-teacher-user-id">
+                        <span class="search-label">Teacher user ID</span>
+                        <input
+                          id="billing-education-provision-teacher-user-id"
+                          class="text-input"
+                          type="text"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </label>
+                    </div>
+                    <label class="search-input-wrap" for="billing-education-provision-teacher-email">
+                      <span class="search-label">Teacher email</span>
+                      <input
+                        id="billing-education-provision-teacher-email"
+                        class="text-input"
+                        type="email"
+                        autocomplete="off"
+                        spellcheck="false"
+                      />
+                    </label>
+                    <div class="search-actions">
+                      <button
+                        id="billing-education-provision-selected-user-button"
+                        class="button button-ghost"
+                        type="button"
+                      >
+                        Use selected user
+                      </button>
+                      <button
+                        id="billing-education-provision-save-button"
+                        class="button button-secondary"
+                        type="submit"
+                      >
+                        Provision Education
+                      </button>
+                    </div>
+                    <p id="billing-education-provision-feedback" class="panel-meta"></p>
+                  </form>
                   <form id="billing-organization-form" class="form-stack">
                     <p class="panel-meta" data-i18n="billing.form.help">
                       Click a row to edit. Leave the record ID blank to create a new item.
@@ -1136,6 +1237,8 @@
                         <select id="billing-organization-status" class="select-input">
                           <option value="draft" data-i18n="value.draft">draft</option>
                           <option value="active" data-i18n="value.active">active</option>
+                          <option value="past_due" data-i18n="value.past_due">past due</option>
+                          <option value="locked" data-i18n="value.locked">locked</option>
                           <option value="suspended" data-i18n="value.suspended">suspended</option>
                           <option value="archived" data-i18n="value.archived">archived</option>
                         </select>
@@ -1238,6 +1341,16 @@
                           spellcheck="false"
                         />
                       </label>
+                      <label class="search-input-wrap" for="billing-membership-email">
+                        <span class="search-label">Student email</span>
+                        <input
+                          id="billing-membership-email"
+                          class="text-input"
+                          type="email"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </label>
                     </div>
                     <div class="inspector-grid">
                       <label class="search-input-wrap" for="billing-membership-role">
@@ -1246,6 +1359,8 @@
                           <option value="owner">owner</option>
                           <option value="admin">admin</option>
                           <option value="manager">manager</option>
+                          <option value="teacher">teacher</option>
+                          <option value="student">student</option>
                           <option value="member">member</option>
                           <option value="viewer">viewer</option>
                         </select>
@@ -1257,6 +1372,7 @@
                           <option value="active">active</option>
                           <option value="inactive">inactive</option>
                           <option value="revoked">revoked</option>
+                          <option value="removed">removed</option>
                         </select>
                       </label>
                     </div>

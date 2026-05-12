@@ -41,6 +41,7 @@ class MainActivity : FlutterFragmentActivity() {
   private var producerExportsChannel: MethodChannel? = null
   private var savedExportsChannel: MethodChannel? = null
   private var initialMixroomPath: String? = null
+  private var initialMixroomUrl: String? = null
   private var pendingSavedExportResult: MethodChannel.Result? = null
   private var pendingSavedExportSourcePath: String? = null
   private var pendingSavedExportSuggestedFileName: String? = null
@@ -54,6 +55,10 @@ class MainActivity : FlutterFragmentActivity() {
         "getInitialMixroomPath" -> {
           result.success(initialMixroomPath)
           initialMixroomPath = null
+        }
+        "getInitialMixroomUrl" -> {
+          result.success(initialMixroomUrl)
+          initialMixroomUrl = null
         }
         else -> result.notImplemented()
       }
@@ -203,6 +208,11 @@ class MainActivity : FlutterFragmentActivity() {
       else -> null
     } ?: return
 
+    if (isMixroomEducationInviteUri(uri)) {
+      deliverUrl(uri.toString(), isInitial)
+      return
+    }
+
     val path = copyUriToCacheIfMixroom(uri) ?: return
 
     if (isInitial && openFileChannel == null) {
@@ -313,6 +323,24 @@ class MainActivity : FlutterFragmentActivity() {
     } else {
       initialMixroomPath = path
     }
+  }
+
+  private fun deliverUrl(url: String, isInitial: Boolean) {
+    val ch = openFileChannel
+    initialMixroomUrl = url
+    if (isInitial && ch == null) {
+      initialMixroomUrl = url
+    } else if (ch != null) {
+      ch.invokeMethod("openMixroomUrl", url)
+    } else {
+      initialMixroomUrl = url
+    }
+  }
+
+  private fun isMixroomEducationInviteUri(uri: Uri): Boolean {
+    if (uri.scheme != "mixroom") return false
+    val host = uri.host ?: return false
+    return host == "education" && uri.pathSegments.firstOrNull() == "invites"
   }
 
   private fun performHapticImpact(style: String) {

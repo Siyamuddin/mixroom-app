@@ -1,8 +1,9 @@
 class AudioExportPlan {
   const AudioExportPlan._();
 
-  static const List<int> _wavUiSampleRates = [44100, 48000, 88200, 96000];
+  static const List<int> _wavUiSampleRates = [44100, 48000];
   static const List<int> _mp3UiSampleRates = [44100, 48000];
+  static const List<int> _flacUiSampleRates = [44100, 48000];
   static const List<int> _mp3SupportedSampleRates = [
     8000,
     11025,
@@ -16,7 +17,9 @@ class AudioExportPlan {
   ];
 
   static List<int> uiSampleRatesForFormat(String format) {
-    return format == 'mp3' ? _mp3UiSampleRates : _wavUiSampleRates;
+    if (format == 'mp3') return _mp3UiSampleRates;
+    if (format == 'flac') return _flacUiSampleRates;
+    return _wavUiSampleRates;
   }
 
   static int normalizeSampleRate({
@@ -147,6 +150,26 @@ class AudioExportPlan {
         if (filter.isNotEmpty) ...['-af', filter],
         '-c:a',
         wavCodecForBitDepth(wavBitDepth),
+        '-ac',
+        channelCount,
+        '-ar',
+        '$effectiveSampleRate',
+        '-y',
+        '"$outputPath"',
+      ];
+    }
+
+    if (format == 'flac') {
+      return [
+        '-i',
+        '"$inputPath"',
+        if (filter.isNotEmpty) ...['-af', filter],
+        '-c:a',
+        'flac',
+        '-compression_level',
+        '8',
+        '-sample_fmt',
+        wavBitDepth >= 24 ? 's32' : 's16',
         '-ac',
         channelCount,
         '-ar',

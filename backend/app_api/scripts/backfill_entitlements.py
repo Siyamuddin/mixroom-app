@@ -12,8 +12,7 @@ if str(SRC) not in sys.path:
 
 def main() -> int:
     try:
-        from common import config  # noqa: E402
-        from common.models import free_entitlement, normalize_status, normalize_tier  # noqa: E402
+        from common.models import free_entitlement, normalize_plan_code, normalize_status  # noqa: E402
         from common.repository import BillingRepository  # noqa: E402
     except ModuleNotFoundError as exc:
         raise SystemExit(
@@ -33,11 +32,19 @@ def main() -> int:
         entitlements_by_user_id[user_id] = item
         tier_key = str(item.get("tier_key") or "").strip().lower()
         status_key = str(item.get("status_key") or "").strip().lower()
-        normalized_tier = normalize_tier(str(item.get("tier") or "free"))
+        normalized_plan_code = normalize_plan_code(
+            str(item.get("plan_code") or item.get("tier") or "free")
+        )
         normalized_status = normalize_status(str(item.get("status") or "active"))
-        if tier_key == normalized_tier and status_key == normalized_status:
+        if (
+            item.get("plan_code") == normalized_plan_code
+            and tier_key == normalized_plan_code
+            and status_key == normalized_status
+        ):
             continue
-        item["tier_key"] = normalized_tier
+        item["plan_code"] = normalized_plan_code
+        item.pop("tier", None)
+        item["tier_key"] = normalized_plan_code
         item["status_key"] = normalized_status
         repo.put_entitlement(item)
         updated_existing += 1
@@ -47,10 +54,7 @@ def main() -> int:
         user_id = str(user.get("user_id") or "").strip()
         if not user_id or user_id in entitlements_by_user_id:
             continue
-        snapshot = free_entitlement(
-            user_id=user_id,
-            allow_studio_tier=config.ALLOW_STUDIO_TIER,
-        ).to_dict()
+        snapshot = free_entitlement(user_id=user_id).to_dict()
         repo.put_entitlement(snapshot)
         created_missing += 1
 

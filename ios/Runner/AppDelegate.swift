@@ -13,6 +13,7 @@ import AVFAudio
   private var savedExportDocumentController: UIDocumentInteractionController?
   private var savedExportScopedURL: URL?
   private var initialMixroomPath: String?
+  private var initialMixroomUrl: String?
   private var didAttemptHapticsAudioSessionConfig = false
   private var channelsInitialized = false
 
@@ -38,6 +39,11 @@ import AVFAudio
 
   @discardableResult
   func handleIncomingURL(_ url: URL) -> Bool {
+    if isMixroomEducationInviteURL(url) {
+      deliverURL(url.absoluteString)
+      return true
+    }
+
     // Only .mixroom file imports are handled here. OAuth/AppAuth callbacks
     // must keep flowing through Flutter/plugin delegates.
     if !url.path.lowercased().hasSuffix(".mixroom") { return false }
@@ -76,6 +82,21 @@ import AVFAudio
     } else {
       initialMixroomPath = path
     }
+  }
+
+  private func deliverURL(_ url: String) {
+    bindChannelsIfNeeded()
+    initialMixroomUrl = url
+    if let channel = channel {
+      channel.invokeMethod("openMixroomUrl", arguments: url)
+    } else {
+      initialMixroomUrl = url
+    }
+  }
+
+  private func isMixroomEducationInviteURL(_ url: URL) -> Bool {
+    guard url.scheme == "mixroom", url.host == "education" else { return false }
+    return url.pathComponents.dropFirst().first == "invites"
   }
 
   private func performHapticImpact(style: String) {
@@ -166,6 +187,9 @@ import AVFAudio
       if call.method == "getInitialMixroomPath" {
         result(self.initialMixroomPath)
         self.initialMixroomPath = nil
+      } else if call.method == "getInitialMixroomUrl" {
+        result(self.initialMixroomUrl)
+        self.initialMixroomUrl = nil
       } else {
         result(FlutterMethodNotImplemented)
       }

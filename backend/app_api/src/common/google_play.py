@@ -7,13 +7,13 @@ from typing import Any, Dict, Optional
 from . import config
 from .provider_support import (
     ProviderVerificationError,
-    assert_user_link_available,
     datetime_to_iso,
     first_present,
     maybe_link_customer,
     maybe_link_purchase_token,
     parse_datetime,
-    resolve_tier_for_product,
+    resolve_access_for_product,
+    resolve_purchase_user_link,
     utc_now,
 )
 from .repository import BillingRepository
@@ -60,18 +60,31 @@ def verify_google_purchase(
     ).strip()
     existing_link = repo.get_purchase_token("google", token) or {}
     linked_user = str(existing_link.get("user_id") or "").strip()
-    user_id = assert_user_link_available(
+    linked_subscription_id = str(existing_link.get("subscription_id") or "").strip()
+    linked_purchase_token = str(
+        first_present(
+            payload.get("linkedPurchaseToken"),
+            line_item.get("linkedPurchaseToken"),
+        )
+        or ""
+    ).strip()
+    if not linked_user and linked_purchase_token:
+        linked_purchase = repo.get_purchase_token("google", linked_purchase_token) or {}
+        linked_user = str(linked_purchase.get("user_id") or "").strip()
+        linked_subscription_id = str(linked_purchase.get("subscription_id") or "").strip()
+
+    order_id = str(payload.get("latestOrderId") or "").strip()
+    subscription_id = order_id or token
+    user_id, reclaimed_from_user_id = resolve_purchase_user_link(
+        repo,
         resolved_user_id=store_account_user,
         expected_user_id=expected_user_id,
         existing_link_user_id=linked_user,
         provider="Google Play",
+        subscription_id=linked_subscription_id or subscription_id,
     )
 
-    tier = resolve_tier_for_product(
-        repo,
-        "google",
-        product_id,
-    )
+    access = resolve_access_for_product(repo, "google", product_id)
     expires_at = datetime_to_iso(line_item.get("expiryTime"))
     status = _normalize_google_status(
         subscription_state=str(payload.get("subscriptionState") or ""),
@@ -79,8 +92,6 @@ def verify_google_purchase(
         revoked=bool(payload.get("canceledStateContext", {}).get("systemInitiatedCancellation")),
     )
 
-    order_id = str(payload.get("latestOrderId") or "").strip()
-    subscription_id = order_id or token
     base_plan_id = str(line_item.get("basePlanId") or "").strip()
     offer_id = str(line_item.get("offerId") or "").strip()
 
@@ -95,6 +106,8 @@ def verify_google_purchase(
             "package_name": package,
             "base_plan_id": base_plan_id,
             "offer_id": offer_id,
+            "linked_purchase_token": linked_purchase_token,
+            "reclaimed_from_user_id": reclaimed_from_user_id,
         },
     )
     maybe_link_customer(
@@ -126,7 +139,6 @@ def verify_google_purchase(
         "normalized": {
             "provider": "google",
             "subscription_id": subscription_id,
-            "tier": tier,
             "status": status,
             "effective_at": first_present(payload.get("startTime"), utc_now().isoformat()),
             "expires_at": expires_at,
@@ -136,9 +148,12 @@ def verify_google_purchase(
             ),
             "management_channel": "google",
             "product_id": product_id,
+            "product_code": access.get("product_code") or "",
+            "plan_code": access.get("plan_code") or "",
             "package_name": package,
             "base_plan_id": base_plan_id,
             "offer_id": offer_id,
+            "reclaimed_from_user_id": reclaimed_from_user_id,
         },
     }
 
@@ -241,7 +256,7 @@ def build_google_webhook_event(
             raise ProviderVerificationError("Google voided purchase is not linked to any user.", status_code=202)
 
         product_id = str(linked.get("product_id") or "").strip()
-        tier = resolve_tier_for_product(repo, "google", product_id)
+        access = resolve_access_for_product(repo, "google", product_id)
         refund_type = str(voided_purchase.get("refundType") or "").strip()
         status = "refunded" if refund_type == "1" else "revoked"
 
@@ -257,7 +272,6 @@ def build_google_webhook_event(
             "normalized": {
                 "provider": "google",
                 "subscription_id": str(linked.get("subscription_id") or purchase_token),
-                "tier": tier,
                 "status": status,
                 "effective_at": utc_now().isoformat(),
                 "expires_at": utc_now().isoformat(),
@@ -267,6 +281,8 @@ def build_google_webhook_event(
                 ),
                 "management_channel": "google",
                 "product_id": product_id,
+                "product_code": access.get("product_code") or "",
+                "plan_code": access.get("plan_code") or "",
                 "package_name": str(linked.get("package_name") or config.GOOGLE_PLAY_PACKAGE_NAME),
             },
         }

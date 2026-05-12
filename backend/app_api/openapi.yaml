@@ -100,6 +100,123 @@ paths:
       responses:
         '200':
           description: Cloud project access snapshot
+    post:
+      summary: Start a direct-to-S3 .mixroom cloud project upload
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, size_bytes]
+              properties:
+                project_id:
+                  type: string
+                local_project_id:
+                  type: string
+                name:
+                  type: string
+                size_bytes:
+                  type: integer
+      responses:
+        '200':
+          description: Presigned upload URL and cloud project metadata
+        '403':
+          description: Plan or cloud storage quota does not allow the upload
+  /v1/education/me:
+    get:
+      summary: Get education organizations and student seats managed by the signed-in teacher
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Education teacher admin snapshot
+        '403':
+          description: Teacher access required
+  /v1/education/me/invites:
+    post:
+      summary: Invite a student to an education seat
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [organization_id, email]
+              properties:
+                organization_id:
+                  type: string
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          description: Pending student seat invite
+        '403':
+          description: Teacher access required
+  /v1/education/me/memberships:
+    post:
+      summary: Update an existing education student seat
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [organization_id, user_id, status]
+              properties:
+                organization_id:
+                  type: string
+                user_id:
+                  type: string
+                status:
+                  type: string
+                  enum: [pending, active, inactive, revoked, removed]
+      responses:
+        '200':
+          description: Updated student seat
+        '403':
+          description: Teacher access required
+        '404':
+          description: Student membership not found
+  /v1/education/invites/{invite_token}:
+    get:
+      summary: Get education invite details
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: invite_token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Education invite detail
+        '404':
+          description: Education invite not found
+  /v1/education/invites/{invite_token}/accept:
+    post:
+      summary: Accept an education invite for the signed-in user
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: invite_token
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Active student seat membership
+        '404':
+          description: Education invite not found
   /v1/cloud-projects/{project_id}:
     get:
       summary: Get one accessible cloud project document and metadata
@@ -141,6 +258,47 @@ paths:
       responses:
         '200':
           description: Cloud project updated
+    delete:
+      summary: Delete a personal .mixroom cloud project
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cloud project deleted
+  /v1/cloud-projects/{project_id}/complete:
+    post:
+      summary: Complete a .mixroom cloud project upload after S3 PUT
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cloud project upload committed
+  /v1/cloud-projects/{project_id}/download:
+    get:
+      summary: Get a presigned .mixroom bundle download URL
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cloud project download URL
   /v1/feedback:
     post:
       summary: Submit product feedback or a bug report
@@ -410,6 +568,39 @@ paths:
       responses:
         '200':
           description: Organization saved
+  /v1/internal/admin/billing/education-provisioning:
+    post:
+      summary: Provision an Education organization, teacher, and classroom workspace
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - teacher_user_id
+                - seat_limit
+              properties:
+                organization_id:
+                  type: string
+                name:
+                  type: string
+                seat_limit:
+                  type: integer
+                  enum: [10, 20, 30]
+                teacher_user_id:
+                  type: string
+                teacher_email:
+                  type: string
+                workspace_id:
+                  type: string
+                workspace_name:
+                  type: string
+      responses:
+        '200':
+          description: Education organization provisioned
   /v1/internal/admin/billing/memberships:
     get:
       summary: List internal admin organization memberships

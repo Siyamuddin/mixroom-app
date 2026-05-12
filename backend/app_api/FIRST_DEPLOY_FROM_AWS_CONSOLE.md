@@ -140,8 +140,8 @@ python3 scripts/seed_catalog_mappings.py
 
 That prints the 2 default rows for:
 
-- `apple:mixroom_pro_monthly`
-- `google:mixroom_pro_monthly`
+- `apple:mixroom_producer_monthly`
+- `google:mixroom_producer_monthly`
 
 When you are ready to write them into DynamoDB:
 
@@ -164,7 +164,6 @@ Do not enable payments yet. First, point the app at the backend:
 flutter run \
   --dart-define=APP_API_BASE_URL=https://YOUR_API_ID.execute-api.YOUR_REGION.amazonaws.com/staging \
   --dart-define=SUBSCRIPTION_ENFORCE=false \
-  --dart-define=SUBSCRIPTION_SHADOW_MODE=true \
   --dart-define=IAP_ENABLE_PURCHASES=false
 ```
 

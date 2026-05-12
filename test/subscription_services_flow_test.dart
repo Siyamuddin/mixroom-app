@@ -48,8 +48,8 @@ void main() {
 
     platform.availableProducts.add(
       buildProductDetails(
-        title: 'Mixroom Pro Monthly',
-        description: 'Monthly access to pro features',
+        title: 'Mixroom Producer Monthly',
+        description: 'Monthly access to Producer features',
       ),
     );
     final iapService = TestIapService();
@@ -63,10 +63,9 @@ void main() {
     );
     await flushAsync();
 
-    expect(entitlementService.currentTier, PlanTier.pro);
-    expect(entitlementService.isProEntitled, isTrue);
+    expect(entitlementService.currentPlanCode, 'producer');
     expect(
-      entitlementService.canUseCapability(SubscriptionCapability.proEditor),
+      entitlementService.canUseCapability(SubscriptionCapability.allPlugins),
       isTrue,
     );
     expect(platform.lastCompletedPurchase, isNotNull);

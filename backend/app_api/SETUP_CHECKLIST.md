@@ -51,23 +51,25 @@ Recommended shape:
 
 ```json
 {
-  "provider_product_key": "apple:mixroom_pro_monthly",
+  "provider_product_key": "apple:mixroom_producer_monthly",
   "provider": "apple",
-  "product_id": "mixroom_pro_monthly",
-  "tier": "pro"
+  "product_id": "mixroom_producer_monthly",
+  "plan_code": "producer",
+  "product_code": "producer_monthly"
 }
 ```
 
 ```json
 {
-  "provider_product_key": "google:mixroom_pro_monthly",
+  "provider_product_key": "google:mixroom_producer_monthly",
   "provider": "google",
-  "product_id": "mixroom_pro_monthly",
-  "tier": "pro"
+  "product_id": "mixroom_producer_monthly",
+  "plan_code": "producer",
+  "product_code": "producer_monthly"
 }
 ```
 
-If you add Studio later, add matching `studio` rows for both stores.
+If you sell Studio through stores later, add matching `studio` rows for both stores.
 
 The same table now also stores the admin-managed billing catalog document used by:
 
@@ -102,6 +104,16 @@ or a plain string secret.
 
 6. Create a Secrets Manager secret referenced by `AppleRootCaSecretArn` containing the Apple root certificates used by App Store signed data verification.
    Accepted formats:
+
+```json
+{
+  "certificates_der_base64": [
+    "base64-encoded DER certificate bytes"
+  ]
+}
+```
+
+or PEM:
 
 ```json
 {
@@ -188,8 +200,8 @@ Run the app with:
 ```bash
 flutter run \
   --dart-define=APP_API_BASE_URL=https://YOUR_API_ID.execute-api.YOUR_REGION.amazonaws.com/STAGE \
+  --dart-define=ACCOUNT_PLAN_BILLING_ENABLED=true \
   --dart-define=SUBSCRIPTION_ENFORCE=true \
-  --dart-define=SUBSCRIPTION_SHADOW_MODE=false \
   --dart-define=IAP_ENABLE_PURCHASES=true
 ```
 
@@ -197,7 +209,7 @@ Recommended rollout:
 
 1. Deploy backend and webhooks first.
 2. Seed catalog mappings.
-3. Test with store sandbox/test accounts while `SUBSCRIPTION_SHADOW_MODE=true`.
+3. Test with store sandbox/test accounts while `SUBSCRIPTION_ENFORCE=false`.
 4. Confirm entitlement transitions for:
    - new purchase
    - restore
@@ -207,15 +219,14 @@ Recommended rollout:
    - refund/revoke
 5. Only then flip:
    - `SUBSCRIPTION_ENFORCE=true`
-   - `SUBSCRIPTION_SHADOW_MODE=false`
    - `IAP_ENABLE_PURCHASES=true`
 
 ## 8. Manual validation cases
 
 Before launch, verify all of these in sandbox/test:
 
-- iOS purchase grants Pro.
-- Android purchase grants Pro.
+- iOS purchase grants Producer.
+- Android purchase grants Producer.
 - iOS restore on a second device restores the same Mixroom account.
 - Android restore re-links the same Mixroom account.
 - Renewal webhook updates entitlement revision.

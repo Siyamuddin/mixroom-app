@@ -143,6 +143,49 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 granted_by_email=admin_email,
             )
             return _finalize(json_response(200, payload))
+
+        if method == "POST" and path.endswith("/v1/internal/admin/users/entitlement-override"):
+            if not can_edit_ai_settings(admin_email):
+                return _finalize(
+                    json_response(
+                        403,
+                        {"error": "Only andrew@mixroom.ai can apply entitlement overrides."},
+                    ),
+                    error="entitlement_override_editor_required",
+                )
+            try:
+                body = parse_json_body(event)
+            except RequestBodyError as exc:
+                return _finalize(
+                    json_response(exc.status_code, {"error": exc.message}),
+                    error="request_body_invalid",
+                )
+
+            payload = repo.apply_entitlement_override(
+                user_id=str(body.get("user_id") or ""),
+                plan_code=str(body.get("plan_code") or body.get("planCode") or ""),
+                expires_at=str(body.get("expires_at") or body.get("expiresAt") or ""),
+                reason=str(body.get("reason") or ""),
+                confirm_identifier=str(
+                    body.get("confirm_identifier")
+                    or body.get("confirmIdentifier")
+                    or ""
+                ),
+                confirm_admin_first_name=str(
+                    body.get("confirm_admin_first_name")
+                    or body.get("confirmAdminFirstName")
+                    or ""
+                ),
+                seat_limit=body.get("seat_limit") or body.get("seatLimit"),
+                organization_name=str(
+                    body.get("organization_name")
+                    or body.get("organizationName")
+                    or ""
+                ),
+                granted_by_user_id=admin_user_id,
+                granted_by_email=admin_email,
+            )
+            return _finalize(json_response(200, payload))
     except ValueError as exc:
         return _finalize(json_response(400, {"error": str(exc)}), error="bad_request")
     except AdminUserNotFoundError as exc:

@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from . import config
-from .models import normalize_provider, normalize_status, normalize_tier
+from .billing_catalog import infer_plan_code
+from .models import normalize_provider, normalize_status
 
 
 def utc_now_iso() -> str:
@@ -133,7 +134,24 @@ def normalize_webhook(provider: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         metadata = {}
 
     status = normalize_status(str(payload.get("status") or payload.get("subscription_status") or "active"))
-    tier = normalize_tier(str(payload.get("tier") or metadata.get("tier") or "pro"))
+    raw_plan_code = (
+        payload.get("plan_code")
+        or metadata.get("plan_code")
+        or payload.get("tier")
+        or metadata.get("tier")
+        or ""
+    )
+    product_code = str(
+        payload.get("product_code") or metadata.get("product_code") or ""
+    ).strip().lower()
+    product_id = str(
+        payload.get("product_id")
+        or payload.get("provider_product_id")
+        or metadata.get("product_id")
+        or metadata.get("provider_product_id")
+        or ""
+    ).strip()
+    plan_code = infer_plan_code(raw_plan_code) if raw_plan_code else _infer_plan_code_from_text(product_code or product_id)
 
     return {
         "provider": provider,
@@ -143,7 +161,6 @@ def normalize_webhook(provider: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             or payload.get("customer_id")
             or f"{provider}-sub-unknown"
         ),
-        "tier": tier,
         "status": status,
         "effective_at": payload.get("effective_at") or utc_now_iso(),
         "expires_at": payload.get("expires_at"),
@@ -154,6 +171,9 @@ def normalize_webhook(provider: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             or payload.get("updated_at")
         ),
         "management_channel": provider,
+        "plan_code": plan_code,
+        "product_code": product_code,
+        "product_id": product_id,
     }
 
 
@@ -165,15 +185,30 @@ def normalize_mobile_verify(provider: str, payload: Dict[str, Any]) -> Dict[str,
         or payload.get("purchase_token")
         or f"{provider}-sub-verify"
     )
-    tier = normalize_tier(str(payload.get("tier") or "pro"))
+    plan_code = infer_plan_code(payload.get("plan_code") or "producer")
     status = normalize_status(str(payload.get("status") or "active"))
 
     return {
         "provider": provider,
         "subscription_id": subscription_id,
-        "tier": tier,
+        "plan_code": plan_code,
         "status": status,
         "effective_at": payload.get("effective_at") or utc_now_iso(),
         "expires_at": payload.get("expires_at"),
         "management_channel": provider,
     }
+
+
+def _infer_plan_code_from_text(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if "education" in normalized:
+        return "education"
+    if "enterprise" in normalized:
+        return "enterprise"
+    if "studio" in normalized:
+        return "studio"
+    if "starter" in normalized:
+        return "starter"
+    if "producer" in normalized or "_pro_" in normalized or normalized.endswith("_pro"):
+        return "producer"
+    return "producer"

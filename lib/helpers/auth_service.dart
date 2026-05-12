@@ -100,11 +100,15 @@ class AuthService extends ChangeNotifier {
   }
 
   Future<http.Response> authorizedRequest(
-    Future<http.Response> Function(String token) send,
-  ) async {
+    Future<http.Response> Function(String token) send, {
+    bool expireSessionOnAuthFailure = false,
+  }) async {
     final initialCandidates = await _collectAuthTokenCandidates();
     if (initialCandidates.isEmpty) {
-      await _expireSessionAndThrow();
+      if (expireSessionOnAuthFailure) {
+        await _expireSessionAndThrow();
+      }
+      throw StateError('Session expired. Please sign in again.');
     }
 
     http.Response? lastAuthFailure;
@@ -121,11 +125,17 @@ class AuthService extends ChangeNotifier {
     if (refreshedCandidates.isEmpty) {
       if (lastAuthFailure != null) {
         if (_isUnauthorizedResponse(lastAuthFailure)) {
-          await _expireSessionAndThrow();
+          if (expireSessionOnAuthFailure) {
+            await _expireSessionAndThrow();
+          }
+          return lastAuthFailure;
         }
         return lastAuthFailure;
       }
-      await _expireSessionAndThrow();
+      if (expireSessionOnAuthFailure) {
+        await _expireSessionAndThrow();
+      }
+      throw StateError('Session expired. Please sign in again.');
     }
 
     for (final token in refreshedCandidates) {
@@ -138,11 +148,17 @@ class AuthService extends ChangeNotifier {
 
     if (lastAuthFailure != null) {
       if (_isUnauthorizedResponse(lastAuthFailure)) {
-        await _expireSessionAndThrow();
+        if (expireSessionOnAuthFailure) {
+          await _expireSessionAndThrow();
+        }
+        return lastAuthFailure;
       }
       return lastAuthFailure;
     }
-    await _expireSessionAndThrow();
+    if (expireSessionOnAuthFailure) {
+      await _expireSessionAndThrow();
+    }
+    throw StateError('Session expired. Please sign in again.');
   }
 
   Future<void> _restoreSession() async {
@@ -1426,7 +1442,7 @@ class AuthService extends ChangeNotifier {
   }
 
   bool _isUnauthorizedResponse(http.Response response) {
-    return response.statusCode == 401 || response.statusCode == 403;
+    return response.statusCode == 401;
   }
 
   Future<List<String>> _collectAuthTokenCandidates({
@@ -1461,11 +1477,11 @@ class AuthService extends ChangeNotifier {
     final idToken = tokens.idToken.trim();
     final accessToken = tokens.accessToken.trim();
     final candidates = <String>[];
-    if (idToken.isNotEmpty) {
-      candidates.add(idToken);
-    }
-    if (accessToken.isNotEmpty && accessToken != idToken) {
+    if (accessToken.isNotEmpty) {
       candidates.add(accessToken);
+    }
+    if (idToken.isNotEmpty && idToken != accessToken) {
+      candidates.add(idToken);
     }
     return candidates;
   }

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:in_app_purchase/in_app_purchase.dart';
@@ -14,6 +13,7 @@ import 'package:mixroom/helpers/cognito_auth_client.dart';
 import 'package:mixroom/helpers/entitlement_service.dart';
 import 'package:mixroom/helpers/iap_service.dart';
 import 'package:mixroom/models/auth_user_profile.dart';
+import 'package:mixroom/models/entitlement_models.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 void initTestBindings() {
@@ -44,15 +44,15 @@ class FakeSubscriptionApi {
   }) : currentEntitlement = initialEntitlement ??
             <String, dynamic>{
               'user_id': 'user-1',
-              'tier': 'free',
+              'plan_code': 'free',
               'status': 'active',
               'effective_at': '2026-03-20T00:00:00Z',
               'expires_at': null,
               'source_provider': 'admin_grant',
               'source_subscription_id': 'free-default',
               'capabilities': <String, bool>{
-                'pro_editor': false,
-                'premium_effects': false,
+                'all_plugins': false,
+                'advanced_ai_models': false,
                 'video_projects': true,
                 'web_checkout': true,
                 'mobile_iap': true,
@@ -64,6 +64,32 @@ class FakeSubscriptionApi {
   final List<({String method, String path, Map<String, dynamic>? body})>
       requests = [];
   Map<String, dynamic> currentEntitlement;
+  Map<String, dynamic> educationOrganization = <String, dynamic>{
+    'organization_id': 'edu-1',
+    'name': 'Mixroom Academy',
+    'plan_code': 'education',
+    'plan_label': 'Education',
+    'plan_group': 'education',
+    'role': 'teacher',
+    'status': 'active',
+    'membership_status': 'active',
+    'seat_limit': 20,
+    'seats_used': 1,
+    'seats_active': 1,
+    'seats_invited': 0,
+    'seats_available': 19,
+  };
+  final List<Map<String, dynamic>> educationMemberships =
+      <Map<String, dynamic>>[
+    <String, dynamic>{
+      'organization_id': 'edu-1',
+      'user_id': 'teacher-1',
+      'email': 'teacher@example.com',
+      'role': 'teacher',
+      'status': 'active',
+      'seat_consumed': false,
+    },
+  ];
 
   Future<http.Response> handle(http.BaseRequest request) async {
     final path = request.url.path;
@@ -78,6 +104,131 @@ class FakeSubscriptionApi {
 
     if (request.method == 'GET' && path.endsWith('/v1/entitlements/me')) {
       return http.Response(jsonEncode(currentEntitlement), 200);
+    }
+    if (request.method == 'GET' && path.endsWith('/v1/billing/catalog')) {
+      return http.Response(
+        jsonEncode(
+          BillingCatalogSnapshot.localDefaults(requestedByUserId: 'user-1')
+              .toJson(),
+        ),
+        200,
+      );
+    }
+    if (request.method == 'GET' && path.endsWith('/v1/organizations/me')) {
+      return http.Response(
+        jsonEncode(<String, dynamic>{
+          'organizations': <Map<String, dynamic>>[],
+          'memberships': <Map<String, dynamic>>[],
+          'summary': <String, dynamic>{},
+          'configurable': true,
+        }),
+        200,
+      );
+    }
+    if (request.method == 'GET' && path.endsWith('/v1/workspaces/me')) {
+      return http.Response(
+        jsonEncode(<String, dynamic>{
+          'workspaces': <Map<String, dynamic>>[],
+          'summary': <String, dynamic>{},
+          'configurable': true,
+        }),
+        200,
+      );
+    }
+    if (request.method == 'GET' && path.endsWith('/v1/cloud-projects/me')) {
+      return http.Response(
+        jsonEncode(<String, dynamic>{
+          'cloud_projects': <Map<String, dynamic>>[],
+          'summary': <String, dynamic>{},
+          'configurable': true,
+          'storage': <String, dynamic>{},
+        }),
+        200,
+      );
+    }
+    if (request.method == 'GET' && path.endsWith('/v1/education/me')) {
+      return http.Response(
+        jsonEncode(<String, dynamic>{
+          'organizations': <Map<String, dynamic>>[educationOrganization],
+          'memberships': educationMemberships,
+          'student_usage': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'organization_id': 'edu-1',
+              'user_id': 'invite:student',
+              'email': 'student@example.com',
+              'status': 'pending',
+              'seat_consumed': true,
+              'project_count': 0,
+              'last_active_at': null,
+            },
+          ],
+          'summary': <String, dynamic>{},
+          'configurable': true,
+        }),
+        200,
+      );
+    }
+    if (request.method == 'POST' && path.endsWith('/v1/education/me/invites')) {
+      final email = (body?['email'] ?? '').toString();
+      final membership = <String, dynamic>{
+        'organization_id': body?['organization_id'],
+        'user_id': 'invite:student',
+        'email': email,
+        'role': 'student',
+        'status': 'pending',
+        'seat_consumed': true,
+        'invite_token': 'invite-token',
+        'invite_url': 'https://www.mixroom.ai/signup?invite=invite-token',
+      };
+      educationMemberships.add(membership);
+      educationOrganization = <String, dynamic>{
+        ...educationOrganization,
+        'seats_used': 2,
+        'seats_invited': 1,
+        'seats_available': 18,
+      };
+      return http.Response(
+        jsonEncode(<String, dynamic>{
+          'membership': membership,
+          'email_sent': true,
+        }),
+        200,
+      );
+    }
+    if (request.method == 'POST' &&
+        path.endsWith('/v1/education/me/memberships')) {
+      final userId = (body?['user_id'] ?? '').toString();
+      final status = (body?['status'] ?? '').toString();
+      final index = educationMemberships.indexWhere(
+        (membership) => membership['user_id'] == userId,
+      );
+      if (index < 0) return http.Response('not found', 404);
+      educationMemberships[index] = <String, dynamic>{
+        ...educationMemberships[index],
+        'status': status,
+        'seat_consumed': status == 'active' || status == 'pending',
+      };
+      return http.Response(
+        jsonEncode(<String, dynamic>{
+          'membership': educationMemberships[index],
+        }),
+        200,
+      );
+    }
+    if (request.method == 'POST' &&
+        path.endsWith('/v1/education/invites/invite-token/accept')) {
+      final membership = <String, dynamic>{
+        'organization_id': 'edu-1',
+        'user_id': 'user-1',
+        'email': 'student@example.com',
+        'role': 'student',
+        'status': 'active',
+        'seat_consumed': true,
+      };
+      return http.Response(
+        jsonEncode(<String, dynamic>{'membership': membership}),
+        200,
+      );
     }
     if (request.method == 'GET' && path.endsWith('/v1/billing/portal-url')) {
       return http.Response(
@@ -126,20 +277,21 @@ class FakeSubscriptionApi {
   Map<String, dynamic> _proEntitlement(String provider) {
     return <String, dynamic>{
       'user_id': 'user-1',
-      'tier': 'pro',
+      'plan_code': 'producer',
       'status': 'active',
       'effective_at': '2026-03-20T00:00:00Z',
       'expires_at': '2099-04-20T00:00:00Z',
       'source_provider': provider,
       'source_subscription_id': '$provider-sub-1',
       'capabilities': <String, bool>{
-        'pro_editor': true,
-        'premium_effects': true,
+        'all_plugins': true,
+        'advanced_ai_models': true,
         'video_projects': true,
         'web_checkout': true,
         'mobile_iap': true,
       },
       'management_channel': provider,
+      'product_code': 'producer_monthly',
       'revision': 1,
     };
   }
@@ -175,6 +327,9 @@ class FakeIapPlatform extends Fake
   PurchaseDetails? lastCompletedPurchase;
   String? lastRestoreUserName;
   bool storeAvailable = true;
+  bool buyResult = true;
+  Object? queryProductFailure;
+  Object? buyFailure;
 
   @override
   Stream<List<PurchaseDetails>> get purchaseStream => purchaseController.stream;
@@ -186,6 +341,8 @@ class FakeIapPlatform extends Fake
   Future<ProductDetailsResponse> queryProductDetails(
     Set<String> identifiers,
   ) async {
+    final failure = queryProductFailure;
+    if (failure != null) throw failure;
     return ProductDetailsResponse(
       productDetails: availableProducts
           .where((product) => identifiers.contains(product.id))
@@ -196,8 +353,10 @@ class FakeIapPlatform extends Fake
 
   @override
   Future<bool> buyNonConsumable({required PurchaseParam purchaseParam}) async {
+    final failure = buyFailure;
+    if (failure != null) throw failure;
     lastPurchaseParam = purchaseParam;
-    return true;
+    return buyResult;
   }
 
   @override
@@ -219,15 +378,19 @@ class FakeEntitlementService extends EntitlementService {
     this.accountToken = 'user-1',
   }) : super();
 
-  final String accountToken;
+  String accountToken;
   final List<Map<String, dynamic>> appleRequests = <Map<String, dynamic>>[];
   final List<Map<String, dynamic>> googleRequests = <Map<String, dynamic>>[];
   int refreshCalls = 0;
   Object? appleFailure;
   Object? googleFailure;
+  EntitlementSnapshot? currentEntitlement;
 
   @override
   String? get storeAccountToken => accountToken;
+
+  @override
+  EntitlementSnapshot? get entitlement => currentEntitlement;
 
   @override
   Future<Map<String, dynamic>> verifyApplePurchase({
@@ -277,21 +440,63 @@ class FakeEntitlementService extends EntitlementService {
   Future<void> refresh({bool force = false}) async {
     refreshCalls += 1;
   }
+
+  void debugNotifyChanged() {
+    notifyListeners();
+  }
 }
 
 class TestIapService extends IapService {
-  TestIapService({super.inAppPurchase});
+  TestIapService({
+    super.inAppPurchase,
+    this.testPurchaseLaunchWatchdogDuration,
+    this.googlePastPurchasesResponse,
+    this.restorablePurchasesResponse,
+  });
+
+  final Duration? testPurchaseLaunchWatchdogDuration;
+  QueryPurchaseDetailsResponse? googlePastPurchasesResponse;
+  List<PurchaseDetails>? restorablePurchasesResponse;
 
   @override
   bool get purchasesEnabled => true;
 
   @override
   bool get isMobilePlatformSupported => true;
+
+  @override
+  Duration? get purchaseLaunchWatchdogDuration =>
+      testPurchaseLaunchWatchdogDuration;
+
+  @override
+  Future<QueryPurchaseDetailsResponse>
+      queryPastGooglePurchasesForSubscriptionChange(
+    String applicationUserName,
+  ) async {
+    final response = googlePastPurchasesResponse;
+    if (response != null) {
+      return response;
+    }
+    return QueryPurchaseDetailsResponse(
+      pastPurchases: const <GooglePlayPurchaseDetails>[],
+    );
+  }
+
+  @override
+  Future<List<PurchaseDetails>> queryRestorablePurchases(
+    String applicationUserName,
+  ) async {
+    final response = restorablePurchasesResponse;
+    if (response != null) {
+      return response;
+    }
+    return super.queryRestorablePurchases(applicationUserName);
+  }
 }
 
 ProductDetails buildProductDetails({
-  String id = 'mixroom_pro_monthly',
-  String title = 'Mixroom Pro Monthly',
+  String id = 'mixroom_producer_monthly',
+  String title = 'Mixroom Producer Monthly',
   String description = 'Monthly plan',
   double rawPrice = 9.99,
   String currencyCode = 'USD',
@@ -306,9 +511,41 @@ ProductDetails buildProductDetails({
   );
 }
 
+EntitlementSnapshot buildPaidEntitlement({
+  BillingProvider sourceProvider = BillingProvider.apple,
+  String managementChannel = 'apple',
+  String planCode = 'producer',
+  String productCode = 'producer_monthly',
+}) {
+  return EntitlementSnapshot(
+    userId: 'user-1',
+    status: SubscriptionStatus.active,
+    effectiveAt: DateTime.now().toUtc(),
+    expiresAt: DateTime.now().toUtc().add(const Duration(days: 30)),
+    sourceProvider: sourceProvider,
+    sourceSubscriptionId: '${sourceProvider.name}-sub-1',
+    capabilities: defaultCapabilitiesForPlanCode(planCode),
+    managementChannel: managementChannel,
+    revision: 1,
+    planCode: planCode,
+    planLabel: defaultPlanLabelForCode(planCode),
+    planGroup: 'individual',
+    productCode: productCode,
+    limits: defaultLimitsForPlanCode(planCode),
+    accessSources: const <AccountAccessSource>[],
+    workspaceAccessSummary: const CollaborationAccessSummary(
+      organizationCount: 0,
+      workspaceCount: 0,
+      cloudProjectCount: 0,
+    ),
+    organizations: const <OrganizationAccessItem>[],
+    billingSupport: BillingSupportInfo.defaults(),
+  );
+}
+
 SK2PurchaseDetails buildIosPurchaseDetails({
   required PurchaseStatus status,
-  String productId = 'mixroom_pro_monthly',
+  String productId = 'mixroom_producer_monthly',
   String verificationData = 'signed-transaction',
   String? appAccountToken = 'user-1',
 }) {
@@ -328,7 +565,7 @@ SK2PurchaseDetails buildIosPurchaseDetails({
 
 GooglePlayPurchaseDetails buildAndroidPurchaseDetails({
   required PurchaseStatus status,
-  String productId = 'mixroom_pro_monthly',
+  String productId = 'mixroom_producer_monthly',
   String purchaseToken = 'purchase-token',
   bool isAcknowledged = false,
   String? obfuscatedAccountId = 'user-1',

@@ -46,7 +46,7 @@ def _status_has_active_access(raw: Any) -> bool:
 def _summarize_entitlements(items: List[Dict[str, Any]]) -> Dict[str, Any]:
     by_status = Counter()
     by_provider = Counter()
-    active_paid_by_tier = Counter()
+    active_paid_by_plan = Counter()
 
     active_access_users = 0
     active_paid_users = 0
@@ -54,7 +54,7 @@ def _summarize_entitlements(items: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     for item in items:
         status = str(item.get("status") or "unknown").strip().lower()
-        tier = str(item.get("tier") or "free").strip().lower()
+        plan_code = str(item.get("plan_code") or "free").strip().lower()
         provider = str(item.get("source_provider") or "unknown").strip().lower()
 
         by_status[status] += 1
@@ -62,9 +62,9 @@ def _summarize_entitlements(items: List[Dict[str, Any]]) -> Dict[str, Any]:
 
         if _status_has_active_access(status):
             active_access_users += 1
-            if tier != "free":
+            if plan_code != "free":
                 active_paid_users += 1
-                active_paid_by_tier[tier] += 1
+                active_paid_by_plan[plan_code] += 1
 
         if status in AT_RISK_STATUSES:
             at_risk_users += 1
@@ -76,7 +76,7 @@ def _summarize_entitlements(items: List[Dict[str, Any]]) -> Dict[str, Any]:
         "at_risk_users": at_risk_users,
         "by_status": dict(by_status),
         "by_source_provider": dict(by_provider),
-        "active_paid_by_tier": dict(active_paid_by_tier),
+        "active_paid_by_plan": dict(active_paid_by_plan),
     }
 
 
@@ -200,7 +200,7 @@ def main() -> int:
     print(f"Users with active access: {current['active_access_users']}")
     print(f"Users with active paid access: {current['active_paid_users']}")
     print(f"At-risk users (grace/past_due/paused/canceled): {current['at_risk_users']}")
-    print(f"Active paid by tier: {json.dumps(current['active_paid_by_tier'], sort_keys=True)}")
+    print(f"Active paid by plan: {json.dumps(current['active_paid_by_plan'], sort_keys=True)}")
     print(f"Current statuses: {json.dumps(current['by_status'], sort_keys=True)}")
     print(
         "Recent events "

@@ -26,10 +26,11 @@ except ModuleNotFoundError:  # pragma: no cover - local dev/test fallback
 from . import config
 from .models import (
     ACTIVE_ACCESS_STATUSES,
+    PLAN_CODES,
     STATUSES,
+    normalize_plan_code,
     normalize_provider,
     normalize_status,
-    normalize_tier,
     status_has_active_access,
 )
 from .posthog_admin_metrics import PosthogAdminMetricsClient
@@ -175,7 +176,7 @@ class AdminOverviewRepository:
             state = self._get_item(self._ai_usage_state, user_id)
             if entitlement:
                 updated_at = _safe_str(entitlement.get("updated_at") or entitlement.get("effective_at"))
-                record["subscription_tier"] = normalize_tier(_safe_str(entitlement.get("tier")))
+                record["subscription_tier"] = normalize_plan_code(_safe_str(entitlement.get("plan_code")))
                 record["subscription_status"] = normalize_status(_safe_str(entitlement.get("status")))
                 record["subscription_provider"] = normalize_provider(
                     _safe_str(entitlement.get("source_provider"))
@@ -285,13 +286,13 @@ class AdminOverviewRepository:
         paid_users = sum(
             payload.get("active_user_count", 0)
             for payload in tier_breakdown
-            if payload.get("tier") in ("pro", "studio")
+            if payload.get("plan_code") != "free"
         )
         active_subscriptions = sum(
             payload.get("active_user_count", 0)
             for payload in tier_breakdown
         ) - next(
-            (payload.get("active_user_count", 0) for payload in tier_breakdown if payload.get("tier") == "free"),
+            (payload.get("active_user_count", 0) for payload in tier_breakdown if payload.get("plan_code") == "free"),
             0,
         )
 
@@ -831,23 +832,23 @@ class AdminOverviewRepository:
         tracked_user_ids: set[str],
     ) -> list[Dict[str, Any]]:
         counts: dict[str, Dict[str, int]] = {
-            "free": {"user_count": 0, "active_user_count": 0},
-            "pro": {"user_count": 0, "active_user_count": 0},
-            "studio": {"user_count": 0, "active_user_count": 0},
+            plan_code: {"user_count": 0, "active_user_count": 0}
+            for plan_code in PLAN_CODES
         }
         for user_id in tracked_user_ids:
             record = user_records.get(user_id) or {}
-            tier = normalize_tier(record.get("subscription_tier") or "free")
+            plan_code = normalize_plan_code(record.get("subscription_tier") or "free")
             status = record.get("subscription_status") or ""
-            counts[tier]["user_count"] += 1
+            counts.setdefault(plan_code, {"user_count": 0, "active_user_count": 0})
+            counts[plan_code]["user_count"] += 1
             if status_has_active_access(status):
-                counts[tier]["active_user_count"] += 1
+                counts[plan_code]["active_user_count"] += 1
         return [
             {
-                "tier": tier,
+                "plan_code": plan_code,
                 **payload,
             }
-            for tier, payload in counts.items()
+            for plan_code, payload in counts.items()
         ]
 
     def _finalize_project_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
@@ -982,7 +983,7 @@ class AdminOverviewRepository:
         while True:
             try:
                 kwargs = {
-                    "ProjectionExpression": "tier, #status",
+                    "ProjectionExpression": "plan_code, #status",
                     "ExpressionAttributeNames": {"#status": "status"},
                 }
                 if start_key:
@@ -992,7 +993,7 @@ class AdminOverviewRepository:
                 warnings.append(f"entitlement_scan_unavailable:{exc.__class__.__name__}")
                 return total
             for item in response.get("Items", []):
-                item_tier = normalize_tier(_safe_str(item.get("tier") or "free"))
+                item_tier = normalize_plan_code(_safe_str(item.get("plan_code") or "free"))
                 item_status = normalize_status(_safe_str(item.get("status") or ""))
                 if tier and item_tier != tier:
                     continue
@@ -1006,21 +1007,19 @@ class AdminOverviewRepository:
     def _scan_tier_breakdown(self, warnings: list[str]) -> list[Dict[str, Any]]:
         if self._entitlements is None:
             return [
-                {"tier": "free", "user_count": 0, "active_user_count": 0},
-                {"tier": "pro", "user_count": 0, "active_user_count": 0},
-                {"tier": "studio", "user_count": 0, "active_user_count": 0},
+                {"plan_code": plan_code, "user_count": 0, "active_user_count": 0}
+                for plan_code in PLAN_CODES
             ]
 
         counts = {
-            "free": {"user_count": 0, "active_user_count": 0},
-            "pro": {"user_count": 0, "active_user_count": 0},
-            "studio": {"user_count": 0, "active_user_count": 0},
+            plan_code: {"user_count": 0, "active_user_count": 0}
+            for plan_code in PLAN_CODES
         }
         start_key = None
         while True:
             try:
                 kwargs = {
-                    "ProjectionExpression": "tier, #status",
+                    "ProjectionExpression": "plan_code, #status",
                     "ExpressionAttributeNames": {"#status": "status"},
                 }
                 if start_key:
@@ -1029,12 +1028,13 @@ class AdminOverviewRepository:
             except (BotoCoreError, ClientError) as exc:
                 warnings.append(f"entitlement_scan_unavailable:{exc.__class__.__name__}")
                 return [
-                    {"tier": tier, **payload}
+                    {"plan_code": tier, **payload}
                     for tier, payload in counts.items()
                 ]
 
             for item in response.get("Items", []):
-                tier = normalize_tier(_safe_str(item.get("tier") or "free"))
+                tier = normalize_plan_code(_safe_str(item.get("plan_code") or "free"))
+                counts.setdefault(tier, {"user_count": 0, "active_user_count": 0})
                 status = normalize_status(_safe_str(item.get("status") or ""))
                 counts[tier]["user_count"] += 1
                 if status_has_active_access(status):
@@ -1045,15 +1045,15 @@ class AdminOverviewRepository:
                 break
 
         return [
-            {"tier": tier, **payload}
+            {"plan_code": tier, **payload}
             for tier, payload in counts.items()
         ]
 
     def _build_tier_breakdown_fast(self, warnings: list[str]) -> list[Dict[str, Any]]:
-        tiers = ("free", "pro", "studio")
+        tiers = PLAN_CODES
         indexed_breakdown = [
             {
-                "tier": tier,
+                "plan_code": tier,
                 "user_count": self._count_entitlements(
                     tier=tier,
                     statuses=STATUSES,

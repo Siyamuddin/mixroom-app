@@ -14,6 +14,7 @@ import 'package:mixroom/helpers/entitlement_service.dart';
 import 'package:mixroom/helpers/iap_service.dart';
 import 'package:mixroom/helpers/password_policy.dart';
 import 'package:mixroom/helpers/app_popup.dart';
+import 'package:mixroom/helpers/project_version_preferences.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/feedback_models.dart';
 import 'package:mixroom/models/entitlement_models.dart';
@@ -38,10 +39,12 @@ class AccountScreen extends StatelessWidget {
     super.key,
     this.showTopBar = true,
     this.enforceProfileCompletion = false,
+    this.scrollToTopSignal = 0,
   });
 
   final bool showTopBar;
   final bool enforceProfileCompletion;
+  final int scrollToTopSignal;
 
   @override
   Widget build(BuildContext context) {
@@ -75,6 +78,7 @@ class AccountScreen extends StatelessWidget {
                           canEditAppProfile: appUser.supportsRemoteProfileEdits,
                           enforceProfileCompletion: enforceProfileCompletion,
                           embeddedMode: false,
+                          scrollToTopSignal: scrollToTopSignal,
                         )
                       : SafeArea(
                           top: true,
@@ -85,6 +89,7 @@ class AccountScreen extends StatelessWidget {
                                 appUser.supportsRemoteProfileEdits,
                             enforceProfileCompletion: enforceProfileCompletion,
                             embeddedMode: true,
+                            scrollToTopSignal: scrollToTopSignal,
                             onSignOut: () async {
                               await context.read<AuthService>().signOut();
                             },
@@ -168,6 +173,7 @@ class _AccountBody extends StatefulWidget {
     required this.canEditAppProfile,
     required this.enforceProfileCompletion,
     required this.embeddedMode,
+    required this.scrollToTopSignal,
     this.onSignOut,
   });
 
@@ -176,6 +182,7 @@ class _AccountBody extends StatefulWidget {
   final bool canEditAppProfile;
   final bool enforceProfileCompletion;
   final bool embeddedMode;
+  final int scrollToTopSignal;
   final Future<void> Function()? onSignOut;
 
   @override
@@ -187,6 +194,7 @@ class _AccountBodyState extends State<_AccountBody> {
   late TextEditingController _usernameController;
   late TextEditingController _birthdateController;
   late TextEditingController _bioController;
+  final ScrollController _scrollController = ScrollController();
   String? _musicProfileValue;
   DateTime? _selectedBirthdateUtc;
   bool _isEditing = false;
@@ -210,6 +218,9 @@ class _AccountBodyState extends State<_AccountBody> {
         !_isEditing) {
       _syncFromUser();
     }
+    if (oldWidget.scrollToTopSignal != widget.scrollToTopSignal) {
+      _scrollToTop();
+    }
   }
 
   @override
@@ -218,7 +229,19 @@ class _AccountBodyState extends State<_AccountBody> {
     _usernameController.dispose();
     _birthdateController.dispose();
     _bioController.dispose();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  void _scrollToTop() {
+    if (!_scrollController.hasClients) return;
+    unawaited(
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+      ),
+    );
   }
 
   void _syncFromUser() {
@@ -489,6 +512,7 @@ class _AccountBodyState extends State<_AccountBody> {
             !widget.user.emailVerified;
 
     return ListView(
+      controller: _scrollController,
       physics:
           const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
       padding: EdgeInsets.fromLTRB(
@@ -696,6 +720,16 @@ class _AccountBodyState extends State<_AccountBody> {
         ),
         const SizedBox(height: 12),
         const _SubscriptionEntitlementCard(),
+        const SizedBox(height: 12),
+        _AccountSettingsEntryCard(
+          onOpen: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const _AccountSettingsScreen(),
+              ),
+            );
+          },
+        ),
         const SizedBox(height: 12),
         _SignInMethodsCard(user: widget.user),
         const SizedBox(height: 12),
@@ -1930,6 +1964,99 @@ class _DividerLine extends StatelessWidget {
   }
 }
 
+class _PlanPurchaseContext {
+  const _PlanPurchaseContext({
+    required this.planCode,
+    required this.productCode,
+    required this.sourceProvider,
+    required this.managementChannel,
+    required this.isAccessActive,
+  });
+
+  final String planCode;
+  final String productCode;
+  final BillingProvider sourceProvider;
+  final String managementChannel;
+  final bool isAccessActive;
+
+  bool get isPaidPlan => planCode.trim().toLowerCase() != 'free';
+}
+
+_PlanPurchaseContext _purchaseContextForProduct(
+  EntitlementSnapshot? entitlement,
+  BillingCatalogSnapshot? catalog,
+  BillingProductDefinition product,
+) {
+  if (entitlement == null) {
+    return const _PlanPurchaseContext(
+      planCode: 'free',
+      productCode: '',
+      sourceProvider: BillingProvider.adminGrant,
+      managementChannel: 'free',
+      isAccessActive: true,
+    );
+  }
+  final planGroup =
+      catalog?.planByCode(product.planCode)?.group.trim().toLowerCase() ??
+          defaultPlanGroupForCode(product.planCode);
+  if (planGroup == 'individual') {
+    return _personalPurchaseContext(entitlement);
+  }
+  return _PlanPurchaseContext(
+    planCode: entitlement.planCode,
+    productCode: entitlement.productCode,
+    sourceProvider: entitlement.sourceProvider,
+    managementChannel: entitlement.managementChannel,
+    isAccessActive: entitlement.isAccessActive,
+  );
+}
+
+_PlanPurchaseContext _personalPurchaseContext(EntitlementSnapshot entitlement) {
+  AccountAccessSource? source;
+  for (final item in entitlement.accessSources) {
+    if (item.sourceType.trim().toLowerCase() == 'personal') {
+      source = item;
+      break;
+    }
+  }
+  if (source == null) {
+    if (entitlement.planGroup.trim().toLowerCase() == 'individual') {
+      return _PlanPurchaseContext(
+        planCode: entitlement.planCode,
+        productCode: entitlement.productCode,
+        sourceProvider: entitlement.sourceProvider,
+        managementChannel: entitlement.managementChannel,
+        isAccessActive: entitlement.isAccessActive,
+      );
+    }
+    return const _PlanPurchaseContext(
+      planCode: 'free',
+      productCode: '',
+      sourceProvider: BillingProvider.adminGrant,
+      managementChannel: 'free',
+      isAccessActive: true,
+    );
+  }
+  return _PlanPurchaseContext(
+    planCode: source.planCode,
+    productCode: source.productCode,
+    sourceProvider: source.sourceProvider,
+    managementChannel: source.managementChannel,
+    isAccessActive: _accessSourceIsActive(source.status),
+  );
+}
+
+bool _accessSourceIsActive(String status) {
+  switch (status.trim().toLowerCase()) {
+    case 'trialing':
+    case 'active':
+    case 'grace_period':
+      return true;
+    default:
+      return false;
+  }
+}
+
 class _SubscriptionEntitlementCard extends StatefulWidget {
   const _SubscriptionEntitlementCard();
 
@@ -1943,10 +2070,20 @@ class _SubscriptionEntitlementCardState
   bool _didBootstrap = false;
   bool _actionBusy = false;
   String? _inlineMessage;
+  IapService? _boundIapService;
+  String? _lastShownIapError;
+  BillingProductDefinition? _pendingIapProduct;
+  DateTime? _lastHandledCompletedPurchaseAtUtc;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final iapService = context.read<IapService>();
+    if (!identical(_boundIapService, iapService)) {
+      _boundIapService?.removeListener(_handleIapServiceChanged);
+      _boundIapService = iapService;
+      iapService.addListener(_handleIapServiceChanged);
+    }
     if (_didBootstrap) return;
     _didBootstrap = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1955,11 +2092,248 @@ class _SubscriptionEntitlementCardState
     });
   }
 
+  @override
+  void dispose() {
+    _boundIapService?.removeListener(_handleIapServiceChanged);
+    super.dispose();
+  }
+
+  void _handleIapServiceChanged() {
+    if (!mounted) return;
+    final iapService = _boundIapService;
+    final completedAt = iapService?.lastCompletedPurchaseAtUtc;
+    if (completedAt != null &&
+        completedAt != _lastHandledCompletedPurchaseAtUtc) {
+      _lastHandledCompletedPurchaseAtUtc = completedAt;
+      unawaited(_handleCompletedIapPurchase(iapService!));
+    }
+    final message = (iapService?.lastMessage ?? '').trim().toLowerCase();
+    if (message.contains('purchase canceled')) {
+      _pendingIapProduct = null;
+    }
+    final error = (iapService?.lastError ?? '').trim();
+    if (error.isEmpty || error == _lastShownIapError) {
+      return;
+    }
+    _pendingIapProduct = null;
+    final displayError = _friendlyAccountActionError(error);
+    _lastShownIapError = error;
+    showAppSnackBar(
+      context,
+      L10n.translate(context, displayError),
+      tone: AppPopupTone.error,
+      duration: _billingErrorSnackBarDuration(displayError),
+    );
+  }
+
+  Duration _billingErrorSnackBarDuration(String message) {
+    final normalized = message.toLowerCase();
+    if (normalized.contains('different mixroom account') ||
+        normalized.contains('already linked to another mixroom account')) {
+      return const Duration(seconds: 10);
+    }
+    return const Duration(seconds: 5);
+  }
+
+  Future<void> _handleCompletedIapPurchase(IapService iapService) async {
+    final entitlementService = context.read<EntitlementService>();
+    final product = _pendingIapProduct;
+    await entitlementService.refresh(force: true);
+    await entitlementService.refreshAccountSurface(force: true);
+    if (!mounted) return;
+    final planLabel = _completedPurchasePlanLabel(
+      product,
+      entitlementService.entitlement,
+      entitlementService.billingCatalog,
+    );
+    final shouldManage = await _showPurchaseCompleteDialog(
+      planLabel: planLabel,
+      provider: _platformProvider(_regionCode(context)),
+      deferred: iapService.lastCompletedPurchaseMayBeDeferred,
+    );
+    _pendingIapProduct = null;
+    if (shouldManage == true && mounted) {
+      final provider = _platformProvider(_regionCode(context));
+      unawaited(
+        _runAction(
+          () => _handleManageSubscription(
+            providerOverride: provider,
+            managementChannelOverride: 'in_app',
+          ),
+        ),
+      );
+    }
+  }
+
+  String _completedPurchasePlanLabel(
+    BillingProductDefinition? product,
+    EntitlementSnapshot? entitlement,
+    BillingCatalogSnapshot? catalog,
+  ) {
+    final productPlanCode = product?.planCode.trim() ?? '';
+    if (productPlanCode.isNotEmpty) {
+      final plan = catalog?.planByCode(productPlanCode);
+      final productLabel = product?.label.trim() ?? '';
+      return plan?.label.trim().isNotEmpty == true
+          ? plan!.label.trim()
+          : productLabel.isNotEmpty
+              ? productLabel
+              : defaultPlanLabelForCode(productPlanCode);
+    }
+    final entitlementLabel = entitlement?.effectivePlanLabel.trim() ?? '';
+    if (entitlementLabel.isNotEmpty) {
+      return entitlementLabel;
+    }
+    return 'your new plan';
+  }
+
+  Future<bool?> _showPurchaseCompleteDialog({
+    required String planLabel,
+    required BillingProvider provider,
+    required bool deferred,
+  }) {
+    final localizedPlanLabel = L10n.translate(context, planLabel);
+    final storeLabel = _storeManagementLabel(provider);
+    final detail = deferred
+        ? L10n.translate(
+            context,
+            'Your plan change is synced. Store-managed downgrades or billing-cycle changes may take effect at renewal.',
+          )
+        : L10n.translate(
+            context,
+            'Your subscription is active and Mixroom has applied your new access.',
+          );
+    return showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.58),
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF5F666D),
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+          ),
+          titlePadding: const EdgeInsets.fromLTRB(22, 22, 22, 8),
+          contentPadding: const EdgeInsets.fromLTRB(22, 0, 22, 8),
+          actionsPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+          title: Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF67E8A5).withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: const Color(0xFF67E8A5).withValues(alpha: 0.26),
+                  ),
+                ),
+                child: const Icon(
+                  Icons.check_rounded,
+                  color: Color(0xFFB9FFD8),
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  L10n.translate(context, 'Plan activated'),
+                  style: const TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: Color(0xFFF4F4F4),
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    height: 1.15,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${L10n.translate(context, 'You are now on')} $localizedPlanLabel.',
+                style: const TextStyle(
+                  fontFamily: 'Pretendard',
+                  color: Color(0xFFF4F4F4),
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w800,
+                  height: 1.25,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                detail,
+                style: TextStyle(
+                  fontFamily: 'Pretendard',
+                  color: Colors.white.withValues(alpha: 0.78),
+                  fontSize: 13.2,
+                  fontWeight: FontWeight.w500,
+                  height: 1.35,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text(
+                storeLabel,
+                style: TextStyle(
+                  fontFamily: 'Pretendard',
+                  color: Colors.white.withValues(alpha: 0.72),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF258AE6),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                textStyle: const TextStyle(
+                  fontFamily: 'Pretendard',
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(L10n.translate(context, 'Done')),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  String _storeManagementLabel(BillingProvider provider) {
+    switch (provider) {
+      case BillingProvider.apple:
+        return L10n.translate(context, 'Manage in App Store');
+      case BillingProvider.google:
+        return L10n.translate(context, 'Manage in Google Play');
+      case BillingProvider.paddle:
+      case BillingProvider.toss:
+      case BillingProvider.kakao:
+      case BillingProvider.adminGrant:
+      case BillingProvider.unknown:
+        return L10n.translate(context, 'Manage plan');
+    }
+  }
+
   Future<void> _refreshData({
+    bool force = false,
     bool silent = false,
   }) async {
     final entitlementService = context.read<EntitlementService>();
-    await entitlementService.refresh(force: !entitlementService.isInitialized);
+    await entitlementService.refresh(
+      force: force || !entitlementService.isInitialized,
+    );
     if (!mounted) return;
     if (!AppApiConfig.accountPlanBillingEnabled) {
       if (!silent) {
@@ -1972,15 +2346,25 @@ class _SubscriptionEntitlementCardState
       return;
     }
     final iapService = context.read<IapService>();
-    await entitlementService.refreshAccountSurface(
-      force: !entitlementService.isAccountSurfaceInitialized,
+    final accountSurfaceFuture = entitlementService.refreshAccountSurface(
+      force: force || !entitlementService.isAccountSurfaceInitialized,
     );
+    Future<void>? iapRefreshFuture;
     if (iapService.isMobilePlatformSupported) {
-      await iapService.initialize();
-      if (iapService.isInitialized && iapService.isStoreAvailable) {
-        await iapService.refreshProducts();
-      }
+      iapRefreshFuture = () async {
+        final wasInitialized = iapService.isInitialized;
+        await iapService.initialize();
+        if (wasInitialized &&
+            iapService.isInitialized &&
+            iapService.isStoreAvailable) {
+          await iapService.refreshProducts();
+        }
+      }();
     }
+    await Future.wait(<Future<void>>[
+      accountSurfaceFuture,
+      if (iapRefreshFuture != null) iapRefreshFuture,
+    ]);
     if (!silent && mounted) {
       showAppSnackBar(
         context,
@@ -1992,6 +2376,7 @@ class _SubscriptionEntitlementCardState
 
   Future<void> _runAction(
     Future<void> Function() action, {
+    String? progressMessage,
     String? successMessage,
   }) async {
     if (_actionBusy) return;
@@ -2000,6 +2385,13 @@ class _SubscriptionEntitlementCardState
       _inlineMessage = null;
     });
     try {
+      if ((progressMessage ?? '').trim().isNotEmpty && mounted) {
+        showAppSnackBar(
+          context,
+          L10n.translate(context, progressMessage!),
+          tone: AppPopupTone.info,
+        );
+      }
       await action();
       if (!mounted) return;
       if ((successMessage ?? '').trim().isNotEmpty) {
@@ -2014,10 +2406,10 @@ class _SubscriptionEntitlementCardState
         });
       }
     } catch (error) {
-      final message = error.toString().replaceFirst('Bad state: ', '').trim();
+      final message = _friendlyAccountActionError(error);
       final translatedMessage = L10n.translate(
         context,
-        message.isEmpty ? 'Something went wrong.' : message,
+        message,
       );
       if (!mounted) return;
       showAppSnackBar(
@@ -2035,6 +2427,43 @@ class _SubscriptionEntitlementCardState
         });
       }
     }
+  }
+
+  String _friendlyAccountActionError(Object error) {
+    var raw = error.toString().trim();
+    if (error is PlatformException) {
+      raw = <String>[
+        error.code,
+        if ((error.message ?? '').trim().isNotEmpty) error.message!,
+        if ((error.details ?? '').toString().trim().isNotEmpty)
+          error.details.toString(),
+      ].join(' ');
+    }
+    raw = raw
+        .replaceFirst('Bad state: ', '')
+        .replaceFirst('Exception: ', '')
+        .trim();
+    final normalized = raw.toLowerCase();
+    if (normalized.contains('storekit') ||
+        normalized.contains('in_app_purchase_storekit')) {
+      return 'The App Store could not complete that request. Please try again.';
+    }
+    if (normalized.contains('billingclient') ||
+        normalized.contains('billingresponse') ||
+        normalized.contains('google play')) {
+      return 'Google Play could not complete that request. Please try again.';
+    }
+    if (normalized.contains('platformexception') ||
+        normalized.contains('pigeonerror') ||
+        normalized.contains('stacktrace') ||
+        normalized.contains('runner.debug.dylib') ||
+        normalized.contains('fluttererror')) {
+      return 'Something went wrong. Please try again.';
+    }
+    if (raw.isEmpty) {
+      return 'Something went wrong. Please try again.';
+    }
+    return raw;
   }
 
   String _platformKey() {
@@ -2091,15 +2520,49 @@ class _SubscriptionEntitlementCardState
     }
   }
 
-  Future<void> _handleManageSubscription() async {
+  Future<void> _handleManageSubscription({
+    BillingProvider? providerOverride,
+    String? managementChannelOverride,
+  }) async {
     final entitlementService = context.read<EntitlementService>();
+    final entitlement = entitlementService.entitlement;
+    final sourceProvider = providerOverride ?? entitlement?.sourceProvider;
+    if (sourceProvider == BillingProvider.apple) {
+      await _launchUrlString('https://apps.apple.com/account/subscriptions');
+      return;
+    }
+    if (sourceProvider == BillingProvider.google) {
+      await _launchUrlString(
+        'https://play.google.com/store/account/subscriptions'
+        '?package=com.mixroom.mixroomapp',
+      );
+      return;
+    }
+    final managementChannel =
+        (managementChannelOverride ?? entitlement?.managementChannel ?? '')
+            .trim()
+            .toLowerCase();
     final support = entitlementService.effectiveBillingSupport;
-    final portalUrl = await entitlementService.fetchPortalUrl();
+    String? portalUrl;
+    if (managementChannel == 'web' ||
+        sourceProvider == BillingProvider.paddle ||
+        sourceProvider == BillingProvider.toss ||
+        sourceProvider == BillingProvider.unknown ||
+        sourceProvider == BillingProvider.adminGrant ||
+        sourceProvider == null) {
+      try {
+        portalUrl = await entitlementService.fetchPortalUrl();
+      } catch (_) {
+        portalUrl = null;
+      }
+    }
     final target = (portalUrl ?? '').trim().isNotEmpty
         ? portalUrl!
         : support.manageSubscriptionUrl.trim().isNotEmpty
             ? support.manageSubscriptionUrl
-            : support.defaultCheckoutUrl;
+            : support.defaultCheckoutUrl.trim().isNotEmpty
+                ? support.defaultCheckoutUrl
+                : 'https://mixroom.ai/account';
     await _launchUrlString(target);
   }
 
@@ -2141,39 +2604,104 @@ class _SubscriptionEntitlementCardState
     throw StateError('Support contact is not configured yet.');
   }
 
+  Future<void> _handleContactSalesForPlan([
+    BillingProductDefinition? product,
+  ]) async {
+    final support = context.read<EntitlementService>().effectiveBillingSupport;
+    final salesEmail = support.salesEmail.trim().isNotEmpty
+        ? support.salesEmail.trim()
+        : 'sales@mixroom.ai';
+    final planLabel = _salesPlanLabel(product);
+    final subject = planLabel == null
+        ? 'Mixroom sales inquiry'
+        : 'Mixroom sales inquiry - $planLabel';
+    final uri = Uri(
+      scheme: 'mailto',
+      path: salesEmail,
+      query: 'subject=${Uri.encodeComponent(subject)}',
+    );
+    final launched = await launchUrl(uri, mode: LaunchMode.platformDefault);
+    if (!launched) {
+      throw StateError('Could not open your email app.');
+    }
+  }
+
+  String? _salesPlanLabel(BillingProductDefinition? product) {
+    final label = product?.label.trim() ?? '';
+    if (label.isNotEmpty) {
+      return label;
+    }
+    final planCode = product?.planCode.trim() ?? '';
+    if (planCode.isEmpty) {
+      return null;
+    }
+    return defaultPlanLabelForCode(planCode);
+  }
+
   Future<void> _handleProductSelection(BillingProductDefinition product) async {
     final entitlementService = context.read<EntitlementService>();
     final iapService = context.read<IapService>();
     final catalog = entitlementService.billingCatalog;
     final regionCode = _regionCode(context);
     final provider = _platformProvider(regionCode);
+    final entitlement = entitlementService.entitlement;
+    final purchaseContext = _purchaseContextForProduct(
+      entitlement,
+      catalog,
+      product,
+    );
 
     if (product.managementChannel == 'admin' || product.type == 'contract') {
-      await _handleContactSupport();
+      await _handleContactSalesForPlan(product);
       return;
     }
 
-    final offer = catalog?.bestOfferForProduct(
+    if (_requiresManagedPlanChange(
+        purchaseContext, catalog, product, provider)) {
+      await _handleManageSubscription(
+        providerOverride: purchaseContext.sourceProvider,
+        managementChannelOverride: purchaseContext.managementChannel,
+      );
+      return;
+    }
+
+    final providerProduct = catalog?.bestProviderProductForProduct(
       productCode: product.code,
       provider: provider,
       regionCode: regionCode,
     );
 
-    if (iapService.isMobilePlatformSupported) {
+    if (iapService.isMobilePlatformSupported && providerProduct != null) {
+      if (mounted) {
+        setState(() {
+          _inlineMessage = 'Opening secure checkout...';
+        });
+      }
       await iapService.initialize();
-      if (offer != null) {
-        final storeProduct =
-            iapService.findProductById(offer.providerProductId);
-        if (storeProduct != null) {
-          await iapService.buyProduct(storeProduct);
-          final purchaseError = (iapService.lastError ?? '').trim();
-          if (purchaseError.isNotEmpty) {
-            throw StateError(purchaseError);
-          }
-          await entitlementService.refresh(force: true);
-          await entitlementService.refreshAccountSurface(force: true);
-          return;
+      final storeProduct =
+          iapService.findProductById(providerProduct.providerProductId);
+      if (storeProduct != null) {
+        final isMobileStorePlanChange =
+            _isMobileStorePlanChange(purchaseContext, product, provider);
+        _pendingIapProduct = product;
+        await iapService.buyProduct(
+          storeProduct,
+          requiresAndroidSubscriptionChange:
+              defaultTargetPlatform == TargetPlatform.android &&
+                  isMobileStorePlanChange,
+          storePlanChangeMayBeDeferred: isMobileStorePlanChange,
+        );
+        if (mounted) {
+          setState(() {
+            _inlineMessage = null;
+          });
         }
+        final purchaseError = (iapService.lastError ?? '').trim();
+        if (purchaseError.isNotEmpty) {
+          _pendingIapProduct = null;
+          throw StateError(purchaseError);
+        }
+        return;
       }
       throw StateError(
         'This store product is not configured for the current build yet.',
@@ -2191,6 +2719,100 @@ class _SubscriptionEntitlementCardState
     await _launchUrlString(checkoutUrl);
   }
 
+  bool _requiresManagedPlanChange(
+    _PlanPurchaseContext purchaseContext,
+    BillingCatalogSnapshot? catalog,
+    BillingProductDefinition product,
+    BillingProvider platformProvider,
+  ) {
+    if (!purchaseContext.isAccessActive ||
+        !purchaseContext.isPaidPlan ||
+        product.type != 'subscription') {
+      return false;
+    }
+    if (_isMobileStorePlanChange(purchaseContext, product, platformProvider)) {
+      return false;
+    }
+    if (_isCurrentBillingProduct(purchaseContext, product)) {
+      return false;
+    }
+    return purchaseContext.sourceProvider != platformProvider ||
+        !_isPlanUpgrade(purchaseContext, catalog, product);
+  }
+
+  bool _isMobileStorePlanChange(
+    _PlanPurchaseContext purchaseContext,
+    BillingProductDefinition product,
+    BillingProvider platformProvider,
+  ) {
+    if (!purchaseContext.isAccessActive ||
+        !purchaseContext.isPaidPlan ||
+        product.type != 'subscription' ||
+        _isCurrentBillingProduct(purchaseContext, product)) {
+      return false;
+    }
+    return (purchaseContext.sourceProvider == BillingProvider.apple &&
+            platformProvider == BillingProvider.apple) ||
+        (purchaseContext.sourceProvider == BillingProvider.google &&
+            platformProvider == BillingProvider.google);
+  }
+
+  bool _isCurrentBillingProduct(
+    _PlanPurchaseContext purchaseContext,
+    BillingProductDefinition product,
+  ) {
+    if (!purchaseContext.isAccessActive || product.type != 'subscription') {
+      return false;
+    }
+    final currentProductCode = purchaseContext.productCode.trim();
+    if (currentProductCode.isNotEmpty) {
+      return currentProductCode == product.code;
+    }
+    if (purchaseContext.planCode == product.planCode &&
+        product.managementChannel.trim().toLowerCase() == 'web') {
+      return true;
+    }
+    return purchaseContext.planCode == product.planCode &&
+        product.billingInterval == 'monthly';
+  }
+
+  bool _isPlanUpgrade(
+    _PlanPurchaseContext purchaseContext,
+    BillingCatalogSnapshot? catalog,
+    BillingProductDefinition product,
+  ) {
+    if (!purchaseContext.isAccessActive ||
+        !purchaseContext.isPaidPlan ||
+        product.type != 'subscription') {
+      return false;
+    }
+    if (_isCurrentBillingProduct(purchaseContext, product)) {
+      return false;
+    }
+    final currentRank = catalog?.planByCode(purchaseContext.planCode)?.rank ??
+        _fallbackPlanRank(purchaseContext.planCode);
+    final nextRank = catalog?.planByCode(product.planCode)?.rank ??
+        _fallbackPlanRank(product.planCode);
+    return nextRank > currentRank;
+  }
+
+  int _fallbackPlanRank(String planCode) {
+    switch (planCode.trim().toLowerCase()) {
+      case 'starter':
+        return 10;
+      case 'producer':
+        return 20;
+      case 'studio':
+        return 30;
+      case 'enterprise':
+        return 40;
+      case 'education':
+        return 50;
+      default:
+        return 0;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final entitlementService = context.watch<EntitlementService>();
@@ -2205,7 +2827,7 @@ class _SubscriptionEntitlementCardState
             : () {
                 unawaited(
                   _runAction(
-                    () => _refreshData(silent: true),
+                    () => _refreshData(force: true, silent: true),
                     successMessage: 'Subscription details refreshed.',
                   ),
                 );
@@ -2228,20 +2850,26 @@ class _SubscriptionEntitlementCardState
       onRefresh: () {
         unawaited(
           _runAction(
-            () => _refreshData(silent: true),
+            () => _refreshData(force: true, silent: true),
             successMessage: 'Subscription details refreshed.',
           ),
         );
       },
-      onManageSubscription: () {
-        unawaited(_runAction(_handleManageSubscription));
+      onManageSubscription: ({provider, managementChannel}) {
+        unawaited(
+          _runAction(
+            () => _handleManageSubscription(
+              providerOverride: provider,
+              managementChannelOverride: managementChannel,
+            ),
+          ),
+        );
       },
       onRestorePurchases: () {
         unawaited(
           _runAction(
             _handleRestorePurchases,
-            successMessage:
-                'Restore request sent. Matching purchases will sync shortly.',
+            progressMessage: 'Restoring purchases...',
           ),
         );
       },
@@ -2361,9 +2989,9 @@ class _LegalPrivacyEntryCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
+        color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2403,6 +3031,253 @@ class _LegalPrivacyEntryCard extends StatelessWidget {
               minimumSize: const Size(0, 34),
             ),
             child: Text(L10n.translate(context, 'Open')),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AccountSettingsEntryCard extends StatelessWidget {
+  const _AccountSettingsEntryCard({required this.onOpen});
+
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.tune_rounded, color: Color(0xFFA4C2FF)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  L10n.translate(context, 'Settings'),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  L10n.translate(
+                    context,
+                    'Control project version history and local app preferences.',
+                  ),
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: onOpen,
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFFBBD2FF),
+              minimumSize: const Size(0, 34),
+            ),
+            child: Text(L10n.translate(context, 'Open')),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+const Color _accountSettingsRouteBackground = Color(0xFF06080D);
+
+class _AccountSettingsScreen extends StatefulWidget {
+  const _AccountSettingsScreen();
+
+  @override
+  State<_AccountSettingsScreen> createState() => _AccountSettingsScreenState();
+}
+
+class _AccountSettingsScreenState extends State<_AccountSettingsScreen> {
+  bool _versionHistoryEnabled = false;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  Future<void> _load() async {
+    final enabled = await ProjectVersionPreferences.isEnabled();
+    if (!mounted) return;
+    setState(() {
+      _versionHistoryEnabled = enabled;
+      _loading = false;
+    });
+  }
+
+  Future<void> _setVersionHistoryEnabled(bool enabled) async {
+    setState(() => _versionHistoryEnabled = enabled);
+    await ProjectVersionPreferences.setEnabled(enabled);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _accountSettingsRouteBackground,
+      body: Stack(
+        children: [
+          const Positioned.fill(
+            child: ColoredBox(color: _accountSettingsRouteBackground),
+          ),
+          const Positioned.fill(child: MixroomShellBackground()),
+          SafeArea(
+            bottom: false,
+            child: AppResponsiveBody(
+              maxWidth: 920,
+              expandToHeight: true,
+              child: ListView(
+                physics: const BouncingScrollPhysics(
+                  parent: AlwaysScrollableScrollPhysics(),
+                ),
+                padding: EdgeInsets.fromLTRB(
+                  16,
+                  8,
+                  16,
+                  mixroomShellBottomPadding(context),
+                ),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
+                    child: Row(
+                      children: [
+                        MixroomShellRoundButton(
+                          size: 46,
+                          icon: const Icon(
+                            Icons.arrow_back_ios_new_rounded,
+                            size: 18,
+                            color: Colors.white,
+                          ),
+                          onTap: () => Navigator.of(context).maybePop(),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                L10n.translate(context, 'Settings'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Color(0xFFF4F4F4),
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                L10n.translate(
+                                  context,
+                                  'Local app preferences',
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Colors.white.withValues(alpha: 0.62),
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.08),
+                      ),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(
+                          Icons.history_rounded,
+                          color: Color(0xFFA4C2FF),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                L10n.translate(context, 'Version History'),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                L10n.translate(
+                                  context,
+                                  'Keep lightweight local project snapshots so older saves can be restored as copies.',
+                                ),
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                L10n.translate(
+                                  context,
+                                  'Cloud sync stores only the latest project.',
+                                ),
+                                style: const TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Switch.adaptive(
+                          value: _versionHistoryEnabled,
+                          onChanged:
+                              _loading ? null : _setVersionHistoryEnabled,
+                          activeThumbColor: const Color(0xFF9FC2FF),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),

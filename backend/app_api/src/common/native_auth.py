@@ -1451,7 +1451,6 @@ def _ensure_default_entitlement(
     repo.put_entitlement(
         free_entitlement(
             user_id=safe_user_id,
-            allow_studio_tier=config.ALLOW_STUDIO_TIER,
         ).to_dict()
     )
 

@@ -20,7 +20,7 @@ except (ImportError, ModuleNotFoundError):  # pragma: no cover - local dev/test 
 from botocore.exceptions import ClientError
 
 from . import config
-from .models import normalize_provider
+from .models import normalize_plan_code, normalize_provider
 
 
 def _utc_now_iso() -> str:
@@ -176,7 +176,11 @@ class BillingRepository:
         payload = dict(snapshot)
         payload.setdefault("updated_at", _utc_now_iso())
         payload["status_key"] = str(payload.get("status") or "").strip().lower() or "unknown"
-        payload["tier_key"] = str(payload.get("tier") or "").strip().lower() or "free"
+        # The existing GSI attribute is named tier_key in deployed tables; it now
+        # stores plan codes to avoid an infrastructure migration for the rename.
+        payload["tier_key"] = normalize_plan_code(
+            payload.get("plan_code") or payload.get("tier") or "free"
+        )
         self._entitlements.put_item(Item=payload)
 
     def get_entitlement(self, user_id: str) -> Optional[Dict[str, Any]]:

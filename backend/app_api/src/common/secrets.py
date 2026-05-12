@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import time
 from typing import Any, Dict, List, Tuple
@@ -67,15 +69,18 @@ def load_apple_root_certificates() -> List[bytes]:
         parsed = raw
 
     if isinstance(parsed, dict):
+        der_certs = parsed.get("certificates_der_base64")
+        if isinstance(der_certs, list):
+            return [_certificate_text_to_der(str(item)) for item in der_certs if str(item).strip()]
         certs = parsed.get("certificates")
         if isinstance(certs, list):
-            return [str(item).encode("utf-8") for item in certs if str(item).strip()]
+            return [_certificate_text_to_der(str(item)) for item in certs if str(item).strip()]
         bundle = str(parsed.get("pem_bundle") or "").strip()
         if bundle:
             return _split_pem_bundle(bundle)
 
     if isinstance(parsed, list):
-        return [str(item).encode("utf-8") for item in parsed if str(item).strip()]
+        return [_certificate_text_to_der(str(item)) for item in parsed if str(item).strip()]
 
     text = str(parsed).strip()
     if not text:
@@ -237,6 +242,62 @@ def load_stibee_access_token() -> str:
     return value
 
 
+def load_cloud_project_r2_credentials() -> Dict[str, str]:
+    if not config.CLOUD_PROJECT_R2_SECRET_ACCESS_KEY_SECRET_ARN:
+        raise ValueError("CLOUD_PROJECT_R2_SECRET_ACCESS_KEY_SECRET_ARN is not configured.")
+
+    raw = get_secret_string(config.CLOUD_PROJECT_R2_SECRET_ACCESS_KEY_SECRET_ARN)
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = raw
+
+    access_key_id = config.CLOUD_PROJECT_R2_ACCESS_KEY_ID
+    secret_access_key = ""
+    account_id = config.CLOUD_PROJECT_R2_ACCOUNT_ID
+    endpoint_url = config.CLOUD_PROJECT_R2_ENDPOINT_URL
+
+    if isinstance(parsed, dict):
+        for key in ("secret_access_key", "secretAccessKey", "r2_secret_access_key"):
+            value = str(parsed.get(key) or "").strip()
+            if value:
+                secret_access_key = value
+                break
+        for key in ("access_key_id", "accessKeyId", "r2_access_key_id"):
+            value = str(parsed.get(key) or "").strip()
+            if value:
+                access_key_id = value
+                break
+        for key in ("account_id", "accountId", "r2_account_id"):
+            value = str(parsed.get(key) or "").strip()
+            if value:
+                account_id = value
+                break
+        for key in ("endpoint_url", "endpointUrl", "r2_endpoint_url"):
+            value = str(parsed.get(key) or "").strip()
+            if value:
+                endpoint_url = value
+                break
+    else:
+        secret_access_key = str(parsed).strip()
+
+    if not access_key_id:
+        raise ValueError("R2 access key ID is not configured.")
+    if not secret_access_key:
+        raise ValueError("R2 secret access key is empty.")
+    if not endpoint_url:
+        if not account_id:
+            raise ValueError("R2 account ID or endpoint URL is not configured.")
+        endpoint_url = f"https://{account_id}.r2.cloudflarestorage.com"
+
+    return {
+        "access_key_id": access_key_id,
+        "secret_access_key": secret_access_key,
+        "account_id": account_id,
+        "endpoint_url": endpoint_url,
+    }
+
+
 def load_stibee_webhook_shared_secret() -> str:
     if config.STIBEE_WEBHOOK_SHARED_SECRET:
         return config.STIBEE_WEBHOOK_SHARED_SECRET
@@ -313,14 +374,35 @@ def load_posthog_personal_api_key() -> str:
 
 
 def _split_pem_bundle(bundle: str) -> List[bytes]:
-    blocks: List[bytes] = []
+    blocks: List[str] = []
     current: List[str] = []
     for line in bundle.splitlines():
         current.append(line)
         if "END CERTIFICATE" in line:
-            blocks.append(("\n".join(current).strip() + "\n").encode("utf-8"))
+            blocks.append("\n".join(current).strip() + "\n")
             current = []
 
     if not blocks and bundle.strip():
-        blocks.append((bundle.strip() + "\n").encode("utf-8"))
-    return blocks
+        blocks.append(bundle.strip() + "\n")
+    return [_certificate_text_to_der(block) for block in blocks]
+
+
+def _certificate_text_to_der(value: str) -> bytes:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError("Apple root certificate entry is empty.")
+
+    if "BEGIN CERTIFICATE" in text:
+        lines = [
+            line.strip()
+            for line in text.splitlines()
+            if line.strip()
+            and "BEGIN CERTIFICATE" not in line
+            and "END CERTIFICATE" not in line
+        ]
+        text = "".join(lines)
+
+    try:
+        return base64.b64decode(text, validate=True)
+    except binascii.Error as exc:
+        raise ValueError("Apple root certificate must be PEM or base64 DER.") from exc

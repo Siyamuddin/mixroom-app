@@ -59,7 +59,7 @@ class _FakeRepo:
         self.update_calls = []
         self.get_payload = {
             "free_daily_prompt_limit": 50,
-            "free_weekly_prompt_limit": 350,
+            "free_weekly_prompt_limit": 200,
             "source": "default",
             "configurable": True,
         }

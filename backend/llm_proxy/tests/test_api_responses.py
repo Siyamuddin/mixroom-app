@@ -117,14 +117,14 @@ class _FakeUsageRepo:
         self.prompt_rate_limit = {
             "daily": {
                 "used": 0,
-                "limit": 50,
-                "remaining": 50,
+                "limit": 100,
+                "remaining": 100,
                 "resets_at": "2026-03-18T00:00:00+00:00",
             },
             "weekly": {
                 "used": 0,
-                "limit": 350,
-                "remaining": 350,
+                "limit": 500,
+                "remaining": 500,
                 "resets_at": "2026-03-23T00:00:00+00:00",
             },
             "can_submit": True,
@@ -666,7 +666,7 @@ class ApiResponsesTests(unittest.TestCase):
         reserve_call = self.fake_usage_repo.reserve_calls[0]
         self.assertEqual(reserve_call["reserved_prompts"], 1)
         self.assertEqual(reserve_call["daily_prompt_limit"], 50)
-        self.assertEqual(reserve_call["weekly_prompt_limit"], 350)
+        self.assertEqual(reserve_call["weekly_prompt_limit"], 200)
         self.assertEqual(self.fake_usage_repo.log_calls[-1]["status"], "rate_limited")
         payload = json.loads(result["body"])
         self.assertEqual(payload["error"], "prompt_rate_limit_hit")
@@ -798,7 +798,7 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertEqual(self.fake_usage_repo.log_calls[-1]["resolved_tool"], "mix_model_request")
         self.assertEqual(self.fake_usage_repo.log_calls[-1]["provider_response_id"], "resp_123")
         payload = json.loads(result["body"])
-        self.assertEqual(payload["prompt_rate_limit"]["daily"]["limit"], 50)
+        self.assertEqual(payload["prompt_rate_limit"]["daily"]["limit"], 100)
 
     def test_handler_repairs_wrapped_master_clipper_tool_output(self) -> None:
         provider = _FakeProvider(

@@ -50,6 +50,9 @@ Parameters:
     Default: 300
   EntitlementsTableName:
     Type: String
+  CollaborationTableName:
+    Type: String
+    Default: ''
   MaxRequestBytes:
     Type: Number
     Default: 200000
@@ -145,6 +148,7 @@ Globals:
         AI_USAGE_EVENTS_TABLE: !Ref AiUsageEventsTable
         AI_PROMPT_LIMIT_SETTINGS_TABLE: !Ref AiPromptLimitSettingsTable
         ENTITLEMENTS_TABLE: !Ref EntitlementsTableName
+        COLLABORATION_TABLE: !Ref CollaborationTableName
         LLM_MAX_OUTPUT_TOKENS: !Ref LlmMaxOutputTokens
         MIX_APPLY_MODEL_PATH: !Ref MixApplyModelPath
         MIX_MAGNITUDE_MODEL_PATH: !Ref MixMagnitudeModelPath
@@ -157,6 +161,7 @@ Globals:
 
 Conditions:
   ApiDetailedMetricsEnabledCondition: !Equals [!Ref ApiDetailedMetricsEnabled, 'true']
+  HasCollaborationTableName: !Not [!Equals [!Ref CollaborationTableName, '']]
   HasWebAclArn: !Not
     - !Equals
       - !Ref WebAclArn
@@ -291,6 +296,17 @@ Resources:
             TableName: !Ref AiPromptLimitSettingsTable
         - DynamoDBReadPolicy:
             TableName: !Ref EntitlementsTableName
+        - !If
+          - HasCollaborationTableName
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                Resource:
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CollaborationTableName}
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CollaborationTableName}/index/*
+          - !Ref AWS::NoValue
         - DynamoDBReadPolicy:
             TableName: !Ref AuthAccountsTableName
         - DynamoDBCrudPolicy:

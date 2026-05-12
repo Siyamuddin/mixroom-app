@@ -25,6 +25,7 @@ _REQUIRED_ENV = {
     "USER_TOMBSTONES_TABLE": "user-tombstones",
     "APPLE_BUNDLE_ID": "ai.mixroom.test",
     "APPLE_APP_ID": "123456789",
+    "APP_AUTH_SECRET_ARN": "app-auth-secret",
     "GOOGLE_PLAY_PACKAGE_NAME": "ai.mixroom.test",
 }
 for key, value in _REQUIRED_ENV.items():

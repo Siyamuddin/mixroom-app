@@ -22,6 +22,7 @@ _REQUIRED_ENV = {
     "RECONCILIATION_JOBS_TABLE": "reconcile-jobs",
     "PROJECTION_QUEUE_URL": "https://example.com/queue",
     "USER_TOMBSTONES_TABLE": "user-tombstones",
+    "ADMIN_ENTITLEMENT_OVERRIDES_TABLE": "admin-entitlement-overrides",
     "COGNITO_USER_POOL_ID": "pool-id",
 }
 for key, value in _REQUIRED_ENV.items():
@@ -70,15 +71,24 @@ repo_module = importlib.import_module("src.common.admin_user_repository")
 
 
 class _FakeRepo:
-    def __init__(self, search_payload=None, delete_payload=None, grant_payload=None):
+    def __init__(
+        self,
+        search_payload=None,
+        delete_payload=None,
+        grant_payload=None,
+        override_payload=None,
+    ):
         self.search_payload = search_payload or {"users": []}
         self.delete_payload = delete_payload or {"deleted": True}
         self.grant_payload = grant_payload or {"granted": True}
+        self.override_payload = override_payload or {"overridden": True}
         self.search_calls = []
         self.delete_calls = []
         self.grant_calls = []
+        self.override_calls = []
         self.delete_error = None
         self.grant_error = None
+        self.override_error = None
 
     def search_users(self, *, query="", limit=24):
         self.search_calls.append({"query": query, "limit": limit})
@@ -127,6 +137,38 @@ class _FakeRepo:
         if self.grant_error is not None:
             raise self.grant_error
         return dict(self.grant_payload)
+
+    def apply_entitlement_override(
+        self,
+        *,
+        user_id: str,
+        plan_code: str,
+        expires_at: str,
+        reason: str,
+        confirm_identifier: str,
+        confirm_admin_first_name: str,
+        granted_by_user_id: str,
+        granted_by_email: str,
+        seat_limit=None,
+        organization_name: str = "",
+    ):
+        self.override_calls.append(
+            {
+                "user_id": user_id,
+                "plan_code": plan_code,
+                "expires_at": expires_at,
+                "reason": reason,
+                "confirm_identifier": confirm_identifier,
+                "confirm_admin_first_name": confirm_admin_first_name,
+                "granted_by_user_id": granted_by_user_id,
+                "granted_by_email": granted_by_email,
+                "seat_limit": seat_limit,
+                "organization_name": organization_name,
+            }
+        )
+        if self.override_error is not None:
+            raise self.override_error
+        return dict(self.override_payload)
 
 
 class _FakeAccessRepo:
@@ -305,8 +347,89 @@ class AdminUsersHandlerTests(unittest.TestCase):
         self.assertEqual(result["statusCode"], 403)
         self.assertIn("andrew@mixroom.ai", result["body"])
 
+    def test_entitlement_override_returns_payload(self):
+        self._authenticate(email="andrew@mixroom.ai")
+        admin_module.repo = _FakeRepo(
+            override_payload={
+                "overridden": True,
+                "override_id": "override-1",
+                "user": {"user_id": "user-1", "subscription_tier": "producer"},
+            }
+        )
+
+        result = admin_module.handler(
+            {
+                "rawPath": "/v1/internal/admin/users/entitlement-override",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": (
+                    '{"user_id":"user-1","plan_code":"studio",'
+                    '"expires_at":"2026-05-20T00:00:00+00:00",'
+                    '"seat_limit":5,"organization_name":"Test Studio",'
+                    '"reason":"support test","confirm_identifier":"user@example.com",'
+                    '"confirm_admin_first_name":"andrew"}'
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(result["statusCode"], 200)
+        self.assertIn('"overridden": true', result["body"])
+        call = admin_module.repo.override_calls[0]
+        self.assertEqual(call["plan_code"], "studio")
+        self.assertEqual(call["seat_limit"], 5)
+        self.assertEqual(call["organization_name"], "Test Studio")
+
+    def test_entitlement_override_requires_ai_editor_email(self):
+        self._authenticate(email="other-admin@example.com")
+        admin_module.repo = _FakeRepo()
+
+        result = admin_module.handler(
+            {
+                "rawPath": "/v1/internal/admin/users/entitlement-override",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": '{"user_id":"user-1","plan_code":"producer"}',
+            },
+            object(),
+        )
+
+        self.assertEqual(result["statusCode"], 403)
+        self.assertIn("andrew@mixroom.ai", result["body"])
+
 
 class AdminUserRepositoryTests(unittest.TestCase):
+    def test_override_seat_limits_follow_team_plan_rules(self):
+        repository = repo_module.AdminUserRepository.__new__(repo_module.AdminUserRepository)
+
+        self.assertEqual(
+            repository._normalize_override_seat_limit(
+                "studio",
+                None,
+                plan={"limits": {"members": 5}},
+            ),
+            5,
+        )
+        self.assertEqual(
+            repository._normalize_override_seat_limit(
+                "education",
+                20,
+                plan={"limits": {"default_seats": 20}},
+            ),
+            20,
+        )
+
+        with self.assertRaisesRegex(ValueError, "Studio seat limit"):
+            repository._normalize_override_seat_limit(
+                "studio",
+                4,
+                plan={"limits": {"members": 5}},
+            )
+        with self.assertRaisesRegex(ValueError, "Education seat limit"):
+            repository._normalize_override_seat_limit(
+                "education",
+                12,
+                plan={"limits": {"default_seats": 20}},
+            )
+
     def test_build_user_record_prefers_native_auth_fields_and_summarizes_sessions(self):
         repository = repo_module.AdminUserRepository.__new__(repo_module.AdminUserRepository)
         repository._list_auth_sessions_for_user = mock.Mock(
@@ -325,7 +448,7 @@ class AdminUserRepositoryTests(unittest.TestCase):
         )
         repository._get_ai_usage_state = mock.Mock(return_value={})
         repository._get_entitlement = mock.Mock(
-            return_value={"tier": "pro", "status": "active", "source_provider": "apple"}
+            return_value={"plan_code": "producer", "status": "active", "source_provider": "apple"}
         )
         repository._list_subscriptions_for_user = mock.Mock(return_value=[])
         repository._list_customer_link_items = mock.Mock(
@@ -364,7 +487,7 @@ class AdminUserRepositoryTests(unittest.TestCase):
             },
             warnings=[],
             ai_usage_state={},
-            entitlement={"tier": "pro", "status": "active", "source_provider": "apple"},
+            entitlement={"plan_code": "producer", "status": "active", "source_provider": "apple"},
             subscriptions=[],
             customer_links=[{"provider": "google"}],
         )

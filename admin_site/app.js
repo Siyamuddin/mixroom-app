@@ -8,11 +8,15 @@ const LIVE_PRESENCE_PATH = "/v1/internal/admin/live-presence";
 const ADMIN_USERS_PATH = "/v1/internal/admin/users";
 const ADMIN_USERS_DELETE_PATH = "/v1/internal/admin/users/delete";
 const ADMIN_USERS_GRANT_PROMPTS_PATH = "/v1/internal/admin/users/grant-prompts";
+const ADMIN_USERS_ENTITLEMENT_OVERRIDE_PATH =
+  "/v1/internal/admin/users/entitlement-override";
 const ADMIN_FEEDBACK_PATH = "/v1/internal/admin/feedback";
 const ADMIN_AI_PROMPT_LIMITS_PATH = "/v1/internal/admin/settings/ai-prompt-limits";
 const ADMIN_AI_RUNTIME_PATH = "/v1/internal/admin/settings/ai-runtime";
 const ADMIN_BILLING_CATALOG_PATH = "/v1/internal/admin/settings/billing-catalog";
 const ADMIN_BILLING_ORGANIZATIONS_PATH = "/v1/internal/admin/billing/organizations";
+const ADMIN_BILLING_EDUCATION_PROVISIONING_PATH =
+  "/v1/internal/admin/billing/education-provisioning";
 const ADMIN_BILLING_MEMBERSHIPS_PATH = "/v1/internal/admin/billing/memberships";
 const ADMIN_BILLING_WORKSPACES_PATH = "/v1/internal/admin/billing/workspaces";
 const ADMIN_BILLING_CLOUD_PROJECTS_PATH = "/v1/internal/admin/billing/cloud-projects";
@@ -37,6 +41,12 @@ const TAB_KEYS = ["home", "users", "feedback", "dev"];
 const ANDREW_ADMIN_EMAIL = "andrew@mixroom.ai";
 const AI_PROMPT_LIMITS_CONFIRM_PHRASE = "APPLY PROMPT LIMITS";
 const PRODUCER_CAPTURE_WHITELIST_CONFIRM_PHRASE = "APPLY PRODUCER WHITELIST";
+const ENTITLEMENT_OVERRIDE_DURATION_OPTIONS = [
+  { key: "1d", days: 1, labelKey: "override.duration.1d" },
+  { key: "1w", days: 7, labelKey: "override.duration.1w" },
+  { key: "1m", days: 30, labelKey: "override.duration.1m" },
+  { key: "1y", days: 365, labelKey: "override.duration.1y" },
+];
 const ANALYTICS_RANGE_OPTIONS = [
   { key: "365d", days: 365, labelKey: "analytics.range.1y" },
   { key: "90d", days: 90, labelKey: "analytics.range.3m" },
@@ -161,7 +171,7 @@ const MESSAGES = {
     "panel.aiUsage.label": "AI Usage",
     "panel.aiUsage.title": "Daily and weekly AI snapshot",
     "panel.aiPromptLimits.label": "AI Prompt Limits",
-    "panel.aiPromptLimits.title": "Free tier defaults",
+    "panel.aiPromptLimits.title": "Free plan defaults",
     "panel.aiPromptLimits.meta": "Server-enforced prompt limits for free users.",
     "panel.aiRuntime.label": "AI Runtime",
     "panel.aiRuntime.title": "Server prompt and model config",
@@ -171,8 +181,8 @@ const MESSAGES = {
     "panel.producerCaptureWhitelist.meta":
       "Usernames allowlisted to see the Producer Capture UI toggle.",
     "panel.features.title": "Most used AI tools this week",
-    "panel.tiers.label": "Subscription Tier",
-    "panel.tiers.title": "Tiers",
+    "panel.tiers.label": "Subscription Plan",
+    "panel.tiers.title": "Plans",
     "panel.accountActivity.label": "Account Activity",
     "panel.accountActivity.title": "Accounts with app data",
     "panel.accountActivity.meta": "Users with subscription or AI usage records.",
@@ -194,7 +204,7 @@ const MESSAGES = {
     "table.message": "Message",
     "table.attachments": "Attachments",
     "table.submitted": "Submitted",
-    "table.tier": "Tier",
+    "table.tier": "Plan",
     "table.status": "Status",
     "table.aiRequests": "AI Requests",
     "table.creditsToday": "Credits Today",
@@ -208,7 +218,7 @@ const MESSAGES = {
     "empty.signInSearchUsers": "Sign in to search users.",
     "empty.selectUser": "Select a user to review details and actions.",
     "empty.signInFeatureUsage": "Sign in to load feature usage.",
-    "empty.signInTierDistribution": "Sign in to load tier distribution.",
+    "empty.signInTierDistribution": "Sign in to load plan distribution.",
     "empty.signInUserData": "Sign in to load user data.",
     "empty.signInProjectData": "Sign in to load project data.",
     "empty.signInFeedback": "Sign in to load user feedback and bug reports.",
@@ -247,6 +257,9 @@ const MESSAGES = {
     "status.grantingPrompts": "Granting extra AI prompts to {target}...",
     "status.promptsGranted": "Extra AI prompts granted.",
     "status.grantPromptsFailed": "Could not grant extra AI prompts.",
+    "status.applyingEntitlementOverride": "Applying entitlement override to {target}...",
+    "status.entitlementOverrideApplied": "Entitlement override applied.",
+    "status.entitlementOverrideFailed": "Could not apply entitlement override.",
     "status.savingAiPromptLimits": "Saving AI prompt limit settings...",
     "status.aiPromptLimitsSaved": "AI prompt limit settings saved.",
     "status.saveAiPromptLimitsFailed": "Could not save AI prompt limit settings.",
@@ -311,7 +324,7 @@ const MESSAGES = {
     "analytics.countryShare": "{share} of shown countries",
     "analytics.countryFeatured": "Strongest current region",
     "analytics.countryListLabel": "Country spread",
-    "tiers.noData": "No tier data available.",
+    "tiers.noData": "No plan data available.",
     "tiers.usersActive": "{users} users • {active} active",
     "trackedUsers.none": "No users with billing or AI usage data yet.",
     "projects.none": "No project IDs have shown AI activity yet.",
@@ -400,6 +413,31 @@ const MESSAGES = {
     "support.inputLabel": "Extra prompts to add",
     "support.granting": "Granting...",
     "support.button": "Grant Extra Prompts",
+    "override.label": "Entitlement Support",
+    "override.title": "Temporary plan override",
+    "override.copy":
+      "Grants temporary access without changing payment-provider subscriptions. Every use is written to the audit log.",
+    "override.readOnly": "Visible to admins, editable only by andrew@mixroom.ai.",
+    "override.plan": "Plan to grant",
+    "override.seats": "Seat limit",
+    "override.seatsHelp":
+      "Studio minimum is 5. Education supports 10, 20, or 30 student seats; teacher/admin access is separate.",
+    "override.organizationName": "Team or school name",
+    "override.organizationNamePlaceholder": "Optional",
+    "override.expiry": "Expiry",
+    "override.duration.1d": "1 day",
+    "override.duration.1w": "1 week",
+    "override.duration.1m": "1 month",
+    "override.duration.1y": "1 year",
+    "override.reason": "Reason",
+    "override.reasonPlaceholder": "Support ticket, local test, or emergency context",
+    "override.confirmIdentifier": "Type the user's email, username, or user ID",
+    "override.confirmAdminName": "Type your admin first name: {value}",
+    "override.applying": "Applying...",
+    "override.button": "Apply Override",
+    "override.applied": "Granted {plan} until {date}.",
+    "override.typeExactIdentifier": "Type a matching user email, username, or user ID to confirm.",
+    "override.typeExactAdminName": "Type your admin first name exactly.",
     "delete.label": "Delete User",
     "delete.title": "Delete account",
     "delete.copy":
@@ -452,8 +490,12 @@ const MESSAGES = {
     "value.userLoaded": "{count} user loaded.",
     "value.usersLoaded": "{count} users loaded.",
     "value.free": "free",
-    "value.pro": "pro",
+    "value.starter": "starter",
+    "value.pro": "producer",
+    "value.producer": "producer",
     "value.studio": "studio",
+    "value.enterprise": "enterprise",
+    "value.education": "education",
     "value.active": "active",
     "value.trialing": "trialing",
     "value.grace_period": "grace period",
@@ -471,6 +513,7 @@ const MESSAGES = {
     "value.pending": "pending",
     "value.deleted": "deleted",
     "value.disabled": "disabled",
+    "value.locked": "locked",
     "value.suspended": "suspended",
   },
   ko: {
@@ -547,7 +590,7 @@ const MESSAGES = {
     "panel.aiUsage.label": "AI 사용량",
     "panel.aiUsage.title": "일간 및 주간 AI 스냅샷",
     "panel.aiPromptLimits.label": "AI 프롬프트 제한",
-    "panel.aiPromptLimits.title": "무료 티어 기본값",
+    "panel.aiPromptLimits.title": "무료 플랜 기본값",
     "panel.aiPromptLimits.meta": "무료 사용자에게 서버에서 강제되는 프롬프트 제한입니다.",
     "panel.aiRuntime.label": "AI 런타임",
     "panel.aiRuntime.title": "서버 프롬프트 및 모델 설정",
@@ -557,8 +600,8 @@ const MESSAGES = {
     "panel.producerCaptureWhitelist.meta":
       "프로듀서 캡처 UI 토글을 볼 수 있는 사용자명 허용 목록입니다.",
     "panel.features.title": "이번 주 가장 많이 쓴 AI 도구",
-    "panel.tiers.label": "구독 티어",
-    "panel.tiers.title": "티어",
+    "panel.tiers.label": "구독 플랜",
+    "panel.tiers.title": "플랜",
     "panel.accountActivity.label": "계정 활동",
     "panel.accountActivity.title": "앱 데이터가 있는 계정",
     "panel.accountActivity.meta": "구독 또는 AI 사용 기록이 있는 사용자입니다.",
@@ -580,7 +623,7 @@ const MESSAGES = {
     "table.message": "메시지",
     "table.attachments": "첨부",
     "table.submitted": "제출 시각",
-    "table.tier": "티어",
+    "table.tier": "플랜",
     "table.status": "상태",
     "table.aiRequests": "AI 요청",
     "table.creditsToday": "오늘 크레딧",
@@ -594,7 +637,7 @@ const MESSAGES = {
     "empty.signInSearchUsers": "사용자를 검색하려면 로그인하세요.",
     "empty.selectUser": "상세와 작업을 보려면 사용자를 선택하세요.",
     "empty.signInFeatureUsage": "기능 사용량을 불러오려면 로그인하세요.",
-    "empty.signInTierDistribution": "티어 분포를 불러오려면 로그인하세요.",
+    "empty.signInTierDistribution": "플랜 분포를 불러오려면 로그인하세요.",
     "empty.signInUserData": "사용자 데이터를 불러오려면 로그인하세요.",
     "empty.signInProjectData": "프로젝트 데이터를 불러오려면 로그인하세요.",
     "empty.signInFeedback": "사용자 피드백과 버그 제보를 불러오려면 로그인하세요.",
@@ -633,6 +676,9 @@ const MESSAGES = {
     "status.grantingPrompts": "{target}에 추가 AI 프롬프트를 부여하는 중...",
     "status.promptsGranted": "추가 AI 프롬프트를 부여했습니다.",
     "status.grantPromptsFailed": "추가 AI 프롬프트 부여에 실패했습니다.",
+    "status.applyingEntitlementOverride": "{target}에 플랜 재정의를 적용하는 중...",
+    "status.entitlementOverrideApplied": "플랜 재정의를 적용했습니다.",
+    "status.entitlementOverrideFailed": "플랜 재정의를 적용하지 못했습니다.",
     "status.savingAiPromptLimits": "AI 프롬프트 제한 설정을 저장하는 중...",
     "status.aiPromptLimitsSaved": "AI 프롬프트 제한 설정을 저장했습니다.",
     "status.saveAiPromptLimitsFailed": "AI 프롬프트 제한 설정 저장에 실패했습니다.",
@@ -697,7 +743,7 @@ const MESSAGES = {
     "analytics.countryShare": "표시된 국가 중 {share}",
     "analytics.countryFeatured": "현재 가장 강한 지역",
     "analytics.countryListLabel": "국가 분포",
-    "tiers.noData": "티어 데이터가 없습니다.",
+    "tiers.noData": "플랜 데이터가 없습니다.",
     "tiers.usersActive": "사용자 {users}명 • 활성 {active}명",
     "trackedUsers.none": "결제 또는 AI 사용 데이터가 있는 사용자가 아직 없습니다.",
     "projects.none": "AI 활동이 확인된 프로젝트 ID가 아직 없습니다.",
@@ -786,6 +832,31 @@ const MESSAGES = {
     "support.inputLabel": "추가할 프롬프트 수",
     "support.granting": "부여 중...",
     "support.button": "추가 프롬프트 부여",
+    "override.label": "권한 지원",
+    "override.title": "임시 플랜 재정의",
+    "override.copy":
+      "결제 제공업체의 구독을 변경하지 않고 임시 접근 권한을 부여합니다. 모든 사용 기록은 감사 로그에 저장됩니다.",
+    "override.readOnly": "관리자에게는 보이지만 andrew@mixroom.ai 계정만 수정할 수 있습니다.",
+    "override.plan": "부여할 플랜",
+    "override.seats": "좌석 수",
+    "override.seatsHelp":
+      "Studio는 최소 5석입니다. Education은 학생 좌석 10, 20, 30개를 지원하며 교사/관리자 접근은 별도입니다.",
+    "override.organizationName": "팀 또는 학교 이름",
+    "override.organizationNamePlaceholder": "선택 사항",
+    "override.expiry": "만료일",
+    "override.duration.1d": "1일",
+    "override.duration.1w": "1주",
+    "override.duration.1m": "1개월",
+    "override.duration.1y": "1년",
+    "override.reason": "사유",
+    "override.reasonPlaceholder": "지원 티켓, 로컬 테스트, 긴급 상황 등",
+    "override.confirmIdentifier": "사용자의 이메일, 사용자명, 또는 사용자 ID 입력",
+    "override.confirmAdminName": "관리자 본인 이름 입력: {value}",
+    "override.applying": "적용 중...",
+    "override.button": "재정의 적용",
+    "override.applied": "{date}까지 {plan} 권한을 부여했습니다.",
+    "override.typeExactIdentifier": "일치하는 사용자 이메일, 사용자명, 또는 사용자 ID를 입력하세요.",
+    "override.typeExactAdminName": "관리자 본인 이름을 정확히 입력하세요.",
     "delete.label": "사용자 삭제",
     "delete.title": "계정 삭제",
     "delete.copy":
@@ -836,8 +907,12 @@ const MESSAGES = {
     "value.userLoaded": "사용자 {count}명을 불러왔습니다.",
     "value.usersLoaded": "사용자 {count}명을 불러왔습니다.",
     "value.free": "무료",
-    "value.pro": "프로",
+    "value.starter": "스타터",
+    "value.pro": "프로듀서",
+    "value.producer": "프로듀서",
     "value.studio": "스튜디오",
+    "value.enterprise": "엔터프라이즈",
+    "value.education": "교육",
     "value.active": "활성",
     "value.trialing": "체험 중",
     "value.grace_period": "유예 기간",
@@ -855,6 +930,7 @@ const MESSAGES = {
     "value.pending": "대기 중",
     "value.deleted": "삭제됨",
     "value.disabled": "비활성화",
+    "value.locked": "잠김",
     "value.suspended": "정지됨",
   },
 };
@@ -964,12 +1040,38 @@ const elements = {
   ),
   billingCatalogPlansInput: document.querySelector("#billing-catalog-plans-input"),
   billingCatalogProductsInput: document.querySelector("#billing-catalog-products-input"),
-  billingCatalogOffersInput: document.querySelector("#billing-catalog-offers-input"),
+  billingCatalogProviderProductsInput: document.querySelector(
+    "#billing-catalog-provider-products-input",
+  ),
   billingCatalogSaveButton: document.querySelector("#billing-catalog-save-button"),
   billingCatalogFeedback: document.querySelector("#billing-catalog-feedback"),
   billingOrganizationsMeta: document.querySelector("#billing-organizations-meta"),
   billingOrganizationsTableBody: document.querySelector("#billing-organizations-table-body"),
   billingOrganizationsPageMeta: document.querySelector("#billing-organizations-page-meta"),
+  billingEducationSummary: document.querySelector("#billing-education-summary"),
+  billingEducationCurrentPlan: document.querySelector("#billing-education-current-plan"),
+  billingEducationSeats: document.querySelector("#billing-education-seats"),
+  billingEducationProvisionForm: document.querySelector("#billing-education-provision-form"),
+  billingEducationProvisionOrgIdInput: document.querySelector(
+    "#billing-education-provision-org-id",
+  ),
+  billingEducationProvisionNameInput: document.querySelector("#billing-education-provision-name"),
+  billingEducationProvisionSeatsInput: document.querySelector("#billing-education-provision-seats"),
+  billingEducationProvisionTeacherUserIdInput: document.querySelector(
+    "#billing-education-provision-teacher-user-id",
+  ),
+  billingEducationProvisionTeacherEmailInput: document.querySelector(
+    "#billing-education-provision-teacher-email",
+  ),
+  billingEducationProvisionSelectedUserButton: document.querySelector(
+    "#billing-education-provision-selected-user-button",
+  ),
+  billingEducationProvisionSaveButton: document.querySelector(
+    "#billing-education-provision-save-button",
+  ),
+  billingEducationProvisionFeedback: document.querySelector(
+    "#billing-education-provision-feedback",
+  ),
   billingOrganizationForm: document.querySelector("#billing-organization-form"),
   billingOrganizationIdInput: document.querySelector("#billing-organization-id"),
   billingOrganizationNameInput: document.querySelector("#billing-organization-name"),
@@ -993,6 +1095,7 @@ const elements = {
     "#billing-membership-organization-id",
   ),
   billingMembershipUserIdInput: document.querySelector("#billing-membership-user-id"),
+  billingMembershipEmailInput: document.querySelector("#billing-membership-email"),
   billingMembershipRoleInput: document.querySelector("#billing-membership-role"),
   billingMembershipStatusInput: document.querySelector("#billing-membership-status"),
   billingMembershipSeatConsumedInput: document.querySelector("#billing-membership-seat-consumed"),
@@ -1144,6 +1247,7 @@ const state = {
   selectedBillingMembershipKey: "",
   selectedBillingWorkspaceId: "",
   selectedBillingCloudProjectId: "",
+  billingEducationProvisionFeedback: null,
   billingOrganizationFeedback: null,
   billingMembershipFeedback: null,
   billingWorkspaceFeedback: null,
@@ -1155,6 +1259,8 @@ const state = {
   feedbackRequestId: 0,
   deleteFeedback: null,
   grantFeedback: null,
+  overrideFeedback: null,
+  overrideBusy: false,
   searchRequestId: 0,
   overviewRequestId: 0,
   loadedTabs: buildLoadedTabs(),
@@ -1197,6 +1303,8 @@ function bindEvents() {
   elements.feedbackShowMoreButton.addEventListener("click", handleFeedbackShowMore);
   elements.analyticsRangeControls.addEventListener("click", handleAnalyticsRangeClick);
   elements.userInspector.addEventListener("submit", handleInspectorSubmit);
+  elements.userInspector.addEventListener("click", handleInspectorClick);
+  elements.userInspector.addEventListener("change", handleInspectorChange);
   elements.aiPromptLimitsForm.addEventListener("submit", handleAiPromptLimitsSubmit);
   elements.aiPromptLimitsConfirmInput.addEventListener("input", updateBusyState);
   elements.producerCaptureWhitelistForm.addEventListener(
@@ -1208,7 +1316,16 @@ function bindEvents() {
   elements.aiRuntimeSettings.addEventListener("input", handleAiRuntimeInputChange);
   elements.aiRuntimeSettings.addEventListener("change", handleAiRuntimeInputChange);
   elements.billingCatalogForm.addEventListener("submit", handleBillingCatalogSubmit);
+  elements.billingEducationProvisionForm?.addEventListener(
+    "submit",
+    handleBillingEducationProvisionSubmit,
+  );
+  elements.billingEducationProvisionSelectedUserButton?.addEventListener(
+    "click",
+    fillEducationProvisionTeacherFromSelectedUser,
+  );
   elements.billingOrganizationsTableBody.addEventListener("click", handleBillingOrganizationsTableClick);
+  elements.billingEducationSummary?.addEventListener("click", handleEducationSeatPresetClick);
   elements.billingOrganizationForm.addEventListener("submit", handleBillingOrganizationSubmit);
   elements.billingOrganizationClearButton.addEventListener(
     "click",
@@ -1737,6 +1854,10 @@ function canEditBillingControlPlane() {
 
 function canGrantAiPrompts() {
   return state.overview?.permissions?.can_grant_ai_prompts === true;
+}
+
+function canApplyEntitlementOverrides() {
+  return canViewAiRuntimeSettings();
 }
 
 async function bootstrap() {
@@ -2850,7 +2971,7 @@ function renderBillingCatalogSettings() {
     elements.billingCatalogSummary.innerHTML = buildBillingCatalogSummaryHtml({
       plans: [],
       products: [],
-      offers: [],
+      providerProducts: [],
       support: null,
     });
     elements.billingCatalogPreview.innerHTML = `
@@ -2868,7 +2989,7 @@ function renderBillingCatalogSettings() {
     elements.billingCatalogDefaultCheckoutUrlInput.value = "";
     elements.billingCatalogPlansInput.value = "";
     elements.billingCatalogProductsInput.value = "";
-    elements.billingCatalogOffersInput.value = "";
+    elements.billingCatalogProviderProductsInput.value = "";
     renderBillingFeedback(elements.billingCatalogFeedback, state.billingCatalogFeedback);
     renderBillingOrganizations();
     updateBusyState();
@@ -2877,7 +2998,11 @@ function renderBillingCatalogSettings() {
 
   const plans = Array.isArray(catalog.plans) ? catalog.plans : [];
   const products = Array.isArray(catalog.products) ? catalog.products : [];
-  const offers = Array.isArray(catalog.offers) ? catalog.offers : [];
+  const providerProducts = Array.isArray(catalog.provider_products)
+    ? catalog.provider_products
+    : Array.isArray(catalog.offers)
+      ? catalog.offers
+      : [];
   const support = catalog.support && typeof catalog.support === "object" ? catalog.support : {};
   const metaParts = [
     catalog.configurable === false ? "Read-only defaults" : "Editable by admin",
@@ -2889,13 +3014,13 @@ function renderBillingCatalogSettings() {
   elements.billingCatalogSummary.innerHTML = buildBillingCatalogSummaryHtml({
     plans,
     products,
-    offers,
+    providerProducts,
     support,
   });
   elements.billingCatalogPreview.innerHTML = buildBillingCatalogPreviewHtml({
     plans,
     products,
-    offers,
+    providerProducts,
     support,
   });
   elements.billingCatalogForm.classList.remove("hidden");
@@ -2909,7 +3034,11 @@ function renderBillingCatalogSettings() {
   elements.billingCatalogDefaultCheckoutUrlInput.value = `${support.default_checkout_url || ""}`;
   elements.billingCatalogPlansInput.value = JSON.stringify(plans, null, 2);
   elements.billingCatalogProductsInput.value = JSON.stringify(products, null, 2);
-  elements.billingCatalogOffersInput.value = JSON.stringify(offers, null, 2);
+  elements.billingCatalogProviderProductsInput.value = JSON.stringify(
+    providerProducts,
+    null,
+    2,
+  );
   renderBillingFeedback(elements.billingCatalogFeedback, state.billingCatalogFeedback);
   renderBillingOrganizations();
   updateBusyState();
@@ -2937,6 +3066,11 @@ function renderBillingOrganizations() {
       .map((record) => {
         const selected = record.organization_id === state.selectedBillingOrganizationId;
         const rowClass = selected ? ' class="is-selected"' : "";
+        const seatsUsed = Number(record.seats_used || 0);
+        const seatsLimit = Number(record.seat_limit || 0);
+        const seatDetail = seatsLimit > 0
+          ? `${formatWholeNumber(seatsUsed)} / ${formatWholeNumber(seatsLimit)}`
+          : formatWholeNumber(seatsUsed);
         return `
           <tr${rowClass} data-billing-selectable="true" data-organization-id="${escapeHtml(
             record.organization_id || "",
@@ -2946,7 +3080,14 @@ function renderBillingOrganizations() {
               <div class="user-subtext table-code">${escapeHtml(record.organization_id || "")}</div>
             </td>
             <td>${escapeHtml(record.plan_code || t("detail.na"))}</td>
-            <td>${escapeHtml(formatWholeNumber(record.seat_limit || 0))}</td>
+            <td>
+              <div>${escapeHtml(seatDetail)}</div>
+              <div class="user-subtext">${escapeHtml(
+                `${formatWholeNumber(record.seats_active || 0)} active • ${formatWholeNumber(
+                  record.seats_invited || 0,
+                )} invited`,
+              )}</div>
+            </td>
             <td>${escapeHtml(formatStatusLabel(record.status || ""))}</td>
             <td>${escapeHtml(formatDate(record.updated_at || record.created_at))}</td>
           </tr>
@@ -2955,8 +3096,43 @@ function renderBillingOrganizations() {
       .join("");
   }
   elements.billingOrganizationsPageMeta.textContent = buildBillingRecordMeta(records.length, "orgs");
+  renderBillingEducationSummary();
   renderBillingOrganizationForm();
+  renderBillingFeedback(
+    elements.billingEducationProvisionFeedback,
+    state.billingEducationProvisionFeedback,
+  );
   renderBillingFeedback(elements.billingOrganizationFeedback, state.billingOrganizationFeedback);
+}
+
+function renderBillingEducationSummary() {
+  const record = getSelectedBillingOrganization();
+  if (!elements.billingEducationSummary) return;
+  const isEducation = `${record?.plan_code || ""}`.trim().toLowerCase() === "education";
+  elements.billingEducationSummary.classList.toggle("hidden", !isEducation);
+  if (!isEducation) return;
+  const limit = Number(record?.seat_limit || 0);
+  const used = Number(record?.seats_used || 0);
+  const active = Number(record?.seats_active || 0);
+  const invited = Number(record?.seats_invited || 0);
+  elements.billingEducationCurrentPlan.textContent = `Current plan: Education ${formatWholeNumber(
+    limit,
+  )} student seats`;
+  elements.billingEducationSeats.textContent = `Student seats used: ${formatWholeNumber(
+    used,
+  )} / ${formatWholeNumber(limit)} (${formatWholeNumber(active)} active, ${formatWholeNumber(
+    invited,
+  )} invited). Teacher/admin access is separate.`;
+  elements.billingEducationSummary
+    .querySelectorAll("[data-education-seat-preset]")
+    .forEach((button) => {
+      const preset = Number(button.dataset.educationSeatPreset || 0);
+      button.disabled = preset > 0 && preset < used;
+      button.textContent =
+        preset === 30 && limit < 30
+          ? "Upgrade to 30 student seats"
+          : `${formatWholeNumber(preset)} student seats`;
+    });
 }
 
 function renderBillingMemberships() {
@@ -2983,12 +3159,17 @@ function renderBillingMemberships() {
         const selected = key === state.selectedBillingMembershipKey;
         const rowClass = selected ? ' class="is-selected"' : "";
         const seat = record.seat_consumed ? "Seat consumed" : "No seat";
+        const userLabel = record.email || record.user_id || "";
+        const inviteLabel =
+          record.status === "pending" && record.invite_url
+            ? `Pending invite • ${record.invite_url}`
+            : seat;
         return `
           <tr${rowClass} data-billing-selectable="true" data-membership-key="${escapeHtml(key)}">
             <td class="table-code">${escapeHtml(record.organization_id || "")}</td>
             <td>
-              <div class="user-name table-code">${escapeHtml(record.user_id || "")}</div>
-              <div class="user-subtext">${escapeHtml(seat)}</div>
+              <div class="user-name table-code">${escapeHtml(userLabel)}</div>
+              <div class="user-subtext">${escapeHtml(inviteLabel)}</div>
             </td>
             <td>${escapeHtml(record.role || t("detail.na"))}</td>
             <td>${escapeHtml(formatStatusLabel(record.status || ""))}</td>
@@ -3125,6 +3306,7 @@ function renderBillingMembershipForm() {
   const record = getSelectedBillingMembership();
   elements.billingMembershipOrganizationIdInput.value = `${record?.organization_id || ""}`;
   elements.billingMembershipUserIdInput.value = `${record?.user_id || ""}`;
+  elements.billingMembershipEmailInput.value = `${record?.email || ""}`;
   elements.billingMembershipRoleInput.value = `${record?.role || "member"}`;
   elements.billingMembershipStatusInput.value = `${record?.status || "active"}`;
   elements.billingMembershipSeatConsumedInput.checked = record?.seat_consumed === true;
@@ -3157,11 +3339,14 @@ function renderBillingCloudProjectForm() {
   elements.billingCloudProjectDocumentInput.value = "";
 }
 
-function buildBillingCatalogSummaryHtml({ plans, products, offers, support }) {
+function buildBillingCatalogSummaryHtml({ plans, products, providerProducts, support }) {
   return [
     buildBillingMiniMetricHtml("Plans", formatWholeNumber(plans.length || 0)),
     buildBillingMiniMetricHtml("Products", formatWholeNumber(products.length || 0)),
-    buildBillingMiniMetricHtml("Offers", formatWholeNumber(offers.length || 0)),
+    buildBillingMiniMetricHtml(
+      "Provider products",
+      formatWholeNumber(providerProducts.length || 0),
+    ),
     buildBillingMiniMetricHtml(
       "Support",
       support?.support_email || support?.contact_label || t("detail.na"),
@@ -3178,7 +3363,7 @@ function buildBillingMiniMetricHtml(label, value) {
   `;
 }
 
-function buildBillingCatalogPreviewHtml({ plans, products, offers, support }) {
+function buildBillingCatalogPreviewHtml({ plans, products, providerProducts, support }) {
   const planRows = plans.map((plan) => [
     `<span class="table-code">${escapeHtml(plan.code || "")}</span>`,
     escapeHtml(plan.label || plan.code || ""),
@@ -3191,11 +3376,11 @@ function buildBillingCatalogPreviewHtml({ plans, products, offers, support }) {
     escapeHtml(`${product.type || ""} • ${product.billing_interval || ""}`.trim()),
     escapeHtml(product.price_display || product.management_channel || t("detail.na")),
   ]);
-  const offerRows = offers.map((offer) => [
-    `<span class="table-code">${escapeHtml(offer.code || "")}</span>`,
-    escapeHtml(offer.provider || ""),
-    escapeHtml(offer.product_code || ""),
-    escapeHtml(offer.provider_product_id || t("detail.na")),
+  const providerProductRows = providerProducts.map((providerProduct) => [
+    `<span class="table-code">${escapeHtml(providerProduct.code || "")}</span>`,
+    escapeHtml(providerProduct.provider || ""),
+    escapeHtml(providerProduct.product_code || ""),
+    escapeHtml(providerProduct.provider_product_id || t("detail.na")),
   ]);
   return `
     ${buildBillingPreviewTableSection("Plans", ["Code", "Label", "Group", "Limits"], planRows)}
@@ -3205,9 +3390,9 @@ function buildBillingCatalogPreviewHtml({ plans, products, offers, support }) {
       productRows,
     )}
     ${buildBillingPreviewTableSection(
-      "Offers",
+      "Provider products",
       ["Code", "Provider", "Product", "Provider Product ID"],
-      offerRows,
+      providerProductRows,
     )}
     <section class="billing-preview-section">
       <div class="subsection-header">
@@ -3397,6 +3582,26 @@ function handleBillingOrganizationsTableClick(event) {
   renderBillingOrganizations();
 }
 
+function handleEducationSeatPresetClick(event) {
+  const button = event.target.closest("[data-education-seat-preset]");
+  if (!button || button.disabled) {
+    return;
+  }
+  const preset = Number(button.dataset.educationSeatPreset || 0);
+  if (!Number.isFinite(preset) || preset <= 0) {
+    return;
+  }
+  const selected = getSelectedBillingOrganization();
+  if (!selected) {
+    return;
+  }
+  elements.billingOrganizationPlanCodeInput.value = "education";
+  elements.billingOrganizationSeatLimitInput.value = `${preset}`;
+  elements.billingOrganizationFeedback.textContent = `Education student seat limit staged at ${formatWholeNumber(
+    preset,
+  )}. Save organization to apply.`;
+}
+
 function handleBillingMembershipsTableClick(event) {
   const row = event.target.closest("tr[data-membership-key]");
   if (!row) {
@@ -3424,6 +3629,32 @@ function handleBillingCloudProjectsTableClick(event) {
   renderBillingCloudProjects();
 }
 
+function fillEducationProvisionTeacherFromSelectedUser() {
+  const user = getSelectedUser();
+  if (!user) {
+    state.billingEducationProvisionFeedback = {
+      tone: "error",
+      message: "Select a user first.",
+    };
+    renderBillingOrganizations();
+    return;
+  }
+  elements.billingEducationProvisionTeacherUserIdInput.value = user.user_id || "";
+  elements.billingEducationProvisionTeacherEmailInput.value = user.email || "";
+  if (!elements.billingEducationProvisionNameInput.value.trim()) {
+    const label = user.display_name || user.username || user.email || "Education";
+    elements.billingEducationProvisionNameInput.value = `${label} Education`;
+  }
+  state.billingEducationProvisionFeedback = {
+    tone: "info",
+    message: "Selected user staged as teacher.",
+  };
+  renderBillingFeedback(
+    elements.billingEducationProvisionFeedback,
+    state.billingEducationProvisionFeedback,
+  );
+}
+
 async function handleBillingCatalogSubmit(event) {
   event.preventDefault();
   if (!tokens?.idToken || !canEditBillingCatalog()) {
@@ -3444,16 +3675,16 @@ async function handleBillingCatalogSubmit(event) {
       elements.billingCatalogProductsInput.value,
       "Products JSON",
     );
-    const offers = parseJsonArrayInput(
-      elements.billingCatalogOffersInput.value,
-      "Offers JSON",
+    const providerProducts = parseJsonArrayInput(
+      elements.billingCatalogProviderProductsInput.value,
+      "Provider products JSON",
     );
     const payload = await fetchAdminJson(ADMIN_BILLING_CATALOG_PATH, {
       method: "PUT",
       body: JSON.stringify({
         plans,
         products,
-        offers,
+        provider_products: providerProducts,
         support: {
           support_email: `${elements.billingCatalogSupportEmailInput.value || ""}`.trim(),
           support_url: `${elements.billingCatalogSupportUrlInput.value || ""}`.trim(),
@@ -3487,6 +3718,79 @@ async function handleBillingCatalogSubmit(event) {
     renderBillingCatalogSettings();
   } finally {
     state.billingCatalogBusy = false;
+    updateBusyState();
+  }
+}
+
+async function handleBillingEducationProvisionSubmit(event) {
+  event.preventDefault();
+  if (!tokens?.idToken || !canEditBillingControlPlane()) {
+    return;
+  }
+
+  state.billingOrganizationsBusy = true;
+  state.billingEducationProvisionFeedback = null;
+  updateBusyState();
+  setStatus("Provisioning Education organization...", "info");
+
+  try {
+    const payload = await fetchAdminJson(ADMIN_BILLING_EDUCATION_PROVISIONING_PATH, {
+      method: "POST",
+      body: JSON.stringify({
+        organization_id: `${elements.billingEducationProvisionOrgIdInput.value || ""}`.trim(),
+        name: `${elements.billingEducationProvisionNameInput.value || ""}`.trim(),
+        seat_limit: Number(elements.billingEducationProvisionSeatsInput.value || 20),
+        teacher_user_id:
+          `${elements.billingEducationProvisionTeacherUserIdInput.value || ""}`.trim(),
+        teacher_email:
+          `${elements.billingEducationProvisionTeacherEmailInput.value || ""}`.trim(),
+      }),
+    });
+    if (payload.organization) {
+      state.selectedBillingOrganizationId = payload.organization.organization_id || "";
+      state.billingOrganizations = upsertByKey(
+        state.billingOrganizations,
+        payload.organization,
+        (record) => record.organization_id,
+      );
+    }
+    if (payload.teacher_membership) {
+      state.selectedBillingMembershipKey = billingMembershipKey(payload.teacher_membership);
+      state.billingMemberships = upsertByKey(
+        state.billingMemberships,
+        payload.teacher_membership,
+        billingMembershipKey,
+      );
+    }
+    if (payload.workspace) {
+      state.selectedBillingWorkspaceId = payload.workspace.workspace_id || "";
+      state.billingWorkspaces = upsertByKey(
+        state.billingWorkspaces,
+        payload.workspace,
+        (record) => record.workspace_id,
+      );
+    }
+    state.billingEducationProvisionFeedback = {
+      tone: "success",
+      message: "Education org provisioned. Teacher can now invite students from the app.",
+    };
+    elements.billingEducationProvisionOrgIdInput.value = "";
+    elements.billingEducationProvisionNameInput.value = "";
+    elements.billingEducationProvisionTeacherUserIdInput.value = "";
+    elements.billingEducationProvisionTeacherEmailInput.value = "";
+    renderBillingOrganizations();
+    renderBillingMemberships();
+    renderBillingWorkspaces();
+    setStatus("Education organization provisioned.", "success");
+  } catch (error) {
+    handleAdminRequestError(error, "Could not provision Education organization.");
+    state.billingEducationProvisionFeedback = {
+      tone: "error",
+      message: error.message || "Could not provision Education organization.",
+    };
+    renderBillingOrganizations();
+  } finally {
+    state.billingOrganizationsBusy = false;
     updateBusyState();
   }
 }
@@ -3559,6 +3863,7 @@ async function handleBillingMembershipSubmit(event) {
       body: JSON.stringify({
         organization_id: `${elements.billingMembershipOrganizationIdInput.value || ""}`.trim(),
         user_id: `${elements.billingMembershipUserIdInput.value || ""}`.trim(),
+        email: `${elements.billingMembershipEmailInput.value || ""}`.trim(),
         role: `${elements.billingMembershipRoleInput.value || ""}`.trim(),
         status: `${elements.billingMembershipStatusInput.value || ""}`.trim(),
         seat_consumed: elements.billingMembershipSeatConsumedInput.checked,
@@ -4753,7 +5058,7 @@ function renderTiers(tiers) {
       return `
         <div class="tier-row">
           <div class="tier-head">
-            <span class="tier-chip">${escapeHtml(formatTierLabel(tier.tier || "free"))}</span>
+            <span class="tier-chip">${escapeHtml(formatTierLabel(tier.plan_code || tier.tier || "free"))}</span>
             <span>${escapeHtml(
               t("tiers.usersActive", {
                 users: formatNumber(userCount),
@@ -5140,8 +5445,15 @@ function renderInspector() {
     state.grantFeedback && state.grantFeedback.userId === user.user_id
       ? state.grantFeedback
       : null;
+  const overrideFeedback =
+    state.overrideFeedback && state.overrideFeedback.userId === user.user_id
+      ? state.overrideFeedback
+      : null;
   const readOnlyAiSupport = !canGrantAiPrompts();
+  const readOnlyEntitlementOverride = !canApplyEntitlementOverrides();
   const confirmValue = inspectorConfirmValue(user);
+  const adminFirstName = currentAdminFirstName();
+  const defaultOverrideExpiry = toDateTimeLocalValue(addDays(new Date(), 7));
   const providerBadges = (Array.isArray(user.linked_providers) ? user.linked_providers : [])
     .map((provider) => `<span class="badge">${escapeHtml(formatProviderLabel(provider))}</span>`)
     .join("");
@@ -5215,6 +5527,122 @@ function renderInspector() {
         ${detailCard(t("detail.lastSeen"), formatDate(user.last_seen_at || user.updated_at || user.created_at))}
         ${detailCard(t("detail.created"), formatDate(user.created_at))}
         ${detailCard(t("detail.updated"), formatDate(user.updated_at))}
+      </div>
+
+      ${
+        overrideFeedback
+          ? `<div class="status-panel status-${escapeHtml(overrideFeedback.tone || "success")}">${escapeHtml(
+              overrideFeedback.message || "",
+            )}</div>`
+          : ""
+      }
+
+      <div class="delete-card support-card entitlement-override-card">
+        <p class="panel-label">${escapeHtml(t("override.label"))}</p>
+        <h3>${escapeHtml(t("override.title"))}</h3>
+        <p class="delete-copy">${escapeHtml(t("override.copy"))}</p>
+        ${
+          readOnlyEntitlementOverride
+            ? `<p class="delete-copy">${escapeHtml(t("override.readOnly"))}</p>`
+            : ""
+        }
+        <form id="entitlement-override-form" class="form-stack" data-user-id="${escapeHtml(user.user_id || "")}">
+          <div class="form-grid">
+            <label class="search-input-wrap">
+              <span class="search-label">${escapeHtml(t("override.plan"))}</span>
+              <select class="select-input" name="planCode" ${readOnlyEntitlementOverride ? "disabled" : ""}>
+                ${buildEntitlementOverridePlanOptions()}
+              </select>
+            </label>
+            <label class="search-input-wrap">
+              <span class="search-label">${escapeHtml(t("override.seats"))}</span>
+              <input
+                class="text-input"
+                type="number"
+                name="seatLimit"
+                min="1"
+                step="1"
+                value="5"
+                ${readOnlyEntitlementOverride ? "disabled" : ""}
+              />
+            </label>
+          </div>
+          <p class="field-help">${escapeHtml(t("override.seatsHelp"))}</p>
+          <label class="search-input-wrap">
+            <span class="search-label">${escapeHtml(t("override.organizationName"))}</span>
+            <input
+              class="text-input"
+              type="text"
+              name="organizationName"
+              placeholder="${escapeHtml(t("override.organizationNamePlaceholder"))}"
+              ${readOnlyEntitlementOverride ? "disabled" : ""}
+            />
+          </label>
+          <label class="search-input-wrap">
+            <span class="search-label">${escapeHtml(t("override.expiry"))}</span>
+            <input
+              class="text-input"
+              type="datetime-local"
+              name="expiresAt"
+              value="${escapeHtml(defaultOverrideExpiry)}"
+              ${readOnlyEntitlementOverride ? "disabled" : ""}
+              required
+            />
+          </label>
+          <div class="duration-row">
+            ${ENTITLEMENT_OVERRIDE_DURATION_OPTIONS.map(
+              (option) => `<button
+                class="button button-secondary button-compact"
+                type="button"
+                data-override-duration-days="${option.days}"
+                ${readOnlyEntitlementOverride ? "disabled" : ""}
+              >${escapeHtml(t(option.labelKey))}</button>`,
+            ).join("")}
+          </div>
+          <label class="search-input-wrap">
+            <span class="search-label">${escapeHtml(t("override.reason"))}</span>
+            <textarea
+              class="text-area"
+              name="reason"
+              placeholder="${escapeHtml(t("override.reasonPlaceholder"))}"
+              ${readOnlyEntitlementOverride ? "disabled" : ""}
+              required
+            ></textarea>
+          </label>
+          <label class="search-input-wrap">
+            <span class="search-label">${escapeHtml(t("override.confirmIdentifier"))}</span>
+            <input
+              class="text-input"
+              type="text"
+              name="confirmIdentifier"
+              autocomplete="off"
+              ${readOnlyEntitlementOverride ? "disabled" : ""}
+              required
+            />
+          </label>
+          <label class="search-input-wrap">
+            <span class="search-label">${escapeHtml(
+              t("override.confirmAdminName", { value: adminFirstName || t("detail.na") }),
+            )}</span>
+            <input
+              class="text-input"
+              type="text"
+              name="confirmAdminFirstName"
+              autocomplete="off"
+              ${readOnlyEntitlementOverride ? "disabled" : ""}
+              required
+            />
+          </label>
+          <div class="search-actions">
+            <button
+              class="button button-secondary"
+              type="submit"
+              ${state.overrideBusy || readOnlyEntitlementOverride ? "disabled" : ""}
+            >
+              ${escapeHtml(state.overrideBusy ? t("override.applying") : t("override.button"))}
+            </button>
+          </div>
+        </form>
       </div>
 
       <div class="delete-card support-card">
@@ -5434,6 +5862,54 @@ function detailCard(label, value) {
   `;
 }
 
+function buildEntitlementOverridePlanOptions(selectedValue = "studio") {
+  return ["starter", "producer", "studio", "enterprise", "education"]
+    .map((planCode) => {
+      const selected = planCode === selectedValue ? "selected" : "";
+      return `<option value="${escapeHtml(planCode)}" ${selected}>${escapeHtml(
+        formatTierLabel(planCode),
+      )}</option>`;
+    })
+    .join("");
+}
+
+function currentAdminFirstName() {
+  const email = `${currentUser?.email || ""}`.trim().toLowerCase();
+  const local = email.split("@", 1)[0] || "";
+  return local.replace(/[-_]/g, ".").split(".", 1)[0];
+}
+
+function addDays(date, days) {
+  const next = new Date(date.getTime());
+  next.setDate(next.getDate() + Number(days || 0));
+  return next;
+}
+
+function toDateTimeLocalValue(date) {
+  const pad = (value) => `${value}`.padStart(2, "0");
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+  ].join("-") + `T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function entitlementOverrideExpiryIso(localValue) {
+  const date = new Date(`${localValue || ""}`);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return date.toISOString();
+}
+
+function expectedOverrideIdentifiers(user) {
+  return new Set(
+    [user.email, user.username, user.user_id]
+      .map((value) => `${value || ""}`.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
 function formatAuthSourceLabel(value) {
   switch (`${value || ""}`.trim()) {
     case "native":
@@ -5585,7 +6061,7 @@ function setSignedOutState() {
 
 function updateBusyState() {
   const signedIn = !!tokens?.idToken;
-  const destructiveBusy = state.deleteBusy || state.grantBusy;
+  const destructiveBusy = state.deleteBusy || state.grantBusy || state.overrideBusy;
   elements.refreshButton.disabled = !signedIn || state.overviewBusy;
   elements.signInButtonSecondary.disabled = signedIn;
   elements.signOutButton.disabled = !signedIn;
@@ -5677,9 +6153,18 @@ function updateBusyState() {
     elements.billingOrganizationForm,
     state.billingOrganizationsBusy || !signedIn || !canEditBillingControlPlane(),
   );
+  setFormControlsDisabled(
+    elements.billingEducationProvisionForm,
+    state.billingOrganizationsBusy || !signedIn || !canEditBillingControlPlane(),
+  );
   elements.billingOrganizationSaveButton.textContent = state.billingOrganizationsBusy
     ? t("action.saving")
     : tMaybe("action.saveOrganization", "Save organization");
+  if (elements.billingEducationProvisionSaveButton) {
+    elements.billingEducationProvisionSaveButton.textContent = state.billingOrganizationsBusy
+      ? t("action.saving")
+      : "Provision Education";
+  }
   setFormControlsDisabled(
     elements.billingMembershipForm,
     state.billingMembershipsBusy || !signedIn || !canEditBillingControlPlane(),
@@ -6117,6 +6602,7 @@ function handleAdminUsersTableClick(event) {
   state.selectedUserId = userId;
   state.deleteFeedback = null;
   state.grantFeedback = null;
+  state.overrideFeedback = null;
   renderAdminUsers(state.adminUsers);
   renderInspector();
 }
@@ -6136,11 +6622,138 @@ function handleFeedbackTableClick(event) {
   void loadSelectedFeedbackDetail({ silent: true });
 }
 
+function handleInspectorClick(event) {
+  const button = event.target.closest("[data-override-duration-days]");
+  if (!button) {
+    return;
+  }
+  const form = button.closest("#entitlement-override-form");
+  const input = form?.querySelector("input[name='expiresAt']");
+  if (!input) {
+    return;
+  }
+  input.value = toDateTimeLocalValue(addDays(new Date(), Number(button.dataset.overrideDurationDays || 0)));
+}
+
+function handleInspectorChange(event) {
+  const planSelect = event.target.closest("#entitlement-override-form select[name='planCode']");
+  if (!planSelect) {
+    return;
+  }
+  const form = planSelect.closest("#entitlement-override-form");
+  const seatInput = form?.querySelector("input[name='seatLimit']");
+  if (!seatInput) {
+    return;
+  }
+  if (planSelect.value === "education") {
+    seatInput.min = "10";
+    seatInput.step = "10";
+    seatInput.value = "20";
+    return;
+  }
+  if (planSelect.value === "enterprise") {
+    seatInput.min = "1";
+    seatInput.step = "1";
+    seatInput.value = "500";
+    return;
+  }
+  if (planSelect.value === "studio") {
+    seatInput.min = "5";
+    seatInput.step = "1";
+    seatInput.value = "5";
+    return;
+  }
+  seatInput.min = "0";
+  seatInput.step = "1";
+  seatInput.value = "";
+}
+
 async function handleInspectorSubmit(event) {
   event.preventDefault();
 
   const user = getSelectedUser();
   if (!user) {
+    return;
+  }
+
+  const overrideForm = event.target.closest("#entitlement-override-form");
+  if (overrideForm) {
+    const formData = new FormData(overrideForm);
+    const planCode = `${formData.get("planCode") || ""}`.trim();
+    const expiresAtLocal = `${formData.get("expiresAt") || ""}`.trim();
+    const reason = `${formData.get("reason") || ""}`.trim();
+    const confirmIdentifier = `${formData.get("confirmIdentifier") || ""}`.trim();
+    const confirmAdminFirstName = `${formData.get("confirmAdminFirstName") || ""}`.trim();
+    const expectedIdentifiers = expectedOverrideIdentifiers(user);
+    const expectedAdminName = currentAdminFirstName();
+    if (!expectedIdentifiers.has(confirmIdentifier.toLowerCase())) {
+      state.overrideFeedback = {
+        userId: user.user_id,
+        tone: "error",
+        message: t("override.typeExactIdentifier"),
+      };
+      renderInspector();
+      return;
+    }
+    if (confirmAdminFirstName.toLowerCase() !== expectedAdminName) {
+      state.overrideFeedback = {
+        userId: user.user_id,
+        tone: "error",
+        message: t("override.typeExactAdminName"),
+      };
+      renderInspector();
+      return;
+    }
+
+    state.overrideBusy = true;
+    state.overrideFeedback = null;
+    updateBusyState();
+    renderInspector();
+    setStatus(
+      t("status.applyingEntitlementOverride", { target: user.email || user.user_id }),
+      "info",
+    );
+
+    try {
+      const payload = await fetchAdminJson(ADMIN_USERS_ENTITLEMENT_OVERRIDE_PATH, {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: user.user_id,
+          plan_code: planCode,
+          expires_at: entitlementOverrideExpiryIso(expiresAtLocal),
+          seat_limit: Number(`${formData.get("seatLimit") || ""}`.trim() || 0),
+          organization_name: `${formData.get("organizationName") || ""}`.trim(),
+          reason,
+          confirm_identifier: confirmIdentifier,
+          confirm_admin_first_name: confirmAdminFirstName,
+        }),
+      });
+      if (payload.user) {
+        replaceAdminUser(payload.user);
+      }
+      state.overrideFeedback = {
+        userId: user.user_id,
+        tone: "success",
+        message: t("override.applied", {
+          plan: formatTierLabel(planCode),
+          date: formatDate(payload.subscription?.expires_at || entitlementOverrideExpiryIso(expiresAtLocal)),
+        }),
+      };
+      renderAdminUsers(state.adminUsers);
+      renderInspector();
+      setStatus(t("status.entitlementOverrideApplied"), "success");
+    } catch (error) {
+      handleAdminRequestError(error, t("status.entitlementOverrideFailed"));
+      state.overrideFeedback = {
+        userId: user.user_id,
+        tone: "error",
+        message: error.message || t("status.entitlementOverrideFailed"),
+      };
+      renderInspector();
+    } finally {
+      state.overrideBusy = false;
+      updateBusyState();
+    }
     return;
   }
 
@@ -6494,6 +7107,7 @@ function resetAdminState() {
   state.billingCloudProjectsBusy = false;
   state.deleteBusy = false;
   state.grantBusy = false;
+  state.overrideBusy = false;
   state.currentSearchQuery = "";
   state.overview = null;
   state.overviewIncludes = buildOverviewIncludes();
@@ -6532,6 +7146,7 @@ function resetAdminState() {
   state.selectedBillingMembershipKey = "";
   state.selectedBillingWorkspaceId = "";
   state.selectedBillingCloudProjectId = "";
+  state.billingEducationProvisionFeedback = null;
   state.billingOrganizationFeedback = null;
   state.billingMembershipFeedback = null;
   state.billingWorkspaceFeedback = null;
@@ -6566,7 +7181,7 @@ function resetAdminState() {
   elements.billingCatalogDefaultCheckoutUrlInput.value = "";
   elements.billingCatalogPlansInput.value = "";
   elements.billingCatalogProductsInput.value = "";
-  elements.billingCatalogOffersInput.value = "";
+  elements.billingCatalogProviderProductsInput.value = "";
   elements.adminUsersTableBody.innerHTML = `
     <tr>
       <td colspan="5" class="table-empty">${escapeHtml(t("empty.signInSearchUsers"))}</td>

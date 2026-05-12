@@ -6,7 +6,7 @@ from typing import Any, Dict
 from common import config
 from common.auth import extract_claims_from_event, json_response, unauthorized
 from common.events import RequestBodyError, parse_json_body
-from common.models import normalize_tier, status_has_active_access
+from common.models import normalize_plan_code, status_has_active_access
 from common.native_auth import AppUserAuthError, verify_current_password
 from common.rate_limits import RequestRateLimiter, client_ip_from_event
 from common.repository import BillingRepository, UsernameClaimConflictError
@@ -219,9 +219,11 @@ def _delete_me(event: Dict[str, Any]) -> Dict[str, Any]:
     existing = repo.get_user_profile(user_id) or {}
     account = repo.get_auth_account(user_id) or {}
     entitlement = repo.get_entitlement(user_id) or {}
-    tier = normalize_tier(str(entitlement.get("tier") or "free"))
+    plan_code = normalize_plan_code(
+        entitlement.get("plan_code") or entitlement.get("tier") or "free"
+    )
     status = str(entitlement.get("status") or "active").strip()
-    if tier != "free" and status_has_active_access(status):
+    if plan_code != "free" and status_has_active_access(status):
         return json_response(
             409,
             {

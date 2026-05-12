@@ -4,13 +4,9 @@ import 'package:mixroom/helpers/audio_export_plan.dart';
 void main() {
   group('AudioExportPlan sample rates', () {
     test('exposes format-specific UI sample rates', () {
-      expect(AudioExportPlan.uiSampleRatesForFormat('wav'), [
-        44100,
-        48000,
-        88200,
-        96000,
-      ]);
+      expect(AudioExportPlan.uiSampleRatesForFormat('wav'), [44100, 48000]);
       expect(AudioExportPlan.uiSampleRatesForFormat('mp3'), [44100, 48000]);
+      expect(AudioExportPlan.uiSampleRatesForFormat('flac'), [44100, 48000]);
     });
 
     test(

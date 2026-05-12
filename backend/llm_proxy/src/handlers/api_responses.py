@@ -1901,7 +1901,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
 
     user_context = _usage_repo.load_user_context(user_id)
     subscription_tier = get_user_tier(user_context)
-    prompt_limits = get_prompt_limits(subscription_tier)
+    prompt_limits = get_prompt_limits(subscription_tier, user_context.get("limits"))
 
     if http_method == "GET" and request_path.endswith("/v1/llm/limits"):
         try:

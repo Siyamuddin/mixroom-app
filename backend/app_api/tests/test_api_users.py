@@ -297,7 +297,7 @@ class UsersApiHandlerTests(unittest.TestCase):
             "auth_provider": "email",
         }
         repo._entitlement = {
-            "tier": "pro",
+            "plan_code": "producer",
             "status": "active",
         }
         users_module.repo = repo
@@ -1001,7 +1001,7 @@ class UsersApiHandlerTests(unittest.TestCase):
         }
         repo._profile = {"username_lc": "mixroomer"}
         repo._entitlement = {
-            "tier": "free",
+            "plan_code": "free",
             "status": "active",
         }
         users_module.repo = repo

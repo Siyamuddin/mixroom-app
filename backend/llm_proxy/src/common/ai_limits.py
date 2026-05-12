@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from decimal import Decimal
 from functools import lru_cache
 from datetime import datetime, timedelta, timezone
 from math import ceil
@@ -34,7 +35,7 @@ _FEATURE_ALIASES = {
     "stem_separation": "stem_separation",
 }
 _TIER_ALIASES = {
-    "studio": "pro",
+    "pro": "producer",
 }
 _PROMPT_LIMIT_SETTINGS_KEY = "ai_prompt_limits"
 _PROMPT_LIMITS_CACHE_TTL_SECONDS = 60
@@ -71,7 +72,8 @@ def _normalized_tier_name(tier: str) -> str:
     raw_value = (tier or "").strip().lower()
     normalized = _TIER_ALIASES.get(raw_value, raw_value or "free")
     configured_tiers = load_ai_limits().get("tiers") or {}
-    if normalized in configured_tiers:
+    configured_prompt_limits = load_ai_limits().get("prompt_limits") or {}
+    if normalized in configured_tiers or normalized in configured_prompt_limits:
         return normalized
     return "free"
 
@@ -95,6 +97,40 @@ def _default_prompt_limits_for_tier(tier: str) -> dict[str, int]:
     return {
         "daily_prompts": int(tier_limits.get("daily") or 0),
         "weekly_prompts": int(tier_limits.get("weekly") or 0),
+    }
+
+
+def _positive_int(value: Any) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, Decimal):
+        if value % 1 != 0:
+            return None
+        parsed = int(value)
+        return parsed if parsed > 0 else None
+    if isinstance(value, str):
+        text = value.strip()
+        if not re.fullmatch(r"[0-9]+", text):
+            return None
+        parsed = int(text)
+        return parsed if parsed > 0 else None
+    return None
+
+
+def _prompt_limits_from_entitlement(
+    entitlement_limits: Mapping[str, Any] | None,
+) -> dict[str, int] | None:
+    if not isinstance(entitlement_limits, Mapping):
+        return None
+    daily_prompts = _positive_int(entitlement_limits.get("ai_prompts_daily"))
+    weekly_prompts = _positive_int(entitlement_limits.get("ai_prompts_weekly"))
+    if daily_prompts is None or weekly_prompts is None or weekly_prompts < daily_prompts:
+        return None
+    return {
+        "daily_prompts": daily_prompts,
+        "weekly_prompts": weekly_prompts,
     }
 
 
@@ -178,8 +214,11 @@ def get_tier_limits(tier: str) -> dict[str, int]:
     }
 
 
-def get_prompt_limits(tier: str = "free") -> dict[str, int]:
-    limits = _default_prompt_limits_for_tier(tier)
+def get_prompt_limits(
+    tier: str = "free",
+    entitlement_limits: Mapping[str, Any] | None = None,
+) -> dict[str, int]:
+    limits = _prompt_limits_from_entitlement(entitlement_limits) or _default_prompt_limits_for_tier(tier)
     normalized_tier = _normalized_tier_name(tier)
     if normalized_tier != "free":
         return limits

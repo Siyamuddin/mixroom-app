@@ -234,7 +234,8 @@ void main() {
       expect(auth.signedInUser?.userId, 'google-user');
     });
 
-    test('retries authenticated requests once after a 401 response', () async {
+    test('authorizedRequest sends access token before id token fallback',
+        () async {
       final fakeClient = _FakeCognitoAuthClient(
         refreshedSession: _session(
           userId: 'google-user',
@@ -267,15 +268,87 @@ void main() {
       final seenTokens = <String>[];
       final response = await auth.authorizedRequest((token) async {
         seenTokens.add(token);
-        if (token == 'cached-id-token') {
+        return http.Response('ok', 200);
+      });
+
+      expect(response.statusCode, 200);
+      expect(seenTokens, <String>['access-token']);
+      expect(fakeClient.refreshCallCount, 0);
+    });
+
+    test('authorizedRequest falls back to id token if access token is rejected',
+        () async {
+      final fakeClient = _FakeCognitoAuthClient(
+        refreshedSession: _session(
+          userId: 'google-user',
+          email: 'google@example.com',
+          provider: AuthProviderType.google,
+          refreshToken: 'rt_refreshed_secret',
+        ),
+      );
+      final auth = AuthService(
+        cognitoClient: fakeClient,
+        restoreSessionOnInit: false,
+      );
+      final user = AuthUserProfile(
+        userId: 'google-user',
+        email: 'google@example.com',
+        displayName: 'Google User',
+        provider: AuthProviderType.google,
+        emailVerified: true,
+        createdAt: DateTime.utc(2026, 3, 13),
+      );
+      final tokens = CognitoTokens(
+        accessToken: 'access-token',
+        idToken: 'cached-id-token',
+        refreshToken: 'rt_valid_refresh_secret',
+        expiresAtUtc: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      );
+
+      auth.debugPrimeSession(user: user, tokens: tokens);
+
+      final seenTokens = <String>[];
+      final response = await auth.authorizedRequest((token) async {
+        seenTokens.add(token);
+        if (token == 'access-token') {
           return http.Response('unauthorized', 401);
         }
         return http.Response('ok', 200);
       });
 
       expect(response.statusCode, 200);
-      expect(seenTokens, <String>['cached-id-token', 'access-token']);
+      expect(seenTokens, <String>['access-token', 'cached-id-token']);
       expect(fakeClient.refreshCallCount, 0);
+    });
+
+    test('authorizedRequest returns forbidden responses without token fallback',
+        () async {
+      final auth = AuthService(restoreSessionOnInit: false);
+      final user = AuthUserProfile(
+        userId: 'google-user',
+        email: 'google@example.com',
+        displayName: 'Google User',
+        provider: AuthProviderType.google,
+        emailVerified: true,
+        createdAt: DateTime.utc(2026, 3, 13),
+      );
+      final tokens = CognitoTokens(
+        accessToken: 'access-token',
+        idToken: 'cached-id-token',
+        refreshToken: 'rt_valid_refresh_secret',
+        expiresAtUtc: DateTime.now().toUtc().add(const Duration(hours: 1)),
+      );
+
+      auth.debugPrimeSession(user: user, tokens: tokens);
+
+      final seenTokens = <String>[];
+      final response = await auth.authorizedRequest((token) async {
+        seenTokens.add(token);
+        return http.Response('forbidden', 403);
+      });
+
+      expect(response.statusCode, 403);
+      expect(seenTokens, <String>['access-token']);
     });
 
     test('shares one refresh request across concurrent authenticated calls',
@@ -324,8 +397,50 @@ void main() {
 
       expect(responses.every((response) => response.statusCode == 200), isTrue);
       expect(fakeClient.refreshCallCount, 1);
-      expect(
-          seenTokens, <String>['id-token-google-user', 'id-token-google-user']);
+      expect(seenTokens,
+          <String>['access-token-google-user', 'access-token-google-user']);
+    });
+
+    test('authorizedRequest reports auth expiry without clearing session',
+        () async {
+      final fakeClient = _FakeCognitoAuthClient(
+        refreshError: const CognitoApiException(
+          code: 'NotAuthorizedException',
+          message: 'Session expired.',
+        ),
+      );
+      final auth = AuthService(
+        cognitoClient: fakeClient,
+        restoreSessionOnInit: false,
+      );
+      final user = AuthUserProfile(
+        userId: 'google-user',
+        email: 'google@example.com',
+        displayName: 'Google User',
+        provider: AuthProviderType.google,
+        emailVerified: true,
+        createdAt: DateTime.utc(2026, 3, 13),
+      );
+      final expiredTokens = CognitoTokens(
+        accessToken: 'expired-access-token',
+        idToken: 'expired-id-token',
+        refreshToken: 'rt_expired_refresh_secret',
+        expiresAtUtc:
+            DateTime.now().toUtc().subtract(const Duration(minutes: 5)),
+      );
+
+      auth.debugPrimeSession(user: user, tokens: expiredTokens);
+
+      await expectLater(
+        auth.authorizedRequest(
+          (_) async => http.Response('ok', 200),
+        ),
+        throwsA(isA<StateError>()),
+      );
+
+      expect(fakeClient.refreshCallCount, 1);
+      expect(auth.isSignedIn, isTrue);
+      expect(auth.signedInUser?.userId, 'google-user');
     });
   });
 

@@ -22,8 +22,10 @@ class AiLimitsTests(unittest.TestCase):
     def test_load_ai_limits_reads_expected_single_source_file(self) -> None:
         limits = ai_limits.load_ai_limits()
 
-        self.assertEqual(limits["prompt_limits"]["daily"], 50)
-        self.assertEqual(limits["prompt_limits"]["weekly"], 350)
+        self.assertEqual(limits["prompt_limits"]["free"]["daily"], 50)
+        self.assertEqual(limits["prompt_limits"]["free"]["weekly"], 200)
+        self.assertEqual(limits["prompt_limits"]["starter"]["daily"], 400)
+        self.assertEqual(limits["prompt_limits"]["producer"]["daily"], 1000)
         self.assertEqual(limits["tiers"]["free"]["daily_credits"], 100)
         self.assertEqual(limits["feature_costs"]["stem_separation"], 30)
         self.assertEqual(limits["token_ratio"]["tokens_per_credit"], 500)
@@ -32,7 +34,58 @@ class AiLimitsTests(unittest.TestCase):
         limits = ai_limits.get_prompt_limits()
 
         self.assertEqual(limits["daily_prompts"], 50)
-        self.assertEqual(limits["weekly_prompts"], 350)
+        self.assertEqual(limits["weekly_prompts"], 200)
+
+    def test_get_prompt_limits_reads_subscription_tiers(self) -> None:
+        starter = ai_limits.get_prompt_limits("starter")
+        producer = ai_limits.get_prompt_limits("producer")
+        legacy_pro = ai_limits.get_prompt_limits("pro")
+        education = ai_limits.get_prompt_limits("education")
+        enterprise = ai_limits.get_prompt_limits("enterprise")
+
+        self.assertEqual(starter["daily_prompts"], 400)
+        self.assertEqual(starter["weekly_prompts"], 1500)
+        self.assertEqual(education["daily_prompts"], 400)
+        self.assertEqual(education["weekly_prompts"], 1500)
+        self.assertEqual(producer["daily_prompts"], 1000)
+        self.assertEqual(producer["weekly_prompts"], 4000)
+        self.assertEqual(legacy_pro["daily_prompts"], 1000)
+        self.assertEqual(legacy_pro["weekly_prompts"], 4000)
+        self.assertEqual(enterprise["daily_prompts"], 1000)
+        self.assertEqual(enterprise["weekly_prompts"], 4000)
+
+    def test_get_prompt_limits_prefers_entitlement_limits(self) -> None:
+        limits = ai_limits.get_prompt_limits(
+            "starter",
+            {
+                "ai_prompts_daily": 123,
+                "ai_prompts_weekly": 456,
+            },
+        )
+
+        self.assertEqual(limits["daily_prompts"], 123)
+        self.assertEqual(limits["weekly_prompts"], 456)
+
+    def test_get_prompt_limits_falls_back_when_entitlement_limits_are_invalid(self) -> None:
+        custom = ai_limits.get_prompt_limits(
+            "producer",
+            {
+                "ai_prompts_daily": "custom",
+                "ai_prompts_weekly": "custom",
+            },
+        )
+        inverted = ai_limits.get_prompt_limits(
+            "starter",
+            {
+                "ai_prompts_daily": 400,
+                "ai_prompts_weekly": 100,
+            },
+        )
+
+        self.assertEqual(custom["daily_prompts"], 1000)
+        self.assertEqual(custom["weekly_prompts"], 4000)
+        self.assertEqual(inverted["daily_prompts"], 400)
+        self.assertEqual(inverted["weekly_prompts"], 1500)
 
     def test_get_prompt_limits_prefers_remote_override_for_free_tier(self) -> None:
         with mock.patch.object(
@@ -43,7 +96,13 @@ class AiLimitsTests(unittest.TestCase):
                 "free_weekly_prompt_limit": 90,
             },
         ):
-            limits = ai_limits.get_prompt_limits("free")
+            limits = ai_limits.get_prompt_limits(
+                "free",
+                {
+                    "ai_prompts_daily": 100,
+                    "ai_prompts_weekly": 500,
+                },
+            )
 
         self.assertEqual(limits["daily_prompts"], 12)
         self.assertEqual(limits["weekly_prompts"], 90)
@@ -53,8 +112,8 @@ class AiLimitsTests(unittest.TestCase):
             def get_item(self, **_kwargs):
                 return {
                     "Item": {
-                        "free_daily_prompt_limit": 100,
-                        "free_weekly_prompt_limit": 500,
+                        "free_daily_prompt_limit": 50,
+                        "free_weekly_prompt_limit": 200,
                     }
                 }
 
@@ -73,8 +132,8 @@ class AiLimitsTests(unittest.TestCase):
             ai_limits.clear_prompt_limits_cache()
             limits = ai_limits.get_prompt_limits("free")
 
-        self.assertEqual(limits["daily_prompts"], 100)
-        self.assertEqual(limits["weekly_prompts"], 500)
+        self.assertEqual(limits["daily_prompts"], 50)
+        self.assertEqual(limits["weekly_prompts"], 200)
 
     def test_get_prompt_limits_does_not_apply_free_override_to_pro_tier(self) -> None:
         with mock.patch.object(
@@ -87,8 +146,8 @@ class AiLimitsTests(unittest.TestCase):
         ):
             limits = ai_limits.get_prompt_limits("pro")
 
-        self.assertEqual(limits["daily_prompts"], 50)
-        self.assertEqual(limits["weekly_prompts"], 350)
+        self.assertEqual(limits["daily_prompts"], 1000)
+        self.assertEqual(limits["weekly_prompts"], 4000)
 
     def test_validate_feature_accepts_legacy_aliases(self) -> None:
         self.assertEqual(ai_limits.validate_feature("assistant_chat"), "ai_chat")
@@ -105,10 +164,10 @@ class AiLimitsTests(unittest.TestCase):
 
         self.assertEqual(credits, 2)
 
-    def test_get_user_tier_maps_studio_to_pro_limits(self) -> None:
+    def test_get_user_tier_preserves_studio_plan(self) -> None:
         tier = ai_limits.get_user_tier({"subscription_tier": "studio"})
 
-        self.assertEqual(tier, "pro")
+        self.assertEqual(tier, "studio")
 
     def test_apply_server_output_token_cap_sets_default_and_clamps_large_values(self) -> None:
         with mock.patch.dict(os.environ, {"LLM_MAX_OUTPUT_TOKENS": "256"}, clear=False):

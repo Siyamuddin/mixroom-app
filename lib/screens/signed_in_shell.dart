@@ -10,11 +10,11 @@ import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/helpers/entitlement_service.dart';
 import 'package:mixroom/helpers/feedback_service.dart';
+import 'package:mixroom/helpers/open_mixroom_service.dart';
 import 'package:mixroom/helpers/project_manager.dart';
 import 'package:mixroom/helpers/remote_announcement_manager.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/app_update_policy.dart';
-import 'package:mixroom/models/entitlement_models.dart';
 import 'package:mixroom/models/feedback_models.dart';
 import 'package:mixroom/providers/locale_provider.dart';
 import 'package:mixroom/screens/account.dart';
@@ -41,6 +41,7 @@ class _SignedInShellState extends State<SignedInShell> {
 
   MixroomMainTab _selectedTab = MixroomMainTab.projects;
   MixroomMainTab? _lastTrackedTab;
+  int _scrollToTopSignal = 0;
   bool _creatingProject = false;
   final AppUpdatePromptService _appUpdatePromptService =
       AppUpdatePromptService();
@@ -53,6 +54,9 @@ class _SignedInShellState extends State<SignedInShell> {
   bool _announcementModalOpen = false;
   String? _trackedAnnouncementBannerVersion;
   AppUserService? _welcomeAppUserService;
+  StreamSubscription<String>? _educationInviteLinkSub;
+  final Set<String> _handledEducationInviteTokens = <String>{};
+  bool _educationInviteAcceptBusy = false;
 
   @override
   void didChangeDependencies() {
@@ -69,17 +73,86 @@ class _SignedInShellState extends State<SignedInShell> {
   @override
   void initState() {
     super.initState();
+    _educationInviteLinkSub = OpenMixroomService.urlStream.listen(
+      (url) => unawaited(_handleIncomingEducationInviteUrl(url)),
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _trackSelectedTab();
+      final initialUrl = OpenMixroomService.consumeInitialUrlOnce();
+      if (initialUrl != null && initialUrl.isNotEmpty) {
+        unawaited(_handleIncomingEducationInviteUrl(initialUrl));
+      }
       unawaited(_initializeEntryContent());
     });
   }
 
   @override
   void dispose() {
+    _educationInviteLinkSub?.cancel();
     _welcomeAppUserService?.removeListener(_handleAppUserChanged);
     super.dispose();
+  }
+
+  Future<void> _handleIncomingEducationInviteUrl(String url) async {
+    final token = _educationInviteTokenFromUrl(url);
+    if (token == null ||
+        token.isEmpty ||
+        _educationInviteAcceptBusy ||
+        _handledEducationInviteTokens.contains(token)) {
+      return;
+    }
+    OpenMixroomService.clearInitialUrl(url);
+    _educationInviteAcceptBusy = true;
+    _handledEducationInviteTokens.add(token);
+    try {
+      await context.read<EntitlementService>().acceptEducationInvite(
+            inviteToken: token,
+          );
+      if (!mounted) return;
+      setState(() {
+        _selectedTab = MixroomMainTab.account;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Education student seat activated.'),
+          duration: Duration(seconds: 4),
+        ),
+      );
+    } catch (_) {
+      _handledEducationInviteTokens.remove(token);
+      if (!mounted) return;
+      setState(() {
+        _selectedTab = MixroomMainTab.account;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not accept this education invite. Open Plan & Billing to try again.',
+          ),
+          duration: Duration(seconds: 6),
+        ),
+      );
+    } finally {
+      _educationInviteAcceptBusy = false;
+    }
+  }
+
+  String? _educationInviteTokenFromUrl(String input) {
+    final raw = input.trim();
+    if (raw.isEmpty) return null;
+    final uri = Uri.tryParse(raw);
+    if (uri != null) {
+      final invite = uri.queryParameters['invite']?.trim();
+      if (invite != null && invite.isNotEmpty) return invite;
+      final segments = uri.pathSegments;
+      final inviteIndex = segments.indexOf('invites');
+      if (inviteIndex >= 0 && inviteIndex + 1 < segments.length) {
+        final candidate = segments[inviteIndex + 1].trim();
+        if (candidate.isNotEmpty) return candidate;
+      }
+    }
+    return raw.replaceFirst('invite=', '').trim();
   }
 
   void _handleAppUserChanged() {
@@ -456,6 +529,10 @@ class _SignedInShellState extends State<SignedInShell> {
 
   void _setTab(MixroomMainTab tab) {
     if (_selectedTab == tab) {
+      FocusManager.instance.primaryFocus?.unfocus();
+      setState(() {
+        _scrollToTopSignal++;
+      });
       return;
     }
     FocusManager.instance.primaryFocus?.unfocus();
@@ -466,6 +543,14 @@ class _SignedInShellState extends State<SignedInShell> {
       if (!mounted) return;
       _trackSelectedTab();
     });
+  }
+
+  void _openSubscriptionAccountTab() {
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.popUntil((route) => route.isFirst);
+    }
+    _setTab(MixroomMainTab.account);
   }
 
   Future<void> _submitHomeFeedback(
@@ -508,9 +593,6 @@ class _SignedInShellState extends State<SignedInShell> {
     }
     if (!mounted) return;
     _creatingProject = true;
-    final isProEntitled = context
-        .read<EntitlementService>()
-        .canUseCapability(SubscriptionCapability.proEditor);
     showLoadingDialog(
       context,
       message: L10n.translate(context, 'Creating project…'),
@@ -538,8 +620,8 @@ class _SignedInShellState extends State<SignedInShell> {
         MaterialPageRoute(
           builder: (_) => AudioEditorScreen(
             projectDir: dir,
-            mode: isProEntitled ? 'Pro' : 'Basic',
-            isProEntitled: isProEntitled,
+            mode: 'Pro',
+            onUpgradeRequested: _openSubscriptionAccountTab,
           ),
         ),
       );
@@ -558,13 +640,22 @@ class _SignedInShellState extends State<SignedInShell> {
   Widget _buildPage(MixroomMainTab tab) {
     switch (tab) {
       case MixroomMainTab.home:
-        return _HomeTab(onSubmitFeedback: _submitHomeFeedback);
+        return _HomeTab(
+          scrollToTopSignal: _scrollToTopSignal,
+          onSubmitFeedback: _submitHomeFeedback,
+        );
       case MixroomMainTab.platform:
-        return const _PlatformTab();
+        return _PlatformTab(scrollToTopSignal: _scrollToTopSignal);
       case MixroomMainTab.projects:
-        return const ProjectsScreen();
+        return ProjectsScreen(
+          scrollToTopSignal: _scrollToTopSignal,
+          onUpgradeRequested: _openSubscriptionAccountTab,
+        );
       case MixroomMainTab.account:
-        return const AccountScreen(showTopBar: false);
+        return AccountScreen(
+          showTopBar: false,
+          scrollToTopSignal: _scrollToTopSignal,
+        );
     }
   }
 
@@ -692,16 +783,50 @@ class _SignedInShellState extends State<SignedInShell> {
   }
 }
 
-class _HomeTab extends StatelessWidget {
+class _HomeTab extends StatefulWidget {
   const _HomeTab({
+    required this.scrollToTopSignal,
     required this.onSubmitFeedback,
   });
 
+  final int scrollToTopSignal;
   final Future<void> Function(
     FeedbackCategory category,
     String message,
     bool allowEmailContact,
   ) onSubmitFeedback;
+
+  @override
+  State<_HomeTab> createState() => _HomeTabState();
+}
+
+class _HomeTabState extends State<_HomeTab> {
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void didUpdateWidget(covariant _HomeTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.scrollToTopSignal != widget.scrollToTopSignal) {
+      _scrollToTop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _scrollToTop() {
+    if (!_scrollController.hasClients) return;
+    unawaited(
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -716,6 +841,7 @@ class _HomeTab extends StatelessWidget {
           child: Align(
             alignment: Alignment.topCenter,
             child: SingleChildScrollView(
+              controller: _scrollController,
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               padding: EdgeInsets.fromLTRB(
                 27,
@@ -726,7 +852,7 @@ class _HomeTab extends StatelessWidget {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 348),
                 child: MixroomInlineFeedbackComposer(
-                  onSubmit: onSubmitFeedback,
+                  onSubmit: widget.onSubmitFeedback,
                   showBetaNotice: true,
                 ),
               ),
@@ -739,7 +865,11 @@ class _HomeTab extends StatelessWidget {
 }
 
 class _PlatformTab extends StatefulWidget {
-  const _PlatformTab();
+  const _PlatformTab({
+    required this.scrollToTopSignal,
+  });
+
+  final int scrollToTopSignal;
 
   @override
   State<_PlatformTab> createState() => _PlatformTabState();
@@ -752,6 +882,14 @@ class _PlatformTabState extends State<_PlatformTab> {
   void initState() {
     super.initState();
     _versionStatusFuture = AppUpdatePromptService().getVersionStatus();
+  }
+
+  @override
+  void didUpdateWidget(covariant _PlatformTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.scrollToTopSignal != widget.scrollToTopSignal) {
+      FocusManager.instance.primaryFocus?.unfocus();
+    }
   }
 
   Future<void> _openStore(String storeUrl) async {

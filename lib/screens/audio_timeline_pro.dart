@@ -489,6 +489,8 @@ class AudioCanvasTimeline extends StatefulWidget {
   final bool externalSampleDragActive;
   final MixChangeHighlighter? tutorialHighlighter;
   final double bottomDockInset;
+  final bool allPluginsEntitled;
+  final VoidCallback? onUpgradeRequested;
 
   final String mode; // "Basic" or "Pro"
 
@@ -620,6 +622,8 @@ class AudioCanvasTimeline extends StatefulWidget {
     this.externalSampleDragActive = false,
     this.tutorialHighlighter,
     this.bottomDockInset = 0.0,
+    this.allPluginsEntitled = true,
+    this.onUpgradeRequested,
   }) : super(key: key);
   @override
   State<AudioCanvasTimeline> createState() => _AudioCanvasTimelineState();
@@ -8102,7 +8106,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         key: ValueKey("effect_panel_row_${widget.rows[row].rowId}"),
         rowIndex: row,
         mode: widget.mode,
-        isProEntitled: widget.mode == 'Pro',
+        isProEntitled: widget.allPluginsEntitled,
+        onUpgradeRequested: widget.onUpgradeRequested,
         minHeight: _kEffectsPanelMinHeight,
         onHeightChanged: (h) {
           if (mounted) {

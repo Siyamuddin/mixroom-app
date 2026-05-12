@@ -56,6 +56,15 @@
                     android:scheme="com.mixroom.mixroomapp"
                     android:host="oauthredirect" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="mixroom"
+                    android:host="education"
+                    android:pathPrefix="/invites" />
+            </intent-filter>
             <!-- Only claim Mixroom project bundles opened from outside the app. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>

@@ -29,6 +29,11 @@ import 'package:mixroom/ffmpeg/ffmpeg.dart';
 class ProjectMeta {
   final Directory dir;
   final String name;
+  final String projectId;
+  final String? cloudProjectId;
+  final String? cloudWorkspaceId;
+  final String? cloudOrganizationId;
+  final int? cloudDocumentRevision;
   final DateTime createdAt;
   final DateTime lastOpenedAt;
   final String? bundledDemoAssetPath;
@@ -36,6 +41,11 @@ class ProjectMeta {
   ProjectMeta({
     required this.dir,
     required this.name,
+    required this.projectId,
+    this.cloudProjectId,
+    this.cloudWorkspaceId,
+    this.cloudOrganizationId,
+    this.cloudDocumentRevision,
     required this.createdAt,
     required this.lastOpenedAt,
     this.bundledDemoAssetPath,
@@ -116,10 +126,37 @@ class ProjectManager {
         final json = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
         final bundledDemoAssetPath =
             (json['bundledDemoAssetPath'] as String?)?.trim();
+        final cloudProjectId =
+            (json["cloudProjectId"] ?? json["cloud_project_id"])
+                ?.toString()
+                .trim();
+        final cloudWorkspaceId =
+            (json["cloudWorkspaceId"] ?? json["cloud_workspace_id"])
+                ?.toString()
+                .trim();
+        final cloudOrganizationId =
+            (json["cloudOrganizationId"] ?? json["cloud_organization_id"])
+                ?.toString()
+                .trim();
         metas.add(
           ProjectMeta(
             dir: d,
             name: (json["name"] ?? "Untitled") as String,
+            projectId:
+                (json["projectId"] ?? json["project_id"] ?? '').toString(),
+            cloudProjectId: cloudProjectId == null || cloudProjectId.isEmpty
+                ? null
+                : cloudProjectId,
+            cloudWorkspaceId:
+                cloudWorkspaceId == null || cloudWorkspaceId.isEmpty
+                    ? null
+                    : cloudWorkspaceId,
+            cloudOrganizationId:
+                cloudOrganizationId == null || cloudOrganizationId.isEmpty
+                    ? null
+                    : cloudOrganizationId,
+            cloudDocumentRevision:
+                (json["cloudDocumentRevision"] as num?)?.toInt(),
             createdAt: DateTime.fromMillisecondsSinceEpoch(
                 (json["createdAt"] ?? 0) as int),
             lastOpenedAt: DateTime.fromMillisecondsSinceEpoch(
@@ -237,6 +274,69 @@ class ProjectManager {
     return finalDir;
   }
 
+  static Future<Directory> duplicateProject(Directory dir) async {
+    final sourceJson = await readProjectJson(dir);
+    final sourceName =
+        (sourceJson["name"] ?? p.basename(dir.path)).toString().trim();
+    final duplicateDir = await createNewProjectDir(
+      name: sourceName.isEmpty ? "Untitled Project Copy" : "$sourceName Copy",
+    );
+    await _copyProjectContentsForDuplicate(
+      source: dir,
+      destination: duplicateDir,
+    );
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final duplicateJson = Map<String, dynamic>.from(sourceJson);
+    stripCloudSyncMetadata(duplicateJson);
+    duplicateJson["name"] = p.basename(duplicateDir.path);
+    duplicateJson["projectId"] = _nextProjectId();
+    duplicateJson.remove("project_id");
+    duplicateJson["createdAt"] = now;
+    duplicateJson["lastOpenedAt"] = now;
+    await writeProjectJson(duplicateDir, duplicateJson);
+    return duplicateDir;
+  }
+
+  static Future<void> _copyProjectContentsForDuplicate({
+    required Directory source,
+    required Directory destination,
+  }) async {
+    await for (final entity in source.list(followLinks: false)) {
+      final name = p.basename(entity.path);
+      if (name == "project.json" || name == ".mixroom_versions") continue;
+      final targetPath = p.join(destination.path, name);
+      if (entity is File) {
+        await entity.copy(targetPath);
+      } else if (entity is Directory) {
+        await _copyDirectoryContents(
+          source: entity,
+          destination: Directory(targetPath),
+        );
+      }
+    }
+  }
+
+  static Future<void> _copyDirectoryContents({
+    required Directory source,
+    required Directory destination,
+  }) async {
+    if (!await destination.exists()) {
+      await destination.create(recursive: true);
+    }
+    await for (final entity in source.list(followLinks: false)) {
+      final targetPath = p.join(destination.path, p.basename(entity.path));
+      if (entity is File) {
+        await entity.copy(targetPath);
+      } else if (entity is Directory) {
+        await _copyDirectoryContents(
+          source: entity,
+          destination: Directory(targetPath),
+        );
+      }
+    }
+  }
+
   static Future<Map<String, dynamic>> readProjectJson(Directory dir) async {
     final f = _projectJsonFile(dir);
     if (!await f.exists()) {
@@ -316,7 +416,29 @@ class ProjectManager {
   static Future<void> writeProjectJson(
       Directory dir, Map<String, dynamic> json) async {
     final f = _projectJsonFile(dir);
-    await f.writeAsString(jsonEncode(json));
+    final temp = File('${f.path}.tmp');
+    await temp.writeAsString(jsonEncode(json), flush: true);
+    try {
+      await temp.rename(f.path);
+    } on FileSystemException {
+      if (await f.exists()) {
+        await f.delete();
+      }
+      await temp.rename(f.path);
+    }
+  }
+
+  static void stripCloudSyncMetadata(Map<String, dynamic> json) {
+    json.remove('cloudProjectId');
+    json.remove('cloud_project_id');
+    json.remove('cloudWorkspaceId');
+    json.remove('cloud_workspace_id');
+    json.remove('cloudOrganizationId');
+    json.remove('cloud_organization_id');
+    json.remove('cloudDocumentRevision');
+    json.remove('cloud_document_revision');
+    json.remove('cloudSyncedAt');
+    json.remove('cloud_synced_at');
   }
 
   static Directory audioDir(Directory dir) => _audioDir(dir);
@@ -480,6 +602,7 @@ class ProjectBundle {
     final jsonMap =
         jsonDecode(projectJson.readAsStringSync()) as Map<String, dynamic>;
     final projectName = (jsonMap["name"] as String?) ?? "Mixroom Project";
+    ProjectManager.stripCloudSyncMetadata(jsonMap);
 
     final tmpDir = await getTemporaryDirectory();
     final base = _sanitizeFileName(projectName);
@@ -678,6 +801,7 @@ class ProjectBundleImport {
       final resolvedName = p.basename(destProjectDir.path);
       jsonMap["name"] = resolvedName;
       jsonMap["lastOpenedAt"] = DateTime.now().millisecondsSinceEpoch;
+      ProjectManager.stripCloudSyncMetadata(jsonMap);
 
       final srcAudioDir = Directory(p.join(unpackDir.path, "audio"));
       final dstAudioDir = Directory(p.join(destProjectDir.path, "audio"));

@@ -5,13 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:mixroom/helpers/app_popup.dart';
-import 'package:mixroom/helpers/entitlement_service.dart';
 import 'package:mixroom/helpers/video_project_manager.dart';
 import 'package:mixroom/l10n/l10n.dart';
-import 'package:mixroom/models/entitlement_models.dart';
 import 'package:mixroom/screens/video_editor_sequencer.dart';
 import 'package:path/path.dart' as p;
-import 'package:provider/provider.dart';
 
 class _NoSwipeMaterialPageRoute<T> extends MaterialPageRoute<T> {
   _NoSwipeMaterialPageRoute({required super.builder});
@@ -353,34 +350,7 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
     );
   }
 
-  bool _ensureCanAccessVideoProjects() {
-    if (_canAccessVideoProjects()) return true;
-    _showVideoAccessLockedDialog();
-    return false;
-  }
-
-  bool _canAccessVideoProjects() {
-    try {
-      return context
-          .read<EntitlementService>()
-          .canUseCapability(SubscriptionCapability.videoProjects);
-    } catch (_) {
-      return false;
-    }
-  }
-
-  void _showVideoAccessLockedDialog() {
-    showAppMessageDialog(
-      context: context,
-      title: L10n.translate(context, 'Subscription required'),
-      message: L10n.translate(
-        context,
-        'Your current plan does not include video projects.',
-      ),
-      buttonLabel: L10n.translate(context, 'OK'),
-      icon: Icons.lock_outline_rounded,
-    );
-  }
+  bool _ensureCanAccessVideoProjects() => true;
 
   Widget _compactActionCard({
     required IconData icon,
@@ -445,8 +415,6 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    context.watch<EntitlementService>();
-    final hasVideoAccess = _canAccessVideoProjects();
     final canCreate = _projects.length < VideoProjectManager.maxProjects;
     return Scaffold(
       resizeToAvoidBottomInset: false,
@@ -502,10 +470,6 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
                                 : L10n.translate(
                                     context, 'Delete one to continue'),
                             onTap: () {
-                              if (!hasVideoAccess) {
-                                _showVideoAccessLockedDialog();
-                                return;
-                              }
                               if (!canCreate) {
                                 _showProjectLimitDialog();
                                 return;
@@ -619,20 +583,12 @@ class _VideoProjectsScreenState extends State<VideoProjectsScreen> {
                                             fontSize: 12),
                                       ),
                                       onTap: () {
-                                        if (!hasVideoAccess) {
-                                          _showVideoAccessLockedDialog();
-                                          return;
-                                        }
                                         _openProject(p.dir);
                                       },
                                       trailing: PopupMenuButton<String>(
                                         icon: const Icon(Icons.more_vert,
                                             color: Colors.white70),
                                         onSelected: (v) async {
-                                          if (!hasVideoAccess) {
-                                            _showVideoAccessLockedDialog();
-                                            return;
-                                          }
                                           if (v == 'open') {
                                             await _openProject(p.dir);
                                           }

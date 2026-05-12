@@ -256,6 +256,34 @@ void main() {
     );
   });
 
+  test('project bundle sharing strips cloud sync metadata', () async {
+    final projectDir = await ProjectManager.createNewProjectDir(
+      name: 'Cloud Metadata Bundle',
+    );
+    final json = await ProjectManager.readProjectJson(projectDir);
+    json['cloudProjectId'] = 'personal-cloud-project';
+    json['cloudDocumentRevision'] = 7;
+    json['cloudSyncedAt'] = '2026-05-07T00:00:00Z';
+    await ProjectManager.writeProjectJson(projectDir, json);
+
+    final bundlePath = await ProjectBundle.exportMixroomBundle(
+      projectDir: projectDir,
+      audioMode: BundleAudioMode.preserveAsIs,
+    );
+    final importedDir = await ProjectBundleImport.importMixroomBundle(
+      bundleFile: File(bundlePath),
+      audioStrategy: ImportAudioStrategy.keepAsBundled,
+    );
+
+    final localJson = await ProjectManager.readProjectJson(projectDir);
+    expect(localJson['cloudProjectId'], 'personal-cloud-project');
+
+    final importedJson = await ProjectManager.readProjectJson(importedDir);
+    expect(importedJson.containsKey('cloudProjectId'), isFalse);
+    expect(importedJson.containsKey('cloudDocumentRevision'), isFalse);
+    expect(importedJson.containsKey('cloudSyncedAt'), isFalse);
+  });
+
   test(
       'project bundle flac export/import path remaps filenames and runs ffmpeg',
       () async {

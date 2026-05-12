@@ -5,17 +5,47 @@ export const AI_LIMITS = {
   // using chat; they are retained only for backend feature validation and
   // usage/telemetry bookkeeping.
   "prompt_limits": {
-    "daily": 50,
-    "weekly": 350
+    "free": {
+      "daily": 50,
+      "weekly": 200
+    },
+    "starter": {
+      "daily": 400,
+      "weekly": 1500
+    },
+    "producer": {
+      "daily": 1000,
+      "weekly": 4000
+    },
+    "studio": {
+      "daily": 1000,
+      "weekly": 4000
+    },
+    "enterprise": {
+      "daily": 1000,
+      "weekly": 4000
+    },
+    "education": {
+      "daily": 400,
+      "weekly": 1500
+    }
   },
   "tiers": {
     "free": {
       "daily_credits": 100,
       "monthly_tokens": 200000
     },
-    "pro": {
+    "starter": {
+      "daily_credits": 1000,
+      "monthly_tokens": 2500000
+    },
+    "producer": {
       "daily_credits": 2000,
       "monthly_tokens": 5000000
+    },
+    "studio": {
+      "daily_credits": 10000,
+      "monthly_tokens": 25000000
     }
   },
   "feature_costs": {

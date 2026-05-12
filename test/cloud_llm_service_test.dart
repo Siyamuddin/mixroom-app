@@ -13,6 +13,28 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('CloudLlmService', () {
+    test('prompt rate limit windows expose percentage remaining', () {
+      final halfLeft = AiPromptRateLimitWindow.fromJson({
+        'used': 50,
+        'limit': 100,
+        'remaining': 50,
+      });
+      final clamped = AiPromptRateLimitWindow.fromJson({
+        'used': 0,
+        'limit': 100,
+        'remaining': 150,
+      });
+      final empty = AiPromptRateLimitWindow.fromJson({
+        'used': 0,
+        'limit': 0,
+        'remaining': 0,
+      });
+
+      expect(halfLeft.remainingPercent, 50);
+      expect(clamped.remainingPercent, 100);
+      expect(empty.remainingPercent, 0);
+    });
+
     test('kDebugSystemPrompt stays in sync with the server prompt', () {
       final serverText = File(
         'backend/llm_proxy/src/common/llm_contract.py',

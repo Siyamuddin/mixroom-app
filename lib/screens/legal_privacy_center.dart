@@ -284,11 +284,15 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  MixroomShellSurface(
-                    radius: 26,
-                    strong: true,
-                    color: const Color.fromRGBO(244, 244, 244, 0.10),
-                    padding: const EdgeInsets.fromLTRB(16, 15, 16, 15),
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.08),
+                      ),
+                    ),
                     child: Text(
                       L10n.translate(
                         context,
@@ -520,10 +524,7 @@ class _ShellPageTopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MixroomShellSurface(
-      radius: 28,
-      strong: true,
-      color: const Color.fromRGBO(244, 244, 244, 0.12),
+    return Padding(
       padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
       child: Row(
         children: [
@@ -586,11 +587,13 @@ class _SectionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MixroomShellSurface(
-      radius: 28,
-      strong: true,
-      color: const Color.fromRGBO(244, 244, 244, 0.08),
-      padding: const EdgeInsets.fromLTRB(16, 15, 16, 14),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -676,19 +679,14 @@ class _ActionItem extends StatelessWidget {
               Container(
                 width: 38,
                 height: 38,
-                decoration: BoxDecoration(
-                  color: (disabled ? Colors.white30 : iconColor)
-                      .withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(14),
-                ),
                 alignment: Alignment.center,
                 child: Icon(
                   icon,
-                  size: 18,
+                  size: 22,
                   color: disabled ? Colors.white38 : iconColor,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -762,21 +760,14 @@ class _ToggleItem extends StatelessWidget {
           Container(
             width: 38,
             height: 38,
-            decoration: BoxDecoration(
-              color: (enabled
-                      ? const Color(0xFFA4C2FF)
-                      : Colors.white.withValues(alpha: 0.30))
-                  .withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(14),
-            ),
             alignment: Alignment.center,
             child: Icon(
               icon,
-              size: 18,
+              size: 22,
               color: enabled ? const Color(0xFFA4C2FF) : Colors.white30,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1082,11 +1073,15 @@ class _LegalDocumentScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  MixroomShellSurface(
-                    radius: 28,
-                    strong: true,
-                    color: const Color.fromRGBO(244, 244, 244, 0.10),
-                    padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.08),
+                      ),
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -1125,11 +1120,15 @@ class _LegalDocumentScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  MixroomShellSurface(
-                    radius: 26,
-                    strong: true,
-                    color: const Color.fromRGBO(244, 244, 244, 0.08),
-                    padding: const EdgeInsets.fromLTRB(18, 12, 18, 12),
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.08),
+                      ),
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: _buildDocumentSections(context),

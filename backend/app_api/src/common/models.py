@@ -2,9 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import re
 from typing import Any, Dict, Iterable, Optional
 
-TIERS = ("free", "pro", "studio")
+from .plan_catalog import (
+    PLAN_CODES,
+    INDIVIDUAL_PLAN_CODES,
+    PLAN_PRIORITY,
+    TEAM_BUSINESS_PLAN_CODES,
+    default_capabilities_for_plan,
+    default_limits_for_plan,
+)
+
 PROVIDERS = ("apple", "google", "kakao", "paddle", "toss", "admin_grant", "unknown")
 STATUSES = (
     "trialing",
@@ -18,7 +27,7 @@ STATUSES = (
     "revoked",
 )
 ACTIVE_ACCESS_STATUSES = {"trialing", "active", "grace_period"}
-_TIER_PRIORITY = {"free": 0, "pro": 1, "studio": 2}
+_PLAN_CODE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _STATUS_PRIORITY = {
     "trialing": 4,
     "active": 3,
@@ -56,10 +65,23 @@ def _parse_datetime(raw: Any) -> Optional[datetime]:
         return None
 
 
-def normalize_tier(raw: str) -> str:
-    value = (raw or "").strip().lower()
-    if value in TIERS:
+def normalize_plan_code(raw: Any) -> str:
+    value = str(raw or "").strip().lower()
+    if value == "pro":
+        return "producer"
+    if value == "basic":
+        return "free"
+    if _PLAN_CODE_RE.match(value):
         return value
+    return "free"
+
+
+def legacy_tier_for_plan_code(raw: Any) -> str:
+    value = normalize_plan_code(raw)
+    if value in TEAM_BUSINESS_PLAN_CODES:
+        return "studio"
+    if value in INDIVIDUAL_PLAN_CODES and value != "free":
+        return "pro"
     return "free"
 
 
@@ -81,14 +103,22 @@ def status_has_active_access(raw: str) -> bool:
     return normalize_status(raw) in ACTIVE_ACCESS_STATUSES
 
 
-def subscription_priority_key(raw: Dict[str, Any]) -> tuple[int, int, int, datetime, datetime]:
-    tier = normalize_tier(str(raw.get("tier") or "free"))
+def subscription_effective_status(raw: Dict[str, Any]) -> str:
     status = normalize_status(str(raw.get("status") or "expired"))
+    expires_at = _parse_datetime(raw.get("expires_at"))
+    if status_has_active_access(status) and expires_at is not None and expires_at <= datetime.now(timezone.utc):
+        return "expired"
+    return status
+
+
+def subscription_priority_key(raw: Dict[str, Any]) -> tuple[int, int, int, datetime, datetime]:
+    plan_code = normalize_plan_code(raw.get("plan_code") or raw.get("tier") or "free")
+    status = subscription_effective_status(raw)
+    expires_at = _parse_datetime(raw.get("expires_at"))
     active_access = 1 if status_has_active_access(status) else 0
-    tier_priority = _TIER_PRIORITY.get(tier, 0)
+    plan_priority = PLAN_PRIORITY.get(plan_code, PLAN_PRIORITY["producer"]) if active_access else 0
     status_priority = _STATUS_PRIORITY.get(status, -10)
 
-    expires_at = _parse_datetime(raw.get("expires_at"))
     if expires_at is None:
         expires_at = datetime.max.replace(tzinfo=timezone.utc) if active_access else datetime.min.replace(tzinfo=timezone.utc)
 
@@ -101,7 +131,7 @@ def subscription_priority_key(raw: Dict[str, Any]) -> tuple[int, int, int, datet
 
     return (
         active_access,
-        tier_priority,
+        plan_priority,
         status_priority,
         expires_at,
         activity_at,
@@ -115,68 +145,28 @@ def choose_primary_subscription(subscriptions: Iterable[Dict[str, Any]]) -> Opti
     return max(candidates, key=subscription_priority_key)
 
 
-def default_capabilities_for_tier(tier: str, allow_studio_tier: bool) -> Dict[str, bool]:
-    free = {
-        "pro_editor": False,
-        "unlimited_audio_tracks": False,
-        "multi_video_import": False,
-        "premium_effects": False,
-        "video_projects": True,
-        "web_checkout": True,
-        "mobile_iap": True,
-        "studio_features": False,
-    }
-    if tier == "pro":
-        return {
-            **free,
-            "pro_editor": True,
-            "unlimited_audio_tracks": True,
-            "multi_video_import": True,
-            "premium_effects": True,
-        }
-    if tier == "studio":
-        return {
-            **free,
-            "pro_editor": True,
-            "unlimited_audio_tracks": True,
-            "multi_video_import": True,
-            "premium_effects": True,
-            "studio_features": allow_studio_tier,
-        }
-    return free
-
-
-def infer_tier_from_product_id(product_id: str) -> str:
-    value = (product_id or "").strip().lower()
-    if not value:
-        return "free"
-    if "studio" in value:
-        return "studio"
-    if "pro" in value or "premium" in value:
-        return "pro"
-    return "free"
-
-
-def entitlement_capabilities_for_status(
-    tier: str,
-    status: str,
-    allow_studio_tier: bool,
-) -> Dict[str, bool]:
+def entitlement_capabilities_for_status(plan_code: str, status: str) -> Dict[str, bool]:
     if not status_has_active_access(status):
-        return default_capabilities_for_tier("free", allow_studio_tier)
-    return default_capabilities_for_tier(normalize_tier(tier), allow_studio_tier)
+        return default_capabilities_for_plan("free")
+    return default_capabilities_for_plan(plan_code)
+
+
+def entitlement_limits_for_status(plan_code: str, status: str) -> Dict[str, Any]:
+    if not status_has_active_access(status):
+        return default_limits_for_plan("free")
+    return default_limits_for_plan(plan_code)
 
 
 @dataclass
 class EntitlementSnapshot:
     user_id: str
-    tier: str
     status: str
     effective_at: str
     expires_at: Optional[str]
     source_provider: str
     source_subscription_id: str
     capabilities: Dict[str, bool]
+    limits: Dict[str, Any]
     management_channel: str
     revision: int
     plan_code: str = "free"
@@ -186,13 +176,14 @@ class EntitlementSnapshot:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "user_id": self.user_id,
-            "tier": self.tier,
+            "tier": legacy_tier_for_plan_code(self.plan_code),
             "status": self.status,
             "effective_at": self.effective_at,
             "expires_at": self.expires_at,
             "source_provider": self.source_provider,
             "source_subscription_id": self.source_subscription_id,
             "capabilities": self.capabilities,
+            "limits": self.limits,
             "management_channel": self.management_channel,
             "revision": self.revision,
             "plan_code": self.plan_code,
@@ -201,16 +192,16 @@ class EntitlementSnapshot:
         }
 
 
-def free_entitlement(user_id: str, allow_studio_tier: bool, revision: int = 0) -> EntitlementSnapshot:
+def free_entitlement(user_id: str, revision: int = 0) -> EntitlementSnapshot:
     return EntitlementSnapshot(
         user_id=user_id,
-        tier="free",
         status="active",
         effective_at=utc_now_iso(),
         expires_at=None,
         source_provider="admin_grant",
         source_subscription_id="free-default",
-        capabilities=default_capabilities_for_tier("free", allow_studio_tier),
+        capabilities=default_capabilities_for_plan("free"),
+        limits=default_limits_for_plan("free"),
         management_channel="free",
         revision=revision,
         plan_code="free",

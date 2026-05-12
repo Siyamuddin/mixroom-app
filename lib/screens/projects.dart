@@ -8,14 +8,18 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:mixroom/helpers/desktop_file_ingress_service.dart';
+import 'package:mixroom/helpers/cloud_project_service.dart';
+import 'package:mixroom/helpers/cloud_sync_preferences.dart';
 import 'package:mixroom/helpers/export_save_dialog.dart';
 import 'package:mixroom/helpers/open_mixroom_service.dart';
+import 'package:mixroom/helpers/auth_service.dart';
+import 'package:mixroom/helpers/entitlement_service.dart';
 import 'package:mixroom/l10n/l10n.dart';
+import 'package:mixroom/models/entitlement_models.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:mixroom/helpers/app_popup.dart';
 import 'package:mixroom/helpers/project_manager.dart';
-import 'package:mixroom/helpers/entitlement_service.dart';
-import 'package:mixroom/models/entitlement_models.dart';
+import 'package:mixroom/helpers/project_version_store.dart';
 import 'package:mixroom/screens/audio_editor.dart';
 import 'package:mixroom/widgets/app_responsive_body.dart';
 import 'package:mixroom/widgets/app_shell_figma.dart';
@@ -28,14 +32,40 @@ class _NoSwipeMaterialPageRoute<T> extends MaterialPageRoute<T> {
   bool get popGestureEnabled => false;
 }
 
+class _ProjectLibraryPageScrollPhysics extends PageScrollPhysics {
+  const _ProjectLibraryPageScrollPhysics({super.parent});
+
+  @override
+  _ProjectLibraryPageScrollPhysics applyTo(ScrollPhysics? ancestor) {
+    return _ProjectLibraryPageScrollPhysics(
+      parent: buildParent(ancestor),
+    );
+  }
+
+  @override
+  SpringDescription get spring => const SpringDescription(
+        mass: 1,
+        stiffness: 620,
+        damping: 48,
+      );
+}
+
 class ProjectsScreen extends StatefulWidget {
-  const ProjectsScreen({super.key});
+  const ProjectsScreen({
+    super.key,
+    this.scrollToTopSignal = 0,
+    this.onUpgradeRequested,
+  });
+
+  final int scrollToTopSignal;
+  final VoidCallback? onUpgradeRequested;
 
   @override
   State<ProjectsScreen> createState() => _ProjectsScreenState();
 }
 
 const double kActionCardHeight = 72;
+const double _kProjectLibraryPageHorizontalGutter = 8;
 
 enum _ProjectSortMode {
   recent,
@@ -44,26 +74,67 @@ enum _ProjectSortMode {
 
 enum _ProjectLibraryTab {
   yourProjects,
+  cloudProjects,
   demoProjects,
 }
 
 class _ProjectListEntry {
   const _ProjectListEntry.project(this.project)
       : bundledDemo = null,
+        cloudProject = null,
         isBundledDemo = false;
 
   const _ProjectListEntry.bundledDemo(this.bundledDemo)
       : project = null,
+        cloudProject = null,
         isBundledDemo = true;
+
+  const _ProjectListEntry.cloud(this.cloudProject)
+      : project = null,
+        bundledDemo = null,
+        isBundledDemo = false;
 
   final ProjectMeta? project;
   final BundledDemoProjectAsset? bundledDemo;
+  final CloudProjectAccessItem? cloudProject;
   final bool isBundledDemo;
+
+  bool get isCloudProject => cloudProject != null;
+}
+
+class _CloudProjectDestination {
+  const _CloudProjectDestination.personal()
+      : workspaceId = '',
+        organizationId = '',
+        label = 'Personal Cloud',
+        subtitle = 'Only you can access this project',
+        icon = Icons.person_rounded,
+        canWrite = true,
+        status = 'active';
+
+  const _CloudProjectDestination.workspace({
+    required this.workspaceId,
+    required this.organizationId,
+    required this.label,
+    required this.subtitle,
+    required this.canWrite,
+    required this.status,
+  }) : icon = canWrite ? Icons.groups_2_rounded : Icons.lock_rounded;
+
+  final String workspaceId;
+  final String organizationId;
+  final String label;
+  final String subtitle;
+  final IconData icon;
+  final bool canWrite;
+  final String status;
+
+  bool get isPersonal => workspaceId.isEmpty;
+  bool get isReadOnly => !canWrite;
 }
 
 class _ProjectsScreenState extends State<ProjectsScreen> {
   static const Key _projectsScreenKey = Key('projects_screen');
-  static const Key _projectsListKey = Key('projects_list');
   static const Key _renameDialogKey = ValueKey('projects_rename_dialog');
   static const Key _renameFieldKey = ValueKey('projects_rename_field');
   static const Key _renameCancelKey = ValueKey('projects_rename_cancel');
@@ -71,20 +142,37 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   static const Key _deleteDialogKey = ValueKey('projects_delete_dialog');
   static const Key _deleteCancelKey = ValueKey('projects_delete_cancel');
   static const Key _deleteConfirmKey = ValueKey('projects_delete_confirm');
+  static List<ProjectMeta>? _cachedProjects;
+  static List<BundledDemoProjectAsset>? _cachedBundledDemoProjects;
   List<ProjectMeta> _projects = [];
   List<BundledDemoProjectAsset> _bundledDemoProjects = [];
+  List<CloudProjectAccessItem> _cloudProjects = [];
+  CloudProjectStorageSummary? _cloudStorage;
   bool _loading = true;
+  bool _cloudLoading = false;
+  CloudSyncMode _cloudSyncMode = CloudSyncMode.auto;
+  String _selectedCloudWorkspaceId = '';
   bool _filePickerInFlight = false;
+  final CloudProjectService _cloudProjectService = CloudProjectService();
   StreamSubscription<String>? _importSub;
   StreamSubscription<List<DesktopFileDropItem>>? _desktopDropSub;
+  Future<void>? _cloudRefreshInFlight;
   String? _loadError;
+  String? _cloudError;
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode(debugLabel: 'projects_search');
+  late final PageController _libraryPageController;
+  late final Map<_ProjectLibraryTab, ScrollController>
+      _libraryScrollControllers;
   final GlobalKey _projectToolsButtonKey = GlobalKey();
+  final GlobalKey<TooltipState> _cloudSyncTooltipKey =
+      GlobalKey<TooltipState>();
   _ProjectSortMode _sortMode = _ProjectSortMode.recent;
   _ProjectLibraryTab _libraryTab = _ProjectLibraryTab.yourProjects;
   final Set<String> _selectedProjectPaths = <String>{};
   final Set<String> _selectedBundledDemoAssetPaths = <String>{};
+  final Set<String> _cloudProjectsInFlight = <String>{};
+  final ProjectVersionStore _projectVersionStore = const ProjectVersionStore();
   bool _selectionModePinned = false;
 
   String _projectActionKeyToken(String name) =>
@@ -101,9 +189,22 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     return 'We couldn\'t load your projects right now. Please try again.';
   }
 
+  String _cleanCloudError(Object error) {
+    final raw = error.toString();
+    final marker = raw.indexOf('): ');
+    if (marker >= 0 && marker + 3 < raw.length) {
+      return raw.substring(marker + 3).trim();
+    }
+    return raw.replaceFirst('Exception: ', '').replaceFirst('StateError: ', '');
+  }
+
   @override
   void initState() {
     super.initState();
+    _libraryPageController = PageController(initialPage: _libraryTab.index);
+    _libraryScrollControllers = {
+      for (final tab in _ProjectLibraryTab.values) tab: ScrollController(),
+    };
     _searchFocusNode.addListener(() {
       if (!mounted) return;
       setState(() {});
@@ -111,7 +212,18 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     ProjectManager.projectLibraryRevision.addListener(
       _handleProjectLibraryChanged,
     );
-    _refresh();
+    final cachedProjects = _cachedProjects;
+    final cachedBundledDemoProjects = _cachedBundledDemoProjects;
+    if (cachedProjects != null && cachedBundledDemoProjects != null) {
+      _projects = List<ProjectMeta>.from(cachedProjects);
+      _bundledDemoProjects =
+          List<BundledDemoProjectAsset>.from(cachedBundledDemoProjects);
+      _loading = false;
+      unawaited(_refresh(showBlockingLoader: false));
+    } else {
+      _refresh();
+    }
+    unawaited(_loadCloudPreferences());
 
     // Cold start
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -139,15 +251,63 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   @override
+  void didUpdateWidget(covariant ProjectsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.scrollToTopSignal != widget.scrollToTopSignal) {
+      _scrollCurrentLibraryTabToTop();
+    }
+  }
+
+  Future<void> _loadCloudPreferences() async {
+    final mode = await CloudSyncPreferences.loadMode();
+    final workspaceId = await CloudSyncPreferences.loadDefaultWorkspaceId();
+    if (!mounted) return;
+    setState(() {
+      _cloudSyncMode = mode;
+      _selectedCloudWorkspaceId = workspaceId;
+    });
+  }
+
+  Future<void> _setCloudSyncMode(CloudSyncMode mode) async {
+    if (_cloudSyncMode == mode) return;
+    setState(() => _cloudSyncMode = mode);
+    await CloudSyncPreferences.saveMode(mode);
+  }
+
+  Future<void> _setSelectedCloudWorkspace(String workspaceId) async {
+    final normalized = workspaceId.trim();
+    if (_selectedCloudWorkspaceId == normalized) return;
+    setState(() => _selectedCloudWorkspaceId = normalized);
+    await CloudSyncPreferences.saveDefaultWorkspaceId(normalized);
+  }
+
+  @override
   void dispose() {
     _importSub?.cancel();
     _desktopDropSub?.cancel();
     ProjectManager.projectLibraryRevision.removeListener(
       _handleProjectLibraryChanged,
     );
+    _cloudProjectService.close();
+    _libraryPageController.dispose();
+    for (final controller in _libraryScrollControllers.values) {
+      controller.dispose();
+    }
     _searchFocusNode.dispose();
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _scrollCurrentLibraryTabToTop() {
+    final controller = _libraryScrollControllers[_libraryTab];
+    if (controller == null || !controller.hasClients) return;
+    unawaited(
+      controller.animateTo(
+        0,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+      ),
+    );
   }
 
   void _handleProjectLibraryChanged() {
@@ -167,11 +327,24 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     }
   }
 
-  Future<void> _refresh() async {
-    setState(() {
-      _loading = true;
-      _loadError = null;
-    });
+  Future<void> _refresh({
+    bool includeCloud = false,
+    bool showBlockingLoader = true,
+  }) async {
+    final shouldShowBlockingLoader =
+        showBlockingLoader && _projects.isEmpty && _bundledDemoProjects.isEmpty;
+    if (shouldShowBlockingLoader) {
+      setState(() {
+        _loading = true;
+        _loadError = null;
+        _cloudError = null;
+      });
+    } else {
+      setState(() {
+        _loadError = null;
+        _cloudError = null;
+      });
+    }
     try {
       _projects = await ProjectManager.listProjects();
       final bundledDemoProjects =
@@ -189,9 +362,32 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                 !dismissedDemoAssetPaths.contains(demo.assetPath),
           )
           .toList(growable: false);
+      _cachedProjects = List<ProjectMeta>.from(_projects);
+      _cachedBundledDemoProjects =
+          List<BundledDemoProjectAsset>.from(_bundledDemoProjects);
+      if (!mounted) return;
+      _seedCloudProjectsFromEntitlementCache();
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+      final hasCloudLinkedLocalProjects = _projects.any(
+        (project) => (project.cloudProjectId ?? '').trim().isNotEmpty,
+      );
+      final signedIn = context.read<AuthService>().isSignedIn;
+      if (includeCloud ||
+          _libraryTab == _ProjectLibraryTab.cloudProjects ||
+          hasCloudLinkedLocalProjects ||
+          (signedIn && _projects.isNotEmpty && _cloudProjects.isEmpty)) {
+        await _refreshCloudProjectsSilently();
+      }
+      await _persistCloudLinksForLocalMatches();
+      if (mounted) {
+        setState(() {});
+      }
     } catch (e) {
       _projects = <ProjectMeta>[];
       _bundledDemoProjects = <BundledDemoProjectAsset>[];
+      _cloudProjects = <CloudProjectAccessItem>[];
       _loadError = _friendlyLoadError(e);
     } finally {
       if (mounted) {
@@ -200,13 +396,93 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     }
   }
 
+  void _seedCloudProjectsFromEntitlementCache() {
+    final snapshot = context.read<EntitlementService>().cloudProjectsAccess;
+    if (snapshot == null) return;
+    _cloudProjects = snapshot.cloudProjects;
+    _cloudStorage = snapshot.storage;
+    _cloudError = null;
+  }
+
+  Future<void> _refreshCloudProjectsSilently({
+    bool showLoading = true,
+  }) async {
+    if (_cloudRefreshInFlight != null) {
+      await _cloudRefreshInFlight;
+      return;
+    }
+    final completer = Completer<void>();
+    _cloudRefreshInFlight = completer.future;
+    final auth = context.read<AuthService>();
+    if (!auth.isSignedIn) {
+      _cloudProjects = <CloudProjectAccessItem>[];
+      _cloudStorage = null;
+      _cloudRefreshInFlight = null;
+      completer.complete();
+      return;
+    }
+    if (showLoading) {
+      _cloudLoading = true;
+    }
+    try {
+      final snapshot = await _cloudProjectService.listProjects(auth: auth);
+      _cloudProjects = snapshot.cloudProjects;
+      _cloudStorage = snapshot.storage;
+      _cloudError = null;
+    } catch (e) {
+      _cloudError = _cleanCloudError(e);
+    } finally {
+      if (showLoading) {
+        _cloudLoading = false;
+      }
+      _cloudRefreshInFlight = null;
+      if (!completer.isCompleted) {
+        completer.complete();
+      }
+    }
+  }
+
+  Future<void> _persistCloudLinksForLocalMatches() async {
+    if (_projects.isEmpty || _cloudProjects.isEmpty) return;
+    for (final cloud in _cloudProjects) {
+      if (!cloud.isBundleStorage) continue;
+      final local = _localProjectForCloud(cloud);
+      if (local == null) continue;
+      final currentCloudProjectId = (local.cloudProjectId ?? '').trim();
+      if (currentCloudProjectId == cloud.projectId &&
+          local.cloudDocumentRevision == cloud.documentRevision) {
+        continue;
+      }
+      try {
+        final json = await ProjectManager.readProjectJson(local.dir);
+        final jsonCloudProjectId =
+            (json['cloudProjectId'] ?? json['cloud_project_id'] ?? '')
+                .toString()
+                .trim();
+        final rawJsonCloudRevision =
+            json['cloudDocumentRevision'] ?? json['cloud_document_revision'];
+        final jsonCloudRevision = rawJsonCloudRevision is num
+            ? rawJsonCloudRevision.toInt()
+            : int.tryParse((rawJsonCloudRevision ?? '').toString().trim());
+        if (jsonCloudProjectId == cloud.projectId &&
+            jsonCloudRevision == cloud.documentRevision) {
+          continue;
+        }
+        json['cloudProjectId'] = cloud.projectId;
+        json['cloudDocumentRevision'] = cloud.documentRevision;
+        json['cloudSyncedAt'] =
+            (cloud.updatedAt ?? DateTime.now()).toUtc().toIso8601String();
+        await ProjectManager.writeProjectJson(local.dir, json);
+      } catch (error) {
+        debugPrint('Failed to persist local cloud project link: $error');
+      }
+    }
+  }
+
   Future<void> _openProject(
     Directory dir, {
     AudioEditorInitialAction? initialAction,
   }) async {
-    final resolvedMode = _resolvedEditorMode();
-    final isProEntitled = _isProEntitled();
-
     // 1. Show loading spinner immediately
     showLoadingDialog(
       context,
@@ -226,10 +502,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       context,
       _NoSwipeMaterialPageRoute(
         builder: (_) => AudioEditorScreen(
-          mode: resolvedMode,
+          mode: 'Pro',
           projectDir: dir,
-          isProEntitled: isProEntitled,
           initialAction: initialAction,
+          onUpgradeRequested: widget.onUpgradeRequested,
         ),
       ),
     );
@@ -494,7 +770,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       if (newName.isEmpty) return;
 
       try {
-        await ProjectManager.renameProject(meta.dir, newName);
+        final renamedDir =
+            await ProjectManager.renameProject(meta.dir, newName);
+        await _restoreCloudScopedDisplayNameIfAllowed(
+          original: meta,
+          renamedDir: renamedDir,
+          requestedName: newName,
+        );
         await _refresh();
 
         if (!mounted) return;
@@ -562,10 +844,634 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     return filtered;
   }
 
+  ProjectMeta? _localProjectForCloud(CloudProjectAccessItem cloud) {
+    for (final project in _projects) {
+      if ((project.cloudProjectId ?? '').trim() == cloud.projectId) {
+        return project;
+      }
+      if (project.projectId.trim().isNotEmpty &&
+          project.projectId == cloud.localProjectId) {
+        return project;
+      }
+      if (project.projectId.trim().isNotEmpty &&
+          project.projectId == cloud.projectId) {
+        return project;
+      }
+    }
+    return null;
+  }
+
+  CloudProjectAccessItem? _cloudProjectForLocal(ProjectMeta meta) {
+    final cloudProjectId = (meta.cloudProjectId ?? '').trim();
+    for (final project in _cloudProjects) {
+      if (!project.isBundleStorage) continue;
+      if (cloudProjectId.isNotEmpty && project.projectId == cloudProjectId) {
+        return project;
+      }
+      if (meta.projectId.trim().isNotEmpty &&
+          project.localProjectId == meta.projectId) {
+        return project;
+      }
+      if (meta.projectId.trim().isNotEmpty &&
+          project.projectId == meta.projectId) {
+        return project;
+      }
+    }
+    return null;
+  }
+
+  List<_CloudProjectDestination> _availableCloudDestinations(
+    EntitlementService entitlement,
+  ) {
+    final organizationsById = {
+      for (final org in entitlement.effectiveOrganizations)
+        org.organizationId: org,
+    };
+    final destinations = <_CloudProjectDestination>[
+      const _CloudProjectDestination.personal(),
+    ];
+    for (final workspace in entitlement.effectiveWorkspaces) {
+      if (workspace.workspaceId.trim().isEmpty) continue;
+      final organization = organizationsById[workspace.organizationId];
+      final orgName = (organization?.name ?? '').trim();
+      final planLabel = (organization?.planLabel ?? '').trim();
+      final canWrite = workspace.canWrite && (organization?.canWrite ?? true);
+      final label = orgName.isNotEmpty ? orgName : workspace.name;
+      destinations.add(
+        _CloudProjectDestination.workspace(
+          workspaceId: workspace.workspaceId,
+          organizationId: workspace.organizationId,
+          label: label.isEmpty ? 'Shared Cloud' : label,
+          subtitle: canWrite
+              ? (planLabel.isEmpty ? 'Shared cloud project space' : planLabel)
+              : 'Read-only cloud storage',
+          canWrite: canWrite,
+          status: workspace.status.trim().isNotEmpty
+              ? workspace.status.trim().toLowerCase()
+              : (organization?.status ?? 'active').trim().toLowerCase(),
+        ),
+      );
+    }
+    return destinations;
+  }
+
+  _CloudProjectDestination _destinationForCloudProject(
+    CloudProjectAccessItem cloud,
+    EntitlementService entitlement,
+  ) {
+    final workspaceId = cloud.workspaceId.trim();
+    if (workspaceId.isEmpty) return const _CloudProjectDestination.personal();
+    for (final destination in _availableCloudDestinations(entitlement)) {
+      if (destination.workspaceId == workspaceId) return destination;
+    }
+    return _CloudProjectDestination.workspace(
+      workspaceId: workspaceId,
+      organizationId: cloud.organizationId,
+      label: 'Shared Cloud',
+      subtitle: 'Team project space',
+      canWrite: cloud.canWrite,
+      status: cloud.canWrite ? 'active' : 'locked',
+    );
+  }
+
+  _CloudProjectDestination _selectedCloudDestination(
+    EntitlementService entitlement,
+  ) {
+    final destinations = _availableCloudDestinations(entitlement);
+    for (final destination in destinations) {
+      if (destination.workspaceId == _selectedCloudWorkspaceId) {
+        return destination;
+      }
+    }
+    return destinations.first;
+  }
+
+  bool _cloudProjectIsInDestination(
+    CloudProjectAccessItem project,
+    _CloudProjectDestination destination,
+  ) {
+    return project.workspaceId.trim() == destination.workspaceId;
+  }
+
+  Future<_CloudProjectDestination?> _resolveCloudSyncDestination({
+    required ProjectMeta meta,
+    required EntitlementService entitlement,
+    required bool promptForNewProject,
+  }) async {
+    final existing = _cloudProjectForLocal(meta);
+    if (existing != null && !promptForNewProject) {
+      return _destinationForCloudProject(existing, entitlement);
+    }
+    final destinations = _availableCloudDestinations(entitlement);
+    final writableDestinations = destinations
+        .where((destination) => destination.canWrite)
+        .toList(growable: false);
+    if (destinations.length <= 1) {
+      return existing == null
+          ? destinations.first
+          : _destinationForCloudProject(existing, entitlement);
+    }
+    if (!promptForNewProject) {
+      for (final destination in destinations) {
+        if (destination.workspaceId == _selectedCloudWorkspaceId &&
+            destination.canWrite) {
+          return destination;
+        }
+      }
+      return writableDestinations.isNotEmpty
+          ? writableDestinations.first
+          : destinations.first;
+    }
+    if (!mounted) return null;
+    final selected = await showModalBottomSheet<_CloudProjectDestination>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+            child: MixroomShellSurface(
+              radius: 28,
+              strong: true,
+              color: const Color.fromRGBO(24, 24, 28, 0.96),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    existing == null ? 'Save project to' : 'Sync project to',
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  for (final destination in destinations)
+                    ListTile(
+                      enabled: destination.canWrite,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                      leading: Icon(
+                        destination.icon,
+                        color: destination.canWrite
+                            ? const Color(0xFFA4C2FF)
+                            : Colors.white.withValues(alpha: 0.48),
+                      ),
+                      title: Text(
+                        destination.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: destination.canWrite
+                              ? Colors.white
+                              : Colors.white.withValues(alpha: 0.58),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      subtitle: Text(
+                        _destinationSubtitle(
+                          destination: destination,
+                          existing: existing,
+                          entitlement: entitlement,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.64),
+                        ),
+                      ),
+                      onTap: destination.canWrite
+                          ? () => Navigator.of(context).pop(destination)
+                          : null,
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    if (selected != null) {
+      await _setSelectedCloudWorkspace(selected.workspaceId);
+    }
+    return selected;
+  }
+
+  Future<void> _showCloudLocationSelector(
+    List<_CloudProjectDestination> destinations, {
+    required GlobalKey anchorKey,
+  }) async {
+    if (!mounted) return;
+    final entitlement = context.read<EntitlementService>();
+    final selectedDestination = _selectedCloudDestination(entitlement);
+    final selected = await _showAnchoredShellMenu<_CloudProjectDestination>(
+      anchorKey: anchorKey,
+      width: 280,
+      estimatedHeight: 58.0 + destinations.length * 58.0,
+      child: Material(
+        color: Colors.transparent,
+        child: MixroomShellSurface(
+          radius: 22,
+          strong: true,
+          color: const Color.fromRGBO(24, 24, 28, 0.96),
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 2, 4, 8),
+                child: Text(
+                  L10n.translate(context, 'Cloud Location'),
+                  style: const TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              for (final destination in destinations) ...[
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: () => Navigator.of(context).pop(destination),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 9,
+                      ),
+                      decoration: BoxDecoration(
+                        color: destination.workspaceId ==
+                                selectedDestination.workspaceId
+                            ? const Color(0xFFA4C2FF).withValues(alpha: 0.16)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            destination.icon,
+                            color: const Color(0xFFA4C2FF),
+                            size: 18,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  destination.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontFamily: 'Pretendard',
+                                    color: Color(0xFFF4F4F4),
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  L10n.translate(
+                                    context,
+                                    destination.subtitle,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontFamily: 'Pretendard',
+                                    color: Colors.white.withValues(alpha: 0.62),
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (destination.workspaceId ==
+                              selectedDestination.workspaceId)
+                            const Icon(
+                              Icons.check_rounded,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                if (destination != destinations.last) const SizedBox(height: 4),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+    if (selected != null) {
+      await _setSelectedCloudWorkspace(selected.workspaceId);
+    }
+  }
+
+  String _destinationSubtitle({
+    required _CloudProjectDestination destination,
+    required CloudProjectAccessItem? existing,
+    required EntitlementService entitlement,
+  }) {
+    if (!destination.canWrite) {
+      return L10n.translate(context, 'Read-only cloud storage');
+    }
+    if (existing != null) {
+      final current = _destinationForCloudProject(existing, entitlement);
+      if (current.workspaceId == destination.workspaceId) {
+        return 'Current cloud location';
+      }
+      return 'Create a new cloud copy here';
+    }
+    return destination.subtitle;
+  }
+
+  String _cloudProjectLocationLabel(CloudProjectAccessItem cloud) {
+    final destination = _destinationForCloudProject(
+      cloud,
+      context.read<EntitlementService>(),
+    );
+    return destination.label;
+  }
+
+  String _cloudProjectPersonLabel(
+    CloudProjectUserSummary profile,
+    String fallbackUserId,
+  ) {
+    if (profile.hasLabel) return profile.label;
+    final safeUserId = fallbackUserId.trim();
+    if (safeUserId.isEmpty) return L10n.translate(context, 'Unknown member');
+    if (safeUserId.length <= 8) return safeUserId;
+    return '${safeUserId.substring(0, 8)}…';
+  }
+
+  String? _cloudProjectAttributionLine(CloudProjectAccessItem cloud) {
+    if (cloud.workspaceId.trim().isEmpty) return null;
+    final owner = _cloudProjectPersonLabel(
+      cloud.ownerProfile,
+      cloud.ownerUserId,
+    );
+    final editorUserId = cloud.updatedByUserId.trim().isNotEmpty
+        ? cloud.updatedByUserId
+        : cloud.ownerUserId;
+    final editor = _cloudProjectPersonLabel(
+      cloud.updatedByProfile,
+      editorUserId,
+    );
+    if (editorUserId.trim().isNotEmpty && editorUserId == cloud.ownerUserId) {
+      return L10n.translate(context, 'Created and edited by {user}')
+          .replaceAll('{user}', owner);
+    }
+    return L10n.translate(context, 'Created by {owner} • Edited by {editor}')
+        .replaceAll('{owner}', owner)
+        .replaceAll('{editor}', editor);
+  }
+
+  bool _hasCloudReference(ProjectMeta meta) {
+    return (meta.cloudProjectId ?? '').trim().isNotEmpty ||
+        _cloudProjectForLocal(meta) != null;
+  }
+
+  bool _hasMultipleCloudDestinations() {
+    return _availableCloudDestinations(context.read<EntitlementService>())
+            .length >
+        1;
+  }
+
+  String _workspaceIdForLocalCloudProject(
+    ProjectMeta meta, {
+    CloudProjectAccessItem? cloud,
+  }) {
+    return (cloud?.workspaceId ?? meta.cloudWorkspaceId ?? '').trim();
+  }
+
+  String _cloudLocationLabelForWorkspaceId(
+    String workspaceId, {
+    CloudProjectAccessItem? cloud,
+  }) {
+    final normalized = workspaceId.trim();
+    if (normalized.isEmpty) {
+      return const _CloudProjectDestination.personal().label;
+    }
+    final entitlement = context.read<EntitlementService>();
+    for (final destination in _availableCloudDestinations(entitlement)) {
+      if (destination.workspaceId == normalized) return destination.label;
+    }
+    if (cloud != null) {
+      return _destinationForCloudProject(cloud, entitlement).label;
+    }
+    return 'Shared Cloud';
+  }
+
+  String? _localCloudLocationLabel(
+    ProjectMeta meta,
+    CloudProjectAccessItem? cloud,
+  ) {
+    if (!_hasMultipleCloudDestinations() || !_hasCloudReference(meta)) {
+      return null;
+    }
+    return _cloudLocationLabelForWorkspaceId(
+      _workspaceIdForLocalCloudProject(meta, cloud: cloud),
+      cloud: cloud,
+    );
+  }
+
+  String _localCloudSyncedLabel(
+    ProjectMeta meta,
+    CloudProjectAccessItem? cloud,
+  ) {
+    final location = _localCloudLocationLabel(meta, cloud);
+    final synced = L10n.translate(context, 'Cloud synced');
+    if (location == null || location.isEmpty) return synced;
+    return '$synced • $location';
+  }
+
+  bool _cloudScopedDisplayNameAllowed({
+    required ProjectMeta original,
+    required String requestedName,
+  }) {
+    final desired = requestedName.trim().toLowerCase();
+    if (desired.isEmpty || !_hasCloudReference(original)) return false;
+    final originalWorkspaceId = _workspaceIdForLocalCloudProject(
+      original,
+      cloud: _cloudProjectForLocal(original),
+    );
+    final originalPath = original.dir.path;
+    for (final project in _projects) {
+      if (project.dir.path == originalPath) continue;
+      if (project.name.trim().toLowerCase() != desired) continue;
+      if (!_hasCloudReference(project)) return false;
+      final projectWorkspaceId = _workspaceIdForLocalCloudProject(
+        project,
+        cloud: _cloudProjectForLocal(project),
+      );
+      if (projectWorkspaceId == originalWorkspaceId) return false;
+    }
+    return true;
+  }
+
+  Future<void> _restoreCloudScopedDisplayNameIfAllowed({
+    required ProjectMeta original,
+    required Directory renamedDir,
+    required String requestedName,
+  }) async {
+    final trimmed = requestedName.trim();
+    if (trimmed.isEmpty) return;
+    if (!_cloudScopedDisplayNameAllowed(
+      original: original,
+      requestedName: trimmed,
+    )) {
+      return;
+    }
+    final json = await ProjectManager.readProjectJson(renamedDir);
+    json['name'] = trimmed;
+    await ProjectManager.writeProjectJson(renamedDir, json);
+  }
+
+  String _downloadedCloudProjectDisplayName({
+    required CloudProjectAccessItem cloud,
+    required String resolvedName,
+  }) {
+    final desiredName = cloud.name.trim();
+    if (desiredName.isEmpty) return resolvedName;
+    final desiredLower = desiredName.toLowerCase();
+    final cloudWorkspaceId = cloud.workspaceId.trim();
+    for (final project in _projects) {
+      if (project.name.trim().toLowerCase() != desiredLower) continue;
+      if (!_hasCloudReference(project)) return resolvedName;
+      final projectWorkspaceId = _workspaceIdForLocalCloudProject(
+        project,
+        cloud: _cloudProjectForLocal(project),
+      );
+      if (projectWorkspaceId == cloudWorkspaceId) return resolvedName;
+    }
+    return desiredName;
+  }
+
+  bool _localCloudSyncInFlight(
+    ProjectMeta meta,
+    CloudProjectAccessItem? cloud,
+  ) {
+    final projectId = meta.projectId.trim();
+    final cloudProjectId = (meta.cloudProjectId ?? '').trim();
+    return (projectId.isNotEmpty &&
+            _cloudProjectsInFlight.contains(projectId)) ||
+        (cloudProjectId.isNotEmpty &&
+            _cloudProjectsInFlight.contains(cloudProjectId)) ||
+        (cloud != null && _cloudProjectsInFlight.contains(cloud.projectId));
+  }
+
+  String? _syncQuotaErrorForBundle(
+    ProjectMeta meta,
+    int bundleSizeBytes, {
+    required _CloudProjectDestination destination,
+  }) {
+    final storage = _cloudStorage;
+    if (storage == null) return null;
+    final storageLocation = _cloudStorageLocationForDestination(destination);
+    final existing = _cloudProjectForLocal(meta);
+    final projectLimit = storageLocation?.projectLimit ?? storage.projectLimit;
+    if (existing == null && projectLimit != null) {
+      final activeCloudProjects = _cloudProjects.where(
+        (project) =>
+            project.isBundleStorage &&
+            _cloudProjectIsInDestination(project, destination),
+      );
+      if (activeCloudProjects.length >= projectLimit) {
+        return 'Cloud project limit reached for your current plan.';
+      }
+    }
+
+    final limitBytes = storageLocation?.limitBytes ?? storage.limitBytes;
+    if (limitBytes == null || limitBytes < 0) return null;
+    final currentUsedBytes = _cloudStorageUsedBytesForDestination(destination);
+    final replacingBytes =
+        existing != null && _cloudProjectIsInDestination(existing, destination)
+            ? existing.documentSizeBytes
+            : 0;
+    final projectedUsedBytes =
+        currentUsedBytes - replacingBytes + bundleSizeBytes;
+    if (projectedUsedBytes > limitBytes) {
+      return 'Cloud storage limit reached for your current plan.';
+    }
+    return null;
+  }
+
+  void _showUpgradeRequired({
+    required String title,
+    required String message,
+    IconData icon = Icons.lock_outline_rounded,
+  }) {
+    unawaited(
+      showAppUpgradeDialog(
+        context: context,
+        title: title,
+        message: message,
+        icon: icon,
+        onUpgrade: widget.onUpgradeRequested,
+      ),
+    );
+  }
+
+  List<CloudProjectAccessItem> _visibleCloudProjects() {
+    final query = _searchController.text.trim().toLowerCase();
+    final entitlement = context.read<EntitlementService>();
+    final selectedDestination = _selectedCloudDestination(entitlement);
+    final filtered = _cloudProjects.where((project) {
+      if (!project.isBundleStorage) return false;
+      if (!_cloudProjectIsInDestination(project, selectedDestination)) {
+        return false;
+      }
+      if (query.isEmpty) return true;
+      return project.name.toLowerCase().contains(query);
+    }).toList();
+    int compareLocation(CloudProjectAccessItem a, CloudProjectAccessItem b) {
+      final aLabel = _destinationForCloudProject(a, entitlement).label;
+      final bLabel = _destinationForCloudProject(b, entitlement).label;
+      return aLabel.toLowerCase().compareTo(bLabel.toLowerCase());
+    }
+
+    switch (_sortMode) {
+      case _ProjectSortMode.alphabetical:
+        filtered.sort((a, b) {
+          final location = compareLocation(a, b);
+          if (location != 0) return location;
+          return a.name.toLowerCase().compareTo(
+                b.name.toLowerCase(),
+              );
+        });
+        break;
+      case _ProjectSortMode.recent:
+        filtered.sort((a, b) {
+          final location = compareLocation(a, b);
+          if (location != 0) return location;
+          final aTime = a.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final bTime = b.updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+          return bTime.compareTo(aTime);
+        });
+        break;
+    }
+    return filtered;
+  }
+
   List<_ProjectListEntry> _visibleEntries() {
-    switch (_libraryTab) {
+    return _visibleEntriesForTab(_libraryTab);
+  }
+
+  List<_ProjectListEntry> _visibleEntriesForTab(_ProjectLibraryTab tab) {
+    switch (tab) {
       case _ProjectLibraryTab.yourProjects:
         return _visibleProjects().map(_ProjectListEntry.project).toList();
+      case _ProjectLibraryTab.cloudProjects:
+        return _visibleCloudProjects().map(_ProjectListEntry.cloud).toList();
       case _ProjectLibraryTab.demoProjects:
         return _visibleBundledDemoProjects()
             .map(_ProjectListEntry.bundledDemo)
@@ -601,7 +1507,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     setState(() => _selectionModePinned = true);
   }
 
-  void _setLibraryTab(_ProjectLibraryTab tab) {
+  void _setLibraryTab(_ProjectLibraryTab tab, {bool animatePage = true}) {
     if (_libraryTab == tab) return;
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
@@ -610,6 +1516,38 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       _selectedProjectPaths.clear();
       _selectedBundledDemoAssetPaths.clear();
     });
+    if (animatePage && _libraryPageController.hasClients) {
+      unawaited(
+        _libraryPageController.animateToPage(
+          tab.index,
+          duration: const Duration(milliseconds: 190),
+          curve: Curves.easeOutCubic,
+        ),
+      );
+    }
+    if (tab == _ProjectLibraryTab.cloudProjects) {
+      unawaited(_refreshCloudProjectsForUi());
+    }
+  }
+
+  void _handleLibraryPageChanged(int index) {
+    final tabs = _ProjectLibraryTab.values;
+    if (index < 0 || index >= tabs.length) return;
+    _setLibraryTab(tabs[index], animatePage: false);
+  }
+
+  Future<void> _refreshCloudProjectsForUi() async {
+    if (!mounted) return;
+    final hasCloudSnapshot = _cloudStorage != null || _cloudProjects.isNotEmpty;
+    setState(() {
+      _cloudError = null;
+      if (!hasCloudSnapshot) {
+        _cloudLoading = true;
+      }
+    });
+    await _refreshCloudProjectsSilently(showLoading: !hasCloudSnapshot);
+    if (!mounted) return;
+    setState(() {});
   }
 
   void _selectAllVisible() {
@@ -621,6 +1559,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         if (entry.isBundledDemo) {
           final demo = entry.bundledDemo!;
           _selectedBundledDemoAssetPaths.add(demo.assetPath);
+        } else if (entry.isCloudProject) {
+          continue;
         } else {
           final project = entry.project!;
           _selectedProjectPaths.add(_projectSelectionKey(project));
@@ -669,7 +1609,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     return null;
   }
 
-  Future<String?> _showAnchoredShellMenu({
+  Future<T?> _showAnchoredShellMenu<T>({
     required GlobalKey anchorKey,
     required Widget child,
     required double width,
@@ -677,7 +1617,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }) {
     final anchor = _anchorRectFor(anchorKey);
     if (anchor == null) {
-      return Future<String?>.value(null);
+      return Future<T?>.value(null);
     }
     final media = MediaQuery.of(context);
     final screen = media.size;
@@ -688,7 +1628,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       top = (anchor.top - estimatedHeight - 10).clamp(24.0, maxTop);
     }
 
-    return showGeneralDialog<String>(
+    return showGeneralDialog<T>(
       context: context,
       barrierLabel: 'menu',
       barrierDismissible: true,
@@ -906,9 +1846,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
             return _selectedBundledDemoAssetPaths
                 .contains(entry.bundledDemo!.assetPath);
           }
+          if (entry.isCloudProject) return true;
           return _selectedProjectPaths.contains(entry.project!.dir.path);
         });
-    final selected = await _showAnchoredShellMenu(
+    final selected = await _showAnchoredShellMenu<String>(
       anchorKey: _projectToolsButtonKey,
       width: 228,
       estimatedHeight: 204,
@@ -981,10 +1922,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     required GlobalKey anchorKey,
     required ProjectMeta project,
   }) async {
-    final selected = await _showAnchoredShellMenu(
+    final selected = await _showAnchoredShellMenu<String>(
       anchorKey: anchorKey,
       width: 216,
-      estimatedHeight: 320,
+      estimatedHeight: 332,
       child: Material(
         color: Colors.transparent,
         child: MixroomShellSurface(
@@ -1002,9 +1943,35 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
               ),
               const SizedBox(height: 4),
               _ProjectToolAction(
+                icon: Icons.content_copy_rounded,
+                label: L10n.translate(context, 'Duplicate'),
+                onTap: () => Navigator.of(context).pop('duplicate'),
+              ),
+              const SizedBox(height: 4),
+              _ProjectToolAction(
                 icon: Icons.delete_outline_rounded,
-                label: L10n.translate(context, 'Delete'),
+                label: L10n.translate(
+                  context,
+                  _cloudProjectForLocal(project) == null
+                      ? 'Delete'
+                      : 'Delete from Device',
+                ),
                 onTap: () => Navigator.of(context).pop('delete'),
+              ),
+              const SizedBox(height: 4),
+              _ProjectToolAction(
+                icon: Icons.history_rounded,
+                label: L10n.translate(context, 'Version History'),
+                onTap: () => Navigator.of(context).pop('version_history'),
+              ),
+              const SizedBox(height: 4),
+              _ProjectToolAction(
+                icon: Icons.cloud_upload_rounded,
+                label: L10n.translate(
+                  context,
+                  !_hasCloudReference(project) ? 'Sync to Cloud' : 'Sync Now',
+                ),
+                onTap: () => Navigator.of(context).pop('sync_cloud'),
               ),
               const SizedBox(height: 4),
               _ProjectToolAction(
@@ -1021,14 +1988,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
               const SizedBox(height: 4),
               _ProjectToolAction(
                 icon: Icons.audio_file_outlined,
-                label: L10n.translate(context, 'Export WAV'),
-                onTap: () => Navigator.of(context).pop('export_wav'),
-              ),
-              const SizedBox(height: 4),
-              _ProjectToolAction(
-                icon: Icons.graphic_eq_rounded,
-                label: L10n.translate(context, 'Export MP3'),
-                onTap: () => Navigator.of(context).pop('export_mp3'),
+                label: L10n.translate(context, 'Export to Audio'),
+                onTap: () => Navigator.of(context).pop('export_audio'),
               ),
             ],
           ),
@@ -1039,10 +2000,219 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     await _handleCompactProjectMenuAction(selected, project);
   }
 
+  Future<void> _showCloudProjectItemMenu({
+    required GlobalKey anchorKey,
+    required CloudProjectAccessItem project,
+  }) async {
+    final local = _localProjectForCloud(project);
+    final selected = await _showAnchoredShellMenu<String>(
+      anchorKey: anchorKey,
+      width: 228,
+      estimatedHeight: 196,
+      child: Material(
+        color: Colors.transparent,
+        child: MixroomShellSurface(
+          radius: 28,
+          strong: true,
+          color: const Color.fromRGBO(244, 244, 244, 0.16),
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _ProjectToolAction(
+                icon: Icons.info_outline_rounded,
+                label: L10n.translate(context, 'View Details'),
+                onTap: () => Navigator.of(context).pop('details'),
+              ),
+              const SizedBox(height: 4),
+              _ProjectToolAction(
+                icon: local == null
+                    ? Icons.cloud_download_rounded
+                    : Icons.folder_open_rounded,
+                label: L10n.translate(
+                  context,
+                  local == null ? 'Download & Open' : 'Open',
+                ),
+                onTap: () => Navigator.of(context).pop('open'),
+              ),
+              if (project.canWrite) ...[
+                const SizedBox(height: 4),
+                _ProjectToolAction(
+                  icon: Icons.delete_outline_rounded,
+                  label: L10n.translate(context, 'Delete from Cloud'),
+                  onTap: () => Navigator.of(context).pop('delete_cloud'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+    switch (selected) {
+      case 'details':
+        await _showCloudProjectDetails(project);
+        return;
+      case 'open':
+        await _openCloudProject(project);
+        return;
+      case 'delete_cloud':
+        await _deleteCloudProject(project);
+        return;
+    }
+  }
+
+  Future<void> _showCloudProjectDetails(CloudProjectAccessItem project) async {
+    final locationLabel = _cloudProjectLocationLabel(project);
+    final owner = _cloudProjectPersonLabel(
+      project.ownerProfile,
+      project.ownerUserId,
+    );
+    final editorUserId = project.updatedByUserId.trim().isNotEmpty
+        ? project.updatedByUserId
+        : project.ownerUserId;
+    final editor = _cloudProjectPersonLabel(
+      project.updatedByProfile,
+      editorUserId,
+    );
+    final createdAt = project.createdAt;
+    final updatedAt = project.updatedAt;
+    final createdValue = [
+      owner,
+      if (createdAt != null) _formatProjectVersionTimestamp(createdAt),
+    ].join(' • ');
+    final editedValue = [
+      editor,
+      if (updatedAt != null) _formatProjectVersionTimestamp(updatedAt),
+    ].join(' • ');
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final bottomInset = MediaQuery.of(sheetContext).viewInsets.bottom;
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 18 + bottomInset),
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: 520,
+                  maxHeight: 640,
+                ),
+                child: MixroomShellSurface(
+                  radius: 28,
+                  strong: true,
+                  color: const Color.fromRGBO(244, 244, 244, 0.16),
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.cloud_queue_rounded,
+                            color: Color(0xFFA4C2FF),
+                            size: 22,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              L10n.translate(context, 'Cloud Project Details'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          MixroomShellRoundButton(
+                            size: 34,
+                            iconExtent: 18,
+                            icon: const Icon(
+                              Icons.close_rounded,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                            onTap: () => Navigator.of(sheetContext).pop(),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Flexible(
+                        child: SingleChildScrollView(
+                          child: Column(
+                            children: [
+                              _CloudProjectDetailRow(
+                                icon: Icons.folder_open_rounded,
+                                label: L10n.translate(context, 'Project Name'),
+                                value: project.name,
+                                maxValueLines: 8,
+                              ),
+                              _CloudProjectDetailRow(
+                                icon: Icons.storage_rounded,
+                                label: L10n.translate(context, 'Workspace'),
+                                value: locationLabel,
+                              ),
+                              _CloudProjectDetailRow(
+                                icon: project.canWrite
+                                    ? Icons.edit_rounded
+                                    : Icons.lock_rounded,
+                                label: L10n.translate(context, 'Status'),
+                                value: L10n.translate(
+                                  context,
+                                  project.canWrite ? 'Editable' : 'Read-only',
+                                ),
+                              ),
+                              _CloudProjectDetailRow(
+                                icon: Icons.person_outline_rounded,
+                                label: L10n.translate(context, 'Created'),
+                                value: createdValue,
+                              ),
+                              _CloudProjectDetailRow(
+                                icon: Icons.edit_outlined,
+                                label: L10n.translate(context, 'Last edited'),
+                                value: editedValue,
+                              ),
+                              _CloudProjectDetailRow(
+                                icon: Icons.data_object_rounded,
+                                label: L10n.translate(context, 'Size'),
+                                value: _formatBytes(project.documentSizeBytes),
+                              ),
+                              _CloudProjectDetailRow(
+                                icon: Icons.history_rounded,
+                                label: L10n.translate(
+                                    context, 'Number of Revisions'),
+                                value: '${project.documentRevision}',
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _deleteProject(ProjectMeta meta) async {
+    final cloudBacked = _hasCloudReference(meta);
     final ok = await _showDeleteProjectsDialog(
-      message:
-          '“${meta.name}” ${L10n.translate(context, 'will be permanently deleted.')}',
+      message: cloudBacked
+          ? '“${meta.name}” ${L10n.translate(context, 'will be deleted from this device. The cloud copy will remain available.')}'
+          : '“${meta.name}” ${L10n.translate(context, 'will be permanently deleted.')}',
       dialogKey: _deleteDialogKey,
       cancelKey: _deleteCancelKey,
       confirmKey: _deleteConfirmKey,
@@ -1051,6 +2221,26 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     if (!ok) return;
     await ProjectManager.deleteProject(meta.dir);
     await _refresh();
+  }
+
+  Future<void> _duplicateProject(ProjectMeta meta) async {
+    try {
+      await ProjectManager.duplicateProject(meta.dir);
+      await _refresh();
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        L10n.translate(context, 'Project duplicated'),
+        tone: AppPopupTone.success,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        '${L10n.translate(context, 'Duplicate failed')}: $e',
+        tone: AppPopupTone.error,
+      );
+    }
   }
 
   Future<void> _shareProject(ProjectMeta meta) async {
@@ -1133,6 +2323,258 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     }
   }
 
+  Future<void> _syncProjectToCloud(ProjectMeta meta) async {
+    final auth = context.read<AuthService>();
+    final entitlement = context.read<EntitlementService>();
+    if (!auth.isSignedIn) {
+      showAppSnackBar(
+        context,
+        L10n.translate(context, 'Sign in to use cloud projects.'),
+        tone: AppPopupTone.warning,
+      );
+      return;
+    }
+    if (!entitlement.canUseCapability(SubscriptionCapability.cloudProjects)) {
+      _showUpgradeRequired(
+        title: 'Upgrade to use cloud projects',
+        message:
+            'Cloud projects are available on Starter and higher plans. Upgrade to sync this project across devices.',
+        icon: Icons.cloud_upload_outlined,
+      );
+      return;
+    }
+    final projectId = meta.projectId.trim().isNotEmpty
+        ? meta.projectId.trim()
+        : await ProjectManager.ensureProjectId(meta.dir);
+    if (!mounted) return;
+    await entitlement.refreshAccountSurface(force: true);
+    if (!mounted) return;
+    await _refreshCloudProjectsSilently();
+    if (!mounted) return;
+    final destination = await _resolveCloudSyncDestination(
+      meta: meta,
+      entitlement: entitlement,
+      promptForNewProject: true,
+    );
+    if (destination == null) return;
+    if (!mounted) return;
+    if (!destination.canWrite) {
+      showAppSnackBar(
+        context,
+        L10n.translate(
+          context,
+          'This cloud location is read-only. Renew or unlock it to sync changes.',
+        ),
+        tone: AppPopupTone.warning,
+      );
+      return;
+    }
+    if (!mounted) return;
+    if (_cloudProjectsInFlight.contains(projectId)) return;
+    setState(() => _cloudProjectsInFlight.add(projectId));
+    showLoadingDialog(
+      context,
+      message: L10n.translate(context, 'Syncing to cloud…'),
+    );
+    var loadingOpen = true;
+    try {
+      await Future.delayed(const Duration(milliseconds: 200));
+      final bundlePath = await ProjectBundle.exportMixroomBundle(
+        projectDir: meta.dir,
+        audioMode: BundleAudioMode.flacLossless,
+      );
+      final bundleFile = File(bundlePath);
+      final quotaError = _syncQuotaErrorForBundle(
+        meta,
+        await bundleFile.length(),
+        destination: destination,
+      );
+      if (quotaError != null) {
+        if (mounted && Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+          loadingOpen = false;
+        }
+        if (!mounted) return;
+        _showUpgradeRequired(
+          title: quotaError.contains('storage')
+              ? 'Upgrade for more cloud storage'
+              : 'Upgrade for more cloud projects',
+          message:
+              'Your current plan has reached its cloud limit. Upgrade to Starter or higher for more cloud capacity.',
+          icon: Icons.cloud_off_outlined,
+        );
+        return;
+      }
+      final existingCloud = _cloudProjectForLocal(meta);
+      if (existingCloud != null &&
+          existingCloud.workspaceId.trim() == destination.workspaceId.trim() &&
+          !existingCloud.canWrite) {
+        if (mounted && Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+          loadingOpen = false;
+        }
+        if (!mounted) return;
+        showAppSnackBar(
+          context,
+          L10n.translate(
+            context,
+            'This cloud project is read-only. Renew or unlock it to sync changes.',
+          ),
+          tone: AppPopupTone.warning,
+        );
+        return;
+      }
+      final selectedWorkspaceId = destination.workspaceId.trim();
+      final existingWorkspaceId =
+          (existingCloud?.workspaceId ?? meta.cloudWorkspaceId ?? '').trim();
+      final preservesExistingCloudLocation =
+          existingCloud != null && existingWorkspaceId == selectedWorkspaceId;
+      final fallbackPersonalCloudProjectId = (meta.cloudProjectId ?? '').trim();
+      final canReuseFallbackPersonalCloudProject = existingCloud == null &&
+          selectedWorkspaceId.isEmpty &&
+          fallbackPersonalCloudProjectId.isNotEmpty &&
+          existingWorkspaceId.isEmpty;
+      final uploadCloudProjectId = preservesExistingCloudLocation
+          ? existingCloud.projectId
+          : canReuseFallbackPersonalCloudProject
+              ? fallbackPersonalCloudProjectId
+              : null;
+      final expectedRevision =
+          uploadCloudProjectId == null ? null : meta.cloudDocumentRevision;
+      final result = await _cloudProjectService.uploadBundle(
+        auth: auth,
+        bundleFile: bundleFile,
+        projectId: projectId,
+        name: meta.name,
+        cloudProjectId: uploadCloudProjectId,
+        workspaceId: destination.isPersonal ? null : destination.workspaceId,
+        organizationId:
+            destination.isPersonal ? null : destination.organizationId,
+        expectedRevision: expectedRevision,
+      );
+      final json = await ProjectManager.readProjectJson(meta.dir);
+      json['cloudProjectId'] = result.project.projectId;
+      if (result.project.workspaceId.trim().isNotEmpty) {
+        json['cloudWorkspaceId'] = result.project.workspaceId;
+      } else {
+        json.remove('cloudWorkspaceId');
+      }
+      if (result.project.organizationId.trim().isNotEmpty) {
+        json['cloudOrganizationId'] = result.project.organizationId;
+      } else {
+        json.remove('cloudOrganizationId');
+      }
+      json['cloudDocumentRevision'] = result.project.documentRevision;
+      json['cloudSyncedAt'] = DateTime.now().toUtc().toIso8601String();
+      await ProjectManager.writeProjectJson(meta.dir, json);
+      await entitlement.refreshAccountSurface(force: true);
+      await _refresh(includeCloud: true);
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        '${L10n.translate(context, 'Project synced to cloud')} • ${destination.label}',
+        tone: AppPopupTone.success,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        '${L10n.translate(context, 'Cloud sync failed')}: ${_cleanCloudError(e)}',
+        tone: AppPopupTone.error,
+      );
+    } finally {
+      if (loadingOpen && mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      if (mounted) {
+        setState(() => _cloudProjectsInFlight.remove(projectId));
+      } else {
+        _cloudProjectsInFlight.remove(projectId);
+      }
+    }
+  }
+
+  Future<void> _openCloudProject(CloudProjectAccessItem cloud) async {
+    final local = _localProjectForCloud(cloud);
+    if (local != null) {
+      await _openProject(local.dir);
+      return;
+    }
+    final canCreate = await ProjectManager.canCreateNew();
+    if (!mounted) return;
+    if (!canCreate) {
+      _showProjectLimitDialog();
+      return;
+    }
+    final auth = context.read<AuthService>();
+    if (_cloudProjectsInFlight.contains(cloud.projectId)) return;
+    setState(() => _cloudProjectsInFlight.add(cloud.projectId));
+    showLoadingDialog(
+      context,
+      message: L10n.translate(context, 'Downloading from cloud…'),
+    );
+    try {
+      await Future.delayed(const Duration(milliseconds: 200));
+      final downloaded = await _cloudProjectService.downloadBundle(
+        auth: auth,
+        project: cloud,
+      );
+      final newDir = await ProjectBundleImport.importMixroomBundle(
+        bundleFile: downloaded.file,
+        audioStrategy: ImportAudioStrategy.convertFlacToWav48k,
+      );
+      final json = await ProjectManager.readProjectJson(newDir);
+      json['name'] = _downloadedCloudProjectDisplayName(
+        cloud: cloud,
+        resolvedName: (json['name'] ?? cloud.name).toString(),
+      );
+      json['cloudProjectId'] = cloud.projectId;
+      if (cloud.workspaceId.trim().isNotEmpty) {
+        json['cloudWorkspaceId'] = cloud.workspaceId.trim();
+      } else {
+        json.remove('cloudWorkspaceId');
+      }
+      if (cloud.organizationId.trim().isNotEmpty) {
+        json['cloudOrganizationId'] = cloud.organizationId.trim();
+      } else {
+        json.remove('cloudOrganizationId');
+      }
+      json['cloudDocumentRevision'] = cloud.documentRevision;
+      json['cloudSyncedAt'] = DateTime.now().toUtc().toIso8601String();
+      await ProjectManager.writeProjectJson(newDir, json);
+      if (!mounted) return;
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      await Navigator.push(
+        context,
+        _NoSwipeMaterialPageRoute(
+          builder: (_) => AudioEditorScreen(
+            mode: 'Pro',
+            projectDir: newDir,
+            onUpgradeRequested: widget.onUpgradeRequested,
+          ),
+        ),
+      );
+      if (!mounted) return;
+      await _refresh(includeCloud: true);
+    } catch (e) {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        '${L10n.translate(context, 'Cloud download failed')}: ${_cleanCloudError(e)}',
+        tone: AppPopupTone.error,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _cloudProjectsInFlight.remove(cloud.projectId));
+      } else {
+        _cloudProjectsInFlight.remove(cloud.projectId);
+      }
+    }
+  }
+
   Future<void> _startProjectExport(
     ProjectMeta meta,
     AudioEditorInitialAction action,
@@ -1180,15 +2622,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
 
       // Open imported project immediately (optional)
-      final resolvedMode = _resolvedEditorMode();
-      final isProEntitled = _isProEntitled();
       await Navigator.push(
         context,
         _NoSwipeMaterialPageRoute(
           builder: (_) => AudioEditorScreen(
-            mode: resolvedMode,
+            mode: 'Pro',
             projectDir: newDir,
-            isProEntitled: isProEntitled,
+            onUpgradeRequested: widget.onUpgradeRequested,
           ),
         ),
       );
@@ -1232,15 +2672,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
 
-      final resolvedMode = _resolvedEditorMode();
-      final isProEntitled = _isProEntitled();
       await Navigator.push(
         context,
         _NoSwipeMaterialPageRoute(
           builder: (_) => AudioEditorScreen(
-            mode: resolvedMode,
+            mode: 'Pro',
             projectDir: newDir,
-            isProEntitled: isProEntitled,
+            onUpgradeRequested: widget.onUpgradeRequested,
           ),
         ),
       );
@@ -1260,22 +2698,414 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     }
   }
 
-  String _resolvedEditorMode() {
-    return _isProEntitled() ? "Pro" : "Basic";
-  }
+  Future<void> _deleteCloudProject(CloudProjectAccessItem cloud) async {
+    if (!cloud.canWrite) {
+      showAppSnackBar(
+        context,
+        L10n.translate(
+          context,
+          'This cloud project is read-only. Renew or unlock it to make changes.',
+        ),
+        tone: AppPopupTone.warning,
+      );
+      return;
+    }
+    final ok = await _showDeleteProjectsDialog(
+      message:
+          '“${cloud.name}” ${L10n.translate(context, 'will be deleted from cloud storage. Local copies on this device will remain.')}',
+    );
+    if (!ok || !mounted) return;
 
-  bool _isProEntitled() {
+    final auth = context.read<AuthService>();
+    final entitlement = context.read<EntitlementService>();
+    if (_cloudProjectsInFlight.contains(cloud.projectId)) return;
+    setState(() => _cloudProjectsInFlight.add(cloud.projectId));
+    showLoadingDialog(
+      context,
+      message: L10n.translate(context, 'Deleting from cloud…'),
+    );
     try {
-      return context
-          .read<EntitlementService>()
-          .canUseCapability(SubscriptionCapability.proEditor);
-    } catch (_) {
-      return false;
+      await _cloudProjectService.deleteProject(
+        auth: auth,
+        projectId: cloud.projectId,
+      );
+      final local = _localProjectForCloud(cloud);
+      if (local != null) {
+        final json = await ProjectManager.readProjectJson(local.dir);
+        if ((json['cloudProjectId'] ?? json['cloud_project_id'] ?? '')
+                .toString() ==
+            cloud.projectId) {
+          json.remove('cloudProjectId');
+          json.remove('cloud_project_id');
+          json.remove('cloudDocumentRevision');
+          json.remove('cloudSyncedAt');
+          await ProjectManager.writeProjectJson(local.dir, json);
+        }
+      }
+      await entitlement.refreshAccountSurface(force: true);
+      await _refresh(includeCloud: true);
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        L10n.translate(context, 'Cloud project deleted'),
+        tone: AppPopupTone.success,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        '${L10n.translate(context, 'Cloud delete failed')}: ${_cleanCloudError(e)}',
+        tone: AppPopupTone.error,
+      );
+    } finally {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      if (mounted) {
+        setState(() => _cloudProjectsInFlight.remove(cloud.projectId));
+      } else {
+        _cloudProjectsInFlight.remove(cloud.projectId);
+      }
     }
   }
 
   String _formatLastOpened(DateTime dateTime) {
     return DateFormat('MMM d, h:mm a').format(dateTime.toLocal());
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes >= 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+    }
+    if (bytes >= 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    if (bytes >= 1024) {
+      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    }
+    return '$bytes B';
+  }
+
+  String _formatStoragePercentage(int usedBytes, int limitBytes) {
+    if (limitBytes <= 0) return '0%';
+    final percentage = usedBytes / limitBytes * 100;
+    if (percentage < 10) return '${percentage.toStringAsFixed(1)}%';
+    return '${percentage.round()}%';
+  }
+
+  String _formatLastUpdatedLabel(DateTime dateTime) {
+    return L10n.translate(context, 'Last updated: {date}').replaceAll(
+      '{date}',
+      _formatLastOpened(dateTime),
+    );
+  }
+
+  CloudProjectStorageLocation? _cloudStorageLocationForDestination(
+    _CloudProjectDestination destination,
+  ) {
+    final storage = _cloudStorage;
+    if (storage == null || storage.locations.isEmpty) return null;
+    for (final location in storage.locations) {
+      if (location.workspaceId.trim() == destination.workspaceId) {
+        return location;
+      }
+    }
+    return null;
+  }
+
+  String _cloudStorageTitleLabel() {
+    final entitlement = context.read<EntitlementService>();
+    final destination = _selectedCloudDestination(entitlement);
+    final storage = _cloudStorage;
+    final storageLocation = _cloudStorageLocationForDestination(destination);
+    final label = destination.label;
+    if (storage == null) return label;
+    final limit = storageLocation?.limitBytes ?? storage.limitBytes;
+    if (limit == null || limit <= 0) {
+      return label;
+    }
+    final usedBytes = _cloudStorageUsedBytesForDestination(destination);
+    final percentage = _formatStoragePercentage(usedBytes, limit);
+    return '$label • $percentage';
+  }
+
+  String? _cloudStorageDetailLabel() {
+    final entitlement = context.read<EntitlementService>();
+    final destination = _selectedCloudDestination(entitlement);
+    final storage = _cloudStorage;
+    final storageLocation = _cloudStorageLocationForDestination(destination);
+    if (storage == null) return null;
+    final limit = storageLocation?.limitBytes ?? storage.limitBytes;
+    final usedBytes = _cloudStorageUsedBytesForDestination(destination);
+    final used = _formatBytes(usedBytes);
+    final prefix = destination.canWrite
+        ? ''
+        : '${L10n.translate(context, 'Read-only')} • ';
+    if (limit == null || limit <= 0) return '$prefix$used used';
+    if (usedBytes > limit) {
+      return '$prefix${L10n.translate(context, 'Storage full')} • $used of ${_formatBytes(limit)} used';
+    }
+    return '$prefix$used of ${_formatBytes(limit)} used';
+  }
+
+  String? _cloudProjectCountDetailLabel() {
+    final entitlement = context.read<EntitlementService>();
+    final destination = _selectedCloudDestination(entitlement);
+    if (!destination.isPersonal) return null;
+    final storage = _cloudStorage;
+    final storageLocation = _cloudStorageLocationForDestination(destination);
+    if (storage == null) return null;
+    final projectLimit = storageLocation?.projectLimit ?? storage.projectLimit;
+    final count = _cloudProjectCountForDestination(destination);
+    if (projectLimit == null || projectLimit <= 0) return null;
+    final planCode = (storageLocation?.planCode.trim().isNotEmpty == true
+            ? storageLocation!.planCode
+            : entitlement.currentPlanCode)
+        .trim()
+        .toLowerCase();
+    final labelKey = planCode == 'free'
+        ? 'Free Cloud Projects: {count} of {limit} used'
+        : 'Cloud projects: {count} of {limit} used';
+    return L10n.translate(context, labelKey)
+        .replaceAll('{count}', '$count')
+        .replaceAll('{limit}', '$projectLimit');
+  }
+
+  double? _cloudStorageUsageFraction() {
+    final entitlement = context.read<EntitlementService>();
+    final destination = _selectedCloudDestination(entitlement);
+    final storage = _cloudStorage;
+    final storageLocation = _cloudStorageLocationForDestination(destination);
+    final limit = storageLocation?.limitBytes ?? storage?.limitBytes;
+    if (storage == null || limit == null || limit <= 0) return null;
+    final usedBytes = _cloudStorageUsedBytesForDestination(destination);
+    return (usedBytes / limit).clamp(0.0, 1.0);
+  }
+
+  Color _cloudStorageUsageColor() {
+    final entitlement = context.read<EntitlementService>();
+    final destination = _selectedCloudDestination(entitlement);
+    final storage = _cloudStorage;
+    final storageLocation = _cloudStorageLocationForDestination(destination);
+    final limit = storageLocation?.limitBytes ?? storage?.limitBytes;
+    if (storage == null || limit == null || limit <= 0) {
+      return const Color(0xFFA4C2FF);
+    }
+    final ratio = _cloudStorageUsedBytesForDestination(destination) / limit;
+    if (ratio >= 1) return const Color(0xFFFF7878);
+    if (ratio >= 0.9) return const Color(0xFFFFC86B);
+    return const Color(0xFFA4C2FF);
+  }
+
+  int _cloudStorageUsedBytesForDestination(
+    _CloudProjectDestination destination,
+  ) {
+    final storageLocation = _cloudStorageLocationForDestination(destination);
+    if (storageLocation != null) return storageLocation.usedBytes;
+    return _cloudProjects
+        .where(
+          (project) =>
+              project.isBundleStorage &&
+              _cloudProjectIsInDestination(project, destination),
+        )
+        .fold<int>(
+          0,
+          (total, project) => total + project.documentSizeBytes,
+        );
+  }
+
+  int _cloudProjectCountForDestination(
+    _CloudProjectDestination destination,
+  ) {
+    final storageLocation = _cloudStorageLocationForDestination(destination);
+    if (storageLocation != null) return storageLocation.projectCount;
+    return _cloudProjects
+        .where(
+          (project) =>
+              project.isBundleStorage &&
+              _cloudProjectIsInDestination(project, destination),
+        )
+        .length;
+  }
+
+  String _formatProjectVersionReason(ProjectVersionReason reason) {
+    return L10n.translate(
+      context,
+      switch (reason) {
+        ProjectVersionReason.autosave => 'Autosave',
+        ProjectVersionReason.manualSave => 'Manual save',
+        ProjectVersionReason.background => 'Background save',
+      },
+    );
+  }
+
+  String _formatProjectVersionTimestamp(DateTime value) {
+    return DateFormat('MMM d, h:mm a').format(value.toLocal());
+  }
+
+  String _formatCurrentProjectTimestamp(ProjectMeta project) {
+    return DateFormat('MMM d, h:mm a').format(project.lastOpenedAt.toLocal());
+  }
+
+  Future<void> _showProjectVersionHistory(ProjectMeta project) async {
+    final versions = await _projectVersionStore.listVersions(project.dir);
+    if (!mounted) return;
+    if (versions.isEmpty) {
+      showAppSnackBar(
+        context,
+        L10n.translate(context, 'No versions yet.'),
+      );
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final bottomInset = MediaQuery.of(sheetContext).viewInsets.bottom;
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 18 + bottomInset),
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: 520,
+                  maxHeight: 560,
+                ),
+                child: MixroomShellSurface(
+                  radius: 28,
+                  strong: true,
+                  color: const Color.fromRGBO(244, 244, 244, 0.16),
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.history_rounded,
+                            color: Color(0xFFA4C2FF),
+                            size: 22,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              L10n.translate(sheetContext, 'Version History'),
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          MixroomShellRoundButton(
+                            size: 34,
+                            iconExtent: 18,
+                            icon: const Icon(
+                              Icons.close_rounded,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                            onTap: () => Navigator.of(sheetContext).pop(),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Flexible(
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: versions.length + 1,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 8),
+                          itemBuilder: (context, index) {
+                            if (index == 0) {
+                              return _ProjectVersionHistoryRow(
+                                title: L10n.translate(sheetContext, 'Current'),
+                                subtitle:
+                                    '${L10n.translate(sheetContext, 'Current project')} • ${_formatCurrentProjectTimestamp(project)}',
+                                actionLabel:
+                                    L10n.translate(sheetContext, 'Current'),
+                                onAction: null,
+                              );
+                            }
+                            final version = versions[index - 1];
+                            return _ProjectVersionHistoryRow(
+                              title: _formatProjectVersionTimestamp(
+                                version.createdAt,
+                              ),
+                              subtitle:
+                                  '${_formatProjectVersionReason(version.reason)} • ${_formatBytes(version.sizeBytes)}',
+                              actionLabel: L10n.translate(
+                                sheetContext,
+                                'Restore Copy',
+                              ),
+                              onAction: () {
+                                Navigator.of(sheetContext).pop();
+                                unawaited(
+                                  _restoreProjectVersion(project, version),
+                                );
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _restoreProjectVersion(
+    ProjectMeta project,
+    ProjectVersionEntry version,
+  ) async {
+    if (!await ProjectManager.canCreateNew()) {
+      if (!mounted) return;
+      _showProjectLimitDialog();
+      return;
+    }
+    if (!mounted) return;
+    showLoadingDialog(
+      context,
+      message: L10n.translate(context, 'Restoring version…'),
+    );
+    try {
+      await _projectVersionStore.restoreVersionAsCopy(
+        projectDir: project.dir,
+        versionId: version.id,
+      );
+      if (!mounted) return;
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      await _refresh(showBlockingLoader: false);
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        L10n.translate(context, 'Restored project copy created.'),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      showAppSnackBar(
+        context,
+        '${L10n.translate(context, 'Restore failed')}: $error',
+        tone: AppPopupTone.error,
+      );
+    }
   }
 
   Future<void> _handleCompactProjectMenuAction(
@@ -1286,19 +3116,25 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       case 'rename':
         await _renameProject(project);
         return;
+      case 'duplicate':
+        await _duplicateProject(project);
+        return;
       case 'delete':
         await _deleteProject(project);
         return;
       case 'save_mixroom':
         await _saveProjectBundle(project);
         return;
+      case 'version_history':
+        await _showProjectVersionHistory(project);
+        return;
+      case 'sync_cloud':
+        await _syncProjectToCloud(project);
+        return;
       case 'share_mixroom':
         await _shareProject(project);
         return;
-      case 'export_wav':
-        await _startProjectExport(project, AudioEditorInitialAction.exportWav);
-        return;
-      case 'export_mp3':
+      case 'export_audio':
         await _startProjectExport(project, AudioEditorInitialAction.exportMp3);
         return;
     }
@@ -1358,10 +3194,338 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     );
   }
 
+  Widget _buildCloudStoragePanel({
+    required bool canConfigureCloudSync,
+  }) {
+    final entitlement = context.read<EntitlementService>();
+    final destinations = _availableCloudDestinations(entitlement);
+    final selectedDestination = _selectedCloudDestination(entitlement);
+    final locationSelectorKey = GlobalObjectKey(
+      'cloud_location_selector_${selectedDestination.workspaceId}',
+    );
+    return MixroomShellSurface(
+      radius: 24,
+      padding: const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 12,
+      ),
+      color: const Color.fromRGBO(244, 244, 244, 0.16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.cloud_queue_rounded,
+                color: Color(0xFFA4C2FF),
+                size: 19,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _cloudStorageTitleLabel(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontFamily: 'Pretendard',
+                        color: Color(0xFFF4F4F4),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (_cloudStorageDetailLabel() != null) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        _cloudStorageDetailLabel()!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: Colors.white.withValues(alpha: 0.72),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                    if (_cloudProjectCountDetailLabel() != null) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        _cloudProjectCountDetailLabel()!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: Colors.white.withValues(alpha: 0.72),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                    if (_cloudStorageUsageFraction() != null) ...[
+                      const SizedBox(height: 8),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(99),
+                        child: SizedBox(
+                          height: 5,
+                          child: LinearProgressIndicator(
+                            value: _cloudStorageUsageFraction()!,
+                            minHeight: 5,
+                            backgroundColor:
+                                Colors.white.withValues(alpha: 0.18),
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              _cloudStorageUsageColor(),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                    if ((_cloudError ?? '').isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        _cloudError!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: Colors.white.withValues(alpha: 0.68),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              SizedBox(
+                width: 40,
+                height: 40,
+                child: Center(
+                  child: _cloudLoading
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : IconButton(
+                          onPressed: _refresh,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints.tightFor(
+                            width: 40,
+                            height: 40,
+                          ),
+                          icon: const Icon(
+                            Icons.refresh_rounded,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                          tooltip: L10n.translate(context, 'Refresh'),
+                        ),
+                ),
+              ),
+            ],
+          ),
+          if (destinations.length > 1) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const Icon(
+                  Icons.storage_rounded,
+                  color: Color(0xFFA4C2FF),
+                  size: 18,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  L10n.translate(context, 'Cloud Location'),
+                  style: TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: Colors.white.withValues(alpha: 0.78),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Material(
+                    key: locationSelectorKey,
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => unawaited(
+                        _showCloudLocationSelector(
+                          destinations,
+                          anchorKey: locationSelectorKey,
+                        ),
+                      ),
+                      child: Container(
+                        height: 38,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.10),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                selectedDestination.label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Icon(
+                              Icons.keyboard_arrow_down_rounded,
+                              color: Colors.white.withValues(alpha: 0.72),
+                              size: 18,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          if (canConfigureCloudSync) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const Icon(
+                  Icons.sync_rounded,
+                  color: Color(0xFFA4C2FF),
+                  size: 18,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  L10n.translate(context, 'Cloud Sync'),
+                  style: TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: Colors.white.withValues(alpha: 0.78),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Tooltip(
+                  key: _cloudSyncTooltipKey,
+                  triggerMode: TooltipTriggerMode.manual,
+                  showDuration: const Duration(seconds: 5),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
+                  margin: const EdgeInsets.symmetric(horizontal: 18),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF11131A).withValues(alpha: 0.96),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.12),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.28),
+                        blurRadius: 18,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  richMessage: TextSpan(
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.72),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      height: 1.42,
+                    ),
+                    children: [
+                      TextSpan(
+                        text: L10n.translate(context, 'Auto'),
+                        style: const TextStyle(
+                          color: Color(0xFFA4C2FF),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const TextSpan(text: ': '),
+                      TextSpan(
+                        text: L10n.translate(
+                          context,
+                          'Syncs projects to cloud storage automatically.',
+                        ),
+                      ),
+                      const TextSpan(text: '\n'),
+                      TextSpan(
+                        text: L10n.translate(context, 'Manual'),
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.88),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const TextSpan(text: ': '),
+                      TextSpan(
+                        text: L10n.translate(
+                          context,
+                          'Uploads only when you choose "Sync to Cloud" in project settings.',
+                        ),
+                      ),
+                    ],
+                  ),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => _cloudSyncTooltipKey.currentState
+                        ?.ensureTooltipVisible(),
+                    child: SizedBox(
+                      width: 20,
+                      height: 24,
+                      child: Icon(
+                        Icons.info_outline_rounded,
+                        color: Colors.white.withValues(alpha: 0.58),
+                        size: 16,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: MixroomShellSegmentedControl<CloudSyncMode>(
+                    value: _cloudSyncMode,
+                    options: const <CloudSyncMode>[
+                      CloudSyncMode.auto,
+                      CloudSyncMode.manual,
+                    ],
+                    labelBuilder: (mode) => L10n.translate(
+                      context,
+                      mode == CloudSyncMode.auto ? 'Auto' : 'Manual',
+                    ),
+                    onChanged: _setCloudSyncMode,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final auth = context.watch<AuthService>();
+    final entitlement = context.watch<EntitlementService>();
+    final canConfigureCloudSync = auth.isSignedIn &&
+        entitlement.canUseCapability(SubscriptionCapability.cloudProjects);
     final canCreate = _projects.length < ProjectManager.maxProjects;
-    final visibleEntries = _visibleEntries();
     final hasSearchQuery = _searchController.text.trim().isNotEmpty;
     final searchFocused = _searchFocusNode.hasFocus;
     final showSearchClear = searchFocused || hasSearchQuery;
@@ -1410,15 +3574,21 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                       Expanded(
                         child: MixroomShellSegmentedControl<int>(
                           value: _libraryTab.index,
-                          options: const [0, 1],
+                          options: const [0, 1, 2],
                           labelBuilder: (value) => L10n.translate(
                             context,
-                            value == 0 ? 'Your Projects' : 'Demo Projects',
+                            value == 0
+                                ? 'On Device'
+                                : value == 1
+                                    ? 'Cloud'
+                                    : 'Demo Projects',
                           ),
                           onChanged: (value) => _setLibraryTab(
                             value == 0
                                 ? _ProjectLibraryTab.yourProjects
-                                : _ProjectLibraryTab.demoProjects,
+                                : value == 1
+                                    ? _ProjectLibraryTab.cloudProjects
+                                    : _ProjectLibraryTab.demoProjects,
                           ),
                         ),
                       ),
@@ -1474,494 +3644,900 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                       ),
                     ),
                   ],
-                  const SizedBox(height: 18),
                   Expanded(
-                    child: _loading
-                        ? const Center(child: CircularProgressIndicator())
-                        : (_loadError ?? '').trim().isNotEmpty
-                            ? Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 24),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(
-                                        Icons.folder_off_rounded,
-                                        color: Colors.white54,
-                                        size: 36,
-                                      ),
-                                      const SizedBox(height: 12),
-                                      Text(
-                                        L10n.translate(
-                                          context,
-                                          'Could not load projects.',
-                                        ),
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        L10n.translate(context, _loadError!),
-                                        textAlign: TextAlign.center,
-                                        style: const TextStyle(
-                                          color: Colors.white70,
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 14),
-                                      ElevatedButton(
-                                        onPressed: _refresh,
-                                        child: Text(
-                                          L10n.translate(context, 'Retry'),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              )
-                            : visibleEntries.isEmpty
+                    child: PageView.builder(
+                      controller: _libraryPageController,
+                      physics: const _ProjectLibraryPageScrollPhysics(),
+                      itemCount: _ProjectLibraryTab.values.length,
+                      onPageChanged: _handleLibraryPageChanged,
+                      itemBuilder: (context, pageIndex) {
+                        final tab = _ProjectLibraryTab.values[pageIndex];
+                        final visibleEntries = _visibleEntriesForTab(tab);
+                        final tabBody = _loading
+                            ? const Center(child: CircularProgressIndicator())
+                            : (_loadError ?? '').trim().isNotEmpty
                                 ? Center(
-                                    child: Text(
-                                      L10n.translate(
-                                        context,
-                                        hasSearchQuery
-                                            ? 'No matching projects.'
-                                            : _libraryTab ==
-                                                    _ProjectLibraryTab
-                                                        .yourProjects
-                                                ? 'No saved projects yet.'
-                                                : 'No demo projects available.',
-                                      ),
-                                      style: const TextStyle(
-                                        color: Colors.white70,
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 24),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(
+                                            Icons.folder_off_rounded,
+                                            color: Colors.white54,
+                                            size: 36,
+                                          ),
+                                          const SizedBox(height: 12),
+                                          Text(
+                                            L10n.translate(
+                                              context,
+                                              'Could not load projects.',
+                                            ),
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Text(
+                                            L10n.translate(
+                                                context, _loadError!),
+                                            textAlign: TextAlign.center,
+                                            style: const TextStyle(
+                                              color: Colors.white70,
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 14),
+                                          ElevatedButton(
+                                            onPressed: _refresh,
+                                            child: Text(
+                                              L10n.translate(context, 'Retry'),
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ),
                                   )
-                                : LayoutBuilder(
-                                    builder: (context, constraints) {
-                                      final useCompactProjectMenus =
-                                          constraints.maxWidth < 520;
-                                      return ShaderMask(
-                                        shaderCallback: (Rect bounds) {
-                                          const fadeHeight = 32.0;
-                                          final fadeStart =
-                                              ((bounds.height - fadeHeight)
+                                : visibleEntries.isEmpty
+                                    ? Center(
+                                        child: Text(
+                                          L10n.translate(
+                                            context,
+                                            hasSearchQuery
+                                                ? 'No matching projects.'
+                                                : tab ==
+                                                        _ProjectLibraryTab
+                                                            .yourProjects
+                                                    ? 'No saved projects yet.'
+                                                    : tab ==
+                                                            _ProjectLibraryTab
+                                                                .cloudProjects
+                                                        ? 'No cloud projects yet.'
+                                                        : 'No demo projects available.',
+                                          ),
+                                          style: const TextStyle(
+                                            color: Colors.white70,
+                                          ),
+                                        ),
+                                      )
+                                    : LayoutBuilder(
+                                        builder: (context, constraints) {
+                                          final useCompactProjectMenus =
+                                              constraints.maxWidth < 520;
+                                          return ShaderMask(
+                                            shaderCallback: (Rect bounds) {
+                                              const fadeHeight = 32.0;
+                                              final fadeStart = ((bounds
+                                                              .height -
+                                                          fadeHeight)
                                                       .clamp(0.0, bounds.height)
                                                       .toDouble()) /
                                                   bounds.height;
-                                          return LinearGradient(
-                                            begin: Alignment.topCenter,
-                                            end: Alignment.bottomCenter,
-                                            colors: const <Color>[
-                                              Color(0xFFFFFFFF),
-                                              Color(0xFFFFFFFF),
-                                              Color(0x00FFFFFF),
-                                            ],
-                                            stops: <double>[
-                                              0.0,
-                                              fadeStart,
-                                              1.0,
-                                            ],
-                                          ).createShader(bounds);
-                                        },
-                                        blendMode: BlendMode.dstIn,
-                                        child: ListView.separated(
-                                          key: _projectsListKey,
-                                          itemCount: visibleEntries.length,
-                                          separatorBuilder: (_, __) =>
-                                              const SizedBox(height: 14),
-                                          itemBuilder: (_, i) {
-                                            final entry = visibleEntries[i];
-                                            if (entry.isBundledDemo) {
-                                              final demo = entry.bundledDemo!;
-                                              final selected =
-                                                  _isBundledDemoSelected(demo);
-                                              return Material(
-                                                color: Colors.transparent,
-                                                borderRadius:
-                                                    BorderRadius.circular(24),
-                                                clipBehavior: Clip.antiAlias,
-                                                child: InkWell(
-                                                  onLongPress: () =>
-                                                      _toggleBundledDemoSelection(
-                                                    demo,
-                                                  ),
-                                                  onTap: () {
-                                                    if (_selectionMode) {
-                                                      _toggleBundledDemoSelection(
+                                              return LinearGradient(
+                                                begin: Alignment.topCenter,
+                                                end: Alignment.bottomCenter,
+                                                colors: const <Color>[
+                                                  Color(0xFFFFFFFF),
+                                                  Color(0xFFFFFFFF),
+                                                  Color(0x00FFFFFF),
+                                                ],
+                                                stops: <double>[
+                                                  0.0,
+                                                  fadeStart,
+                                                  1.0,
+                                                ],
+                                              ).createShader(bounds);
+                                            },
+                                            blendMode: BlendMode.dstIn,
+                                            child: ListView.separated(
+                                              key: ValueKey<String>(
+                                                'projects_list_${tab.name}',
+                                              ),
+                                              controller:
+                                                  _libraryScrollControllers[
+                                                      tab],
+                                              itemCount: visibleEntries.length,
+                                              separatorBuilder: (_, __) =>
+                                                  const SizedBox(height: 14),
+                                              itemBuilder: (_, i) {
+                                                final entry = visibleEntries[i];
+                                                if (entry.isBundledDemo) {
+                                                  final demo =
+                                                      entry.bundledDemo!;
+                                                  final selected =
+                                                      _isBundledDemoSelected(
+                                                          demo);
+                                                  return Material(
+                                                    color: Colors.transparent,
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            24),
+                                                    clipBehavior:
+                                                        Clip.antiAlias,
+                                                    child: InkWell(
+                                                      onLongPress: () =>
+                                                          _toggleBundledDemoSelection(
                                                         demo,
-                                                      );
-                                                      return;
-                                                    }
-                                                    _importBundledDemoAndOpen(
-                                                      demo,
-                                                    );
-                                                  },
-                                                  splashFactory:
-                                                      InkRipple.splashFactory,
-                                                  splashColor: Colors.white
-                                                      .withValues(alpha: 0.12),
-                                                  highlightColor: Colors.white
-                                                      .withValues(alpha: 0.04),
-                                                  overlayColor:
-                                                      WidgetStateProperty
-                                                          .resolveWith<Color?>(
-                                                    (states) {
-                                                      if (states.contains(
-                                                        WidgetState.pressed,
-                                                      )) {
-                                                        return Colors.white
-                                                            .withValues(
-                                                                alpha: 0.14);
-                                                      }
-                                                      if (states.contains(
-                                                        WidgetState.hovered,
-                                                      )) {
-                                                        return Colors.white
-                                                            .withValues(
-                                                                alpha: 0.08);
-                                                      }
-                                                      if (states.contains(
-                                                        WidgetState.focused,
-                                                      )) {
-                                                        return Colors.white
-                                                            .withValues(
-                                                                alpha: 0.10);
-                                                      }
-                                                      return Colors.transparent;
-                                                    },
-                                                  ),
-                                                  child: MixroomShellSurface(
-                                                    padding: const EdgeInsets
-                                                        .fromLTRB(
-                                                      18,
-                                                      16,
-                                                      12,
-                                                      16,
-                                                    ),
-                                                    color: selected
-                                                        ? const Color.fromRGBO(
-                                                            193,
-                                                            221,
-                                                            249,
-                                                            0.34,
-                                                          )
-                                                        : const Color.fromRGBO(
-                                                            244,
-                                                            244,
-                                                            244,
-                                                            0.30,
-                                                          ),
-                                                    child: Row(
-                                                      crossAxisAlignment:
-                                                          CrossAxisAlignment
-                                                              .start,
-                                                      children: [
-                                                        Expanded(
-                                                          child: Column(
-                                                            crossAxisAlignment:
-                                                                CrossAxisAlignment
-                                                                    .start,
-                                                            children: [
-                                                              Text(
-                                                                demo.name,
-                                                                maxLines: 1,
-                                                                overflow:
-                                                                    TextOverflow
-                                                                        .ellipsis,
-                                                                style:
-                                                                    const TextStyle(
-                                                                  fontFamily:
-                                                                      'Pretendard',
-                                                                  color: Color(
-                                                                      0xFFF4F4F4),
-                                                                  fontSize: 15,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .w600,
-                                                                  height:
-                                                                      22 / 15,
-                                                                ),
-                                                              ),
-                                                              const SizedBox(
-                                                                  height: 8),
-                                                              Container(
-                                                                height: 1,
-                                                                color: Colors
-                                                                    .white
-                                                                    .withValues(
-                                                                        alpha:
-                                                                            0.22),
-                                                              ),
-                                                              const SizedBox(
-                                                                  height: 8),
-                                                              Text(
-                                                                L10n.translate(
-                                                                  context,
-                                                                  'Tap to import demo project',
-                                                                ),
-                                                                style:
-                                                                    TextStyle(
-                                                                  fontFamily:
-                                                                      'Pretendard',
-                                                                  color: Colors
-                                                                      .white
-                                                                      .withValues(
-                                                                          alpha:
-                                                                              0.80),
-                                                                  fontSize: 12,
-                                                                  height:
-                                                                      22 / 12,
-                                                                ),
-                                                              ),
-                                                            ],
-                                                          ),
+                                                      ),
+                                                      onTap: () {
+                                                        if (_selectionMode) {
+                                                          _toggleBundledDemoSelection(
+                                                            demo,
+                                                          );
+                                                          return;
+                                                        }
+                                                        _importBundledDemoAndOpen(
+                                                          demo,
+                                                        );
+                                                      },
+                                                      splashFactory: InkRipple
+                                                          .splashFactory,
+                                                      splashColor: Colors.white
+                                                          .withValues(
+                                                              alpha: 0.12),
+                                                      highlightColor: Colors
+                                                          .white
+                                                          .withValues(
+                                                              alpha: 0.04),
+                                                      overlayColor:
+                                                          WidgetStateProperty
+                                                              .resolveWith<
+                                                                  Color?>(
+                                                        (states) {
+                                                          if (states.contains(
+                                                            WidgetState.pressed,
+                                                          )) {
+                                                            return Colors.white
+                                                                .withValues(
+                                                                    alpha:
+                                                                        0.14);
+                                                          }
+                                                          if (states.contains(
+                                                            WidgetState.hovered,
+                                                          )) {
+                                                            return Colors.white
+                                                                .withValues(
+                                                                    alpha:
+                                                                        0.08);
+                                                          }
+                                                          if (states.contains(
+                                                            WidgetState.focused,
+                                                          )) {
+                                                            return Colors.white
+                                                                .withValues(
+                                                                    alpha:
+                                                                        0.10);
+                                                          }
+                                                          return Colors
+                                                              .transparent;
+                                                        },
+                                                      ),
+                                                      child:
+                                                          MixroomShellSurface(
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .fromLTRB(
+                                                          18,
+                                                          16,
+                                                          12,
+                                                          16,
                                                         ),
-                                                        const SizedBox(
-                                                            width: 8),
-                                                        if (_selectionMode)
-                                                          Padding(
-                                                            padding:
-                                                                const EdgeInsets
-                                                                    .only(
-                                                                    top: 12),
-                                                            child: selected
-                                                                ? SvgPicture
-                                                                    .asset(
-                                                                    kMixroomShellCheckboxCheckedAsset,
-                                                                    width: 22,
-                                                                    height: 22,
-                                                                  )
-                                                                : Container(
-                                                                    width: 22,
-                                                                    height: 22,
-                                                                    decoration:
-                                                                        BoxDecoration(
-                                                                      shape: BoxShape
-                                                                          .circle,
-                                                                      border:
-                                                                          Border
-                                                                              .all(
-                                                                        color: Colors
-                                                                            .white
-                                                                            .withValues(alpha: 0.6),
-                                                                      ),
+                                                        color: selected
+                                                            ? const Color
+                                                                .fromRGBO(
+                                                                193,
+                                                                221,
+                                                                249,
+                                                                0.34,
+                                                              )
+                                                            : const Color
+                                                                .fromRGBO(
+                                                                244,
+                                                                244,
+                                                                244,
+                                                                0.30,
+                                                              ),
+                                                        child: Row(
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .start,
+                                                          children: [
+                                                            Expanded(
+                                                              child: Column(
+                                                                crossAxisAlignment:
+                                                                    CrossAxisAlignment
+                                                                        .start,
+                                                                children: [
+                                                                  Text(
+                                                                    demo.name,
+                                                                    maxLines: 1,
+                                                                    overflow:
+                                                                        TextOverflow
+                                                                            .ellipsis,
+                                                                    style:
+                                                                        const TextStyle(
+                                                                      fontFamily:
+                                                                          'Pretendard',
+                                                                      color: Color(
+                                                                          0xFFF4F4F4),
+                                                                      fontSize:
+                                                                          15,
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .w600,
+                                                                      height:
+                                                                          22 /
+                                                                              15,
                                                                     ),
                                                                   ),
-                                                          )
-                                                        else
-                                                          MixroomShellRoundButton(
-                                                            size: 40,
-                                                            iconExtent: 18,
-                                                            icon: const Icon(
-                                                              Icons
-                                                                  .file_download_outlined,
-                                                              color:
-                                                                  Colors.white,
-                                                              size: 20,
+                                                                  const SizedBox(
+                                                                      height:
+                                                                          8),
+                                                                  Container(
+                                                                    height: 1,
+                                                                    color: Colors
+                                                                        .white
+                                                                        .withValues(
+                                                                            alpha:
+                                                                                0.22),
+                                                                  ),
+                                                                  const SizedBox(
+                                                                      height:
+                                                                          8),
+                                                                  Text(
+                                                                    L10n.translate(
+                                                                      context,
+                                                                      'Tap to import demo project',
+                                                                    ),
+                                                                    style:
+                                                                        TextStyle(
+                                                                      fontFamily:
+                                                                          'Pretendard',
+                                                                      color: Colors
+                                                                          .white
+                                                                          .withValues(
+                                                                              alpha: 0.80),
+                                                                      fontSize:
+                                                                          12,
+                                                                      height:
+                                                                          22 /
+                                                                              12,
+                                                                    ),
+                                                                  ),
+                                                                ],
+                                                              ),
                                                             ),
-                                                            onTap: () =>
-                                                                _importBundledDemoAndOpen(
-                                                              demo,
-                                                            ),
-                                                          ),
-                                                      ],
+                                                            const SizedBox(
+                                                                width: 8),
+                                                            if (_selectionMode)
+                                                              Padding(
+                                                                padding:
+                                                                    const EdgeInsets
+                                                                        .only(
+                                                                        top:
+                                                                            12),
+                                                                child: selected
+                                                                    ? SvgPicture
+                                                                        .asset(
+                                                                        kMixroomShellCheckboxCheckedAsset,
+                                                                        width:
+                                                                            22,
+                                                                        height:
+                                                                            22,
+                                                                      )
+                                                                    : Container(
+                                                                        width:
+                                                                            22,
+                                                                        height:
+                                                                            22,
+                                                                        decoration:
+                                                                            BoxDecoration(
+                                                                          shape:
+                                                                              BoxShape.circle,
+                                                                          border:
+                                                                              Border.all(
+                                                                            color:
+                                                                                Colors.white.withValues(alpha: 0.6),
+                                                                          ),
+                                                                        ),
+                                                                      ),
+                                                              )
+                                                            else
+                                                              MixroomShellRoundButton(
+                                                                size: 40,
+                                                                iconExtent: 18,
+                                                                icon:
+                                                                    const Icon(
+                                                                  Icons
+                                                                      .file_download_outlined,
+                                                                  color: Colors
+                                                                      .white,
+                                                                  size: 20,
+                                                                ),
+                                                                onTap: () =>
+                                                                    _importBundledDemoAndOpen(
+                                                                  demo,
+                                                                ),
+                                                              ),
+                                                          ],
+                                                        ),
+                                                      ),
                                                     ),
-                                                  ),
-                                                ),
-                                              );
-                                            }
+                                                  );
+                                                }
 
-                                            final project = entry.project!;
-                                            final keyToken =
-                                                _projectActionKeyToken(
-                                              project.name,
-                                            );
-                                            final selected =
-                                                _isSelected(project);
-                                            return Material(
-                                              color: Colors.transparent,
-                                              borderRadius:
-                                                  BorderRadius.circular(24),
-                                              clipBehavior: Clip.antiAlias,
-                                              child: InkWell(
-                                                onLongPress: () =>
-                                                    _toggleSelection(project),
-                                                onTap: () {
-                                                  if (_selectionMode) {
-                                                    _toggleSelection(project);
-                                                    return;
-                                                  }
-                                                  _openProject(project.dir);
-                                                },
-                                                splashFactory:
-                                                    InkRipple.splashFactory,
-                                                splashColor: Colors.white
-                                                    .withValues(alpha: 0.12),
-                                                highlightColor: Colors.white
-                                                    .withValues(alpha: 0.04),
-                                                overlayColor:
-                                                    WidgetStateProperty
-                                                        .resolveWith<Color?>(
-                                                  (states) {
-                                                    if (states.contains(
-                                                      WidgetState.pressed,
-                                                    )) {
-                                                      return Colors.white
+                                                if (entry.isCloudProject) {
+                                                  final cloud =
+                                                      entry.cloudProject!;
+                                                  final local =
+                                                      _localProjectForCloud(
+                                                          cloud);
+                                                  final inFlight =
+                                                      _cloudProjectsInFlight
+                                                          .contains(
+                                                    cloud.projectId,
+                                                  );
+                                                  final updated =
+                                                      cloud.updatedAt;
+                                                  final anchorKey =
+                                                      GlobalObjectKey(
+                                                    'cloud_project_actions_${cloud.projectId}',
+                                                  );
+                                                  final availabilityLabel =
+                                                      local != null
+                                                          ? L10n.translate(
+                                                              context,
+                                                              'On this device',
+                                                            )
+                                                          : L10n.translate(
+                                                              context,
+                                                              'Available in cloud',
+                                                            );
+                                                  final locationLabel =
+                                                      _cloudProjectLocationLabel(
+                                                    cloud,
+                                                  );
+                                                  final updatedLabel = updated ==
+                                                          null
+                                                      ? null
+                                                      : _formatLastUpdatedLabel(
+                                                          updated,
+                                                        );
+                                                  final attributionLine =
+                                                      _cloudProjectAttributionLine(
+                                                    cloud,
+                                                  );
+                                                  final primaryDetailLine = [
+                                                    if (updatedLabel != null)
+                                                      updatedLabel,
+                                                    _formatBytes(
+                                                      cloud.documentSizeBytes,
+                                                    ),
+                                                  ].join(' • ');
+                                                  final secondaryDetailLine = [
+                                                    if (!cloud.canWrite)
+                                                      L10n.translate(
+                                                        context,
+                                                        'Read-only',
+                                                      ),
+                                                    attributionLine ??
+                                                        '$availabilityLabel • $locationLabel',
+                                                  ].join(' • ');
+                                                  return Material(
+                                                    color: Colors.transparent,
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            24),
+                                                    clipBehavior:
+                                                        Clip.antiAlias,
+                                                    child: InkWell(
+                                                      onTap: inFlight
+                                                          ? null
+                                                          : () =>
+                                                              _openCloudProject(
+                                                                cloud,
+                                                              ),
+                                                      splashFactory: InkRipple
+                                                          .splashFactory,
+                                                      splashColor: Colors.white
                                                           .withValues(
-                                                              alpha: 0.14);
-                                                    }
-                                                    if (states.contains(
-                                                      WidgetState.hovered,
-                                                    )) {
-                                                      return Colors.white
+                                                              alpha: 0.12),
+                                                      highlightColor: Colors
+                                                          .white
                                                           .withValues(
-                                                              alpha: 0.08);
-                                                    }
-                                                    if (states.contains(
-                                                      WidgetState.focused,
-                                                    )) {
-                                                      return Colors.white
-                                                          .withValues(
-                                                              alpha: 0.10);
-                                                    }
-                                                    return Colors.transparent;
-                                                  },
-                                                ),
-                                                child: MixroomShellSurface(
-                                                  padding:
-                                                      const EdgeInsets.fromLTRB(
-                                                    18,
-                                                    16,
-                                                    12,
-                                                    16,
-                                                  ),
-                                                  color: selected
-                                                      ? const Color.fromRGBO(
-                                                          193,
-                                                          221,
-                                                          249,
-                                                          0.34,
-                                                        )
-                                                      : const Color.fromRGBO(
+                                                              alpha: 0.04),
+                                                      child:
+                                                          MixroomShellSurface(
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .fromLTRB(
+                                                          18,
+                                                          16,
+                                                          12,
+                                                          16,
+                                                        ),
+                                                        color: const Color
+                                                            .fromRGBO(
                                                           244,
                                                           244,
                                                           244,
                                                           0.30,
                                                         ),
-                                                  child: Row(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .start,
-                                                    children: [
-                                                      Expanded(
-                                                        child: Column(
+                                                        child: Row(
                                                           crossAxisAlignment:
                                                               CrossAxisAlignment
                                                                   .start,
                                                           children: [
-                                                            Text(
-                                                              project.name,
-                                                              maxLines: 1,
-                                                              overflow:
-                                                                  TextOverflow
-                                                                      .ellipsis,
-                                                              style:
-                                                                  const TextStyle(
-                                                                fontFamily:
-                                                                    'Pretendard',
-                                                                color: Color(
-                                                                    0xFFF4F4F4),
-                                                                fontSize: 15,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w600,
-                                                                height: 22 / 15,
+                                                            Expanded(
+                                                              child: Column(
+                                                                crossAxisAlignment:
+                                                                    CrossAxisAlignment
+                                                                        .start,
+                                                                children: [
+                                                                  Row(
+                                                                    children: [
+                                                                      Expanded(
+                                                                        child:
+                                                                            Text(
+                                                                          cloud
+                                                                              .name,
+                                                                          maxLines:
+                                                                              1,
+                                                                          overflow:
+                                                                              TextOverflow.ellipsis,
+                                                                          style:
+                                                                              const TextStyle(
+                                                                            fontFamily:
+                                                                                'Pretendard',
+                                                                            color:
+                                                                                Color(0xFFF4F4F4),
+                                                                            fontSize:
+                                                                                15,
+                                                                            fontWeight:
+                                                                                FontWeight.w600,
+                                                                            height:
+                                                                                22 / 15,
+                                                                          ),
+                                                                        ),
+                                                                      ),
+                                                                      const SizedBox(
+                                                                          width:
+                                                                              8),
+                                                                      Icon(
+                                                                        !cloud.canWrite
+                                                                            ? Icons.lock_rounded
+                                                                            : local != null
+                                                                                ? Icons.cloud_done_rounded
+                                                                                : Icons.cloud_download_rounded,
+                                                                        color: !cloud.canWrite
+                                                                            ? Colors.white.withValues(alpha: 0.64)
+                                                                            : const Color(0xFFA4C2FF),
+                                                                        size:
+                                                                            18,
+                                                                      ),
+                                                                    ],
+                                                                  ),
+                                                                  const SizedBox(
+                                                                      height:
+                                                                          8),
+                                                                  Container(
+                                                                    height: 1,
+                                                                    color: Colors
+                                                                        .white
+                                                                        .withValues(
+                                                                            alpha:
+                                                                                0.22),
+                                                                  ),
+                                                                  const SizedBox(
+                                                                      height:
+                                                                          8),
+                                                                  Column(
+                                                                    crossAxisAlignment:
+                                                                        CrossAxisAlignment
+                                                                            .start,
+                                                                    children: [
+                                                                      Text(
+                                                                        primaryDetailLine,
+                                                                        maxLines:
+                                                                            1,
+                                                                        overflow:
+                                                                            TextOverflow.ellipsis,
+                                                                        style:
+                                                                            TextStyle(
+                                                                          fontFamily:
+                                                                              'Pretendard',
+                                                                          color: Colors
+                                                                              .white
+                                                                              .withValues(alpha: 0.80),
+                                                                          fontSize:
+                                                                              12,
+                                                                          height:
+                                                                              18 / 12,
+                                                                        ),
+                                                                      ),
+                                                                      const SizedBox(
+                                                                          height:
+                                                                              2),
+                                                                      Text(
+                                                                        secondaryDetailLine,
+                                                                        maxLines:
+                                                                            1,
+                                                                        overflow:
+                                                                            TextOverflow.ellipsis,
+                                                                        style:
+                                                                            TextStyle(
+                                                                          fontFamily:
+                                                                              'Pretendard',
+                                                                          color: Colors
+                                                                              .white
+                                                                              .withValues(alpha: 0.62),
+                                                                          fontSize:
+                                                                              11,
+                                                                          height:
+                                                                              17 / 11,
+                                                                        ),
+                                                                      ),
+                                                                    ],
+                                                                  ),
+                                                                ],
                                                               ),
                                                             ),
                                                             const SizedBox(
-                                                                height: 8),
-                                                            Container(
-                                                              height: 1,
-                                                              color: Colors
-                                                                  .white
-                                                                  .withValues(
-                                                                      alpha:
-                                                                          0.22),
-                                                            ),
-                                                            const SizedBox(
-                                                                height: 8),
-                                                            Text(
-                                                              '${L10n.translate(context, 'Last opened')} : ${_formatLastOpened(project.lastOpenedAt)}',
-                                                              style: TextStyle(
-                                                                fontFamily:
-                                                                    'Pretendard',
-                                                                color: Colors
-                                                                    .white
-                                                                    .withValues(
-                                                                        alpha:
-                                                                            0.80),
-                                                                fontSize: 12,
-                                                                height: 22 / 12,
+                                                                width: 8),
+                                                            if (inFlight)
+                                                              const Padding(
+                                                                padding: EdgeInsets
+                                                                    .only(
+                                                                        top:
+                                                                            10),
+                                                                child: SizedBox(
+                                                                  width: 22,
+                                                                  height: 22,
+                                                                  child:
+                                                                      CircularProgressIndicator(
+                                                                    strokeWidth:
+                                                                        2,
+                                                                  ),
+                                                                ),
+                                                              )
+                                                            else
+                                                              MixroomShellRoundButton(
+                                                                key: anchorKey,
+                                                                size: 40,
+                                                                iconExtent: 18,
+                                                                icon:
+                                                                    const Icon(
+                                                                  Icons
+                                                                      .more_horiz_rounded,
+                                                                  color: Colors
+                                                                      .white,
+                                                                  size: 22,
+                                                                ),
+                                                                onTap: () =>
+                                                                    _showCloudProjectItemMenu(
+                                                                  anchorKey:
+                                                                      anchorKey,
+                                                                  project:
+                                                                      cloud,
+                                                                ),
                                                               ),
-                                                            ),
                                                           ],
                                                         ),
                                                       ),
-                                                      const SizedBox(width: 8),
-                                                      if (_selectionMode)
-                                                        Padding(
-                                                          padding:
-                                                              const EdgeInsets
-                                                                  .only(
-                                                                  top: 12),
-                                                          child: selected
-                                                              ? SvgPicture
-                                                                  .asset(
-                                                                  kMixroomShellCheckboxCheckedAsset,
-                                                                  width: 22,
-                                                                  height: 22,
-                                                                )
-                                                              : Container(
-                                                                  width: 22,
-                                                                  height: 22,
-                                                                  decoration:
-                                                                      BoxDecoration(
-                                                                    shape: BoxShape
-                                                                        .circle,
-                                                                    border:
-                                                                        Border
-                                                                            .all(
-                                                                      color: Colors
-                                                                          .white
-                                                                          .withValues(
-                                                                              alpha: 0.6),
+                                                    ),
+                                                  );
+                                                }
+
+                                                final project = entry.project!;
+                                                final cloud =
+                                                    _cloudProjectForLocal(
+                                                        project);
+                                                final cloudLinked = cloud !=
+                                                        null ||
+                                                    (project.cloudProjectId ??
+                                                            '')
+                                                        .trim()
+                                                        .isNotEmpty;
+                                                final cloudInFlight =
+                                                    _localCloudSyncInFlight(
+                                                  project,
+                                                  cloud,
+                                                );
+                                                final localSubtitle =
+                                                    '${L10n.translate(context, 'Last opened')} : ${_formatLastOpened(project.lastOpenedAt)}';
+                                                final keyToken =
+                                                    _projectActionKeyToken(
+                                                  project.name,
+                                                );
+                                                final selected =
+                                                    _isSelected(project);
+                                                return Material(
+                                                  color: Colors.transparent,
+                                                  borderRadius:
+                                                      BorderRadius.circular(24),
+                                                  clipBehavior: Clip.antiAlias,
+                                                  child: InkWell(
+                                                    onLongPress: () =>
+                                                        _toggleSelection(
+                                                            project),
+                                                    onTap: () {
+                                                      if (_selectionMode) {
+                                                        _toggleSelection(
+                                                            project);
+                                                        return;
+                                                      }
+                                                      _openProject(project.dir);
+                                                    },
+                                                    splashFactory:
+                                                        InkRipple.splashFactory,
+                                                    splashColor: Colors.white
+                                                        .withValues(
+                                                            alpha: 0.12),
+                                                    highlightColor: Colors.white
+                                                        .withValues(
+                                                            alpha: 0.04),
+                                                    overlayColor:
+                                                        WidgetStateProperty
+                                                            .resolveWith<
+                                                                Color?>(
+                                                      (states) {
+                                                        if (states.contains(
+                                                          WidgetState.pressed,
+                                                        )) {
+                                                          return Colors.white
+                                                              .withValues(
+                                                                  alpha: 0.14);
+                                                        }
+                                                        if (states.contains(
+                                                          WidgetState.hovered,
+                                                        )) {
+                                                          return Colors.white
+                                                              .withValues(
+                                                                  alpha: 0.08);
+                                                        }
+                                                        if (states.contains(
+                                                          WidgetState.focused,
+                                                        )) {
+                                                          return Colors.white
+                                                              .withValues(
+                                                                  alpha: 0.10);
+                                                        }
+                                                        return Colors
+                                                            .transparent;
+                                                      },
+                                                    ),
+                                                    child: MixroomShellSurface(
+                                                      padding: const EdgeInsets
+                                                          .fromLTRB(
+                                                        18,
+                                                        16,
+                                                        12,
+                                                        16,
+                                                      ),
+                                                      color: selected
+                                                          ? const Color
+                                                              .fromRGBO(
+                                                              193,
+                                                              221,
+                                                              249,
+                                                              0.34,
+                                                            )
+                                                          : const Color
+                                                              .fromRGBO(
+                                                              244,
+                                                              244,
+                                                              244,
+                                                              0.30,
+                                                            ),
+                                                      child: Row(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .start,
+                                                        children: [
+                                                          Expanded(
+                                                            child: Column(
+                                                              crossAxisAlignment:
+                                                                  CrossAxisAlignment
+                                                                      .start,
+                                                              children: [
+                                                                Row(
+                                                                  children: [
+                                                                    Expanded(
+                                                                      child:
+                                                                          Text(
+                                                                        project
+                                                                            .name,
+                                                                        maxLines:
+                                                                            1,
+                                                                        overflow:
+                                                                            TextOverflow.ellipsis,
+                                                                        style:
+                                                                            const TextStyle(
+                                                                          fontFamily:
+                                                                              'Pretendard',
+                                                                          color:
+                                                                              Color(0xFFF4F4F4),
+                                                                          fontSize:
+                                                                              15,
+                                                                          fontWeight:
+                                                                              FontWeight.w600,
+                                                                          height:
+                                                                              22 / 15,
+                                                                        ),
+                                                                      ),
                                                                     ),
+                                                                    if (cloudLinked) ...[
+                                                                      const SizedBox(
+                                                                          width:
+                                                                              8),
+                                                                      Tooltip(
+                                                                        message:
+                                                                            _localCloudSyncedLabel(
+                                                                          project,
+                                                                          cloud,
+                                                                        ),
+                                                                        child:
+                                                                            Icon(
+                                                                          Icons
+                                                                              .cloud_done_rounded,
+                                                                          color:
+                                                                              const Color(0xFFA4C2FF),
+                                                                          size:
+                                                                              18,
+                                                                        ),
+                                                                      ),
+                                                                    ],
+                                                                  ],
+                                                                ),
+                                                                const SizedBox(
+                                                                    height: 8),
+                                                                Container(
+                                                                  height: 1,
+                                                                  color: Colors
+                                                                      .white
+                                                                      .withValues(
+                                                                          alpha:
+                                                                              0.22),
+                                                                ),
+                                                                const SizedBox(
+                                                                    height: 8),
+                                                                Text(
+                                                                  cloudLinked
+                                                                      ? '$localSubtitle • ${_localCloudSyncedLabel(project, cloud)}'
+                                                                      : localSubtitle,
+                                                                  maxLines: 1,
+                                                                  overflow:
+                                                                      TextOverflow
+                                                                          .ellipsis,
+                                                                  style:
+                                                                      TextStyle(
+                                                                    fontFamily:
+                                                                        'Pretendard',
+                                                                    color: Colors
+                                                                        .white
+                                                                        .withValues(
+                                                                            alpha:
+                                                                                0.80),
+                                                                    fontSize:
+                                                                        12,
+                                                                    height:
+                                                                        22 / 12,
                                                                   ),
                                                                 ),
-                                                        )
-                                                      else
-                                                        _buildProjectTrailingActions(
-                                                          context: context,
-                                                          project: project,
-                                                          keyToken: keyToken,
-                                                          compact:
-                                                              useCompactProjectMenus,
-                                                        ),
-                                                    ],
+                                                              ],
+                                                            ),
+                                                          ),
+                                                          const SizedBox(
+                                                              width: 8),
+                                                          if (_selectionMode)
+                                                            Padding(
+                                                              padding:
+                                                                  const EdgeInsets
+                                                                      .only(
+                                                                      top: 12),
+                                                              child: selected
+                                                                  ? SvgPicture
+                                                                      .asset(
+                                                                      kMixroomShellCheckboxCheckedAsset,
+                                                                      width: 22,
+                                                                      height:
+                                                                          22,
+                                                                    )
+                                                                  : Container(
+                                                                      width: 22,
+                                                                      height:
+                                                                          22,
+                                                                      decoration:
+                                                                          BoxDecoration(
+                                                                        shape: BoxShape
+                                                                            .circle,
+                                                                        border:
+                                                                            Border.all(
+                                                                          color: Colors
+                                                                              .white
+                                                                              .withValues(alpha: 0.6),
+                                                                        ),
+                                                                      ),
+                                                                    ),
+                                                            )
+                                                          else if (cloudInFlight)
+                                                            const Padding(
+                                                              padding: EdgeInsets
+                                                                  .only(
+                                                                      top: 10),
+                                                              child: SizedBox(
+                                                                width: 22,
+                                                                height: 22,
+                                                                child:
+                                                                    CircularProgressIndicator(
+                                                                  strokeWidth:
+                                                                      2,
+                                                                ),
+                                                              ),
+                                                            )
+                                                          else
+                                                            _buildProjectTrailingActions(
+                                                              context: context,
+                                                              project: project,
+                                                              keyToken:
+                                                                  keyToken,
+                                                              compact:
+                                                                  useCompactProjectMenus,
+                                                            ),
+                                                        ],
+                                                      ),
+                                                    ),
                                                   ),
-                                                ),
-                                              ),
-                                            );
-                                          },
-                                        ),
+                                                );
+                                              },
+                                            ),
+                                          );
+                                        },
                                       );
-                                    },
-                                  ),
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: _kProjectLibraryPageHorizontalGutter,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (tab == _ProjectLibraryTab.cloudProjects) ...[
+                                const SizedBox(height: 12),
+                                _buildCloudStoragePanel(
+                                  canConfigureCloudSync: canConfigureCloudSync,
+                                ),
+                                const SizedBox(height: 18),
+                              ] else
+                                const SizedBox(height: 18),
+                              Expanded(child: tabBody),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ],
               ),
@@ -2153,7 +4729,7 @@ class _ProjectToolAction extends StatelessWidget {
               Expanded(
                 child: Text(
                   label,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontFamily: 'Pretendard',
                     color: Colors.white,
                     fontSize: 14,
@@ -2164,6 +4740,146 @@ class _ProjectToolAction extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _ProjectVersionHistoryRow extends StatelessWidget {
+  const _ProjectVersionHistoryRow({
+    required this.title,
+    required this.subtitle,
+    required this.actionLabel,
+    required this.onAction,
+  });
+
+  final String title;
+  final String subtitle;
+  final String actionLabel;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onAction != null;
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 12,
+        vertical: 10,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: enabled ? 0.08 : 0.12),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: enabled ? 0.08 : 0.14),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: Color(0xFFF4F4F4),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: Colors.white.withValues(alpha: 0.70),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          TextButton(
+            onPressed: onAction,
+            style: TextButton.styleFrom(
+              foregroundColor: enabled
+                  ? const Color(0xFFA4C2FF)
+                  : Colors.white.withValues(alpha: 0.44),
+            ),
+            child: Text(actionLabel),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CloudProjectDetailRow extends StatelessWidget {
+  const _CloudProjectDetailRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.maxValueLines = 2,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final int maxValueLines;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: const Color(0xFFA4C2FF), size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: Colors.white.withValues(alpha: 0.62),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  maxLines: maxValueLines,
+                  overflow: maxValueLines > 6
+                      ? TextOverflow.visible
+                      : TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: Color(0xFFF4F4F4),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

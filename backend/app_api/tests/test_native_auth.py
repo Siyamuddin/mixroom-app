@@ -26,6 +26,11 @@ for key, value in {
 }.items():
     os.environ.setdefault(key, value)
 
+for module_name in ("src.common.config", "common.config"):
+    config_module = sys.modules.get(module_name)
+    if config_module is not None:
+        config_module.APP_AUTH_SECRET_ARN = os.environ["APP_AUTH_SECRET_ARN"]
+
 if "boto3" not in sys.modules:
     boto3_stub = ModuleType("boto3")
     boto3_stub.client = mock.Mock(return_value=mock.Mock())
@@ -201,7 +206,7 @@ class NativeAuthFlowTests(unittest.TestCase):
 
         entitlement = repo.get_entitlement(sign_up["user"]["userId"])
         self.assertIsNotNone(entitlement)
-        self.assertEqual(entitlement["tier"], "free")
+        self.assertEqual(entitlement["plan_code"], "free")
         self.assertEqual(entitlement["status"], "active")
 
     def test_email_signup_uses_korean_template_when_locale_is_korean(self) -> None:
@@ -321,7 +326,7 @@ class NativeAuthFlowTests(unittest.TestCase):
 
         self.assertTrue(sign_up["codeSent"])
         self.assertTrue(confirm["user"]["emailVerified"])
-        self.assertEqual(repo.get_entitlement(confirm["user"]["userId"])["tier"], "free")
+        self.assertEqual(repo.get_entitlement(confirm["user"]["userId"])["plan_code"], "free")
         self.assertEqual(sign_in["tokens"]["accessToken"], "access-token-2")
         self.assertEqual(refreshed["tokens"]["refreshToken"], refresh_token_2)
         self.assertEqual(len(repo.sessions), 2)
@@ -873,7 +878,7 @@ class NativeAuthFlowTests(unittest.TestCase):
             )
         )
         self.assertEqual(result["user"]["userId"], "legacy-user")
-        self.assertEqual(repo.get_entitlement("legacy-user")["tier"], "free")
+        self.assertEqual(repo.get_entitlement("legacy-user")["plan_code"], "free")
         self.assertEqual(len(repo.sessions), 1)
 
     def test_legacy_refresh_exchanges_cognito_session_into_native_session(self) -> None:
@@ -944,7 +949,7 @@ class NativeAuthFlowTests(unittest.TestCase):
             repo.get_customer_link("google", "auth:google-subject-1")["user_id"],
             "legacy-social-user",
         )
-        self.assertEqual(repo.get_entitlement("legacy-social-user")["tier"], "free")
+        self.assertEqual(repo.get_entitlement("legacy-social-user")["plan_code"], "free")
 
     def test_linked_social_sign_in_does_not_overwrite_email_owned_by_another_account(self) -> None:
         repo = _FakeRepo()

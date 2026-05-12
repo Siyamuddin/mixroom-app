@@ -44,12 +44,12 @@ class SubscriptionFlowTests(unittest.TestCase):
                 "normalized": {
                     "provider": "google",
                     "subscription_id": "sub-1",
-                    "tier": "pro",
+                    "plan_code": "producer",
                     "status": "active",
                     "expires_at": "2099-04-20T00:00:00+00:00",
                     "source_occurred_at": "2026-03-20T00:00:00+00:00",
                     "management_channel": "google",
-                    "product_id": "mixroom_pro_monthly",
+                    "product_id": "mixroom_producer_monthly",
                 },
             }
         )
@@ -61,7 +61,7 @@ class SubscriptionFlowTests(unittest.TestCase):
                 "body": json.dumps(
                     {
                         "purchase_token": "purchase-token",
-                        "product_id": "mixroom_pro_monthly",
+                        "product_id": "mixroom_producer_monthly",
                     }
                 ),
             },
@@ -76,7 +76,7 @@ class SubscriptionFlowTests(unittest.TestCase):
         )
 
         entitlement = self.repo.get_entitlement("user-1")
-        self.assertEqual(entitlement["tier"], "pro")
+        self.assertEqual(entitlement["plan_code"], "producer")
         self.assertEqual(entitlement["status"], "active")
         self.assertEqual(entitlement["source_subscription_id"], "sub-1")
         self.assertEqual(len(self.eventbridge.entries), 1)
