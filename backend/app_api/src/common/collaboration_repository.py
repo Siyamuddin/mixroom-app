@@ -230,6 +230,14 @@ class CollaborationRepository:
             else current.get("seat_options") or []
         )
         now = _utc_now_iso()
+        shared_workspace_enabled = (
+            False
+            if plan_code == "education"
+            else _safe_bool(
+                payload.get("shared_workspace_enabled"),
+                default=_safe_bool(current.get("shared_workspace_enabled"), default=True),
+            )
+        )
         record = {
             "entity_id": self._entity_id("organization", organization_id),
             "entity_type": "organization",
@@ -241,10 +249,7 @@ class CollaborationRepository:
             "seat_options": seat_options,
             "education_admin_enabled": plan_code == "education",
             "teacher_mode_enabled": plan_code == "education",
-            "shared_workspace_enabled": _safe_bool(
-                payload.get("shared_workspace_enabled"),
-                default=_safe_bool(current.get("shared_workspace_enabled"), default=True),
-            ),
+            "shared_workspace_enabled": shared_workspace_enabled,
             "support_notes": _safe_str(payload.get("support_notes") or current.get("support_notes")),
             "owner_user_id": _payload_or_current_str(payload, current, "owner_user_id"),
             "billing_customer_id": _payload_or_current_str(payload, current, "billing_customer_id"),
@@ -493,7 +498,7 @@ class CollaborationRepository:
                 "plan_code": "education",
                 "seat_limit": seat_limit,
                 "status": _safe_str(payload.get("status") or "active") or "active",
-                "shared_workspace_enabled": True,
+                "shared_workspace_enabled": False,
             },
             updated_by_user_id=updated_by_user_id,
             updated_by_email=updated_by_email,
@@ -511,25 +516,10 @@ class CollaborationRepository:
             updated_by_user_id=updated_by_user_id,
             updated_by_email=updated_by_email,
         )
-        workspace = self.save_workspace(
-            {
-                "workspace_id": _safe_str(payload.get("workspace_id"))
-                or f"{organization_id}-classroom",
-                "organization_id": organization_id,
-                "owner_user_id": teacher_user_id,
-                "name": _safe_str(payload.get("workspace_name"))
-                or f"{organization.get('name') or organization_id} Classroom",
-                "visibility": "organization",
-                "default_project_privacy": "workspace",
-                "status": "active",
-            },
-            updated_by_user_id=updated_by_user_id,
-            updated_by_email=updated_by_email,
-        )
         return {
             "organization": self.get_organization(organization_id),
             "teacher_membership": teacher_membership,
-            "workspace": workspace,
+            "workspace": {},
         }
 
     def list_memberships(
@@ -575,6 +565,7 @@ class CollaborationRepository:
         invite_token: str,
         user_id: str,
         *,
+        accepted_email: str = "",
         updated_by_user_id: str = "",
     ) -> Dict[str, Any]:
         invite = self.get_membership_by_invite_token(invite_token)
@@ -586,9 +577,18 @@ class CollaborationRepository:
         safe_user_id = _safe_str(user_id)
         if not organization_id or not safe_user_id:
             raise ValueError("Education invite cannot be accepted.")
+        invite_email = _safe_email(invite.get("email"))
+        safe_accepted_email = _safe_email(accepted_email)
+        if invite_email and not safe_accepted_email:
+            raise PermissionError("Sign in with the invited email address to accept this education invite.")
+        if invite_email and safe_accepted_email and invite_email != safe_accepted_email:
+            raise PermissionError("This education invite was sent to a different email address.")
         existing = self.get_membership(organization_id, safe_user_id)
         if existing and _safe_str(existing.get("entity_id")) != _safe_str(invite.get("entity_id")):
             if _safe_str(existing.get("status")) == "active":
+                old_entity_id = _safe_str(invite.get("entity_id"))
+                if old_entity_id:
+                    self._table.delete_item(Key={"entity_id": old_entity_id})
                 return existing
             raise ValueError("This account already has an education seat record.")
 
@@ -633,6 +633,12 @@ class CollaborationRepository:
             status = _safe_str(membership.get("status")).lower()
             user_id = _safe_str(membership.get("user_id"))
             student_projects = projects_by_user_id.get(user_id, [])
+            if status == "active" and user_id and not user_id.startswith("invite:"):
+                student_projects = [
+                    project
+                    for project in self.list_owned_cloud_projects(user_id)
+                    if not _safe_str(project.get("workspace_id"))
+                ]
             project_count = len(
                 [
                     project
@@ -736,7 +742,7 @@ class CollaborationRepository:
             "status": status,
             "seat_consumed": seat_consumed,
             "invite_token": invite_token,
-            "invite_url": f"https://www.mixroom.ai/signup?invite={invite_token}" if invite_token else "",
+            "invite_url": f"https://www.mixroom.ai/?auth=signup&invite={invite_token}" if invite_token else "",
             "app_invite_url": f"mixroom://education/invites/{invite_token}" if invite_token else "",
             "invited_at": _safe_str(current.get("invited_at")) or (now if status == "pending" else ""),
             "activated_at": _safe_str(current.get("activated_at")) or (now if status == "active" else ""),
@@ -1441,6 +1447,8 @@ class CollaborationRepository:
         seen_workspace_ids: set[str] = set()
         for organization in organizations:
             if not _org_allows_read(organization):
+                continue
+            if _safe_str(organization.get("plan_code")).lower() == "education":
                 continue
             for workspace in self.list_workspaces(
                 organization_id=_safe_str(organization.get("organization_id"))

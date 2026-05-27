@@ -13,6 +13,7 @@ import 'package:mixroom/helpers/feedback_service.dart';
 import 'package:mixroom/helpers/open_mixroom_service.dart';
 import 'package:mixroom/helpers/project_manager.dart';
 import 'package:mixroom/helpers/remote_announcement_manager.dart';
+import 'package:mixroom/helpers/subscription_limits.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/app_update_policy.dart';
 import 'package:mixroom/models/feedback_models.dart';
@@ -577,15 +578,29 @@ class _SignedInShellState extends State<SignedInShell> {
 
   Future<void> _createMusicProject() async {
     if (_creatingProject) return;
-    if (!await ProjectManager.canCreateNew()) {
+    final projectLimit = SubscriptionLimits.localProjectLimitFor(
+      context.read<EntitlementService>().entitlement,
+    );
+    if (!await ProjectManager.canCreateNew(maxProjects: projectLimit)) {
       if (!mounted) return;
+      if (projectLimit == SubscriptionLimits.freeLocalProjects) {
+        unawaited(
+          showAppUpgradeDialog(
+            context: context,
+            title: 'Upgrade for more projects',
+            message:
+                'Free includes 10 local projects. Export or delete one, or upgrade for more.',
+            icon: Icons.folder_off_outlined,
+            onUpgrade: _openSubscriptionAccountTab,
+          ),
+        );
+        return;
+      }
       showAppMessageDialog(
         context: context,
         title: L10n.translate(context, 'Project limit reached'),
         message: L10n.translate(
-          context,
-          'Delete a project to create or import a new one.',
-        ),
+            context, 'Delete a project to create or import a new one.'),
         buttonLabel: L10n.translate(context, 'OK'),
         icon: Icons.folder_off_outlined,
       );

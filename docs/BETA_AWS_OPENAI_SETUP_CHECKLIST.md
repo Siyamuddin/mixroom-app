@@ -7,7 +7,7 @@ Use:
 - Amazon Cognito User Pool for user auth
 - API Gateway HTTP API for the chat endpoint
 - AWS Lambda for server-side prompt/tool/model ownership
-- AWS Secrets Manager for the OpenAI API key
+- SSM Parameter Store `SecureString` for the OpenAI API key
 - CloudWatch Logs for operational logs
 
 Do not use EC2 for this beta path unless you later need a persistent platform backend.
@@ -28,10 +28,10 @@ Rotation is:
 3. Verify traffic uses the new key.
 4. Revoke old key.
 
-## 2. AWS Secrets Manager
+## 2. AWS SSM Parameter Store
 
-- Create a secret for the OpenAI key.
-- Secret name can be anything stable, for example `mixroom/beta/openai`.
+- Create a `SecureString` parameter for the OpenAI key.
+- Parameter name can be anything stable, for example `/mixroom/prod/llm`.
 - Supported secret formats:
 
 Plain string:
@@ -97,7 +97,7 @@ Provide:
 
 - `CognitoUserPoolId`
 - `CognitoAppClientId`
-- `OpenAiApiKeySecretArn`
+- `OpenAiApiKeyParameterName`
 - `OpenAiModel` to choose the production model used by the proxy
 
 After deploy, note the `ApiBaseUrl` output. It should include the API stage path.
@@ -155,7 +155,7 @@ Also run the auth checklist:
 Before beta:
 
 - Proxy deployed and used by production builds
-- OpenAI key only in Secrets Manager
+- OpenAI key only in SSM Parameter Store or another backend-only secret store
 - Old exposed key revoked
 - Cognito sign-in / sign-out validated on iOS and Android
 - Chat request succeeds with authenticated bearer token

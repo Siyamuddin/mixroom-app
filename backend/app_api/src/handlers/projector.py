@@ -22,16 +22,44 @@ from common.repository import BillingRepository
 repo = BillingRepository()
 collaboration_repo = CollaborationRepository()
 eventbridge = boto3.client("events")
-_TEAM_PLAN_CODES = {"studio", "enterprise", "education"}
+_ORG_ONLY_PLAN_CODES = {"enterprise", "education"}
+_PADDLE_PROJECTABLE_TRANSACTION_EVENTS = {
+    "transaction.canceled",
+    "transaction.completed",
+    "transaction.payment_failed",
+    "transaction.refunded",
+}
 
 
 def _is_team_plan(raw: Dict[str, Any]) -> bool:
     plan_code = infer_plan_code(raw.get("plan_code") or raw.get("tier") or "")
-    return plan_code in _TEAM_PLAN_CODES
+    return plan_code in _ORG_ONLY_PLAN_CODES
 
 
 def _personal_subscriptions(subscriptions: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
     return [item for item in subscriptions if not _is_team_plan(item)]
+
+
+def _is_projectable_event(event_record: Dict[str, Any], provider: str, normalized: Dict[str, Any]) -> bool:
+    if provider != "paddle":
+        return True
+    event_type = str(event_record.get("event_type") or "").strip().lower()
+    if not event_type:
+        return True
+    if event_type.startswith("subscription."):
+        return True
+    if event_type in _PADDLE_PROJECTABLE_TRANSACTION_EVENTS:
+        return str(normalized.get("subscription_id") or "").strip().startswith("sub_")
+    return False
+
+
+def _value_or_existing(normalized: Dict[str, Any], existing: Dict[str, Any] | None, key: str) -> Any:
+    value = normalized.get(key)
+    if value is not None and str(value).strip() != "":
+        return value
+    if isinstance(existing, dict):
+        return existing.get(key)
+    return value
 
 
 def _sync_team_organization(subscription: Dict[str, Any]) -> None:
@@ -54,32 +82,50 @@ def _apply_projection(event_record: Dict[str, Any]) -> str:
         return "ignored_missing_normalized"
 
     provider = normalize_provider(str(normalized.get("provider") or event_record.get("provider") or "unknown"))
+    if not _is_projectable_event(event_record, provider, normalized):
+        return "ignored_non_subscription_event"
     status = normalize_status(str(normalized.get("status") or "expired"))
     plan_code = infer_plan_code(normalized.get("plan_code") or normalized.get("tier") or "")
 
     occurred_at = str(event_record.get("occurred_at") or event_record.get("created_at") or "")
-    existing = repo.get_entitlement(user_id)
-    existing_occurred = str((existing or {}).get("source_occurred_at") or "")
-    if existing_occurred and occurred_at and existing_occurred > occurred_at:
+    subscription_id = str(normalized.get("subscription_id") or f"{provider}:{user_id}")
+    existing_subscription = repo.get_subscription(subscription_id)
+    existing_subscription_occurred = str((existing_subscription or {}).get("source_occurred_at") or "")
+    if existing_subscription_occurred and occurred_at and existing_subscription_occurred > occurred_at:
         return "ignored_stale_event"
 
+    existing = repo.get_entitlement(user_id)
     next_revision = int((existing or {}).get("revision") or 0) + 1
-    subscription_id = str(normalized.get("subscription_id") or f"{provider}:{user_id}")
 
     subscription = {
         "subscription_id": subscription_id,
         "user_id": user_id,
         "provider": provider,
+        "customer_id": normalized.get("customer_id"),
+        "customer_email": normalized.get("customer_email"),
+        "payment_method": normalized.get("payment_method"),
         "tier": legacy_tier_for_plan_code(plan_code),
         "plan_code": plan_code,
         "status": status,
-        "effective_at": normalized.get("effective_at") or occurred_at,
-        "expires_at": normalized.get("expires_at"),
-        "product_id": normalized.get("product_id"),
-        "product_code": normalized.get("product_code"),
-        "package_name": normalized.get("package_name"),
-        "base_plan_id": normalized.get("base_plan_id"),
-        "offer_id": normalized.get("offer_id"),
+        "effective_at": _value_or_existing(normalized, existing_subscription, "effective_at") or occurred_at,
+        "expires_at": _value_or_existing(normalized, existing_subscription, "expires_at"),
+        "product_id": _value_or_existing(normalized, existing_subscription, "product_id"),
+        "product_code": _value_or_existing(normalized, existing_subscription, "product_code"),
+        "package_name": _value_or_existing(normalized, existing_subscription, "package_name"),
+        "base_plan_id": _value_or_existing(normalized, existing_subscription, "base_plan_id"),
+        "offer_id": _value_or_existing(normalized, existing_subscription, "offer_id"),
+        "next_billed_at": _value_or_existing(normalized, existing_subscription, "next_billed_at"),
+        "seat_count": _value_or_existing(normalized, existing_subscription, "seat_count"),
+        "extra_storage_tb": _value_or_existing(normalized, existing_subscription, "extra_storage_tb"),
+        "billing_key_parameter_name": _value_or_existing(
+            normalized,
+            existing_subscription,
+            "billing_key_parameter_name",
+        ),
+        "billing_key_secret_arn": _value_or_existing(normalized, existing_subscription, "billing_key_secret_arn"),
+        "billing_amount": _value_or_existing(normalized, existing_subscription, "billing_amount"),
+        "billing_currency": _value_or_existing(normalized, existing_subscription, "billing_currency"),
+        "cancel_at_period_end": bool(normalized.get("cancel_at_period_end") or False),
         "source_event_id": event_record.get("event_id"),
         "source_occurred_at": occurred_at,
         "management_channel": normalized.get("management_channel") or provider,
@@ -87,6 +133,17 @@ def _apply_projection(event_record: Dict[str, Any]) -> str:
     }
     repo.upsert_subscription(subscription)
     _sync_team_organization(subscription)
+
+    existing_occurred = str((existing or {}).get("source_occurred_at") or "")
+    existing_subscription_id = str((existing or {}).get("source_subscription_id") or "").strip()
+    if (
+        existing_subscription_id
+        and existing_subscription_id != subscription_id
+        and existing_occurred
+        and occurred_at
+        and existing_occurred > occurred_at
+    ):
+        return "projected_subscription_only"
 
     subscriptions = [
         item
@@ -114,6 +171,7 @@ def _apply_projection(event_record: Dict[str, Any]) -> str:
     selected_plan_code = infer_plan_code(
         primary_subscription.get("plan_code") or primary_subscription.get("tier") or ""
     )
+    limit_overrides = _limit_overrides_for_subscription(primary_subscription)
     entitlement = {
         "user_id": user_id,
         "tier": legacy_tier_for_plan_code(selected_plan_code),
@@ -122,6 +180,9 @@ def _apply_projection(event_record: Dict[str, Any]) -> str:
         "expires_at": primary_subscription.get("expires_at"),
         "source_provider": selected_provider,
         "source_subscription_id": str(primary_subscription.get("subscription_id") or subscription_id),
+        "source_customer_id": primary_subscription.get("customer_id"),
+        "billing_email": primary_subscription.get("customer_email"),
+        "payment_method": primary_subscription.get("payment_method"),
         "capabilities": entitlement_capabilities_for_status(
             selected_plan_code,
             selected_status,
@@ -130,9 +191,15 @@ def _apply_projection(event_record: Dict[str, Any]) -> str:
             selected_plan_code,
             selected_status,
         ),
+        "limit_overrides": limit_overrides,
+        "limits_are_overrides": bool(limit_overrides),
         "management_channel": primary_subscription.get("management_channel") or selected_provider,
         "plan_code": selected_plan_code,
         "product_code": primary_subscription.get("product_code"),
+        "next_billed_at": primary_subscription.get("next_billed_at"),
+        "seat_count": primary_subscription.get("seat_count"),
+        "extra_storage_tb": primary_subscription.get("extra_storage_tb"),
+        "cancel_at_period_end": bool(primary_subscription.get("cancel_at_period_end") or False),
         "source_occurred_at": primary_subscription.get("source_occurred_at") or occurred_at,
         "revision": next_revision,
     }
@@ -163,6 +230,24 @@ def _apply_projection(event_record: Dict[str, Any]) -> str:
     )
 
     return "projected"
+
+
+def _limit_overrides_for_subscription(subscription: Dict[str, Any]) -> Dict[str, Any]:
+    overrides: Dict[str, Any] = {}
+    try:
+        seat_count = int(subscription.get("seat_count") or 0)
+    except (TypeError, ValueError):
+        seat_count = 0
+    if seat_count > 0:
+        overrides["members"] = seat_count
+
+    try:
+        extra_storage_tb = int(subscription.get("extra_storage_tb") or 0)
+    except (TypeError, ValueError):
+        extra_storage_tb = 0
+    if extra_storage_tb > 0:
+        overrides["shared_storage_gb"] = 1024 + (extra_storage_tb * 1024)
+    return overrides
 
 
 def _expire_reclaimed_prior_entitlement(
@@ -208,6 +293,8 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
 
         billing_event = repo.get_billing_event(event_id)
         if not billing_event:
+            continue
+        if billing_event.get("processed_at"):
             continue
 
         result = _apply_projection(billing_event)

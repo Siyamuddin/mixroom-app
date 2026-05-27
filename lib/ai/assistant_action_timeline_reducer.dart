@@ -591,6 +591,7 @@ class AssistantActionTimelineReducer {
       case 'auto_bpm_align':
       case 'tempo_detect_set_project':
       case 'duplicate':
+      case 'glue':
       case 'delete':
       case 'dialog_cleanup':
       case 'dialog_remove_range':
@@ -1022,6 +1023,48 @@ class AssistantActionTimelineReducer {
         );
       }
       return state.copyWith(clips: clips);
+    }
+
+    if (operation == 'glue') {
+      final indices = resolveTargetClipIndices(requireAudio: true);
+      if (indices.length < 2) return state.copyWith(clips: clips);
+      final selected = indices.where(isAudioAt).toList(growable: false);
+      if (selected.length < 2) return state.copyWith(clips: clips);
+      final row = clips[selected.first].rowIndex;
+      if (selected.any((idx) => clips[idx].rowIndex != row)) {
+        return state.copyWith(clips: clips);
+      }
+      final ordered = List<int>.from(selected)
+        ..sort((a, b) => clips[a].startMs.compareTo(clips[b].startMs));
+      final startMs = ordered.map((idx) => clips[idx].startMs).reduce(math.min);
+      final endMs = ordered.map((idx) => clips[idx].endMs).reduce(math.max);
+      final gain =
+          ordered.map((idx) => clips[idx].gain).reduce((a, b) => a + b) /
+              ordered.length;
+      final label =
+          (data['label'] ?? target['label'] ?? 'Glued Clip').toString().trim();
+      final glued = clips[ordered.first].copyWith(
+        id: 'glued_${ordered.map((idx) => clips[idx].id).join("_")}',
+        startMs: startMs,
+        sourceDurationMs: math.max(50.0, endMs - startMs),
+        trimStartMs: 0.0,
+        trimEndMs: math.max(50.0, endMs - startMs),
+        gain: gain,
+        label: label.isEmpty ? 'Glued Clip' : label,
+        tempoFollow: false,
+        clearDetectedTempoBpm: true,
+      );
+      for (final idx in ordered.reversed) {
+        clips.removeAt(idx);
+      }
+      final insertAt = ordered.first.clamp(0, clips.length).toInt();
+      clips.insert(insertAt, glued);
+      return state.copyWith(
+        clips: clips,
+        selectedClipIndices: <int>[insertAt],
+        primarySelectedClipIndex: insertAt,
+        selectedRowIndex: row,
+      );
     }
 
     if (operation == 'delete') {

@@ -9,6 +9,7 @@ AUTH_ACCOUNTS_TABLE = os.environ.get("AUTH_ACCOUNTS_TABLE", "").strip()
 AUTH_SESSIONS_TABLE = os.environ.get("AUTH_SESSIONS_TABLE", "").strip()
 AUTH_RATE_LIMITS_TABLE = os.environ.get("AUTH_RATE_LIMITS_TABLE", "").strip()
 CATALOG_MAPPINGS_TABLE = os.environ["CATALOG_MAPPINGS_TABLE"]
+FEATURE_FLAGS_TABLE = os.environ.get("FEATURE_FLAGS_TABLE", "").strip()
 COLLABORATION_TABLE = os.environ.get("COLLABORATION_TABLE", "").strip()
 CUSTOMER_LINKS_TABLE = os.environ["CUSTOMER_LINKS_TABLE"]
 PURCHASE_TOKENS_TABLE = os.environ["PURCHASE_TOKENS_TABLE"]
@@ -44,6 +45,9 @@ CLOUD_PROJECT_R2_ENDPOINT_URL = os.environ.get(
 ).strip()
 CLOUD_PROJECT_R2_ACCESS_KEY_ID = os.environ.get(
     "CLOUD_PROJECT_R2_ACCESS_KEY_ID", ""
+).strip()
+CLOUD_PROJECT_R2_SECRET_ACCESS_KEY_PARAMETER_NAME = os.environ.get(
+    "CLOUD_PROJECT_R2_SECRET_ACCESS_KEY_PARAMETER_NAME", ""
 ).strip()
 CLOUD_PROJECT_R2_SECRET_ACCESS_KEY_SECRET_ARN = os.environ.get(
     "CLOUD_PROJECT_R2_SECRET_ACCESS_KEY_SECRET_ARN", ""
@@ -90,7 +94,13 @@ APP_API_MAX_REQUEST_BYTES = int(
 COGNITO_REGION = os.environ.get("COGNITO_REGION", "").strip()
 COGNITO_USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID", "").strip()
 COGNITO_APP_CLIENT_ID = os.environ.get("COGNITO_APP_CLIENT_ID", "").strip()
+SOCIAL_AUTH_SECRET_PARAMETER_NAME = os.environ.get(
+    "SOCIAL_AUTH_SECRET_PARAMETER_NAME", ""
+).strip()
 SOCIAL_AUTH_SECRET_ARN = os.environ.get("SOCIAL_AUTH_SECRET_ARN", "").strip()
+APP_AUTH_SECRET_PARAMETER_NAME = os.environ.get(
+    "APP_AUTH_SECRET_PARAMETER_NAME", ""
+).strip()
 APP_AUTH_SECRET_ARN = os.environ.get("APP_AUTH_SECRET_ARN", "").strip()
 APP_AUTH_ISSUER = os.environ.get("APP_AUTH_ISSUER", "").strip() or "mixroom-native-auth"
 APP_AUTH_AUDIENCE = os.environ.get("APP_AUTH_AUDIENCE", "").strip() or "mixroom-app"
@@ -124,6 +134,9 @@ APP_AUTH_EMAIL_REPLY_TO_ADDRESS = os.environ.get(
 POSTMARK_SERVER_TOKEN = os.environ.get(
     "POSTMARK_SERVER_TOKEN", ""
 ).strip()
+POSTMARK_SERVER_TOKEN_PARAMETER_NAME = os.environ.get(
+    "POSTMARK_SERVER_TOKEN_PARAMETER_NAME", ""
+).strip()
 POSTMARK_SERVER_TOKEN_SECRET_ARN = os.environ.get(
     "POSTMARK_SERVER_TOKEN_SECRET_ARN", ""
 ).strip()
@@ -134,6 +147,9 @@ POSTMARK_MESSAGE_STREAM = os.environ.get(
     "POSTMARK_MESSAGE_STREAM", ""
 ).strip()
 STIBEE_ACCESS_TOKEN = os.environ.get("STIBEE_ACCESS_TOKEN", "").strip()
+STIBEE_ACCESS_TOKEN_PARAMETER_NAME = os.environ.get(
+    "STIBEE_ACCESS_TOKEN_PARAMETER_NAME", ""
+).strip()
 STIBEE_ACCESS_TOKEN_SECRET_ARN = os.environ.get(
     "STIBEE_ACCESS_TOKEN_SECRET_ARN", ""
 ).strip()
@@ -155,6 +171,9 @@ STIBEE_SUBSCRIPTION_STATUS_FIELD_KEY = os.environ.get(
 STIBEE_WEBHOOK_SHARED_SECRET = os.environ.get(
     "STIBEE_WEBHOOK_SHARED_SECRET", ""
 ).strip()
+STIBEE_WEBHOOK_SHARED_SECRET_PARAMETER_NAME = os.environ.get(
+    "STIBEE_WEBHOOK_SHARED_SECRET_PARAMETER_NAME", ""
+).strip()
 STIBEE_WEBHOOK_SHARED_SECRET_ARN = os.environ.get(
     "STIBEE_WEBHOOK_SHARED_SECRET_ARN", ""
 ).strip()
@@ -174,7 +193,11 @@ GOOGLE_OAUTH_CLIENT_IDS = [
 
 APPLE_BUNDLE_ID = os.environ.get("APPLE_BUNDLE_ID", "").strip()
 APPLE_APP_ID = int(os.environ.get("APPLE_APP_ID", "0") or "0") or None
+APPLE_ROOT_CA_PARAMETER_NAME = os.environ.get("APPLE_ROOT_CA_PARAMETER_NAME", "").strip()
 APPLE_ROOT_CA_SECRET_ARN = os.environ.get("APPLE_ROOT_CA_SECRET_ARN", "").strip()
+APPLE_SHARED_SECRET_PARAMETER_NAME = os.environ.get(
+    "APPLE_SHARED_SECRET_PARAMETER_NAME", ""
+).strip()
 APPLE_SHARED_SECRET_SECRET_ARN = os.environ.get(
     "APPLE_SHARED_SECRET_SECRET_ARN", ""
 ).strip()
@@ -183,6 +206,9 @@ APPLE_ENABLE_ONLINE_CHECKS = os.environ.get(
 ).lower() == "true"
 
 GOOGLE_PLAY_PACKAGE_NAME = os.environ.get("GOOGLE_PLAY_PACKAGE_NAME", "").strip()
+GOOGLE_SERVICE_ACCOUNT_PARAMETER_NAME = os.environ.get(
+    "GOOGLE_SERVICE_ACCOUNT_PARAMETER_NAME", ""
+).strip()
 GOOGLE_SERVICE_ACCOUNT_SECRET_ARN = os.environ.get(
     "GOOGLE_SERVICE_ACCOUNT_SECRET_ARN", ""
 ).strip()
@@ -191,8 +217,38 @@ GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL = os.environ.get(
     "GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL", ""
 ).strip()
 
+PADDLE_WEBHOOK_SECRET_PARAMETER_NAME = os.environ.get(
+    "PADDLE_WEBHOOK_SECRET_PARAMETER_NAME", ""
+).strip()
 PADDLE_WEBHOOK_SECRET_ARN = os.environ.get("PADDLE_WEBHOOK_SECRET_ARN", "").strip()
+TOSS_WEBHOOK_SECRET_PARAMETER_NAME = os.environ.get(
+    "TOSS_WEBHOOK_SECRET_PARAMETER_NAME", ""
+).strip()
 TOSS_WEBHOOK_SECRET_ARN = os.environ.get("TOSS_WEBHOOK_SECRET_ARN", "").strip()
+PADDLE_API_KEY_PARAMETER_NAME = os.environ.get(
+    "PADDLE_API_KEY_PARAMETER_NAME", ""
+).strip()
+PADDLE_API_KEY_SECRET_ARN = os.environ.get("PADDLE_API_KEY_SECRET_ARN", "").strip()
+PADDLE_API_BASE_URL = os.environ.get(
+    "PADDLE_API_BASE_URL",
+    "https://api.paddle.com",
+).strip() or "https://api.paddle.com"
+TOSS_SECRET_KEY_SECRET_ARN = os.environ.get("TOSS_SECRET_KEY_SECRET_ARN", "").strip()
+TOSS_API_BASE_URL = os.environ.get(
+    "TOSS_API_BASE_URL",
+    "https://api.tosspayments.com",
+).strip() or "https://api.tosspayments.com"
+TOSS_SECRET_KEY_PARAMETER_NAME = os.environ.get(
+    "TOSS_SECRET_KEY_PARAMETER_NAME", ""
+).strip()
+TOSS_BILLING_KEY_PARAMETER_PREFIX = os.environ.get(
+    "TOSS_BILLING_KEY_PARAMETER_PREFIX",
+    f"/mixroom/payment-credentials/{os.environ.get('ENVIRONMENT', 'dev')}/toss",
+).strip() or "/mixroom/payment-credentials/dev/toss"
+PAYMENT_CREDENTIAL_SECRET_PREFIX = os.environ.get(
+    "PAYMENT_CREDENTIAL_SECRET_PREFIX",
+    f"mixroom/payment-credentials/{os.environ.get('ENVIRONMENT', 'dev')}",
+).strip() or "mixroom/payment-credentials/dev"
 
 DEFAULT_CHECKOUT_URL = os.environ.get(
     "DEFAULT_CHECKOUT_URL",
@@ -206,6 +262,9 @@ POSTHOG_APP_HOST = os.environ.get(
 ).strip() or "https://us.posthog.com"
 POSTHOG_PROJECT_ID = os.environ.get("POSTHOG_PROJECT_ID", "").strip()
 POSTHOG_PERSONAL_API_KEY = os.environ.get("POSTHOG_PERSONAL_API_KEY", "").strip()
+POSTHOG_PERSONAL_API_KEY_PARAMETER_NAME = os.environ.get(
+    "POSTHOG_PERSONAL_API_KEY_PARAMETER_NAME", ""
+).strip()
 POSTHOG_PERSONAL_API_KEY_SECRET_ARN = os.environ.get(
     "POSTHOG_PERSONAL_API_KEY_SECRET_ARN", ""
 ).strip()

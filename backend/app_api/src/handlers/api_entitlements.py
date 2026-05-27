@@ -102,7 +102,9 @@ def _active_org_access(
             continue
         plan_code = str(organization.get("plan_code") or "").strip().lower() or infer_plan_code("")
         plan = catalog_plan_by_code(plan_code, catalog=catalog)
-        if org_is_active:
+        membership_role = str(organization.get("membership_role") or "").strip().lower()
+        grants_personal_entitlement = plan_code != "education" or membership_role == "student"
+        if org_is_active and grants_personal_entitlement:
             capabilities = merge_capabilities(capabilities, plan.get("capabilities") or {})
             limits = merge_limits(limits, plan.get("limits") or {})
             access_sources.append(
@@ -110,10 +112,11 @@ def _active_org_access(
                     "source_type": "organization",
                     "organization_id": organization.get("organization_id"),
                     "organization_name": organization.get("name"),
-                    "role": organization.get("membership_role"),
+                    "role": membership_role or organization.get("membership_role"),
                     "plan_code": plan.get("code"),
                     "plan_label": plan.get("label"),
                     "plan_group": plan.get("group"),
+                    "seat_limit": organization.get("seat_limit"),
                 }
             )
         organizations.append(
@@ -171,6 +174,9 @@ def _normalize_entitlement(raw: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     effective_management_channel = "free"
     effective_expires_at = None
     effective_product_code = ""
+    effective_next_billed_at = None
+    effective_seat_count = None
+    effective_extra_storage_tb = 0
 
     if personal_active:
         effective_plan = personal_plan
@@ -182,6 +188,9 @@ def _normalize_entitlement(raw: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         effective_management_channel = raw.get("management_channel") or "free"
         effective_expires_at = raw.get("expires_at")
         effective_product_code = raw.get("product_code") or ""
+        effective_next_billed_at = raw.get("next_billed_at")
+        effective_seat_count = raw.get("seat_count")
+        effective_extra_storage_tb = raw.get("extra_storage_tb") or 0
         effective_capabilities = merge_capabilities(
             effective_capabilities,
             personal_capabilities,
@@ -202,6 +211,9 @@ def _normalize_entitlement(raw: Dict[str, Any], user_id: str) -> Dict[str, Any]:
                 "source_subscription_id": raw.get("source_subscription_id") or "free-default",
                 "management_channel": raw.get("management_channel") or "free",
                 "product_code": raw.get("product_code") or "",
+                "next_billed_at": raw.get("next_billed_at"),
+                "seat_count": raw.get("seat_count"),
+                "extra_storage_tb": raw.get("extra_storage_tb") or 0,
             }
         )
 
@@ -230,6 +242,9 @@ def _normalize_entitlement(raw: Dict[str, Any], user_id: str) -> Dict[str, Any]:
             effective_management_channel = "admin"
             effective_expires_at = None
             effective_product_code = ""
+            effective_next_billed_at = None
+            effective_seat_count = source.get("seat_limit")
+            effective_extra_storage_tb = 0
 
     snapshot = {
         "user_id": user_id,
@@ -246,6 +261,14 @@ def _normalize_entitlement(raw: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         "plan_label": effective_plan.get("label"),
         "plan_group": effective_plan.get("group"),
         "product_code": effective_product_code,
+        "next_billed_at": effective_next_billed_at,
+        "seat_count": effective_seat_count,
+        "extra_storage_tb": effective_extra_storage_tb,
+        "paddle_subscription_id": (
+            effective_source_subscription_id
+            if str(effective_source_provider or "").strip().lower() == "paddle"
+            else ""
+        ),
         "limits": effective_limits,
         "access_sources": access_sources,
         "workspace_access_summary": collaboration.get("summary") or {},

@@ -174,6 +174,7 @@ def _integration_requested() -> bool:
     return any(
         (
             config.STIBEE_ACCESS_TOKEN,
+            config.STIBEE_ACCESS_TOKEN_PARAMETER_NAME,
             config.STIBEE_ACCESS_TOKEN_SECRET_ARN,
             config.STIBEE_APP_SIGNUPS_LIST_ID,
             config.STIBEE_NEWSLETTER_LIST_ID,

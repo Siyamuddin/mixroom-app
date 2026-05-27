@@ -9,10 +9,12 @@ from common.auth import extract_claims_from_event, json_response, unauthorized
 from common.billing_catalog_repository import BillingCatalogRepository
 from common.collaboration_repository import CollaborationRepository
 from common.events import RequestBodyError, parse_json_body
+from common.feature_flags import FeatureFlagsRepository
 from common.logging_utils import build_request_log_context, log_request_complete
 from common.monitoring import capture_exception, init_sentry
 
 catalog_repo = BillingCatalogRepository()
+feature_flags_repo = FeatureFlagsRepository()
 collaboration_repo = CollaborationRepository()
 access_repo = AdminAccessRepository()
 init_sentry("mixroom-app-api-admin-billing")
@@ -102,6 +104,23 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     provider_products=body.get("provider_products"),
                     offers=body.get("offers"),
                     support=body.get("support"),
+                    updated_by_user_id=admin_user_id,
+                    updated_by_email=admin_email,
+                )
+                payload["updated_by"] = admin_user_id
+                payload["updated_email"] = admin_email
+                return _finalize(json_response(200, payload))
+
+        if path.endswith("/v1/internal/admin/settings/feature-flags"):
+            if method == "GET":
+                payload = feature_flags_repo.get_flags()
+                payload["requested_by"] = admin_user_id
+                payload["requested_email"] = admin_email
+                return _finalize(json_response(200, payload))
+            if method == "PUT":
+                body = parse_json_body(event)
+                payload = feature_flags_repo.update_flags(
+                    flags=body.get("flags"),
                     updated_by_user_id=admin_user_id,
                     updated_by_email=admin_email,
                 )

@@ -13,8 +13,8 @@ except ModuleNotFoundError:  # pragma: no cover - local test fallback
     boto3 = None
 
 from . import config
+from .secrets import get_configured_secret_string, parse_json_or_text
 
-_secrets = boto3.client("secretsmanager") if boto3 is not None else None
 _ddb = boto3.resource("dynamodb") if boto3 is not None else None
 _secret_cache: str | None = None
 _auth_accounts = (
@@ -56,7 +56,7 @@ def extract_claims_from_event(event: Dict[str, Any]) -> Dict[str, Any]:
     headers = event.get("headers") or {}
     auth_header = headers.get("authorization") or headers.get("Authorization") or ""
     token = auth_header.replace("Bearer", "").strip()
-    if not token or not config.APP_AUTH_SECRET_ARN:
+    if not token or not (config.APP_AUTH_SECRET_PARAMETER_NAME or config.APP_AUTH_SECRET_ARN):
         return {}
 
     try:
@@ -148,14 +148,12 @@ def _load_secret() -> str:
     global _secret_cache
     if _secret_cache is not None:
         return _secret_cache
-    if _secrets is None:
-        raise ValueError("Secrets client is unavailable.")
-    response = _secrets.get_secret_value(SecretId=config.APP_AUTH_SECRET_ARN)
-    raw = response.get("SecretString") or ""
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        parsed = raw
+    raw = get_configured_secret_string(
+        parameter_name=config.APP_AUTH_SECRET_PARAMETER_NAME,
+        secret_arn=config.APP_AUTH_SECRET_ARN,
+        label="APP_AUTH_SECRET_PARAMETER_NAME or APP_AUTH_SECRET_ARN",
+    )
+    parsed = parse_json_or_text(raw)
     if isinstance(parsed, dict):
         for key in ("secret", "jwt_secret", "app_auth_secret", "key"):
             value = str(parsed.get(key) or "").strip()

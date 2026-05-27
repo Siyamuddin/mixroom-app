@@ -190,6 +190,7 @@ class AdminOverviewHandlerTests(unittest.TestCase):
         self.assertIn('"requested_email": "admin@example.com"', result["body"])
         self.assertIn('"total_users": 2', result["body"])
         self.assertIn('"can_edit_ai_settings": false', result["body"])
+        self.assertIn('"can_apply_entitlement_overrides": true', result["body"])
         self.assertEqual(admin_module.repo.calls[0]["user_limit"], 6)
         self.assertEqual(admin_module.repo.calls[0]["project_limit"], 5)
         self.assertEqual(admin_module.repo.calls[0]["trace_limit"], 4)

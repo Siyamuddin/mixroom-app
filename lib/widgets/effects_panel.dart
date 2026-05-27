@@ -12,20 +12,11 @@ import 'package:mixroom/helpers/effect_parameter_exposure.dart';
 import 'package:mixroom/helpers/halo.dart';
 import 'package:mixroom/helpers/mix_change_highlighter.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
+import 'package:mixroom/helpers/subscription_limits.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
 
 const int maxNumEffects = 10;
-const Set<String> _kBasicTierBuiltInEffects = <String>{
-  'Gain',
-  'Reverb',
-  'EQ 3-Band',
-  'EQ Parametric',
-  'Delay',
-  'Compressor',
-  'Clipper',
-  'Limiter',
-};
 
 void _showPluginUpgradeDialog(
   BuildContext context, {
@@ -1114,14 +1105,6 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
       ),
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
-        onLongPressStart: (details) => _showAutomateParameterSheet(
-          effectIndex: effectIndex,
-          effectName: effectName,
-          paramId: paramId,
-          paramName: paramName,
-          haloKeys: haloKeys,
-          anchorGlobalPos: details.globalPosition,
-        ),
         onSecondaryTapDown: PlatformCapabilities.current.isDesktop
             ? (details) => _showAutomateParameterSheet(
                   effectIndex: effectIndex,
@@ -2907,6 +2890,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
       "Distortion",
       "Degrade",
       "Pitch Shift",
+      "Pitch Corrector",
       "De-Esser",
       "Stereo",
       "Stereo Pro",
@@ -2978,7 +2962,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                     itemBuilder: (context, i) {
                       final name = fxChoices[i];
                       final isAllowed = !_isBasicTier ||
-                          _kBasicTierBuiltInEffects.contains(name);
+                          SubscriptionLimits.freeBuiltInEffects.contains(name);
                       return GestureDetector(
                         onTap: isAllowed
                             ? () async {
@@ -4727,14 +4711,6 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
       ),
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
-        onLongPressStart: (details) => _showAutomateParameterSheet(
-          effectIndex: effectIndex,
-          effectName: effectName,
-          paramId: paramId,
-          paramName: paramName,
-          haloKeys: haloKeys,
-          anchorGlobalPos: details.globalPosition,
-        ),
         onSecondaryTapDown: PlatformCapabilities.current.isDesktop
             ? (details) => _showAutomateParameterSheet(
                   effectIndex: effectIndex,
@@ -6112,6 +6088,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
       "Distortion",
       "Degrade",
       "Pitch Shift",
+      "Pitch Corrector",
       "De-Esser",
       "Stereo",
       "Stereo Pro",
@@ -6183,7 +6160,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                     itemBuilder: (context, i) {
                       final name = fxChoices[i];
                       final isAllowed = !_isBasicTier ||
-                          _kBasicTierBuiltInEffects.contains(name);
+                          SubscriptionLimits.freeBuiltInEffects.contains(name);
                       return GestureDetector(
                         onTap: isAllowed
                             ? () async {

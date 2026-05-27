@@ -85,25 +85,81 @@ Future<void> showAppMessageDialog({
   String buttonLabel = 'OK',
   IconData icon = Icons.info_outline,
 }) {
-  final colors = Theme.of(context).colorScheme;
   return showDialog<void>(
     context: context,
-    builder: (_) => AlertDialog(
-      title: Row(
-        children: [
-          Icon(icon, color: colors.primary),
-          const SizedBox(width: 8),
-          Expanded(child: Text(title)),
-        ],
-      ),
-      content: Text(message),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(buttonLabel),
+    barrierColor: Colors.black.withValues(alpha: 0.58),
+    builder: (dialogContext) {
+      return MixroomShellDialog(
+        maxWidth: 380,
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.14),
+                    ),
+                  ),
+                  child: Icon(
+                    icon,
+                    color: const Color(0xFFF4F4F4),
+                    size: 19,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      title,
+                      style: const TextStyle(
+                        fontFamily: 'Pretendard',
+                        color: Color(0xFFF4F4F4),
+                        fontSize: 18,
+                        height: 1.18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Text(
+              message,
+              style: TextStyle(
+                fontFamily: 'Pretendard',
+                color: Colors.white.withValues(alpha: 0.82),
+                fontSize: 13.5,
+                height: 1.36,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 18),
+            Align(
+              alignment: Alignment.centerRight,
+              child: SizedBox(
+                width: 118,
+                child: MixroomShellDialogButton(
+                  label: buttonLabel,
+                  accent: true,
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                ),
+              ),
+            ),
+          ],
         ),
-      ],
-    ),
+      );
+    },
   );
 }
 
@@ -121,82 +177,78 @@ Future<void> showAppUpgradeDialog({
     context: context,
     barrierColor: Colors.black.withValues(alpha: 0.58),
     builder: (_) {
-      return AlertDialog(
-        backgroundColor: const Color(0xFF5F666D),
-        surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
-          side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
-        ),
-        titlePadding: const EdgeInsets.fromLTRB(22, 22, 22, 8),
-        contentPadding: const EdgeInsets.fromLTRB(22, 0, 22, 8),
-        actionsPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-        title: Row(
+      return MixroomShellDialog(
+        maxWidth: 390,
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.11),
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-              ),
-              child: Icon(icon, color: Colors.white, size: 18),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                L10n.translate(context, title),
-                style: const TextStyle(
-                  fontFamily: 'Pretendard',
-                  color: Color(0xFFF4F4F4),
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                  height: 1.15,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.14),
+                    ),
+                  ),
+                  child: Icon(icon, color: Colors.white, size: 19),
                 ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      L10n.translate(context, title),
+                      style: const TextStyle(
+                        fontFamily: 'Pretendard',
+                        color: Color(0xFFF4F4F4),
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        height: 1.18,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Text(
+              L10n.translate(context, message),
+              style: TextStyle(
+                fontFamily: 'Pretendard',
+                color: Colors.white.withValues(alpha: 0.82),
+                fontSize: 13.5,
+                fontWeight: FontWeight.w500,
+                height: 1.36,
               ),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: MixroomShellDialogButton(
+                    label: L10n.translate(context, secondaryLabel),
+                    onPressed: () => Navigator.of(context).pop(false),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: MixroomShellDialogButton(
+                    label: L10n.translate(context, primaryLabel),
+                    accent: true,
+                    onPressed: () => Navigator.of(context).pop(true),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
-        content: Text(
-          L10n.translate(context, message),
-          style: TextStyle(
-            fontFamily: 'Pretendard',
-            color: Colors.white.withValues(alpha: 0.82),
-            fontSize: 13.5,
-            fontWeight: FontWeight.w500,
-            height: 1.35,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text(
-              L10n.translate(context, secondaryLabel),
-              style: TextStyle(
-                fontFamily: 'Pretendard',
-                color: Colors.white.withValues(alpha: 0.72),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF258AE6),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(18),
-              ),
-              textStyle: const TextStyle(
-                fontFamily: 'Pretendard',
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text(L10n.translate(context, primaryLabel)),
-          ),
-        ],
       );
     },
   );

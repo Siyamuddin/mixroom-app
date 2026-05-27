@@ -8,6 +8,7 @@ _DEFAULT_ENV = {
     "SUBSCRIPTIONS_TABLE": "subscriptions",
     "ENTITLEMENTS_TABLE": "entitlements",
     "CATALOG_MAPPINGS_TABLE": "catalog-mappings",
+    "FEATURE_FLAGS_TABLE": "feature-flags",
     "CUSTOMER_LINKS_TABLE": "customer-links",
     "PURCHASE_TOKENS_TABLE": "purchase-tokens",
     "RECONCILIATION_JOBS_TABLE": "reconcile-jobs",

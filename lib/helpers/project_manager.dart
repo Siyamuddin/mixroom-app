@@ -64,6 +64,7 @@ class BundledDemoProjectAsset {
 
 class ProjectManager {
   static const int maxProjects = 10000;
+  static const int maxFreeProjects = 10;
   static const String _bundledDemoAssetPrefix = 'assets/demo_projects/';
   static const String _bundledDemoDismissedStateFileName =
       '.bundled_demo_dismissed_v1.json';
@@ -173,7 +174,8 @@ class ProjectManager {
     return metas;
   }
 
-  static Future<bool> canCreateNew() async {
+  static Future<bool> canCreateNew(
+      {int maxProjects = ProjectManager.maxProjects}) async {
     final list = await listProjects();
     return list.length < maxProjects;
   }

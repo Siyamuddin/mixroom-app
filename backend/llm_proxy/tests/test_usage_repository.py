@@ -10,6 +10,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from common import ai_limits  # noqa: E402
 from common.usage_repository import AiUsageRepository  # noqa: E402
 
 
@@ -46,6 +47,10 @@ class _FakeCollaborationTable:
 
 
 class UsageRepositoryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        ai_limits.load_ai_limits.cache_clear()
+        ai_limits.clear_prompt_limits_cache()
+
     def test_load_user_context_prefers_plan_code_over_legacy_tier(self) -> None:
         repo = object.__new__(AiUsageRepository)
         repo._state_table = None
@@ -67,7 +72,67 @@ class UsageRepositoryTests(unittest.TestCase):
 
         self.assertEqual(context["subscription_tier"], "starter")
         self.assertEqual(context["tier"], "starter")
-        self.assertEqual(context["limits"]["ai_prompts_daily"], 400)
+        self.assertNotIn("limits", context)
+
+    def test_load_user_context_ignores_stale_free_limit_snapshot(self) -> None:
+        repo = object.__new__(AiUsageRepository)
+        repo._state_table = None
+        repo._events_table = None
+        repo._collaboration_table = None
+        repo._entitlements_table = _FakeEntitlementsTable(
+            {
+                "user_id": "user-123",
+                "plan_code": "free",
+                "status": "active",
+                "limits": {
+                    "ai_prompts_daily": 50,
+                    "ai_prompts_weekly": 200,
+                },
+            }
+        )
+
+        context = repo.load_user_context("user-123")
+        limits = ai_limits.get_prompt_limits(
+            context["subscription_tier"],
+            context.get("limit_overrides"),
+        )
+
+        self.assertEqual(context["subscription_tier"], "free")
+        self.assertNotIn("limit_overrides", context)
+        self.assertEqual(limits["daily_prompts"], 30)
+        self.assertEqual(limits["weekly_prompts"], 120)
+
+    def test_load_user_context_uses_explicit_limit_overrides(self) -> None:
+        repo = object.__new__(AiUsageRepository)
+        repo._state_table = None
+        repo._events_table = None
+        repo._collaboration_table = None
+        repo._entitlements_table = _FakeEntitlementsTable(
+            {
+                "user_id": "user-123",
+                "plan_code": "starter",
+                "status": "active",
+                "limits": {
+                    "ai_prompts_daily": 400,
+                    "ai_prompts_weekly": 1500,
+                },
+                "limit_overrides": {
+                    "ai_prompts_daily": 777,
+                    "ai_prompts_weekly": 1777,
+                },
+            }
+        )
+
+        context = repo.load_user_context("user-123")
+        limits = ai_limits.get_prompt_limits(
+            context["subscription_tier"],
+            context.get("limit_overrides"),
+        )
+
+        self.assertEqual(context["subscription_tier"], "starter")
+        self.assertEqual(context["limit_overrides"]["ai_prompts_daily"], 777)
+        self.assertEqual(limits["daily_prompts"], 777)
+        self.assertEqual(limits["weekly_prompts"], 1777)
 
     def test_load_user_context_uses_active_education_membership(self) -> None:
         repo = object.__new__(AiUsageRepository)
@@ -104,6 +169,42 @@ class UsageRepositoryTests(unittest.TestCase):
 
         self.assertEqual(context["subscription_tier"], "education")
         self.assertEqual(context["source_type"], "organization")
+
+    def test_load_user_context_ignores_non_student_education_membership(self) -> None:
+        repo = object.__new__(AiUsageRepository)
+        repo._state_table = None
+        repo._events_table = None
+        repo._entitlements_table = _FakeEntitlementsTable(
+            {
+                "user_id": "user-123",
+                "plan_code": "free",
+                "status": "active",
+            }
+        )
+        repo._collaboration_table = _FakeCollaborationTable(
+            [
+                {
+                    "entity_type": "membership",
+                    "user_id": "user-123",
+                    "organization_id": "edu-1",
+                    "status": "active",
+                    "role": "teacher",
+                }
+            ],
+            {
+                "edu-1": {
+                    "entity_type": "organization",
+                    "organization_id": "edu-1",
+                    "plan_code": "education",
+                    "status": "active",
+                }
+            },
+        )
+
+        context = repo.load_user_context("user-123")
+
+        self.assertEqual(context["subscription_tier"], "free")
+        self.assertNotIn("source_type", context)
 
     def test_load_user_context_keeps_higher_personal_plan_over_education(self) -> None:
         repo = object.__new__(AiUsageRepository)

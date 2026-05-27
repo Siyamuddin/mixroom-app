@@ -5,9 +5,14 @@ Description: Mixroom authenticated LLM proxy for beta chat
 Parameters:
   StageName:
     Type: String
-    Default: staging
+    Default: prod
   AppAuthSecretArn:
     Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws[a-zA-Z-]*:secretsmanager:[^:]+:[0-9]{12}:secret:.+$'
+  AppAuthSecretParameterName:
+    Type: String
+    Default: ''
   AppAuthIssuer:
     Type: String
     Default: mixroom-native-auth
@@ -27,6 +32,11 @@ Parameters:
       - gemini
   OpenAiApiKeySecretArn:
     Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws[a-zA-Z-]*:secretsmanager:[^:]+:[0-9]{12}:secret:.+$'
+  OpenAiApiKeyParameterName:
+    Type: String
+    Default: ''
   OpenAiModel:
     Type: String
     Default: gpt-5.4-mini
@@ -119,11 +129,13 @@ Globals:
     Environment:
       Variables:
         LLM_PROVIDER: !Ref LlmProvider
+        LLM_API_KEY_PARAMETER_NAME: !Ref OpenAiApiKeyParameterName
         LLM_API_KEY_SECRET_ARN: !Ref OpenAiApiKeySecretArn
         LLM_MODEL: !Ref OpenAiModel
         LLM_SECRET_CACHE_TTL_SECONDS: !Ref OpenAiSecretCacheTtlSeconds
         LLM_TIMEOUT_SECONDS: 30
         ANTHROPIC_VERSION: 2023-06-01
+        OPENAI_API_KEY_PARAMETER_NAME: !Ref OpenAiApiKeyParameterName
         OPENAI_API_KEY_SECRET_ARN: !Ref OpenAiApiKeySecretArn
         OPENAI_MODEL: !Ref OpenAiModel
         AI_RUNTIME_DEFAULT_MODEL: !Ref OpenAiModel
@@ -138,6 +150,7 @@ Globals:
         POSTHOG_HOST: !Ref PostHogHost
         SENTRY_DSN: !Ref SentryDsn
         ENVIRONMENT: !Ref StageName
+        APP_AUTH_SECRET_PARAMETER_NAME: !Ref AppAuthSecretParameterName
         APP_AUTH_SECRET_ARN: !Ref AppAuthSecretArn
         APP_AUTH_ISSUER: !Ref AppAuthIssuer
         APP_AUTH_AUDIENCE: !Ref AppAuthAudience
@@ -161,11 +174,9 @@ Globals:
 
 Conditions:
   ApiDetailedMetricsEnabledCondition: !Equals [!Ref ApiDetailedMetricsEnabled, 'true']
+  HasAppAuthSecretArn: !Not [!Equals [!Ref AppAuthSecretArn, '']]
+  HasOpenAiApiKeySecretArn: !Not [!Equals [!Ref OpenAiApiKeySecretArn, '']]
   HasCollaborationTableName: !Not [!Equals [!Ref CollaborationTableName, '']]
-  HasWebAclArn: !Not
-    - !Equals
-      - !Ref WebAclArn
-      - ''
   HasAlarmTopicArn: !Not
     - !Equals
       - !Ref AlarmTopicArn
@@ -284,10 +295,32 @@ Resources:
         - Statement:
             - Effect: Allow
               Action:
-                - secretsmanager:GetSecretValue
-              Resource:
-                - !Ref OpenAiApiKeySecretArn
-                - !Ref AppAuthSecretArn
+                - ssm:GetParameter
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+                  kms:CallerAccount: !Ref AWS::AccountId
+        - !If
+          - HasOpenAiApiKeySecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref OpenAiApiKeySecretArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasAppAuthSecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref AppAuthSecretArn
+          - !Ref AWS::NoValue
         - DynamoDBCrudPolicy:
             TableName: !Ref AiUsageMetricsTable
         - DynamoDBCrudPolicy:
@@ -336,9 +369,24 @@ Resources:
         - Statement:
             - Effect: Allow
               Action:
-                - secretsmanager:GetSecretValue
-              Resource:
-                - !Ref AppAuthSecretArn
+                - ssm:GetParameter
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+                  kms:CallerAccount: !Ref AWS::AccountId
+        - !If
+          - HasAppAuthSecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref AppAuthSecretArn
+          - !Ref AWS::NoValue
         - DynamoDBReadPolicy:
             TableName: !Ref AuthAccountsTableName
         - DynamoDBCrudPolicy:

@@ -145,14 +145,6 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return _finalize(json_response(200, payload))
 
         if method == "POST" and path.endswith("/v1/internal/admin/users/entitlement-override"):
-            if not can_edit_ai_settings(admin_email):
-                return _finalize(
-                    json_response(
-                        403,
-                        {"error": "Only andrew@mixroom.ai can apply entitlement overrides."},
-                    ),
-                    error="entitlement_override_editor_required",
-                )
             try:
                 body = parse_json_body(event)
             except RequestBodyError as exc:

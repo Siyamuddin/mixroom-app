@@ -444,6 +444,10 @@ void main() {
           planLabel: 'Producer',
           planGroup: 'individual',
           productCode: 'producer_monthly',
+          nextBilledAt: DateTime.now().toUtc().add(const Duration(minutes: 5)),
+          seatCount: null,
+          extraStorageTb: 0,
+          paddleSubscriptionId: '',
           limits: defaultLimitsForPlanCode('producer'),
           accessSources: const <AccountAccessSource>[],
           workspaceAccessSummary: const CollaborationAccessSummary(

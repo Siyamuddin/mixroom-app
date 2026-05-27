@@ -108,6 +108,33 @@ def _int_value(value: Any) -> int:
         return 0
 
 
+def _safe_plan_code(value: Any) -> str:
+    plan_code = str(value or "").strip().lower()
+    return plan_code or "free"
+
+
+def _explicit_limit_overrides(item: dict[str, Any]) -> dict[str, Any]:
+    overrides = item.get("limit_overrides")
+    if isinstance(overrides, dict):
+        return dict(overrides)
+    if item.get("limits_are_overrides") is True and isinstance(item.get("limits"), dict):
+        return dict(item.get("limits") or {})
+    return {}
+
+
+def _membership_role(membership: dict[str, Any]) -> str:
+    return str(
+        membership.get("membership_role") or membership.get("role") or ""
+    ).strip().lower()
+
+
+def _organization_grants_personal_entitlement(
+    plan_code: str,
+    membership: dict[str, Any],
+) -> bool:
+    return plan_code != "education" or _membership_role(membership) == "student"
+
+
 def _prompt_quota_remaining(used: int, limit: int) -> int:
     return max(max(int(limit or 0), 0) - max(int(used or 0), 0), 0)
 
@@ -186,9 +213,7 @@ class AiUsageRepository:
                 or {}
             )
             status = _effective_entitlement_status(item)
-            tier = str(
-                item.get("plan_code") or item.get("tier") or "free"
-            ).strip().lower()
+            tier = _safe_plan_code(item.get("plan_code") or item.get("tier"))
             if status not in _ACTIVE_ENTITLEMENT_STATUSES:
                 tier = "free"
             if tier:
@@ -198,11 +223,13 @@ class AiUsageRepository:
                     "tier": tier,
                     "entitlement_status": status,
                 }
-                if (
-                    status in _ACTIVE_ENTITLEMENT_STATUSES
-                    and isinstance(item.get("limits"), dict)
-                ):
-                    context["limits"] = item.get("limits") or {}
+                limit_overrides = (
+                    _explicit_limit_overrides(item)
+                    if status in _ACTIVE_ENTITLEMENT_STATUSES
+                    else {}
+                )
+                if limit_overrides:
+                    context["limit_overrides"] = limit_overrides
                 entitlement_context = context
 
         organization_context = self._load_organization_entitlement_context(user_id)
@@ -255,10 +282,15 @@ class AiUsageRepository:
             organization = self._load_organization(organization_id)
             if not organization:
                 continue
-            if str(organization.get("status") or "").strip().lower() != "active":
+            if str(organization.get("status") or "").strip().lower() not in {
+                "active",
+                "past_due",
+            }:
                 continue
-            plan_code = str(organization.get("plan_code") or "").strip().lower()
+            plan_code = _safe_plan_code(organization.get("plan_code"))
             if plan_code not in _ORG_PLAN_CODES:
+                continue
+            if not _organization_grants_personal_entitlement(plan_code, membership):
                 continue
             context = {
                 "user_id": user_id,
@@ -296,11 +328,15 @@ class AiUsageRepository:
             return current
         current_limits = get_prompt_limits(
             str(current.get("subscription_tier") or "free"),
-            current.get("limits") if isinstance(current.get("limits"), dict) else None,
+            current.get("limit_overrides")
+            if isinstance(current.get("limit_overrides"), dict)
+            else None,
         )
         candidate_limits = get_prompt_limits(
             str(candidate.get("subscription_tier") or "free"),
-            candidate.get("limits") if isinstance(candidate.get("limits"), dict) else None,
+            candidate.get("limit_overrides")
+            if isinstance(candidate.get("limit_overrides"), dict)
+            else None,
         )
         current_score = (
             int(current_limits.get("daily_prompts") or 0),

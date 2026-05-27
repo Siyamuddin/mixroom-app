@@ -14,24 +14,45 @@ class ApiBillingTests(unittest.TestCase):
         self.repo = FakeBillingRepo()
         self.original_repo = module.repo
         self.original_catalog_repo = module.catalog_repo
+        self.original_collaboration_repo = module.collaboration_repo
         self.original_extract_user_id = module.extract_user_id_from_event
         self.original_capture_event = module.capture_event
         self.original_verify_apple_purchase = module.verify_apple_purchase
         self.original_verify_google_purchase = module.verify_google_purchase
+        self.original_build_management_links = module.build_management_links
+        self.original_confirm_toss_payment = module.confirm_toss_payment
+        self.original_issue_toss_billing_key = module.issue_toss_billing_key
+        self.original_charge_toss_billing_key = module.charge_toss_billing_key
+        self.original_delete_toss_billing_key = module.delete_toss_billing_key
+        self.original_put_secure_parameter_string = module.put_secure_parameter_string
+        self.original_load_provider_api_key = module.load_provider_api_key
         module.repo = self.repo
         module.catalog_repo = mock.Mock()
         module.catalog_repo.get_catalog.return_value = default_catalog()
         module.catalog_repo.get_product.return_value = {}
+        module.collaboration_repo = mock.Mock()
+        module.collaboration_repo.build_user_access_snapshot.return_value = {
+            "organizations": [],
+            "summary": {},
+        }
         module.extract_user_id_from_event = lambda event: "user-1"
         module.capture_event = mock.Mock()
 
     def tearDown(self):
         module.repo = self.original_repo
         module.catalog_repo = self.original_catalog_repo
+        module.collaboration_repo = self.original_collaboration_repo
         module.extract_user_id_from_event = self.original_extract_user_id
         module.capture_event = self.original_capture_event
         module.verify_apple_purchase = self.original_verify_apple_purchase
         module.verify_google_purchase = self.original_verify_google_purchase
+        module.build_management_links = self.original_build_management_links
+        module.confirm_toss_payment = self.original_confirm_toss_payment
+        module.issue_toss_billing_key = self.original_issue_toss_billing_key
+        module.charge_toss_billing_key = self.original_charge_toss_billing_key
+        module.delete_toss_billing_key = self.original_delete_toss_billing_key
+        module.put_secure_parameter_string = self.original_put_secure_parameter_string
+        module.load_provider_api_key = self.original_load_provider_api_key
 
     def test_checkout_session_uses_toss_for_kr(self):
         response = module.handler(
@@ -49,6 +70,45 @@ class ApiBillingTests(unittest.TestCase):
         self.assertEqual(self.repo.queued_projection_ids, [])
         event = next(iter(self.repo.billing_events.values()))
         self.assertEqual(event["event_type"], "checkout_session_created")
+
+    def test_checkout_session_persists_toss_widget_order(self):
+        module.catalog_repo.get_product.return_value = {
+            "code": "studio_monthly",
+            "plan_code": "studio",
+            "type": "subscription",
+            "billing_interval": "monthly",
+            "label": "Studio Monthly",
+            "enabled": True,
+            "price_krw": 149000,
+        }
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/checkout-session",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps(
+                    {
+                        "region_code": "KR",
+                        "product_code": "studio_monthly",
+                        "additional_seats": 2,
+                        "extra_storage_tb": 1,
+                    }
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertEqual(payload["provider"], "toss")
+        self.assertEqual(payload["toss"]["flow"], "payment")
+        self.assertEqual(payload["toss"]["amount"], 208000)
+        self.assertEqual(payload["toss"]["seat_count"], 7)
+        order_id = payload["toss"]["order_id"]
+        event = self.repo.get_billing_event(f"toss:checkout-order-{order_id}")
+        self.assertIsNotNone(event)
+        self.assertEqual(event["user_id"], "user-1")
+        self.assertEqual(event["raw_payload"]["product_code"], "studio_monthly")
 
     def test_checkout_session_rejects_contract_products(self):
         module.catalog_repo.get_product.return_value = {
@@ -100,7 +160,7 @@ class ApiBillingTests(unittest.TestCase):
         self.assertIn("already have an active subscription", response["body"])
         self.assertEqual(self.repo.billing_events, {})
 
-    def test_checkout_session_allows_team_plan_with_active_personal_subscription(self):
+    def test_checkout_session_rejects_team_plan_with_active_personal_subscription(self):
         self.repo.put_entitlement(
             {
                 "user_id": "user-1",
@@ -133,10 +193,90 @@ class ApiBillingTests(unittest.TestCase):
             object(),
         )
 
+        self.assertEqual(response["statusCode"], 409)
+        self.assertIn("already have an active subscription", response["body"])
+        self.assertEqual(self.repo.billing_events, {})
+
+    def test_checkout_session_allows_team_plan_with_non_billing_entitlement(self):
+        self.repo.put_entitlement(
+            {
+                "user_id": "user-1",
+                "plan_code": "free",
+                "status": "active",
+                "source_provider": "admin_grant",
+                "capabilities": {},
+                "management_channel": "free",
+                "revision": 1,
+            }
+        )
+        module.catalog_repo.get_product.return_value = {
+            "code": "studio_monthly",
+            "type": "subscription",
+            "plan_code": "studio",
+            "enabled": True,
+            "management_channel": "web",
+        }
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/checkout-session",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps(
+                    {"region_code": "US", "product_code": "studio_monthly"}
+                ),
+            },
+            object(),
+        )
+
         self.assertEqual(response["statusCode"], 200)
         payload = decode_json_response(response)
         self.assertEqual(payload["product"]["plan_code"], "studio")
         self.assertEqual(len(self.repo.billing_events), 1)
+
+    def test_checkout_session_rejects_active_owned_subscription_even_when_entitlement_is_admin_grant(self):
+        self.repo.upsert_subscription(
+            {
+                "subscription_id": "sub-active",
+                "user_id": "user-1",
+                "provider": "paddle",
+                "plan_code": "studio",
+                "status": "active",
+                "product_code": "studio_monthly",
+            }
+        )
+        self.repo.put_entitlement(
+            {
+                "user_id": "user-1",
+                "plan_code": "education",
+                "status": "active",
+                "source_provider": "admin_grant",
+                "capabilities": {},
+                "management_channel": "admin",
+                "revision": 1,
+            }
+        )
+        module.catalog_repo.get_product.return_value = {
+            "code": "studio_monthly",
+            "type": "subscription",
+            "plan_code": "studio",
+            "enabled": True,
+            "management_channel": "web",
+        }
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/checkout-session",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps(
+                    {"region_code": "KR", "product_code": "studio_monthly"}
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 409)
+        self.assertIn("already have an active subscription", response["body"])
+        self.assertEqual(self.repo.billing_events, {})
 
     def test_mobile_verify_google_persists_event_and_tracks_analytics(self):
         module.verify_google_purchase = mock.Mock(
@@ -186,6 +326,737 @@ class ApiBillingTests(unittest.TestCase):
         self.assertEqual(tracked_kwargs["distinct_id"], "device-1")
         self.assertEqual(tracked_kwargs["properties"]["billing_cycle"], "monthly")
         self.assertEqual(self.repo.queued_projection_ids, [payload["event_id"]])
+
+    def test_toss_confirm_confirms_payment_and_enqueues_projection(self):
+        module.catalog_repo.get_product.return_value = {
+            "code": "studio_monthly",
+            "plan_code": "studio",
+            "type": "subscription",
+            "billing_interval": "monthly",
+            "label": "Studio Monthly",
+            "enabled": True,
+            "price_krw": 149000,
+        }
+        checkout = module.handler(
+            {
+                "rawPath": "/v1/billing/web/checkout-session",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps(
+                    {
+                        "region_code": "KR",
+                        "product_code": "studio_monthly",
+                    }
+                ),
+            },
+            object(),
+        )
+        order = decode_json_response(checkout)["toss"]
+        module.confirm_toss_payment = mock.Mock(
+            return_value={
+                "paymentKey": "pay-1",
+                "orderId": order["order_id"],
+                "status": "DONE",
+                "totalAmount": 149000,
+                "customerKey": order["customer_key"],
+                "metadata": {
+                    "mixroom_user_id": "attacker",
+                    "plan_code": "starter",
+                    "product_code": "starter_monthly",
+                },
+            }
+        )
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/toss/confirm",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps(
+                    {
+                        "payment_key": "pay-1",
+                        "order_id": order["order_id"],
+                        "amount": 149000,
+                        "product_code": "starter_monthly",
+                    }
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertTrue(payload["accepted"])
+        self.assertEqual(payload["provider"], "toss")
+        self.assertEqual(payload["normalized"]["plan_code"], "studio")
+        self.assertEqual(payload["normalized"]["product_code"], "studio_monthly")
+        self.assertEqual(payload["normalized"]["customer_id"], order["customer_key"])
+        self.assertNotIn("payment", payload)
+        self.assertEqual(self.repo.queued_projection_ids, [payload["event_id"]])
+        module.confirm_toss_payment.assert_called_once_with("pay-1", order["order_id"], 149000)
+
+    def test_toss_confirm_rejects_checkout_order_without_auth(self):
+        module.catalog_repo.get_product.return_value = {
+            "code": "studio_monthly",
+            "plan_code": "studio",
+            "type": "subscription",
+            "billing_interval": "monthly",
+            "label": "Studio Monthly",
+            "enabled": True,
+            "price_krw": 149000,
+        }
+        checkout = module.handler(
+            {
+                "rawPath": "/v1/billing/web/checkout-session",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps(
+                    {
+                        "region_code": "KR",
+                        "product_code": "studio_monthly",
+                        "additional_seats": 2,
+                        "extra_storage_tb": 1,
+                    }
+                ),
+            },
+            object(),
+        )
+        order = decode_json_response(checkout)["toss"]
+        module.extract_user_id_from_event = lambda event: ""
+        module.confirm_toss_payment = mock.Mock(
+            return_value={
+                "paymentKey": "pay-widget-1",
+                "orderId": order["order_id"],
+                "status": "DONE",
+                "totalAmount": 208000,
+                "approvedAt": "2026-05-21T00:00:00+00:00",
+                "customerKey": order["customer_key"],
+                "method": "card",
+            }
+        )
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/toss/confirm",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps(
+                    {
+                        "payment_key": "pay-widget-1",
+                        "order_id": order["order_id"],
+                        "amount": 208000,
+                    }
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 401)
+        payload = decode_json_response(response)
+        self.assertEqual(payload["error"], "Unauthorized")
+        module.confirm_toss_payment.assert_not_called()
+
+    def test_toss_same_plan_one_time_renewal_extends_existing_period(self):
+        self.repo.upsert_subscription(
+            {
+                "subscription_id": "toss-payment:old-order",
+                "user_id": "user-1",
+                "provider": "toss",
+                "status": "active",
+                "plan_code": "starter",
+                "product_code": "starter_monthly",
+                "expires_at": "2026-06-21T00:00:00+00:00",
+                "billing_amount": 6600,
+                "billing_currency": "KRW",
+            }
+        )
+        self.repo.put_entitlement(
+            {
+                "user_id": "user-1",
+                "source_provider": "toss",
+                "source_subscription_id": "toss-payment:old-order",
+                "plan_code": "starter",
+                "status": "active",
+                "revision": 1,
+            }
+        )
+        module.catalog_repo.get_product.return_value = {
+            "code": "starter_monthly",
+            "plan_code": "starter",
+            "type": "subscription",
+            "billing_interval": "monthly",
+            "label": "Starter Monthly",
+            "enabled": True,
+            "price_krw": 6600,
+        }
+
+        checkout = module.handler(
+            {
+                "rawPath": "/v1/billing/web/subscription/change",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps({"product_code": "starter_monthly"}),
+            },
+            object(),
+        )
+        order = decode_json_response(checkout)["toss"]
+        module.confirm_toss_payment = mock.Mock(
+            return_value={
+                "paymentKey": "pay-renew-1",
+                "orderId": order["order_id"],
+                "status": "DONE",
+                "totalAmount": 6600,
+                "approvedAt": "2026-06-01T00:00:00+00:00",
+                "customerKey": order["customer_key"],
+            }
+        )
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/toss/confirm",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps(
+                    {
+                        "payment_key": "pay-renew-1",
+                        "order_id": order["order_id"],
+                        "amount": 6600,
+                    }
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertEqual(payload["normalized"]["product_code"], "starter_monthly")
+        self.assertTrue(str(payload["normalized"]["expires_at"]).startswith("2026-07-21"))
+
+    def test_toss_confirm_duplicate_returns_409_without_reconfirming(self):
+        self.repo.put_billing_event_if_new(
+            {
+                "event_id": "toss:confirm-pay-1",
+                "event_type": "toss_payment_confirmed",
+                "provider": "toss",
+                "provider_event_id": "confirm-pay-1",
+                "user_id": "user-1",
+                "normalized": {"subscription_id": "toss-payment:order-1"},
+            }
+        )
+        module.confirm_toss_payment = mock.Mock()
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/toss/confirm",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps(
+                    {
+                        "payment_key": "pay-1",
+                        "order_id": "order-1",
+                        "amount": 149000,
+                    }
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 409)
+        payload = decode_json_response(response)
+        self.assertTrue(payload["idempotent_replay"])
+        module.confirm_toss_payment.assert_not_called()
+
+    def test_toss_confirm_rejects_amount_mismatch(self):
+        module.catalog_repo.get_product.return_value = {
+            "code": "studio_monthly",
+            "plan_code": "studio",
+            "type": "subscription",
+            "billing_interval": "monthly",
+            "label": "Studio Monthly",
+            "enabled": True,
+            "price_krw": 149000,
+        }
+        checkout = module.handler(
+            {
+                "rawPath": "/v1/billing/web/checkout-session",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps(
+                    {
+                        "region_code": "KR",
+                        "product_code": "studio_monthly",
+                    }
+                ),
+            },
+            object(),
+        )
+        order = decode_json_response(checkout)["toss"]
+        module.confirm_toss_payment = mock.Mock()
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/toss/confirm",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps(
+                    {
+                        "payment_key": "pay-1",
+                        "order_id": order["order_id"],
+                        "amount": 1000,
+                    }
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 409)
+        self.assertIn("amount mismatch", response["body"])
+        module.confirm_toss_payment.assert_not_called()
+        self.assertEqual(self.repo.queued_projection_ids, [])
+
+    def test_toss_billing_key_issues_stores_charges_and_enqueues_projection(self):
+        module.issue_toss_billing_key = mock.Mock(
+            return_value={
+                "billingKey": "billing-key-1",
+                "card": {"company": "Shinhan", "number": "123456******7890"},
+            }
+        )
+        module.charge_toss_billing_key = mock.Mock(
+            return_value={
+                "paymentKey": "pay-billing-1",
+                "orderId": "order-1",
+                "status": "DONE",
+                "totalAmount": 208000,
+                "approvedAt": "2026-05-19T00:00:00+00:00",
+                "customerKey": "customer-1",
+            }
+        )
+        module.put_secure_parameter_string = mock.Mock(return_value="/mixroom/payment-credentials/test/toss/customer-1")
+        module.catalog_repo.get_product.return_value = {
+            "code": "studio_monthly",
+            "plan_code": "studio",
+            "type": "subscription",
+            "billing_interval": "monthly",
+            "label": "Studio Monthly",
+            "enabled": True,
+            "price_krw": 149000,
+        }
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/toss/billing-key",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps(
+                    {
+                        "auth_key": "auth-1",
+                        "customer_key": "customer-1",
+                        "product_code": "studio_monthly",
+                        "order_id": "order-1",
+                        "additional_seats": 2,
+                        "extra_storage_tb": 1,
+                    }
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertTrue(payload["accepted"])
+        self.assertEqual(payload["normalized"]["plan_code"], "studio")
+        self.assertEqual(
+            payload["normalized"]["billing_key_parameter_name"],
+            "/mixroom/payment-credentials/test/toss/customer-1",
+        )
+        self.assertEqual(payload["normalized"]["billing_amount"], 208000)
+        self.assertEqual(payload["normalized"]["seat_count"], 7)
+        self.assertEqual(payload["normalized"]["extra_storage_tb"], 1)
+        self.assertEqual(
+            self.repo.customer_links["toss:customer-1"]["billing_key_parameter_name"],
+            "/mixroom/payment-credentials/test/toss/customer-1",
+        )
+        self.assertEqual(self.repo.queued_projection_ids, [payload["event_id"]])
+        module.issue_toss_billing_key.assert_called_once_with("auth-1", "customer-1")
+        module.charge_toss_billing_key.assert_called_once()
+        self.assertEqual(module.charge_toss_billing_key.call_args.kwargs["amount"], 208000)
+
+    def test_toss_billing_key_duplicate_order_does_not_charge_twice(self):
+        module.issue_toss_billing_key = mock.Mock(return_value={"billingKey": "billing-key-1"})
+        module.charge_toss_billing_key = mock.Mock(
+            return_value={
+                "paymentKey": "pay-billing-1",
+                "orderId": "order-1",
+                "status": "DONE",
+                "totalAmount": 149000,
+                "approvedAt": "2026-05-19T00:00:00+00:00",
+                "customerKey": "customer-1",
+            }
+        )
+        module.put_secure_parameter_string = mock.Mock(return_value="/mixroom/payment-credentials/test/toss/customer-1")
+        module.catalog_repo.get_product.return_value = {
+            "code": "studio_monthly",
+            "plan_code": "studio",
+            "type": "subscription",
+            "billing_interval": "monthly",
+            "label": "Studio Monthly",
+            "enabled": True,
+            "price_krw": 149000,
+        }
+        event = {
+            "rawPath": "/v1/billing/web/toss/billing-key",
+            "requestContext": {"http": {"method": "POST"}},
+            "body": json.dumps(
+                {
+                    "auth_key": "auth-1",
+                    "customer_key": "customer-1",
+                    "product_code": "studio_monthly",
+                    "order_id": "order-1",
+                }
+            ),
+        }
+
+        first = module.handler(event, object())
+        second = module.handler(event, object())
+
+        self.assertEqual(first["statusCode"], 200)
+        self.assertEqual(second["statusCode"], 200)
+        self.assertTrue(decode_json_response(second)["idempotent_replay"])
+        module.charge_toss_billing_key.assert_called_once()
+
+    def test_toss_cancel_marks_subscription_cancel_at_period_end(self):
+        self.repo.upsert_subscription(
+            {
+                "subscription_id": "sub-1",
+                "user_id": "user-1",
+                "provider": "toss",
+                "status": "active",
+                "next_billed_at": "2026-06-19T00:00:00+00:00",
+                "billing_key_parameter_name": "/mixroom/payment-credentials/test/toss/customer-1",
+            }
+        )
+        self.repo.put_entitlement(
+            {
+                "user_id": "user-1",
+                "source_provider": "toss",
+                "source_subscription_id": "sub-1",
+                "plan_code": "studio",
+                "status": "active",
+            }
+        )
+        module.load_provider_api_key = mock.Mock(return_value="billing-key-1")
+        module.delete_toss_billing_key = mock.Mock(return_value={})
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/toss/cancel",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": "{}",
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertTrue(self.repo.subscriptions["sub-1"]["cancel_at_period_end"])
+        self.assertTrue(self.repo.entitlements["user-1"]["cancel_at_period_end"])
+        self.assertEqual(self.repo.entitlements["user-1"]["expires_at"], "2026-06-19T00:00:00+00:00")
+        module.delete_toss_billing_key.assert_called_once_with("billing-key-1")
+
+    def test_toss_subscription_update_changes_next_renewal_amount_and_addons(self):
+        self.repo.upsert_subscription(
+            {
+                "subscription_id": "toss-billing:customer-1:studio_monthly",
+                "user_id": "user-1",
+                "provider": "toss",
+                "status": "active",
+                "plan_code": "studio",
+                "product_code": "studio_monthly",
+                "next_billed_at": "2026-06-19T00:00:00+00:00",
+                "billing_amount": 149000,
+            }
+        )
+        self.repo.put_entitlement(
+            {
+                "user_id": "user-1",
+                "source_provider": "toss",
+                "source_subscription_id": "toss-billing:customer-1:studio_monthly",
+                "plan_code": "studio",
+                "status": "active",
+                "revision": 1,
+            }
+        )
+        module.catalog_repo.get_product.return_value = {
+            "code": "studio_monthly",
+            "plan_code": "studio",
+            "type": "subscription",
+            "billing_interval": "monthly",
+            "label": "Studio Monthly",
+            "enabled": True,
+            "price_krw": 149000,
+        }
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/toss/subscription",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps(
+                    {
+                        "product_code": "studio_monthly",
+                        "additional_seats": 3,
+                        "extra_storage_tb": 2,
+                    }
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertEqual(payload["effective"], "next_renewal")
+        self.assertEqual(payload["billing_amount"], 245000)
+        self.assertEqual(payload["seat_count"], 8)
+        self.assertEqual(payload["extra_storage_tb"], 2)
+        entitlement = self.repo.entitlements["user-1"]
+        self.assertEqual(entitlement["seat_count"], 8)
+        self.assertEqual(entitlement["extra_storage_tb"], 2)
+        self.assertEqual(entitlement["limit_overrides"]["members"], 8)
+        self.assertEqual(entitlement["limit_overrides"]["shared_storage_gb"], 3072)
+
+    def test_web_subscription_change_updates_paddle_subscription(self):
+        self.repo.upsert_subscription(
+            {
+                "subscription_id": "sub_123",
+                "user_id": "user-1",
+                "provider": "paddle",
+                "customer_id": "ctm_123",
+                "status": "active",
+                "plan_code": "starter",
+                "product_code": "starter_monthly",
+                "next_billed_at": "2026-06-19T00:00:00+00:00",
+            }
+        )
+        self.repo.put_entitlement(
+            {
+                "user_id": "user-1",
+                "source_provider": "paddle",
+                "source_subscription_id": "sub_123",
+                "plan_code": "starter",
+                "status": "active",
+                "revision": 1,
+            }
+        )
+        module.catalog_repo.get_product.return_value = {
+            "code": "producer_monthly",
+            "plan_code": "producer",
+            "type": "subscription",
+            "billing_interval": "monthly",
+            "label": "Producer Monthly",
+            "enabled": True,
+        }
+
+        with mock.patch.object(
+            module,
+            "_paddle_patch_subscription",
+            return_value={
+                "data": {
+                    "id": "sub_123",
+                    "status": "active",
+                    "next_billed_at": "2026-07-19T00:00:00Z",
+                }
+            },
+        ) as patch_subscription:
+            response = module.handler(
+                {
+                    "rawPath": "/v1/billing/web/subscription/change",
+                    "requestContext": {"http": {"method": "POST"}},
+                    "body": json.dumps({"product_code": "producer_monthly"}),
+                },
+                object(),
+            )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertEqual(payload["provider"], "paddle")
+        self.assertEqual(payload["plan_code"], "producer")
+        self.assertEqual(payload["proration_billing_mode"], "prorated_immediately")
+        patch_subscription.assert_called_once()
+        request_payload = patch_subscription.call_args.args[1]
+        self.assertEqual(request_payload["items"][0]["price_id"], "pri_01krvt0hvcvhx4dtr1tdhyhp32")
+        self.assertEqual(self.repo.subscriptions["sub_123"]["plan_code"], "producer")
+        self.assertEqual(self.repo.entitlements["user-1"]["plan_code"], "producer")
+
+    def test_web_subscription_change_preview_quotes_paddle_subscription(self):
+        self.repo.upsert_subscription(
+            {
+                "subscription_id": "sub_123",
+                "user_id": "user-1",
+                "provider": "paddle",
+                "customer_id": "ctm_123",
+                "status": "active",
+                "plan_code": "starter",
+                "product_code": "starter_monthly",
+                "billing_amount": 500,
+                "billing_currency": "USD",
+                "next_billed_at": "2026-06-19T00:00:00+00:00",
+            }
+        )
+        self.repo.put_entitlement(
+            {
+                "user_id": "user-1",
+                "source_provider": "paddle",
+                "source_subscription_id": "sub_123",
+                "plan_code": "starter",
+                "status": "active",
+                "revision": 1,
+            }
+        )
+        module.catalog_repo.get_product.side_effect = lambda code: {
+            "starter_monthly": {
+                "code": "starter_monthly",
+                "plan_code": "starter",
+                "type": "subscription",
+                "billing_interval": "monthly",
+                "label": "Starter Monthly",
+                "enabled": True,
+                "price_display": "$5/mo",
+            },
+            "producer_monthly": {
+                "code": "producer_monthly",
+                "plan_code": "producer",
+                "type": "subscription",
+                "billing_interval": "monthly",
+                "label": "Producer Monthly",
+                "enabled": True,
+                "price_display": "$20/mo",
+            },
+        }.get(code, {})
+
+        with mock.patch.object(
+            module,
+            "_paddle_preview_subscription",
+            return_value={
+                "data": {
+                    "immediate_transaction": {
+                        "currency_code": "USD",
+                        "details": {"totals": {"total": "1500"}},
+                    },
+                    "next_transaction": {
+                        "currency_code": "USD",
+                        "billed_at": "2026-06-19T00:00:00Z",
+                        "details": {"totals": {"total": "2000"}},
+                    },
+                    "update_summary": {"result": "debit"},
+                }
+            },
+        ) as preview_subscription:
+            response = module.handler(
+                {
+                    "rawPath": "/v1/billing/web/subscription/change/preview",
+                    "requestContext": {"http": {"method": "POST"}},
+                    "body": json.dumps({"product_code": "producer_monthly"}),
+                },
+                object(),
+            )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertTrue(payload["preview"])
+        self.assertEqual(payload["provider"], "paddle")
+        self.assertFalse(payload["checkout_required"])
+        self.assertEqual(payload["current"]["price_formatted"], "$5.00")
+        self.assertEqual(payload["target"]["price_formatted"], "$20.00")
+        self.assertEqual(payload["amount_due_now"]["price_formatted"], "$15.00")
+        self.assertEqual(payload["next_transaction"]["price_formatted"], "$20.00")
+        preview_subscription.assert_called_once()
+        self.assertNotEqual(self.repo.subscriptions["sub_123"]["plan_code"], "producer")
+
+    def test_web_subscription_change_creates_toss_one_time_checkout(self):
+        self.repo.upsert_subscription(
+            {
+                "subscription_id": "toss-payment:order-1",
+                "user_id": "user-1",
+                "provider": "toss",
+                "status": "active",
+                "plan_code": "starter",
+                "product_code": "starter_monthly",
+            }
+        )
+        self.repo.put_entitlement(
+            {
+                "user_id": "user-1",
+                "source_provider": "toss",
+                "source_subscription_id": "toss-payment:order-1",
+                "plan_code": "starter",
+                "status": "active",
+                "revision": 1,
+            }
+        )
+        module.catalog_repo.get_product.return_value = {
+            "code": "producer_monthly",
+            "plan_code": "producer",
+            "type": "subscription",
+            "billing_interval": "monthly",
+            "label": "Producer Monthly",
+            "enabled": True,
+            "price_krw": 29000,
+        }
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/subscription/change",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps({"product_code": "producer_monthly"}),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertEqual(payload["provider"], "toss")
+        self.assertTrue(payload["checkout_required"])
+        self.assertEqual(payload["toss"]["amount"], 29000)
+
+    def test_web_subscription_change_preview_quotes_toss_one_time_checkout(self):
+        self.repo.upsert_subscription(
+            {
+                "subscription_id": "toss-payment:order-1",
+                "user_id": "user-1",
+                "provider": "toss",
+                "status": "active",
+                "plan_code": "starter",
+                "product_code": "starter_monthly",
+                "billing_amount": 6600,
+                "billing_currency": "KRW",
+            }
+        )
+        self.repo.put_entitlement(
+            {
+                "user_id": "user-1",
+                "source_provider": "toss",
+                "source_subscription_id": "toss-payment:order-1",
+                "plan_code": "starter",
+                "status": "active",
+                "revision": 1,
+            }
+        )
+        module.catalog_repo.get_product.return_value = {
+            "code": "producer_monthly",
+            "plan_code": "producer",
+            "type": "subscription",
+            "billing_interval": "monthly",
+            "label": "Producer Monthly",
+            "enabled": True,
+            "price_krw": 29000,
+        }
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/subscription/change/preview",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps({"product_code": "producer_monthly"}),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertEqual(payload["provider"], "toss")
+        self.assertTrue(payload["checkout_required"])
+        self.assertEqual(payload["effective"], "after_payment")
+        self.assertEqual(payload["current"]["price_formatted"], "₩6,600")
+        self.assertEqual(payload["target"]["price_formatted"], "₩29,000")
+        self.assertEqual(payload["amount_due_now"]["price_formatted"], "₩29,000")
+        self.assertEqual(self.repo.subscriptions["toss-payment:order-1"]["plan_code"], "starter")
 
     def test_duplicate_mobile_verify_returns_accepted_false_without_tracking(self):
         module.verify_apple_purchase = mock.Mock(
@@ -288,6 +1159,227 @@ class ApiBillingTests(unittest.TestCase):
         payload = decode_json_response(response)
         self.assertEqual(payload["label"], "Manage on web")
         self.assertFalse(payload["manage_in_app"])
+
+    def test_billing_me_returns_safe_management_state(self):
+        module.build_management_links = mock.Mock(
+            return_value={
+                "configured": True,
+                "reason": "",
+                "links": {
+                    "overview": "https://buyer-portal.paddle.com/overview",
+                    "update_payment_method": "https://buyer-portal.paddle.com/update-payment-method",
+                    "cancel_subscription": "https://buyer-portal.paddle.com/cancel",
+                },
+            }
+        )
+        self.repo.put_entitlement(
+            {
+                "user_id": "user-1",
+                "plan_code": "studio",
+                "status": "active",
+                "source_provider": "paddle",
+                "source_subscription_id": "sub-1",
+                "source_customer_id": "ctm-1",
+                "billing_email": "billing@example.com",
+                "capabilities": {},
+                "management_channel": "web",
+                "revision": 2,
+                "next_billed_at": "2026-06-18T00:00:00Z",
+                "seat_count": 7,
+                "extra_storage_tb": 2,
+                "payment_method": {
+                    "brand": "visa",
+                    "last4": "4242",
+                    "exp_month": 12,
+                    "exp_year": 2029,
+                    "ignored": "secret",
+                },
+            }
+        )
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/me",
+                "requestContext": {"http": {"method": "GET"}},
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertEqual(payload["provider"], "paddle")
+        self.assertEqual(payload["plan"], "studio")
+        self.assertEqual(payload["next_billed_at"], "2026-06-18T00:00:00Z")
+        self.assertEqual(payload["seat_count"], 7)
+        self.assertEqual(payload["extra_storage_tb"], 2)
+        self.assertEqual(payload["billing_email"], "billing@example.com")
+        self.assertEqual(payload["payment_method"]["brand"], "visa")
+        self.assertNotIn("ignored", payload["payment_method"])
+        self.assertEqual(payload["provider_ids"]["paddle_customer_id"], "ctm-1")
+        self.assertEqual(payload["provider_ids"]["paddle_subscription_id"], "sub-1")
+        self.assertEqual(payload["manage"]["label"], "Manage on web")
+        self.assertEqual(payload["manage_url"], "https://buyer-portal.paddle.com/overview")
+        self.assertEqual(
+            payload["update_payment_method_url"],
+            "https://buyer-portal.paddle.com/update-payment-method",
+        )
+        self.assertEqual(payload["provider_management"]["configured"], True)
+        module.build_management_links.assert_called_once_with(
+            provider="paddle",
+            customer_id="ctm-1",
+            subscription_id="sub-1",
+        )
+
+    def test_billing_me_omits_toss_one_time_management_links(self):
+        self.repo.put_entitlement(
+            {
+                "user_id": "user-1",
+                "plan_code": "studio",
+                "status": "active",
+                "source_provider": "toss",
+                "source_subscription_id": "toss-payment:order-1",
+                "source_customer_id": "customer-1",
+                "management_channel": "web",
+                "revision": 2,
+            }
+        )
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/me",
+                "requestContext": {"http": {"method": "GET"}},
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertEqual(payload["provider"], "toss")
+        self.assertEqual(payload["manage_url"], "")
+        self.assertEqual(payload["update_payment_method_url"], "")
+        self.assertEqual(payload["cancel_subscription_url"], "")
+        self.assertEqual(payload["invoices_url"], "")
+        self.assertEqual(payload["provider_management"]["reason"], "toss_one_time_payment")
+
+    def test_billing_subscriptions_splits_owned_and_member_access(self):
+        module.build_management_links = mock.Mock(
+            return_value={
+                "configured": True,
+                "reason": "",
+                "links": {
+                    "overview": "https://billing.example/overview",
+                    "update_payment_method": "https://billing.example/update",
+                    "cancel_subscription": "https://billing.example/cancel",
+                },
+            }
+        )
+        self.repo.upsert_subscription(
+            {
+                "subscription_id": "personal-sub",
+                "user_id": "user-1",
+                "provider": "apple",
+                "plan_code": "producer",
+                "status": "active",
+                "product_code": "producer_monthly",
+                "next_billed_at": "2026-06-21T00:00:00Z",
+                "management_channel": "apple",
+            }
+        )
+        self.repo.upsert_subscription(
+            {
+                "subscription_id": "studio-sub",
+                "user_id": "user-1",
+                "provider": "paddle",
+                "customer_id": "ctm-1",
+                "plan_code": "studio",
+                "status": "active",
+                "product_code": "studio_monthly",
+                "seat_count": 7,
+                "extra_storage_tb": 1,
+                "billing_amount": 149000,
+                "billing_currency": "KRW",
+                "management_channel": "web",
+            }
+        )
+        module.collaboration_repo.build_user_access_snapshot.return_value = {
+            "organizations": [
+                {
+                    "organization_id": "org-edu",
+                    "name": "Music School",
+                    "plan_code": "education",
+                    "status": "active",
+                    "membership_status": "active",
+                    "membership_role": "student",
+                    "seat_limit": 30,
+                    "seats_used": 12,
+                }
+            ],
+            "summary": {},
+        }
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/subscriptions",
+                "requestContext": {"http": {"method": "GET"}},
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertEqual(payload["personal"][0]["subscription_id"], "personal-sub")
+        self.assertEqual(payload["personal"][0]["plan_code"], "producer")
+        self.assertEqual(payload["personal"][0]["plan_name"], "Producer")
+        self.assertEqual(payload["personal"][0]["billing_cycle"], "monthly")
+        self.assertIn("apps.apple.com", payload["personal"][0]["manage_url"])
+        self.assertTrue(payload["personal"][0]["billing_owner"])
+        self.assertEqual(payload["team"][0]["subscription_id"], "studio-sub")
+        self.assertEqual(payload["team"][0]["plan_code"], "studio")
+        self.assertEqual(payload["team"][0]["plan_name"], "Studio")
+        self.assertEqual(payload["team"][0]["seat_count"], 7)
+        self.assertEqual(payload["team"][0]["amount"], 149000)
+        self.assertEqual(payload["team"][0]["currency"], "KRW")
+        self.assertEqual(payload["team"][0]["price_formatted"], "₩149,000")
+        self.assertEqual(payload["team"][0]["billing_cycle"], "monthly")
+        self.assertEqual(payload["team"][0]["manage_url"], "https://billing.example/overview")
+        self.assertEqual(payload["member_of"][0]["organization_id"], "org-edu")
+        self.assertEqual(payload["member_of"][0]["plan_code"], "education")
+        self.assertEqual(payload["member_of"][0]["organization_name"], "Music School")
+        self.assertFalse(payload["member_of"][0]["billing_owner"])
+        self.assertFalse(payload["member_of"][0]["manageable"])
+
+    def test_billing_subscriptions_omits_toss_one_time_management_url(self):
+        self.repo.upsert_subscription(
+            {
+                "subscription_id": "toss-payment:order-1",
+                "user_id": "user-1",
+                "provider": "toss",
+                "plan_code": "studio",
+                "status": "active",
+                "product_code": "studio_monthly",
+                "billing_amount": 149000,
+                "billing_currency": "KRW",
+                "management_channel": "web",
+            }
+        )
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/subscriptions",
+                "requestContext": {"http": {"method": "GET"}},
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        item = payload["team"][0]
+        self.assertEqual(item["provider"], "toss")
+        self.assertEqual(item["manage_url"], "")
+        self.assertEqual(item["update_payment_method_url"], "")
+        self.assertEqual(item["cancel_subscription_url"], "")
+        self.assertFalse(item["manageable"])
+        self.assertEqual(item["provider_management"]["reason"], "toss_one_time_payment")
 
     def test_verification_conflict_returns_409(self):
         module.verify_google_purchase = mock.Mock(

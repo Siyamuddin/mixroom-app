@@ -14,6 +14,7 @@ const ADMIN_FEEDBACK_PATH = "/v1/internal/admin/feedback";
 const ADMIN_AI_PROMPT_LIMITS_PATH = "/v1/internal/admin/settings/ai-prompt-limits";
 const ADMIN_AI_RUNTIME_PATH = "/v1/internal/admin/settings/ai-runtime";
 const ADMIN_BILLING_CATALOG_PATH = "/v1/internal/admin/settings/billing-catalog";
+const ADMIN_FEATURE_FLAGS_PATH = "/v1/internal/admin/settings/feature-flags";
 const ADMIN_BILLING_ORGANIZATIONS_PATH = "/v1/internal/admin/billing/organizations";
 const ADMIN_BILLING_EDUCATION_PROVISIONING_PATH =
   "/v1/internal/admin/billing/education-provisioning";
@@ -36,10 +37,12 @@ const ADMIN_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 const ADMIN_MAX_SESSION_MS = 8 * 60 * 60 * 1000;
 const ACTIVITY_PERSIST_INTERVAL_MS = 30 * 1000;
 const LIVE_PRESENCE_POLL_MS = 60 * 1000;
+const SHOW_AI_RUNTIME_ADMIN_PANEL = false;
 const DEFAULT_TAB = "home";
 const TAB_KEYS = ["home", "users", "feedback", "dev"];
 const ANDREW_ADMIN_EMAIL = "andrew@mixroom.ai";
 const AI_PROMPT_LIMITS_CONFIRM_PHRASE = "APPLY PROMPT LIMITS";
+const FEATURE_FLAGS_CONFIRM_PHRASE = "APPLY FEATURE FLAGS";
 const PRODUCER_CAPTURE_WHITELIST_CONFIRM_PHRASE = "APPLY PRODUCER WHITELIST";
 const ENTITLEMENT_OVERRIDE_DURATION_OPTIONS = [
   { key: "1d", days: 1, labelKey: "override.duration.1d" },
@@ -117,7 +120,7 @@ const MESSAGES = {
     "auth.title": "Sign in",
     "auth.copy": "Use your work email.",
     "welcome.kicker": "Mixroom control surface",
-    "welcome.subtitle": "Live user operations, AI controls, and product monitoring.",
+    "welcome.subtitle": "Live user operations, support controls, and product monitoring.",
     "welcome.session": "Session",
     "welcome.mode": "Mode",
     "welcome.fallbackName": "Operator",
@@ -130,6 +133,38 @@ const MESSAGES = {
     "tab.users": "Users",
     "tab.feedback": "Feedback",
     "tab.dev": "Dev",
+    "dev.overview.label": "Operations",
+    "dev.overview.title": "Admin controls",
+    "dev.overview.copy":
+      "Compact controls for support limits, billing catalog checks, and team records.",
+    "dev.overview.support.title": "Support controls",
+    "dev.overview.support.copy": "Prompt limits and feature access",
+    "dev.overview.catalog.title": "Billing catalog",
+    "dev.overview.catalog.copy": "Plans, products, support links",
+    "dev.overview.records.title": "Team records",
+    "dev.overview.records.copy": "Organizations, seats, workspaces",
+    "dev.section.support.label": "Support",
+    "dev.section.support.title": "Support-facing controls",
+    "dev.section.support.copy":
+      "Operational toggles used by support. Sensitive runtime controls stay out of this dashboard.",
+    "dev.section.catalog.label": "Catalog",
+    "dev.section.catalog.title": "Billing catalog",
+    "dev.section.catalog.copy":
+      "Review live plans first. Open the editor only when you need to change public pricing or support links.",
+    "dev.section.records.label": "Records",
+    "dev.section.records.title": "Team billing records",
+    "dev.section.records.copy":
+      "Tables are the source of truth. Record editors are collapsed to keep the page scannable.",
+    "dev.disclosure.catalogEditor": "Edit billing catalog",
+    "dev.disclosure.catalogEditorHelp": "Advanced: writes the full catalog document.",
+    "dev.disclosure.educationProvision": "Provision Education account",
+    "dev.disclosure.educationProvisionHelp":
+      "Creates an education org and teacher membership.",
+    "dev.disclosure.organizationEditor": "Edit organization record",
+    "dev.disclosure.membershipEditor": "Edit membership record",
+    "dev.disclosure.workspaceEditor": "Edit workspace record",
+    "dev.disclosure.cloudProjectEditor": "Edit cloud project record",
+    "dev.disclosure.recordEditorHelp": "Advanced direct record editor.",
     "panel.kpi.label": "KPI Overview",
     "panel.kpi.title": "Product metrics",
     "panel.kpi.meta.default":
@@ -174,8 +209,8 @@ const MESSAGES = {
     "panel.aiPromptLimits.title": "Free plan defaults",
     "panel.aiPromptLimits.meta": "Server-enforced prompt limits for free users.",
     "panel.aiRuntime.label": "AI Runtime",
-    "panel.aiRuntime.title": "Server prompt and model config",
-    "panel.aiRuntime.meta": "Prompt and runtime overrides for server-owned AI features.",
+    "panel.aiRuntime.title": "Runtime settings disabled",
+    "panel.aiRuntime.meta": "Runtime overrides are not exposed in this dashboard.",
     "panel.producerCaptureWhitelist.label": "Producer Capture Whitelist",
     "panel.producerCaptureWhitelist.title": "Producer capture usernames",
     "panel.producerCaptureWhitelist.meta":
@@ -413,11 +448,11 @@ const MESSAGES = {
     "support.inputLabel": "Extra prompts to add",
     "support.granting": "Granting...",
     "support.button": "Grant Extra Prompts",
-    "override.label": "Entitlement Support",
-    "override.title": "Temporary plan override",
+    "override.label": "Manual Plan Grant",
+    "override.title": "Grant paid access",
     "override.copy":
-      "Grants temporary access without changing payment-provider subscriptions. Every use is written to the audit log.",
-    "override.readOnly": "Visible to admins, editable only by andrew@mixroom.ai.",
+      "Use after the business side has confirmed payment or a support-approved exception. This creates an audited admin_grant subscription and grants access until the expiry date.",
+    "override.readOnly": "Visible to admins, editable only by allowlisted employee admins.",
     "override.plan": "Plan to grant",
     "override.seats": "Seat limit",
     "override.seatsHelp":
@@ -434,8 +469,8 @@ const MESSAGES = {
     "override.confirmIdentifier": "Type the user's email, username, or user ID",
     "override.confirmAdminName": "Type your admin first name: {value}",
     "override.applying": "Applying...",
-    "override.button": "Apply Override",
-    "override.applied": "Granted {plan} until {date}.",
+    "override.button": "Grant Access",
+    "override.applied": "Granted {plan} access until {date}.",
     "override.typeExactIdentifier": "Type a matching user email, username, or user ID to confirm.",
     "override.typeExactAdminName": "Type your admin first name exactly.",
     "delete.label": "Delete User",
@@ -536,7 +571,7 @@ const MESSAGES = {
     "auth.title": "로그인",
     "auth.copy": "업무용 이메일로 로그인하세요.",
     "welcome.kicker": "Mixroom 컨트롤 서피스",
-    "welcome.subtitle": "실시간 사용자 운영, AI 제어, 제품 모니터링.",
+    "welcome.subtitle": "실시간 사용자 운영, 지원 제어, 제품 모니터링.",
     "welcome.session": "세션",
     "welcome.mode": "모드",
     "welcome.fallbackName": "Operator",
@@ -549,6 +584,36 @@ const MESSAGES = {
     "tab.users": "사용자",
     "tab.feedback": "피드백",
     "tab.dev": "개발",
+    "dev.overview.label": "운영",
+    "dev.overview.title": "관리자 제어",
+    "dev.overview.copy": "지원 제한, 결제 카탈로그 확인, 팀 레코드를 한 곳에서 관리합니다.",
+    "dev.overview.support.title": "지원 제어",
+    "dev.overview.support.copy": "프롬프트 제한 및 기능 접근",
+    "dev.overview.catalog.title": "결제 카탈로그",
+    "dev.overview.catalog.copy": "플랜, 상품, 지원 링크",
+    "dev.overview.records.title": "팀 레코드",
+    "dev.overview.records.copy": "조직, 좌석, 워크스페이스",
+    "dev.section.support.label": "지원",
+    "dev.section.support.title": "지원팀용 제어",
+    "dev.section.support.copy":
+      "지원 업무에 필요한 토글입니다. 민감한 런타임 제어는 이 대시보드에서 제외합니다.",
+    "dev.section.catalog.label": "카탈로그",
+    "dev.section.catalog.title": "결제 카탈로그",
+    "dev.section.catalog.copy":
+      "먼저 현재 플랜을 확인하세요. 공개 가격이나 지원 링크 변경이 필요할 때만 편집기를 여세요.",
+    "dev.section.records.label": "레코드",
+    "dev.section.records.title": "팀 결제 레코드",
+    "dev.section.records.copy":
+      "테이블이 기준 정보입니다. 페이지를 쉽게 훑어볼 수 있도록 레코드 편집기는 접어 두었습니다.",
+    "dev.disclosure.catalogEditor": "결제 카탈로그 편집",
+    "dev.disclosure.catalogEditorHelp": "고급: 전체 카탈로그 문서를 저장합니다.",
+    "dev.disclosure.educationProvision": "Education 계정 프로비저닝",
+    "dev.disclosure.educationProvisionHelp": "교육 조직과 교사 멤버십을 만듭니다.",
+    "dev.disclosure.organizationEditor": "조직 레코드 편집",
+    "dev.disclosure.membershipEditor": "멤버십 레코드 편집",
+    "dev.disclosure.workspaceEditor": "워크스페이스 레코드 편집",
+    "dev.disclosure.cloudProjectEditor": "클라우드 프로젝트 레코드 편집",
+    "dev.disclosure.recordEditorHelp": "고급 직접 레코드 편집기입니다.",
     "panel.kpi.label": "KPI 개요",
     "panel.kpi.title": "제품 지표",
     "panel.kpi.meta.default":
@@ -593,8 +658,8 @@ const MESSAGES = {
     "panel.aiPromptLimits.title": "무료 플랜 기본값",
     "panel.aiPromptLimits.meta": "무료 사용자에게 서버에서 강제되는 프롬프트 제한입니다.",
     "panel.aiRuntime.label": "AI 런타임",
-    "panel.aiRuntime.title": "서버 프롬프트 및 모델 설정",
-    "panel.aiRuntime.meta": "서버가 소유하는 AI 기능의 프롬프트와 런타임 재정의입니다.",
+    "panel.aiRuntime.title": "런타임 설정 비활성화",
+    "panel.aiRuntime.meta": "런타임 재정의는 이 대시보드에 노출하지 않습니다.",
     "panel.producerCaptureWhitelist.label": "프로듀서 캡처 화이트리스트",
     "panel.producerCaptureWhitelist.title": "프로듀서 캡처 사용자명",
     "panel.producerCaptureWhitelist.meta":
@@ -832,11 +897,11 @@ const MESSAGES = {
     "support.inputLabel": "추가할 프롬프트 수",
     "support.granting": "부여 중...",
     "support.button": "추가 프롬프트 부여",
-    "override.label": "권한 지원",
-    "override.title": "임시 플랜 재정의",
+    "override.label": "수동 플랜 부여",
+    "override.title": "유료 권한 부여",
     "override.copy":
-      "결제 제공업체의 구독을 변경하지 않고 임시 접근 권한을 부여합니다. 모든 사용 기록은 감사 로그에 저장됩니다.",
-    "override.readOnly": "관리자에게는 보이지만 andrew@mixroom.ai 계정만 수정할 수 있습니다.",
+      "비즈니스 쪽 결제 확인 또는 지원 승인 예외가 있을 때만 사용하세요. 감사용 admin_grant 구독을 만들고 만료일까지 권한을 부여합니다.",
+    "override.readOnly": "관리자에게는 보이지만 허용된 직원 관리자만 수정할 수 있습니다.",
     "override.plan": "부여할 플랜",
     "override.seats": "좌석 수",
     "override.seatsHelp":
@@ -853,7 +918,7 @@ const MESSAGES = {
     "override.confirmIdentifier": "사용자의 이메일, 사용자명, 또는 사용자 ID 입력",
     "override.confirmAdminName": "관리자 본인 이름 입력: {value}",
     "override.applying": "적용 중...",
-    "override.button": "재정의 적용",
+    "override.button": "권한 부여",
     "override.applied": "{date}까지 {plan} 권한을 부여했습니다.",
     "override.typeExactIdentifier": "일치하는 사용자 이메일, 사용자명, 또는 사용자 ID를 입력하세요.",
     "override.typeExactAdminName": "관리자 본인 이름을 정확히 입력하세요.",
@@ -996,6 +1061,21 @@ const elements = {
   aiPromptLimitsConfirmInput: document.querySelector("#ai-prompt-limits-confirm-input"),
   aiPromptLimitsSaveButton: document.querySelector("#ai-prompt-limits-save-button"),
   aiPromptLimitsFeedback: document.querySelector("#ai-prompt-limits-feedback"),
+  featureFlagsMeta: document.querySelector("#feature-flags-meta"),
+  featureFlagsSummary: document.querySelector("#feature-flags-summary"),
+  featureFlagsForm: document.querySelector("#feature-flags-form"),
+  featureFlagAccountPlanBillingInput: document.querySelector(
+    "#feature-flag-account-plan-billing",
+  ),
+  featureFlagSubscriptionEnforcementInput: document.querySelector(
+    "#feature-flag-subscription-enforcement",
+  ),
+  featureFlagIapPurchasesInput: document.querySelector("#feature-flag-iap-purchases"),
+  featureFlagsEditorNote: document.querySelector("#feature-flags-editor-note"),
+  featureFlagsConfirmWrap: document.querySelector("#feature-flags-confirm-wrap"),
+  featureFlagsConfirmInput: document.querySelector("#feature-flags-confirm-input"),
+  featureFlagsSaveButton: document.querySelector("#feature-flags-save-button"),
+  featureFlagsFeedback: document.querySelector("#feature-flags-feedback"),
   producerCaptureWhitelistMeta: document.querySelector("#producer-capture-whitelist-meta"),
   producerCaptureWhitelistSummary: document.querySelector("#producer-capture-whitelist-summary"),
   producerCaptureWhitelistForm: document.querySelector("#producer-capture-whitelist-form"),
@@ -1227,6 +1307,9 @@ const state = {
   selectedFeedback: null,
   aiPromptLimits: null,
   aiPromptLimitsFeedback: null,
+  featureFlags: null,
+  featureFlagsBusy: false,
+  featureFlagsFeedback: null,
   producerCaptureWhitelist: null,
   producerCaptureWhitelistFeedback: null,
   aiRuntimeSettings: null,
@@ -1307,6 +1390,8 @@ function bindEvents() {
   elements.userInspector.addEventListener("change", handleInspectorChange);
   elements.aiPromptLimitsForm.addEventListener("submit", handleAiPromptLimitsSubmit);
   elements.aiPromptLimitsConfirmInput.addEventListener("input", updateBusyState);
+  elements.featureFlagsForm.addEventListener("submit", handleFeatureFlagsSubmit);
+  elements.featureFlagsConfirmInput.addEventListener("input", updateBusyState);
   elements.producerCaptureWhitelistForm.addEventListener(
     "submit",
     handleProducerCaptureWhitelistSubmit,
@@ -1857,7 +1942,7 @@ function canGrantAiPrompts() {
 }
 
 function canApplyEntitlementOverrides() {
-  return canViewAiRuntimeSettings();
+  return state.overview?.permissions?.can_apply_entitlement_overrides === true;
 }
 
 async function bootstrap() {
@@ -2107,12 +2192,19 @@ async function loadDevTabData({ silent = false, force = false } = {}) {
   if (force || !state.loadedTabs.dev || !state.aiPromptLimits) {
     requests.push(loadAiPromptLimitSettings({ silent }));
   }
+  if (force || !state.loadedTabs.dev || !state.featureFlags) {
+    requests.push(loadFeatureFlagsSettings({ silent }));
+  }
   if (force || !state.loadedTabs.dev || !state.producerCaptureWhitelist) {
     requests.push(loadProducerCaptureWhitelistSettings({ silent }));
   }
-  if (canViewAiRuntimeSettings() && (force || !state.loadedTabs.dev || !state.aiRuntimeSettings)) {
+  if (
+    SHOW_AI_RUNTIME_ADMIN_PANEL
+    && canViewAiRuntimeSettings()
+    && (force || !state.loadedTabs.dev || !state.aiRuntimeSettings)
+  ) {
     requests.push(loadAiRuntimeSettings({ silent }));
-  } else if (!canViewAiRuntimeSettings()) {
+  } else {
     state.aiRuntimeSettings = null;
     renderAiRuntimeSettings();
   }
@@ -2381,6 +2473,32 @@ async function loadAiPromptLimitSettings({ silent = false } = {}) {
     handleAdminRequestError(error, t("status.loadAiPromptLimitsFailed"));
   } finally {
     state.aiPromptLimitsBusy = false;
+    updateBusyState();
+  }
+}
+
+async function loadFeatureFlagsSettings({ silent = false } = {}) {
+  if (!tokens?.idToken) {
+    return;
+  }
+
+  state.featureFlagsBusy = true;
+  updateBusyState();
+  if (!silent) {
+    setStatus("Loading feature flags...", "info");
+  }
+
+  try {
+    const payload = await fetchAdminJson(ADMIN_FEATURE_FLAGS_PATH);
+    state.featureFlags = payload || null;
+    renderFeatureFlagsSettings();
+    if (!silent) {
+      setStatus("Feature flags loaded.", "success");
+    }
+  } catch (error) {
+    handleAdminRequestError(error, "Could not load feature flags.");
+  } finally {
+    state.featureFlagsBusy = false;
     updateBusyState();
   }
 }
@@ -2733,6 +2851,61 @@ function renderAiPromptLimitSettings() {
   updateBusyState();
 }
 
+function renderFeatureFlagsSettings() {
+  const settings = state.featureFlags;
+  if (!settings) {
+    elements.featureFlagsMeta.textContent = "Remote overrides for shipped app behavior.";
+    elements.featureFlagsSummary.innerHTML = `
+      <div class="detail-label">Current feature flags</div>
+      <div class="detail-value">Sign in to load feature flags.</div>
+    `;
+    elements.featureFlagAccountPlanBillingInput.checked = false;
+    elements.featureFlagSubscriptionEnforcementInput.checked = false;
+    elements.featureFlagIapPurchasesInput.checked = false;
+    elements.featureFlagsConfirmInput.value = "";
+    elements.featureFlagsForm.classList.add("hidden");
+    elements.featureFlagsEditorNote.classList.add("hidden");
+    elements.featureFlagsConfirmWrap.classList.add("hidden");
+    elements.featureFlagsFeedback.textContent = "";
+    elements.featureFlagsFeedback.className = "panel-meta";
+    updateBusyState();
+    return;
+  }
+
+  const flags = settings.flags && typeof settings.flags === "object" ? settings.flags : {};
+  const metaParts = [
+    settings.source === "remote" ? t("settings.source.remote") : t("settings.source.default"),
+  ];
+  if (settings.updated_at) {
+    metaParts.push(t("settings.updatedAt", { date: formatDate(settings.updated_at) }));
+  }
+  if (settings.updated_by_email) {
+    metaParts.push(t("settings.updatedBy", { email: settings.updated_by_email }));
+  }
+  elements.featureFlagsMeta.textContent = metaParts.join(" • ");
+  elements.featureFlagsSummary.innerHTML = `
+    <div class="detail-label">Current feature flags</div>
+    <div class="detail-value">
+      Billing UI: ${escapeHtml(flags.account_plan_billing_enabled ? "on" : "off")}<br />
+      Enforcement: ${escapeHtml(flags.subscription_enforcement_enabled ? "on" : "off")}<br />
+      IAP checkout: ${escapeHtml(flags.iap_purchases_enabled ? "on" : "off")}
+    </div>
+  `;
+  elements.featureFlagAccountPlanBillingInput.checked =
+    flags.account_plan_billing_enabled === true;
+  elements.featureFlagSubscriptionEnforcementInput.checked =
+    flags.subscription_enforcement_enabled === true;
+  elements.featureFlagIapPurchasesInput.checked = flags.iap_purchases_enabled === true;
+  elements.featureFlagsForm.classList.remove("hidden");
+  elements.featureFlagsEditorNote.classList.remove("hidden");
+  elements.featureFlagsConfirmWrap.classList.remove("hidden");
+  elements.featureFlagsFeedback.textContent = state.featureFlagsFeedback?.message || "";
+  elements.featureFlagsFeedback.className = state.featureFlagsFeedback?.tone
+    ? `panel-meta status-${state.featureFlagsFeedback.tone}`
+    : "panel-meta";
+  updateBusyState();
+}
+
 function renderProducerCaptureWhitelistSettings() {
   const settings = state.producerCaptureWhitelist;
   const canEdit = canEditProducerCaptureWhitelist();
@@ -2789,7 +2962,7 @@ function renderProducerCaptureWhitelistSettings() {
 
 function renderAiRuntimeSettings() {
   const settings = state.aiRuntimeSettings;
-  const canEdit = canViewAiRuntimeSettings();
+  const canEdit = SHOW_AI_RUNTIME_ADMIN_PANEL && canViewAiRuntimeSettings();
   elements.aiRuntimePanel.classList.toggle("hidden", !canEdit);
   if (!canEdit) {
     return;
@@ -3573,6 +3746,13 @@ function clearBillingCloudProjectSelection() {
   renderBillingCloudProjects();
 }
 
+function openDisclosureForElement(element) {
+  const disclosure = element?.closest?.("details");
+  if (disclosure) {
+    disclosure.open = true;
+  }
+}
+
 function handleBillingOrganizationsTableClick(event) {
   const row = event.target.closest("tr[data-organization-id]");
   if (!row) {
@@ -3580,6 +3760,7 @@ function handleBillingOrganizationsTableClick(event) {
   }
   state.selectedBillingOrganizationId = `${row.dataset.organizationId || ""}`;
   renderBillingOrganizations();
+  openDisclosureForElement(elements.billingOrganizationForm);
 }
 
 function handleEducationSeatPresetClick(event) {
@@ -3600,6 +3781,7 @@ function handleEducationSeatPresetClick(event) {
   elements.billingOrganizationFeedback.textContent = `Education student seat limit staged at ${formatWholeNumber(
     preset,
   )}. Save organization to apply.`;
+  openDisclosureForElement(elements.billingOrganizationForm);
 }
 
 function handleBillingMembershipsTableClick(event) {
@@ -3609,6 +3791,7 @@ function handleBillingMembershipsTableClick(event) {
   }
   state.selectedBillingMembershipKey = `${row.dataset.membershipKey || ""}`;
   renderBillingMemberships();
+  openDisclosureForElement(elements.billingMembershipForm);
 }
 
 function handleBillingWorkspacesTableClick(event) {
@@ -3618,6 +3801,7 @@ function handleBillingWorkspacesTableClick(event) {
   }
   state.selectedBillingWorkspaceId = `${row.dataset.workspaceId || ""}`;
   renderBillingWorkspaces();
+  openDisclosureForElement(elements.billingWorkspaceForm);
 }
 
 function handleBillingCloudProjectsTableClick(event) {
@@ -3627,6 +3811,7 @@ function handleBillingCloudProjectsTableClick(event) {
   }
   state.selectedBillingCloudProjectId = `${row.dataset.cloudProjectId || ""}`;
   renderBillingCloudProjects();
+  openDisclosureForElement(elements.billingCloudProjectForm);
 }
 
 function fillEducationProvisionTeacherFromSelectedUser() {
@@ -4084,6 +4269,10 @@ function aiRuntimeConfirmPhrase(feature) {
 
 function promptLimitsConfirmationMatches() {
   return `${elements.aiPromptLimitsConfirmInput.value || ""}`.trim() === AI_PROMPT_LIMITS_CONFIRM_PHRASE;
+}
+
+function featureFlagsConfirmationMatches() {
+  return `${elements.featureFlagsConfirmInput.value || ""}`.trim() === FEATURE_FLAGS_CONFIRM_PHRASE;
 }
 
 function producerCaptureWhitelistConfirmationMatches() {
@@ -6128,6 +6317,17 @@ function updateBusyState() {
   elements.aiPromptLimitsSaveButton.textContent = state.aiPromptLimitsBusy
     ? t("action.saving")
     : t("action.savePromptLimits");
+  elements.featureFlagAccountPlanBillingInput.disabled =
+    state.featureFlagsBusy || !signedIn;
+  elements.featureFlagSubscriptionEnforcementInput.disabled =
+    state.featureFlagsBusy || !signedIn;
+  elements.featureFlagIapPurchasesInput.disabled = state.featureFlagsBusy || !signedIn;
+  elements.featureFlagsConfirmInput.disabled = state.featureFlagsBusy || !signedIn;
+  elements.featureFlagsSaveButton.disabled =
+    state.featureFlagsBusy || !signedIn || !featureFlagsConfirmationMatches();
+  elements.featureFlagsSaveButton.textContent = state.featureFlagsBusy
+    ? t("action.saving")
+    : "Save feature flags";
   elements.producerCaptureWhitelistInput.disabled =
     state.producerCaptureWhitelistBusy || !signedIn || !canEditProducerCaptureWhitelist();
   elements.producerCaptureWhitelistConfirmInput.disabled =
@@ -6937,6 +7137,51 @@ async function handleAiPromptLimitsSubmit(event) {
   }
 }
 
+async function handleFeatureFlagsSubmit(event) {
+  event.preventDefault();
+  if (!tokens?.idToken || !featureFlagsConfirmationMatches()) {
+    return;
+  }
+
+  state.featureFlagsBusy = true;
+  state.featureFlagsFeedback = null;
+  updateBusyState();
+  setStatus("Saving feature flags...", "info");
+
+  try {
+    const payload = await fetchAdminJson(ADMIN_FEATURE_FLAGS_PATH, {
+      method: "PUT",
+      body: JSON.stringify({
+        flags: {
+          account_plan_billing_enabled:
+            elements.featureFlagAccountPlanBillingInput.checked === true,
+          subscription_enforcement_enabled:
+            elements.featureFlagSubscriptionEnforcementInput.checked === true,
+          iap_purchases_enabled: elements.featureFlagIapPurchasesInput.checked === true,
+        },
+      }),
+    });
+    state.featureFlags = payload || null;
+    state.featureFlagsFeedback = {
+      tone: "success",
+      message: "Feature flags saved.",
+    };
+    elements.featureFlagsConfirmInput.value = "";
+    renderFeatureFlagsSettings();
+    setStatus("Feature flags saved.", "success");
+  } catch (error) {
+    handleAdminRequestError(error, "Could not save feature flags.");
+    state.featureFlagsFeedback = {
+      tone: "error",
+      message: error.message || "Could not save feature flags.",
+    };
+    renderFeatureFlagsSettings();
+  } finally {
+    state.featureFlagsBusy = false;
+    updateBusyState();
+  }
+}
+
 async function handleProducerCaptureWhitelistSubmit(event) {
   event.preventDefault();
   if (
@@ -7098,6 +7343,7 @@ function resetAdminState() {
   state.userSearchBusy = false;
   state.feedbackBusy = false;
   state.aiPromptLimitsBusy = false;
+  state.featureFlagsBusy = false;
   state.producerCaptureWhitelistBusy = false;
   state.aiRuntimeBusy = false;
   state.billingCatalogBusy = false;
@@ -7126,6 +7372,8 @@ function resetAdminState() {
   state.selectedFeedback = null;
   state.aiPromptLimits = null;
   state.aiPromptLimitsFeedback = null;
+  state.featureFlags = null;
+  state.featureFlagsFeedback = null;
   state.producerCaptureWhitelist = null;
   state.producerCaptureWhitelistFeedback = null;
   state.aiRuntimeSettings = null;

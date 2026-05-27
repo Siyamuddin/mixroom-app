@@ -128,7 +128,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--stage",
-        default="staging",
+        default="prod",
         help="Stage suffix used when deriving table names.",
     )
     parser.add_argument(

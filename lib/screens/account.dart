@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:intl/intl.dart';
-import 'package:mixroom/config/app_api_config.dart';
 import 'package:mixroom/config/legal_config.dart';
 import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/auth_service.dart';
@@ -2331,11 +2330,12 @@ class _SubscriptionEntitlementCardState
     bool silent = false,
   }) async {
     final entitlementService = context.read<EntitlementService>();
+    await entitlementService.refreshFeatureFlags(force: force);
     await entitlementService.refresh(
       force: force || !entitlementService.isInitialized,
     );
     if (!mounted) return;
-    if (!AppApiConfig.accountPlanBillingEnabled) {
+    if (!entitlementService.isAccountPlanBillingEnabled) {
       if (!silent) {
         showAppSnackBar(
           context,
@@ -2816,7 +2816,7 @@ class _SubscriptionEntitlementCardState
   @override
   Widget build(BuildContext context) {
     final entitlementService = context.watch<EntitlementService>();
-    if (!AppApiConfig.accountPlanBillingEnabled) {
+    if (!entitlementService.isAccountPlanBillingEnabled) {
       final entitlement = entitlementService.entitlement ??
           EntitlementSnapshot.free(userId: '');
       return _SubscriptionComingSoonCard(

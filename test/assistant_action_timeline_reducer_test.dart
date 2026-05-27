@@ -122,6 +122,38 @@ void main() {
       expect(next.clips[1].endMs, closeTo(6000.0, 0.001));
     });
 
+    test('glue consolidates selected audio clips on the same row', () {
+      final initial = TimelineActionState.empty(
+        clips: <TimelineClip>[
+          _audioClip(id: 'a0', startMs: 500.0, sourceDurationMs: 1000.0),
+          _audioClip(id: 'a1', startMs: 1750.0, sourceDurationMs: 1250.0),
+          _audioClip(id: 'b0', row: 1, startMs: 0.0),
+        ],
+        selectedClipIndices: const <int>[0, 1],
+        primarySelectedClipIndex: 0,
+      );
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('clip_edit', <String, dynamic>{
+            'operation': 'glue',
+            'label': 'Hook Comp',
+            'target': <String, dynamic>{'prefer_selected': true},
+          }),
+        ],
+      );
+
+      expect(next.clips.length, 2);
+      expect(next.clips.first.id, 'glued_a0_a1');
+      expect(next.clips.first.label, 'Hook Comp');
+      expect(next.clips.first.startMs, closeTo(500.0, 0.001));
+      expect(next.clips.first.trimEndMs, closeTo(2500.0, 0.001));
+      expect(next.clips.first.tempoFollow, isFalse);
+      expect(next.selectedClipIndices, const <int>[0]);
+      expect(next.clips[1].id, 'b0');
+    });
+
     test('stretch/move/duplicate/delete operate in sequence', () {
       final initial = TimelineActionState.empty(
         clips: <TimelineClip>[_audioClip(id: 'a0', sourceDurationMs: 8000.0)],

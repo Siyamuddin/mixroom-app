@@ -296,8 +296,9 @@ def _load_api_key(provider_name: str = DEFAULT_PROVIDER) -> str:
     if direct:
         return direct
 
+    parameter_name = _env_value("LLM_API_KEY_PARAMETER_NAME", "OPENAI_API_KEY_PARAMETER_NAME")
     secret_arn = _env_value("LLM_API_KEY_SECRET_ARN", "OPENAI_API_KEY_SECRET_ARN")
-    if not secret_arn:
+    if not parameter_name and not secret_arn:
         return ""
 
     global _secret_cache
@@ -312,7 +313,26 @@ def _load_api_key(provider_name: str = DEFAULT_PROVIDER) -> str:
         return _extract_api_key_from_secret(_secret_cache, provider_name)
 
     if boto3 is None:
-        raise RuntimeError("boto3 is required to read Secrets Manager values.")
+        raise RuntimeError("boto3 is required to read backend secret values.")
+
+    if parameter_name:
+        client = boto3.client("ssm")
+        result = client.get_parameter(Name=parameter_name, WithDecryption=True)
+        parameter = result.get("Parameter") or {}
+        secret_string = str(parameter.get("Value") or "")
+        try:
+            parsed = json.loads(secret_string)
+        except json.JSONDecodeError:
+            _secret_cache = secret_string.strip()
+            _secret_cache_loaded_at = now
+            return _extract_api_key_from_secret(_secret_cache, provider_name)
+
+        if isinstance(parsed, (dict, str)):
+            _secret_cache = parsed
+            _secret_cache_loaded_at = now
+            return _extract_api_key_from_secret(_secret_cache, provider_name)
+
+        raise ValueError("LLM API key SSM parameter must contain a string or JSON object.")
 
     client = boto3.client("secretsmanager")
     result = client.get_secret_value(SecretId=secret_arn)
@@ -954,6 +974,7 @@ _ALLOWED_CLIP_EDIT_OPERATIONS = frozenset(
         "auto_trim",
         "cut",
         "stretch",
+        "glue",
         "move",
         "tempo_follow",
         "auto_bpm_align",
@@ -1046,6 +1067,15 @@ def _normalize_clip_edit_operation(raw: Any) -> str:
         "cut_clip": "cut",
         "resize": "stretch",
         "resize_clip": "stretch",
+        "glue_clips": "glue",
+        "merge": "glue",
+        "merge_clip": "glue",
+        "merge_clips": "glue",
+        "consolidate": "glue",
+        "consolidate_clip": "glue",
+        "consolidate_clips": "glue",
+        "bounce_clip": "glue",
+        "bounce_clips": "glue",
         "move_clip": "move",
         "reposition": "move",
         "shift": "move",
@@ -1901,7 +1931,10 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
 
     user_context = _usage_repo.load_user_context(user_id)
     subscription_tier = get_user_tier(user_context)
-    prompt_limits = get_prompt_limits(subscription_tier, user_context.get("limits"))
+    prompt_limits = get_prompt_limits(
+        subscription_tier,
+        user_context.get("limit_overrides"),
+    )
 
     if http_method == "GET" and request_path.endswith("/v1/llm/limits"):
         try:
@@ -2512,27 +2545,6 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     },
                 ),
                 enabled=analytics_enabled,
-            )
-            capture_exception(
-                RuntimeError(f"Refunded soft-failed AI response: {soft_error_code}"),
-                context={
-                    **request_log_context,
-                    "project_id": project_id,
-                    "feature": ai_feature,
-                    "model": str(
-                        response_payload.get("model") or request_body.get("model") or ""
-                    ),
-                    "provider_response_id": provider_response_id,
-                    "soft_error_code": soft_error_code,
-                    "refunded_prompt_usage": True,
-                    "normalization_issues": normalization_issues,
-                    "prompt_length_chars": len(str(user_text or "")),
-                },
-                tags={
-                    "service": "llm_proxy",
-                    "error_type": "soft_failed_refunded",
-                    "ai_feature": ai_feature,
-                },
             )
         response_payload["observability"] = _observability_payload()
         proxy_response = {

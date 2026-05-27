@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:mixroom/config/app_api_config.dart';
 import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/helpers/auth_service.dart';
+import 'package:mixroom/models/app_feature_flags.dart';
 import 'package:mixroom/models/entitlement_models.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -29,6 +30,7 @@ class EntitlementService extends ChangeNotifier {
   static const String _prefsKeyPrefix = 'mixroom.subscription.entitlement.v1';
   static const String _catalogPrefsKeyPrefix =
       'mixroom.subscription.billing_catalog.v1';
+  static const String _featureFlagsPrefsKeyPrefix = 'mixroom.feature_flags.v1';
 
   final http.Client _httpClient;
 
@@ -36,7 +38,9 @@ class EntitlementService extends ChangeNotifier {
   VoidCallback? _authListener;
 
   EntitlementSnapshot? _entitlement;
+  BillingAccountSnapshot? _billingAccount;
   BillingCatalogSnapshot? _billingCatalog;
+  AppFeatureFlags _appFeatureFlags = AppFeatureFlags.defaults();
   OrganizationAccessSnapshot? _organizationsAccess;
   WorkspaceAccessSnapshot? _workspacesAccess;
   CloudProjectAccessSnapshot? _cloudProjectsAccess;
@@ -51,6 +55,7 @@ class EntitlementService extends ChangeNotifier {
 
   DateTime? _lastSyncedAtUtc;
   DateTime? _accountSurfaceLastSyncedAtUtc;
+  DateTime? _featureFlagsLastSyncedAtUtc;
 
   String? _boundUserId;
   Future<void>? _refreshInFlight;
@@ -59,11 +64,13 @@ class EntitlementService extends ChangeNotifier {
   Map<String, String> _accountSurfaceWarnings = <String, String>{};
 
   EntitlementSnapshot? get entitlement => _entitlement;
+  BillingAccountSnapshot? get billingAccount => _billingAccount;
   BillingCatalogSnapshot? get billingCatalog =>
       _billingCatalog ??
       BillingCatalogSnapshot.localDefaults(
         requestedByUserId: _boundUserId ?? _auth?.signedInUser?.userId ?? '',
       );
+  AppFeatureFlags get appFeatureFlags => _appFeatureFlags;
   OrganizationAccessSnapshot? get organizationsAccess => _organizationsAccess;
   WorkspaceAccessSnapshot? get workspacesAccess => _workspacesAccess;
   CloudProjectAccessSnapshot? get cloudProjectsAccess => _cloudProjectsAccess;
@@ -82,7 +89,11 @@ class EntitlementService extends ChangeNotifier {
   Map<String, String> get accountSurfaceWarnings =>
       Map<String, String>.unmodifiable(_accountSurfaceWarnings);
 
-  bool get isEnforcementEnabled => AppApiConfig.enforceSubscriptions;
+  bool get isEnforcementEnabled =>
+      _appFeatureFlags.subscriptionEnforcementEnabled;
+  bool get isAccountPlanBillingEnabled =>
+      _appFeatureFlags.accountPlanBillingEnabled;
+  bool get areIapPurchasesEnabled => _appFeatureFlags.iapPurchasesEnabled;
 
   String? get storeAccountToken {
     final raw = _auth?.signedInUser?.userId.trim() ?? '';
@@ -253,6 +264,11 @@ class EntitlementService extends ChangeNotifier {
         path: '/v1/billing/catalog',
         parser: (json) => BillingCatalogSnapshot.fromJson(json),
       );
+      final billingFuture = _fetchAccountEndpoint(
+        endpointKey: 'billing',
+        path: '/v1/billing/me',
+        parser: (json) => BillingAccountSnapshot.fromJson(json),
+      );
       final organizationsFuture = _fetchAccountEndpoint(
         endpointKey: 'organizations',
         path: '/v1/organizations/me',
@@ -291,6 +307,7 @@ class EntitlementService extends ChangeNotifier {
           organizationsFuture,
           workspacesFuture,
           cloudProjectsFuture,
+          billingFuture,
         ],
       );
       final results = <_AccountEndpointResult<dynamic>>[
@@ -308,6 +325,7 @@ class EntitlementService extends ChangeNotifier {
       final organizationsResult = results[1].data;
       final workspacesResult = results[2].data;
       final cloudProjectsResult = results[3].data;
+      final billingResult = results[4].data;
 
       if (organizationsResult is OrganizationAccessSnapshot) {
         _organizationsAccess = organizationsResult;
@@ -317,6 +335,9 @@ class EntitlementService extends ChangeNotifier {
       }
       if (cloudProjectsResult is CloudProjectAccessSnapshot) {
         _cloudProjectsAccess = cloudProjectsResult;
+      }
+      if (billingResult is BillingAccountSnapshot) {
+        _billingAccount = billingResult;
       }
 
       _accountSurfaceWarnings = warnings;
@@ -337,6 +358,29 @@ class EntitlementService extends ChangeNotifier {
         refreshCompleter.complete();
       }
       notifyListeners();
+    }
+  }
+
+  Future<void> refreshFeatureFlags({
+    bool force = false,
+  }) async {
+    final auth = _auth;
+    final user = auth?.signedInUser;
+    if (auth == null || user == null) return;
+    if (!force && !_areFeatureFlagsStale) return;
+
+    try {
+      if (!AppApiConfig.hasApiBaseUrl) return;
+      final json = await _getAuthed('/v1/feature-flags');
+      _appFeatureFlags = AppFeatureFlags.fromJson(
+        json,
+        fallback: AppFeatureFlags.defaults(),
+      );
+      _featureFlagsLastSyncedAtUtc = DateTime.now().toUtc();
+      await _writeCachedFeatureFlags(user.userId, _appFeatureFlags);
+      notifyListeners();
+    } catch (_) {
+      // Keep cached/local defaults if remote flags are temporarily unavailable.
     }
   }
 
@@ -425,8 +469,15 @@ class EntitlementService extends ChangeNotifier {
   }
 
   Future<String?> fetchPortalUrl() async {
-    final json = await _getAuthed('/v1/billing/portal-url');
-    final raw = (json['url'] ?? '').toString().trim();
+    try {
+      final billingJson = await _getAuthed('/v1/billing/me');
+      final managed = (billingJson['manage_url'] ?? '').toString().trim();
+      if (managed.isNotEmpty) return managed;
+    } catch (_) {
+      // Older deployed APIs may only expose the legacy portal endpoint.
+    }
+    final portalJson = await _getAuthed('/v1/billing/portal-url');
+    final raw = (portalJson['url'] ?? '').toString().trim();
     return raw.isEmpty ? null : raw;
   }
 
@@ -544,6 +595,13 @@ class EntitlementService extends ChangeNotifier {
     return DateTime.now().toUtc().difference(synced) > ttl;
   }
 
+  bool get _areFeatureFlagsStale {
+    final synced = _featureFlagsLastSyncedAtUtc;
+    if (synced == null) return true;
+    final ttl = Duration(minutes: AppApiConfig.entitlementCacheTtlMinutes);
+    return DateTime.now().toUtc().difference(synced) > ttl;
+  }
+
   Future<_AccountEndpointResult<T>> _fetchAccountEndpoint<T>({
     required String endpointKey,
     required String path,
@@ -652,6 +710,9 @@ class EntitlementService extends ChangeNotifier {
     }
 
     if (_boundUserId == userId) {
+      if (_areFeatureFlagsStale) {
+        unawaited(refreshFeatureFlags());
+      }
       if ((_entitlement == null || _isEntitlementStale) && !_isLoading) {
         unawaited(refresh());
       }
@@ -664,12 +725,14 @@ class EntitlementService extends ChangeNotifier {
     _boundUserId = userId;
     _entitlement = EntitlementSnapshot.free(userId: userId);
     _billingCatalog = null;
+    _appFeatureFlags = AppFeatureFlags.defaults();
     _organizationsAccess = null;
     _workspacesAccess = null;
     _cloudProjectsAccess = null;
     AnalyticsService.instance.setSubscriptionTier(_entitlement?.planCode);
     _lastSyncedAtUtc = null;
     _accountSurfaceLastSyncedAtUtc = null;
+    _featureFlagsLastSyncedAtUtc = null;
     _lastError = null;
     _accountSurfaceError = null;
     _accountSurfaceWarnings = <String, String>{};
@@ -679,7 +742,9 @@ class EntitlementService extends ChangeNotifier {
 
     unawaited(
       _loadCachedEntitlement(userId).then((_) async {
+        await _loadCachedFeatureFlags(userId);
         await _loadCachedBillingCatalog(userId);
+        await refreshFeatureFlags(force: true);
         await refresh(force: true);
         await refreshAccountSurface(force: true);
       }),
@@ -733,6 +798,25 @@ class EntitlementService extends ChangeNotifier {
     }
   }
 
+  Future<void> _loadCachedFeatureFlags(String userId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_featureFlagsCacheKey(userId));
+      if (raw == null || raw.trim().isEmpty) return;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return;
+      final data = decoded.map((key, value) => MapEntry(key.toString(), value));
+      _appFeatureFlags = AppFeatureFlags.fromJson(
+        data,
+        fallback: AppFeatureFlags.defaults(),
+      );
+      _featureFlagsLastSyncedAtUtc = DateTime.now().toUtc();
+      notifyListeners();
+    } catch (_) {
+      // Ignore cache parse failures and fallback to local/default flags.
+    }
+  }
+
   Future<void> _writeCachedBillingCatalog(
     String userId,
     BillingCatalogSnapshot catalog,
@@ -741,6 +825,17 @@ class EntitlementService extends ChangeNotifier {
     await prefs.setString(
       _catalogCacheKey(userId),
       jsonEncode(catalog.toJson()),
+    );
+  }
+
+  Future<void> _writeCachedFeatureFlags(
+    String userId,
+    AppFeatureFlags flags,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _featureFlagsCacheKey(userId),
+      jsonEncode(flags.toJson()),
     );
   }
 
@@ -753,6 +848,9 @@ class EntitlementService extends ChangeNotifier {
 
   String _catalogCacheKey(String userId) => '$_catalogPrefsKeyPrefix.$userId';
 
+  String _featureFlagsCacheKey(String userId) =>
+      '$_featureFlagsPrefsKeyPrefix.$userId';
+
   void _setFallbackFreeEntitlement(String userId) {
     _entitlement = EntitlementSnapshot.free(userId: userId);
     AnalyticsService.instance.setSubscriptionTier(_entitlement?.planCode);
@@ -763,12 +861,14 @@ class EntitlementService extends ChangeNotifier {
   void _resetStateForSignedOutUser() {
     _entitlement = null;
     _billingCatalog = null;
+    _appFeatureFlags = AppFeatureFlags.defaults();
     _organizationsAccess = null;
     _workspacesAccess = null;
     _cloudProjectsAccess = null;
     AnalyticsService.instance.setSubscriptionTier(null);
     _lastSyncedAtUtc = null;
     _accountSurfaceLastSyncedAtUtc = null;
+    _featureFlagsLastSyncedAtUtc = null;
     _lastError = null;
     _accountSurfaceError = null;
     _accountSurfaceWarnings = <String, String>{};

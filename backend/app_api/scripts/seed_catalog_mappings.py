@@ -91,7 +91,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--stage",
-        default="staging",
+        default="prod",
         help="Stage suffix used when deriving the DynamoDB table name.",
     )
     parser.add_argument(

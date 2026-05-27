@@ -22,8 +22,8 @@ class AiLimitsTests(unittest.TestCase):
     def test_load_ai_limits_reads_expected_single_source_file(self) -> None:
         limits = ai_limits.load_ai_limits()
 
-        self.assertEqual(limits["prompt_limits"]["free"]["daily"], 50)
-        self.assertEqual(limits["prompt_limits"]["free"]["weekly"], 200)
+        self.assertEqual(limits["prompt_limits"]["free"]["daily"], 30)
+        self.assertEqual(limits["prompt_limits"]["free"]["weekly"], 120)
         self.assertEqual(limits["prompt_limits"]["starter"]["daily"], 400)
         self.assertEqual(limits["prompt_limits"]["producer"]["daily"], 1000)
         self.assertEqual(limits["tiers"]["free"]["daily_credits"], 100)
@@ -33,8 +33,8 @@ class AiLimitsTests(unittest.TestCase):
     def test_get_prompt_limits_reads_daily_and_weekly_caps(self) -> None:
         limits = ai_limits.get_prompt_limits()
 
-        self.assertEqual(limits["daily_prompts"], 50)
-        self.assertEqual(limits["weekly_prompts"], 200)
+        self.assertEqual(limits["daily_prompts"], 30)
+        self.assertEqual(limits["weekly_prompts"], 120)
 
     def test_get_prompt_limits_reads_subscription_tiers(self) -> None:
         starter = ai_limits.get_prompt_limits("starter")
@@ -54,7 +54,7 @@ class AiLimitsTests(unittest.TestCase):
         self.assertEqual(enterprise["daily_prompts"], 1000)
         self.assertEqual(enterprise["weekly_prompts"], 4000)
 
-    def test_get_prompt_limits_prefers_entitlement_limits(self) -> None:
+    def test_get_prompt_limits_prefers_explicit_limit_overrides(self) -> None:
         limits = ai_limits.get_prompt_limits(
             "starter",
             {
@@ -66,7 +66,7 @@ class AiLimitsTests(unittest.TestCase):
         self.assertEqual(limits["daily_prompts"], 123)
         self.assertEqual(limits["weekly_prompts"], 456)
 
-    def test_get_prompt_limits_falls_back_when_entitlement_limits_are_invalid(self) -> None:
+    def test_get_prompt_limits_falls_back_when_limit_overrides_are_invalid(self) -> None:
         custom = ai_limits.get_prompt_limits(
             "producer",
             {
@@ -112,8 +112,8 @@ class AiLimitsTests(unittest.TestCase):
             def get_item(self, **_kwargs):
                 return {
                     "Item": {
-                        "free_daily_prompt_limit": 50,
-                        "free_weekly_prompt_limit": 200,
+                        "free_daily_prompt_limit": 30,
+                        "free_weekly_prompt_limit": 120,
                     }
                 }
 
@@ -132,8 +132,8 @@ class AiLimitsTests(unittest.TestCase):
             ai_limits.clear_prompt_limits_cache()
             limits = ai_limits.get_prompt_limits("free")
 
-        self.assertEqual(limits["daily_prompts"], 50)
-        self.assertEqual(limits["weekly_prompts"], 200)
+        self.assertEqual(limits["daily_prompts"], 30)
+        self.assertEqual(limits["weekly_prompts"], 120)
 
     def test_get_prompt_limits_does_not_apply_free_override_to_pro_tier(self) -> None:
         with mock.patch.object(

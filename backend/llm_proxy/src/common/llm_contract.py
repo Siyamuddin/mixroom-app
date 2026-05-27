@@ -44,13 +44,117 @@ def _read_client_capabilities(payload: Dict[str, Any]) -> set[str]:
     return normalized
 
 
+def _read_string_list(value: Any, *, max_items: int = 80) -> List[str]:
+    if not isinstance(value, list):
+        return []
+    normalized: List[str] = []
+    seen: set[str] = set()
+    for raw in value:
+        if not isinstance(raw, str):
+            continue
+        item = raw.strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        normalized.append(item)
+        if len(normalized) >= max_items:
+            break
+    return normalized
+
+
+def _read_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, str):
+        try:
+            parsed = int(value.strip())
+        except ValueError:
+            return None
+        return parsed if parsed >= 0 else None
+    return None
+
+
+def _read_client_policy(payload: Dict[str, Any]) -> Dict[str, Any]:
+    raw_context = payload.get("client_context")
+    if not isinstance(raw_context, dict):
+        return {}
+
+    policy: Dict[str, Any] = {}
+    for key in ("subscription_plan", "plugin_access", "row_creation_policy"):
+        value = raw_context.get(key)
+        if isinstance(value, str) and value.strip():
+            policy[key] = value.strip()[:500]
+
+    for key in ("max_rows", "current_rows"):
+        parsed = _read_int(raw_context.get(key))
+        if parsed is not None:
+            policy[key] = parsed
+
+    allowed_effects = _read_string_list(raw_context.get("allowed_builtin_effects"))
+    if allowed_effects:
+        policy["allowed_builtin_effects"] = allowed_effects
+
+    allowed_instruments = _read_string_list(raw_context.get("allowed_instrument_ids"))
+    if allowed_instruments:
+        policy["allowed_instrument_ids"] = allowed_instruments
+
+    return policy
+
+
 def _client_capability_signature(capabilities: set[str]) -> str:
     if not capabilities:
         return "legacy"
     return ",".join(sorted(capabilities))
 
 
-def _build_system_prompt(client_capabilities: set[str]) -> str:
+def _client_policy_signature(policy: Dict[str, Any]) -> str:
+    if not policy:
+        return "default_policy"
+    return json.dumps(policy, sort_keys=True, separators=(",", ":"))
+
+
+def _client_policy_prompt_lines(client_policy: Dict[str, Any]) -> list[str]:
+    if not client_policy:
+        return []
+    lines: list[str] = ["", "CLIENT ENTITLEMENT POLICY"]
+    subscription_plan = str(client_policy.get("subscription_plan") or "").strip()
+    plugin_access = str(client_policy.get("plugin_access") or "").strip()
+    row_creation_policy = str(client_policy.get("row_creation_policy") or "").strip()
+    max_rows = client_policy.get("max_rows")
+    current_rows = client_policy.get("current_rows")
+    allowed_effects = client_policy.get("allowed_builtin_effects")
+    allowed_instruments = client_policy.get("allowed_instrument_ids")
+    if subscription_plan:
+        lines.append(f"- Current subscription plan: {subscription_plan}.")
+    if isinstance(max_rows, int):
+        row_line = f"- Maximum project row_index is {max_rows - 1}; do not emit actions targeting row_index >= {max_rows}."
+        if isinstance(current_rows, int):
+            row_line += f" Current row count is {current_rows}."
+        lines.append(row_line)
+    if row_creation_policy:
+        lines.append(f"- Row creation policy: {row_creation_policy}")
+    if plugin_access:
+        lines.append(f"- Plugin access: {plugin_access}.")
+    if isinstance(allowed_effects, list) and allowed_effects:
+        lines.append(
+            "- Effect/plugin actions may only add or target these built-in effects unless the client explicitly allows all plugins: "
+            + ", ".join(allowed_effects)
+            + "."
+        )
+    if isinstance(allowed_instruments, list) and allowed_instruments:
+        lines.append(
+            "- New MIDI/instrument actions may only use instrument_id values present in LIBRARY_SNAPSHOT and in this allowed list: "
+            + ", ".join(allowed_instruments)
+            + "."
+        )
+    return lines
+
+
+def _build_system_prompt(
+    client_capabilities: set[str], client_policy: Dict[str, Any]
+) -> str:
     lines: list[str] = [SYSTEM_PROMPT_V3]
     lines.extend(
         [
@@ -62,6 +166,7 @@ def _build_system_prompt(client_capabilities: set[str]) -> str:
             "- If a request can be satisfied using a packaged instrument ID or packaged sample path from LIBRARY_SNAPSHOT, do not treat it as unsupported generation.",
         ]
     )
+    lines.extend(_client_policy_prompt_lines(client_policy))
     if "daw.project_edit.set_tempo" in client_capabilities:
         lines.append(
             "- This client supports project_edit set_tempo for direct BPM/project tempo changes."
@@ -695,10 +800,11 @@ Action data rules:
     3) target effect (or add effect)
     4) target parameter control
 - clarify: {"question": "...", "options": ["...","..."]}
-- clip_edit: {"operation":"trim|auto_trim|cut|stretch|move|tempo_follow|auto_bpm_align|tempo_detect_set_project|duplicate|delete|dialog_cleanup|dialog_remove_range|dialog_tighten_pauses|dialog_lift_quiet","target": {...}, ...}
+- clip_edit: {"operation":"trim|auto_trim|cut|stretch|glue|move|tempo_follow|auto_bpm_align|tempo_detect_set_project|duplicate|delete|dialog_cleanup|dialog_remove_range|dialog_tighten_pauses|dialog_lift_quiet","target": {...}, ...}
   - NEVER emit a bare `clip_edit` action with a missing or unknown `operation`
   - timeline/arrangement movement is always `clip_edit`, never `mix_model_request`
   - use cut only for clip region splitting (timeline clip split), not for MIDI note chopping
+  - use `glue` when the user asks to merge, consolidate, or bounce multiple existing clips into one clip
   - for trim, include trim_side ("start" | "end") when user specifies a side
   - for move, include at least one of: new_start_ms, delta_ms, new_start_measure, delta_measures, direction ("left"|"right"|"up"|"down"), or new_row_index
   - vertical row moves still use `operation:"move"`; do NOT invent a separate operation for moving up or down rows
@@ -718,6 +824,7 @@ Action data rules:
   - for `dialog_lift_quiet`, optional fields: `boost_db`, `max_gain`, `min_quiet_ms`
 - effect_edit: {"operation":"add|remove|bypass|unbypass|toggle_bypass","target": {...}, ...}
   - use this for plugin/effect insert/remove/bypass requests on a track or master bus
+  - for autotune, auto-tune, pitch correction, or Melodyne-style vocal tuning requests, add the built-in `Pitch Corrector` effect
   - target may include `row_index`, `scope="master"`, `effect_index`, `effect_name`, `plugin_name`, or `effect_name_contains`
   - if the user says "the plugin" and there is exactly one plausible effect on the target track, you may act without clarifying
   - if multiple plugins exist and the target plugin is ambiguous, emit `clarify` instead of guessing
@@ -1220,8 +1327,9 @@ Action data
     - `row:<row_index>:fx_contains:<effect_name_or_token>:param:<param_name_or_id>`
   - for drill-down tutorials, include `row_index`, `effect_index/effect_name`, `param_id/param_name`, `effect_missing`, `show_add_effect`, `drilldown`
 - `clarify`: `{"question":"...","options":["...","..."]}`
-- `clip_edit`: `operation` is one of `trim|auto_trim|cut|stretch|move|tempo_follow|auto_bpm_align|tempo_detect_set_project|duplicate|delete|dialog_cleanup|dialog_remove_range|dialog_tighten_pauses|dialog_lift_quiet`
+- `clip_edit`: `operation` is one of `trim|auto_trim|cut|stretch|glue|move|tempo_follow|auto_bpm_align|tempo_detect_set_project|duplicate|delete|dialog_cleanup|dialog_remove_range|dialog_tighten_pauses|dialog_lift_quiet`
   - `cut` is clip-region splitting only
+  - `glue` merges/consolidates multiple existing clips into one clip
   - include `trim_side` when relevant
   - `move` needs `new_start_ms`, `delta_ms`, `new_start_measure`, `delta_measures`, `direction`, and/or `new_row_index`
   - when the user specifies bars/measures/beats, prefer `new_start_measure` / `new_start_bar` or `delta_measures` / `delta_bars` instead of converting to milliseconds
@@ -1625,7 +1733,7 @@ starter rhythm, prefer action over clarification.
   specific clip at a resolved cut point; never use cut with from_ms/to_ms for
   beat restructuring, and never emit zero-distance move, zero-length cut, or
   placeholder actions that would leave the groove unchanged.
-- Use clip_edit for movement, arrangement, trim/cut/stretch, duplication,
+- Use clip_edit for movement, arrangement, trim/cut/stretch/glue, duplication,
   deletion, and dialog cleanup. If the user says left/right with bars,
   measures, beats, position, timeline, or clip language, treat it as movement
   in time. If the user says up/down with row, track, or line language, treat
@@ -2193,6 +2301,7 @@ TOOLS = [
                                                     "auto_trim",
                                                     "cut",
                                                     "stretch",
+                                                    "glue",
                                                     "move",
                                                     "tempo_follow",
                                                     "auto_bpm_align",
@@ -3044,7 +3153,12 @@ def build_llm_request_from_mixroom_payload(
     selection_snapshot = _read_optional_string(payload, "selection_snapshot")
     library_snapshot = _read_optional_string(payload, "library_snapshot")
     client_capabilities = _read_client_capabilities(payload)
+    client_policy = _read_client_policy(payload)
     capability_signature = _client_capability_signature(client_capabilities)
+    if client_policy:
+        capability_signature = "|".join(
+            [capability_signature, _client_policy_signature(client_policy)]
+        )
 
     pending_mix_value = payload.get("pending_mix")
     if pending_mix_value is not None and not isinstance(pending_mix_value, dict):
@@ -3053,7 +3167,7 @@ def build_llm_request_from_mixroom_payload(
     resolved_model = default_model.strip() or DEFAULT_MODEL
     body: NormalizedLlmRequest = {
         "model": resolved_model,
-        "instructions": _build_system_prompt(client_capabilities),
+        "instructions": _build_system_prompt(client_capabilities, client_policy),
         "prompt_cache_key": _default_prompt_cache_key(
             ai_feature, capability_signature
         ),
@@ -3076,6 +3190,11 @@ def build_llm_request_from_mixroom_payload(
         body["reasoning"] = default_reasoning
 
     body.update(_normalize_request_overrides(payload))
+    instructions = str(body.get("instructions") or "").strip()
+    if client_policy and "CLIENT ENTITLEMENT POLICY" not in instructions:
+        body["instructions"] = "\n".join(
+            [instructions, *_client_policy_prompt_lines(client_policy)]
+        ).strip()
     resolved_model = str(body.get("model") or "").strip()
     body.setdefault(
         "prompt_cache_retention",

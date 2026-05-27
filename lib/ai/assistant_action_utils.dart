@@ -1225,6 +1225,18 @@ class AssistantActionUtils {
       case 'clone':
       case 'clone_clip':
         return 'duplicate';
+      case 'glue':
+      case 'glue_clip':
+      case 'glue_clips':
+      case 'merge':
+      case 'merge_clip':
+      case 'merge_clips':
+      case 'consolidate':
+      case 'consolidate_clip':
+      case 'consolidate_clips':
+      case 'bounce_clip':
+      case 'bounce_clips':
+        return 'glue';
       case 'remove':
       case 'remove_clip':
         return 'delete';

@@ -445,6 +445,7 @@ class AudioCanvasTimeline extends StatefulWidget {
   final void Function(List<int> clipIndices)? onCopyClips;
   final Future<void> Function(List<int> clipIndices)? onDeleteClips;
   final Future<void> Function(int clipIndex, double cutTimeMs)? onCutClipAt;
+  final Future<void> Function(List<int> clipIndices)? onGlueClips;
   final void Function(int clipIndex)? onOpenMidiClip;
   final Future<void> Function(int clipIndex)? onStemSeparation;
   final void Function(List<int> selectedClipIndices, int primaryClipIndex)?
@@ -590,6 +591,7 @@ class AudioCanvasTimeline extends StatefulWidget {
     this.onCopyClips,
     this.onDeleteClips,
     this.onCutClipAt,
+    this.onGlueClips,
     this.onOpenMidiClip,
     this.onStemSeparation,
     this.onSelectionChanged,
@@ -6111,6 +6113,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         hasSingleSelection ? selectedIndices.first : _selectedClipIndex;
     final canSplitAtPlayhead = hasSingleSelection &&
         _canCutSelectedClipAtPlayhead(singleSelectionIndex);
+    final canGlueSelection =
+        selectedIndices.length >= 2 && widget.onGlueClips != null;
     Rect? selectionRect;
     for (final index in selectedIndices) {
       final rect = _getClipRect(index);
@@ -6122,7 +6126,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         !_isUserInteracting &&
         !_selectionBoxActive;
     final int popupActionCount =
-        hasSingleSelection ? (canSplitAtPlayhead ? 5 : 4) : 3;
+        (hasSingleSelection ? (canSplitAtPlayhead ? 5 : 4) : 3) +
+            (canGlueSelection ? 1 : 0);
     final double popupWidth = math.min(
       popupActionCount * 38.0,
       math.max(84.0, viewportWidth - 8),
@@ -6137,21 +6142,34 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       final clipInTimelineY = selectionRect.bottom >= _verticalScrollOffset &&
           selectionRect.top <= _verticalScrollOffset + viewportHeight;
       if (clipInTimelineX && clipInTimelineY) {
+        final visibleClipLeft = selectionRect.left.clamp(0.0, viewportWidth);
+        final visibleClipRight = selectionRect.right.clamp(0.0, viewportWidth);
+        final hasVisibleClipSpan = visibleClipRight > visibleClipLeft + 1.0;
         final tapAnchorPx = _clipPopupMs == null
             ? double.nan
             : (_clipPopupMs! - _scrollOffsetMs) * _pixelsPerMs;
-        final minAnchorPx = selectionRect.left + 6.0;
-        final maxAnchorPx = selectionRect.right - 6.0;
+        final minAnchorPx =
+            (hasVisibleClipSpan ? visibleClipLeft : selectionRect.left) + 6.0;
+        final maxAnchorPx =
+            (hasVisibleClipSpan ? visibleClipRight : selectionRect.right) - 6.0;
         final anchorPx = tapAnchorPx.isFinite
             ? tapAnchorPx
                 .clamp(
-                  minAnchorPx <= maxAnchorPx ? minAnchorPx : selectionRect.left,
+                  minAnchorPx <= maxAnchorPx
+                      ? minAnchorPx
+                      : (hasVisibleClipSpan
+                          ? visibleClipLeft
+                          : selectionRect.left),
                   minAnchorPx <= maxAnchorPx
                       ? maxAnchorPx
-                      : selectionRect.right,
+                      : (hasVisibleClipSpan
+                          ? visibleClipRight
+                          : selectionRect.right),
                 )
                 .toDouble()
-            : (selectionRect.left + selectionRect.width / 2);
+            : (hasVisibleClipSpan
+                ? (visibleClipLeft + visibleClipRight) / 2.0
+                : (selectionRect.left + selectionRect.width / 2));
         final minLeft = kHeaderWidth + 4.0;
         final maxLeft =
             math.max(minLeft, kHeaderWidth + viewportWidth - popupWidth - 4.0);
@@ -6228,6 +6246,26 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
               unawaited(onCutClipAt(singleSelectionIndex, cutMs));
             },
             tooltip: L10n.translate(context, 'Split at playhead'),
+          ),
+        ),
+      ]);
+    }
+    if (canGlueSelection) {
+      popupChildren.addAll(<Widget>[
+        Container(width: 1, height: 16, color: Colors.white24),
+        Expanded(
+          child: _buildClipPopupAction(
+            key: const ValueKey('selected_clip_popup_glue'),
+            icon: Icons.call_merge_rounded,
+            color: Colors.white,
+            onTap: () async {
+              final onGlueClips = widget.onGlueClips;
+              if (onGlueClips == null) return;
+              final glueIndices = selectedIndices.toList(growable: false);
+              setState(_clearClipSelection);
+              await onGlueClips(glueIndices);
+            },
+            tooltip: L10n.translate(context, 'Glue clips'),
           ),
         ),
       ]);

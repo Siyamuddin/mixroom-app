@@ -11,8 +11,8 @@ except ModuleNotFoundError:  # pragma: no cover - local dev/test fallback
 from . import config
 
 _SETTING_KEY = "ai_prompt_limits"
-_DEFAULT_FREE_DAILY_PROMPT_LIMIT = 50
-_DEFAULT_FREE_WEEKLY_PROMPT_LIMIT = 200
+_DEFAULT_FREE_DAILY_PROMPT_LIMIT = 30
+_DEFAULT_FREE_WEEKLY_PROMPT_LIMIT = 120
 _MAX_PROMPT_LIMIT = 100000
 
 

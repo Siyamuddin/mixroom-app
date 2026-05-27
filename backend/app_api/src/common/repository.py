@@ -83,7 +83,16 @@ class BillingRepository:
         payload = dict(record)
         payload.setdefault("updated_at", _utc_now_iso())
         payload["status_key"] = str(payload.get("status") or "").strip().lower() or "unknown"
+        if payload.get("expires_at") is None or str(payload.get("expires_at") or "").strip() == "":
+            payload.pop("expires_at", None)
         self._subscriptions.put_item(Item=payload)
+
+    def get_subscription(self, subscription_id: str) -> Optional[Dict[str, Any]]:
+        safe_id = str(subscription_id or "").strip()
+        if not safe_id:
+            return None
+        item = self._subscriptions.get_item(Key={"subscription_id": safe_id}).get("Item")
+        return item if isinstance(item, dict) else None
 
     def get_latest_subscription_for_user(self, user_id: str) -> Optional[Dict[str, Any]]:
         items = self.list_subscriptions_for_user(user_id, limit=1)
@@ -691,6 +700,28 @@ class BillingRepository:
         payload = dict(job)
         payload.setdefault("created_at", _utc_now_iso())
         self._reconcile_jobs.put_item(Item=payload)
+
+    def get_reconciliation_job(self, job_id: str) -> Optional[Dict[str, Any]]:
+        safe_id = str(job_id or "").strip()
+        if not safe_id:
+            return None
+        item = self._reconcile_jobs.get_item(Key={"job_id": safe_id}).get("Item")
+        return item if isinstance(item, dict) else None
+
+    def record_reconciliation_job_once(self, job: Dict[str, Any]) -> bool:
+        payload = dict(job)
+        payload.setdefault("created_at", _utc_now_iso())
+        try:
+            self._reconcile_jobs.put_item(
+                Item=payload,
+                ConditionExpression="attribute_not_exists(job_id)",
+            )
+            return True
+        except ClientError as exc:
+            code = str(exc.response.get("Error", {}).get("Code") or "").strip()
+            if code == "ConditionalCheckFailedException":
+                return False
+            raise
 
     @staticmethod
     def catalog_mapping_key(provider: str, product_id: str) -> str:

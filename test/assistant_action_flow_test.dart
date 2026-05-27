@@ -29,6 +29,7 @@ class _FakeCloudLlmService extends CloudLlmService {
     String? aiFeature,
     String? promptTraceId,
     MixingResult? pendingMix,
+    Map<String, dynamic> clientContext = const <String, dynamic>{},
   }) async {
     seenUserText = userText;
     seenProjectSnapshot = projectSnapshot;
@@ -56,6 +57,7 @@ class _QueuedFakeCloudLlmService extends CloudLlmService {
     String? aiFeature,
     String? promptTraceId,
     MixingResult? pendingMix,
+    Map<String, dynamic> clientContext = const <String, dynamic>{},
   }) async {
     seenConversations.add(
       conversation
@@ -433,6 +435,7 @@ void main() {
           'auto_trim',
           'cut',
           'stretch',
+          'glue',
           'move',
           'tempo_follow',
           'auto_bpm_align',
@@ -577,6 +580,7 @@ void main() {
           'auto_trim',
           'cut',
           'stretch',
+          'glue',
           'move',
           'tempo_follow',
           'auto_bpm_align',

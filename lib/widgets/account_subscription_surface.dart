@@ -218,6 +218,15 @@ class _AccountSubscriptionSurfaceState
             isBusy: busy,
             onManageSubscription: widget.onManageSubscription,
           ),
+          if (widget.entitlementService.billingAccount != null) ...[
+            const SizedBox(height: 10),
+            _BillingDetailsPanel(
+              billing: widget.entitlementService.billingAccount!,
+              entitlement: entitlement,
+              isBusy: busy,
+              onManageSubscription: widget.onManageSubscription,
+            ),
+          ],
           const SizedBox(height: 12),
           _BillingActions(
             isBusy: busy,
@@ -790,6 +799,228 @@ class _BillingActions extends StatelessWidget {
   }
 }
 
+class _BillingDetailsPanel extends StatelessWidget {
+  const _BillingDetailsPanel({
+    required this.billing,
+    required this.entitlement,
+    required this.isBusy,
+    required this.onManageSubscription,
+  });
+
+  final BillingAccountSnapshot billing;
+  final EntitlementSnapshot entitlement;
+  final bool isBusy;
+  final ManageSubscriptionAction onManageSubscription;
+
+  @override
+  Widget build(BuildContext context) {
+    final oneTimeAccessEndsAt =
+        _isTossOneTimeBilling(billing) ? billing.expiresAt : null;
+    final details = <_BillingDetailItem>[
+      _BillingDetailItem(
+        label: _t(context, 'Provider'),
+        value: _providerLabel(context, billing.provider),
+      ),
+      if (oneTimeAccessEndsAt != null)
+        _BillingDetailItem(
+          label: _t(context, 'Access ends'),
+          value: _formatDate(oneTimeAccessEndsAt),
+        )
+      else if (billing.nextBilledAt != null)
+        _BillingDetailItem(
+          label: _t(context, 'Renewal'),
+          value: _formatDate(billing.nextBilledAt!),
+        ),
+      if (billing.seatCount != null && billing.seatCount! > 0)
+        _BillingDetailItem(
+          label: _t(context, 'Seats'),
+          value: '${billing.seatCount}',
+        ),
+      if (billing.extraStorageTb > 0)
+        _BillingDetailItem(
+          label: _t(context, 'Extra storage'),
+          value: '+${billing.extraStorageTb} TB',
+        ),
+      if (billing.billingEmail.trim().isNotEmpty)
+        _BillingDetailItem(
+          label: _t(context, 'Billing email'),
+          value: billing.billingEmail.trim(),
+        ),
+      if (billing.paymentMethod != null)
+        _BillingDetailItem(
+          label: _t(context, 'Payment method'),
+          value: _paymentMethodLabel(billing.paymentMethod!),
+        ),
+    ];
+
+    if (details.isEmpty && !entitlement.isPaidPlan) {
+      return const SizedBox.shrink();
+    }
+
+    final hasProviderManagedLink =
+        billing.manageUrl.trim().isNotEmpty || entitlement.isPaidPlan;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(11, 10, 11, 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF14233D).withValues(alpha: 0.42),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.09)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.credit_card_rounded,
+                color: Color(0xFFA4C2FF),
+                size: 17,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _t(context, 'Billing details'),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12.4,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (details.isNotEmpty) ...[
+            const SizedBox(height: 9),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: details
+                  .map((item) => _BillingDetailChip(item: item))
+                  .toList(growable: false),
+            ),
+          ],
+          if (hasProviderManagedLink) ...[
+            const SizedBox(height: 9),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: isBusy
+                    ? null
+                    : () => onManageSubscription(
+                          provider: billing.provider,
+                          managementChannel: billing.managementChannel,
+                        ),
+                icon: const Icon(Icons.open_in_new_rounded, size: 15),
+                label: Text(_t(context, 'Manage billing')),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  disabledForegroundColor: Colors.white.withValues(alpha: 0.34),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 8,
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _BillingDetailItem {
+  const _BillingDetailItem({required this.label, required this.value});
+
+  final String label;
+  final String value;
+}
+
+class _BillingDetailChip extends StatelessWidget {
+  const _BillingDetailChip({required this.item});
+
+  final _BillingDetailItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 98, maxWidth: 220),
+      padding: const EdgeInsets.fromLTRB(9, 7, 9, 7),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            item.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.56),
+              fontSize: 10.4,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            item.value,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11.8,
+              fontWeight: FontWeight.w800,
+              height: 1.18,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _providerLabel(BuildContext context, BillingProvider provider) {
+  switch (provider) {
+    case BillingProvider.apple:
+      return 'App Store';
+    case BillingProvider.google:
+      return 'Google Play';
+    case BillingProvider.paddle:
+      return 'Paddle';
+    case BillingProvider.toss:
+      return 'Toss';
+    case BillingProvider.kakao:
+      return 'Kakao';
+    case BillingProvider.adminGrant:
+      return _t(context, 'Admin');
+    case BillingProvider.unknown:
+      return _t(context, 'Unknown');
+  }
+}
+
+String _paymentMethodLabel(BillingPaymentMethodDisplay method) {
+  final brand = method.brand.trim();
+  final last4 = method.last4.trim();
+  final expiry = method.expMonth != null && method.expYear != null
+      ? ' ${method.expMonth}/${method.expYear}'
+      : '';
+  if (brand.isNotEmpty && last4.isNotEmpty) {
+    return '$brand ending $last4$expiry';
+  }
+  if (last4.isNotEmpty) return 'Ending $last4$expiry';
+  if (brand.isNotEmpty) return '$brand$expiry';
+  return expiry.trim();
+}
+
 class _PlansPanel extends StatelessWidget {
   const _PlansPanel({
     required this.entitlement,
@@ -1259,7 +1490,7 @@ String _teamAccessDetail(
   if (planCode == 'education') {
     return _tr(
       context,
-      '{role} access to education workspace and class cloud storage',
+      '{role} access to Education seat management and Starter-level student seats',
       {'role': role},
     );
   }
@@ -1773,7 +2004,7 @@ class _EducationTeacherDashboardPageState
                     const SizedBox(height: 14),
                     if (_loading)
                       _LoadingPlansCard(
-                        message: _t(context, 'Loading education workspace...'),
+                        message: _t(context, 'Loading education dashboard...'),
                       )
                     else
                       _buildBody(
@@ -3537,15 +3768,35 @@ IconData _manageActionIconForContext(_PlanPurchaseContext context) {
   return Icons.open_in_new_rounded;
 }
 
+bool _isTossOneTimeBilling(BillingAccountSnapshot billing) {
+  final reason = billing.providerManagementReason.trim().toLowerCase();
+  return billing.provider == BillingProvider.toss &&
+      (reason == 'toss_one_time_payment' ||
+          (billing.nextBilledAt == null &&
+              billing.expiresAt != null &&
+              !billing.providerManagementConfigured));
+}
+
 String? _renewalCopy(BuildContext context, EntitlementSnapshot entitlement) {
+  if (entitlement.isAccessActive) {
+    final nextBilledAt = entitlement.nextBilledAt;
+    if (entitlement.sourceProvider == BillingProvider.toss &&
+        nextBilledAt == null &&
+        entitlement.expiresAt != null) {
+      final date = _formatDate(entitlement.expiresAt!);
+      return _tr(context, 'Access ends on {date}.', {'date': date});
+    }
+    if (nextBilledAt == null) {
+      return null;
+    }
+    final date = _formatDate(nextBilledAt);
+    return _tr(context, 'Renews on {date}.', {'date': date});
+  }
   final expiresAt = entitlement.expiresAt;
   if (expiresAt == null) {
     return null;
   }
   final date = _formatDate(expiresAt);
-  if (entitlement.isAccessActive) {
-    return _tr(context, 'Renews on {date}.', {'date': date});
-  }
   return _tr(context, 'Access ended on {date}.', {'date': date});
 }
 

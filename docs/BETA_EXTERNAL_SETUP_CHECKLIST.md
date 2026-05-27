@@ -7,7 +7,7 @@ This is the outside-the-IDE work required to make the current beta code path fun
 - Create a new OpenAI API key for the beta environment.
 - Confirm the OpenAI project has access to the model you want to use.
   - The production model is owned by the proxy deployment config via `OpenAiModel`.
-- Put the new key into AWS Secrets Manager.
+- Put the new key into SSM Parameter Store as a `SecureString`.
 - After the AWS proxy is using the new key successfully, revoke the old exposed key.
 - No special OpenAI-side "rotation setting" is required beyond create -> update AWS secret -> verify -> revoke old key.
 
@@ -18,14 +18,14 @@ Use:
 - API Gateway HTTP API
 - Lambda
 - Cognito User Pool
-- Secrets Manager
+- SSM Parameter Store
 - CloudWatch
 
 Do not use EC2 for the beta LLM proxy path unless you have another unrelated reason.
 
-## AWS Secrets Manager
+## AWS SSM Parameter Store
 
-- Create a secret that stores the OpenAI API key.
+- Create a `SecureString` parameter that stores the OpenAI API key.
 - Accepted by the current Lambda:
   - plain text secret containing `sk-...`
   - or JSON containing `OPENAI_API_KEY`

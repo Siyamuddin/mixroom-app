@@ -50,7 +50,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--user-id", required=True)
     parser.add_argument("--plan-code", required=True, choices=PLAN_CODES)
     parser.add_argument("--status", default="active")
-    parser.add_argument("--stage", default="staging")
+    parser.add_argument("--stage", default="prod")
     parser.add_argument("--region", default="ap-northeast-2")
     parser.add_argument("--profile", default="")
     parser.add_argument("--entitlements-table", default="")

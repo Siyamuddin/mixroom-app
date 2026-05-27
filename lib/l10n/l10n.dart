@@ -279,6 +279,12 @@ class L10n {
               'Your current plan does not include video projects.',
           'New Project': 'New Project',
           'Project limit reached': 'Project limit reached',
+          'Upgrade for more projects': 'Upgrade for more projects',
+          'Free includes 10 local projects. Export or delete one, or upgrade for more.':
+              'Free includes 10 local projects. Export or delete one, or upgrade for more.',
+          'Upgrade for more tracks': 'Upgrade for more tracks',
+          'Free includes 5 tracks per project. Upgrade to add more.':
+              'Free includes 5 tracks per project. Upgrade to add more.',
           'Create a new project': 'Create a new project',
           'Create a new video project': 'Create a new video project',
           'Delete one to continue': 'Delete one to continue',
@@ -539,8 +545,8 @@ class L10n {
           'Member': 'Member',
           'You are the {role}': 'You are the {role}',
           'You are a {role}': 'You are a {role}',
-          '{role} access to education workspace and class cloud storage':
-              '{role} access to education workspace and class cloud storage',
+          '{role} access to Education seat management and Starter-level student seats':
+              '{role} access to Education seat management and Starter-level student seats',
           '{role} access to enterprise workspace and shared cloud storage':
               '{role} access to enterprise workspace and shared cloud storage',
           '{role} access to shared workspace and cloud storage':
@@ -579,7 +585,7 @@ class L10n {
           'Students': 'Students',
           'Seats': 'Seats',
           'Student seats': 'Student seats',
-          'Loading education workspace...': 'Loading education workspace...',
+          'Loading education dashboard...': 'Loading education dashboard...',
           'Education billing': 'Education billing',
           'Current plan: Education {count} student seats. Teacher/admin access is included separately. Seat changes are handled by the Mixroom team.':
               'Current plan: Education {count} student seats. Teacher/admin access is included separately. Seat changes are handled by the Mixroom team.',
@@ -653,6 +659,7 @@ class L10n {
           '{count}/day': '{count}/day',
           '{count}/week': '{count}/week',
           'Renews on {date}.': 'Renews on {date}.',
+          'Access ends on {date}.': 'Access ends on {date}.',
           'Access ended on {date}.': 'Access ended on {date}.',
           'Enter a valid student email.': 'Enter a valid student email.',
           'Invite created for {email}.': 'Invite created for {email}.',
@@ -871,6 +878,8 @@ class L10n {
           'Birthday': 'Birthday',
           'Using Mixroom for': 'Using Mixroom for',
           'Provider': 'Provider',
+          'Renewal': 'Renewal',
+          'Access ends': 'Access ends',
           'Google': 'Google',
           'Apple': 'Apple',
           'KakaoTalk': 'KakaoTalk',
@@ -976,7 +985,13 @@ class L10n {
           'Daily': 'Daily',
           'Weekly': 'Weekly',
           'Try again in': 'Try again in',
-          'Blocked until': 'Blocked until',
+          'Resets': 'Resets',
+          'today at': 'today at',
+          'tomorrow at': 'tomorrow at',
+          'at': 'at',
+          'Unknown': 'Unknown',
+          'Need more AI?': 'Need more AI?',
+          'View Plans': 'View Plans',
           'Clear chat history?': 'Clear chat history?',
           'This removes the saved project chat context and cannot be undone.':
               'This removes the saved project chat context and cannot be undone.',
@@ -1733,6 +1748,12 @@ class L10n {
               '현재 플랜에는 비디오 프로젝트 기능이 포함되어 있지 않습니다.',
           'New Project': '새 프로젝트',
           'Project limit reached': '프로젝트 한도에 도달했습니다',
+          'Upgrade for more projects': '더 많은 프로젝트 사용하기',
+          'Free includes 10 local projects. Export or delete one, or upgrade for more.':
+              '무료 플랜은 로컬 프로젝트 10개까지 지원합니다. 하나를 내보내거나 삭제하거나 업그레이드하세요.',
+          'Upgrade for more tracks': '트랙을 더 추가하려면 업그레이드하세요',
+          'Free includes 5 tracks per project. Upgrade to add more.':
+              '무료 플랜은 프로젝트당 트랙 5개까지 지원합니다. 더 추가하려면 업그레이드하세요.',
           'Create a new project': '새 프로젝트 만들기',
           'Create a new video project': '새 비디오 프로젝트 만들기',
           'Delete one to continue': '계속하려면 하나를 삭제하세요',
@@ -1977,8 +1998,8 @@ class L10n {
           'Member': '멤버',
           'You are the {role}': '회원님은 {role}입니다',
           'You are a {role}': '회원님은 {role}입니다',
-          '{role} access to education workspace and class cloud storage':
-              '{role} 권한으로 교육 워크스페이스와 수업 클라우드 저장소에 접근합니다',
+          '{role} access to Education seat management and Starter-level student seats':
+              '{role} 권한으로 교육 좌석 관리와 Starter 수준 학생 좌석을 사용할 수 있습니다',
           '{role} access to enterprise workspace and shared cloud storage':
               '{role} 권한으로 엔터프라이즈 워크스페이스와 공유 클라우드 저장소에 접근합니다',
           '{role} access to shared workspace and cloud storage':
@@ -2017,7 +2038,7 @@ class L10n {
           'Students': '학생',
           'Seats': '좌석',
           'Student seats': '학생 좌석',
-          'Loading education workspace...': '교육 워크스페이스를 불러오는 중...',
+          'Loading education dashboard...': '교육 대시보드를 불러오는 중...',
           'Education billing': '교육 결제',
           'Current plan: Education {count} student seats. Teacher/admin access is included separately. Seat changes are handled by the Mixroom team.':
               '현재 요금제: 교육 학생 좌석 {count}개. 교사/관리자 접근은 별도로 포함됩니다. 좌석 변경은 Mixroom 팀이 처리합니다.',
@@ -2090,6 +2111,7 @@ class L10n {
           '{count}/day': '일 {count}회',
           '{count}/week': '주 {count}회',
           'Renews on {date}.': '{date}에 갱신됩니다.',
+          'Access ends on {date}.': '{date}에 이용 기간이 종료됩니다.',
           'Access ended on {date}.': '{date}에 액세스가 종료되었습니다.',
           'Enter a valid student email.': '올바른 학생 이메일을 입력하세요.',
           'Invite created for {email}.': '{email} 초대를 만들었습니다.',
@@ -2290,6 +2312,8 @@ class L10n {
           'Birthday': '생년월일',
           'Using Mixroom for': 'Mixroom 사용 목적',
           'Provider': '제공자',
+          'Renewal': '갱신',
+          'Access ends': '이용 종료',
           'Google': '구글',
           'Apple': '애플',
           'KakaoTalk': '카카오톡',
@@ -2391,7 +2415,13 @@ class L10n {
           'Daily': '일일',
           'Weekly': '주간',
           'Try again in': '다시 시도까지',
-          'Blocked until': '차단 해제 시각',
+          'Resets': '리셋',
+          'today at': '오늘',
+          'tomorrow at': '내일',
+          'at': '',
+          'Unknown': '알 수 없음',
+          'Need more AI?': 'AI가 더 필요하신가요?',
+          'View Plans': '요금제 보기',
           'Clear chat history?': '채팅 기록을 지울까요?',
           'This removes the saved project chat context and cannot be undone.':
               '저장된 프로젝트 채팅 컨텍스트를 삭제하며 되돌릴 수 없습니다.',
@@ -3590,6 +3620,12 @@ class L10n {
               '現在のプランにはビデオプロジェクト機能が含まれていません。',
           'New Project': '新規プロジェクト',
           'Project limit reached': 'プロジェクト上限に達しました',
+          'Upgrade for more projects': 'プロジェクト数を増やす',
+          'Free includes 10 local projects. Export or delete one, or upgrade for more.':
+              '無料プランではローカルプロジェクトは10個までです。1つを書き出すか削除するか、アップグレードしてください。',
+          'Upgrade for more tracks': 'トラック数を増やす',
+          'Free includes 5 tracks per project. Upgrade to add more.':
+              '無料プランでは1プロジェクト5トラックまでです。追加するにはアップグレードしてください。',
           'Create a new project': '新しいプロジェクトを作成',
           'Create a new video project': '新しいビデオプロジェクトを作成',
           'Delete one to continue': '続けるには1つ削除してください',
@@ -3829,8 +3865,8 @@ class L10n {
           'Member': 'メンバー',
           'You are the {role}': 'あなたは{role}です',
           'You are a {role}': 'あなたは{role}です',
-          '{role} access to education workspace and class cloud storage':
-              '{role}として教育ワークスペースとクラス用クラウドストレージにアクセスできます',
+          '{role} access to Education seat management and Starter-level student seats':
+              '{role}として教育席の管理とStarter相当の学生席を利用できます',
           '{role} access to enterprise workspace and shared cloud storage':
               '{role}としてエンタープライズワークスペースと共有クラウドストレージにアクセスできます',
           '{role} access to shared workspace and cloud storage':
@@ -3869,7 +3905,7 @@ class L10n {
           'Students': '学生',
           'Seats': '席',
           'Student seats': '学生席',
-          'Loading education workspace...': '教育ワークスペースを読み込み中...',
+          'Loading education dashboard...': '教育ダッシュボードを読み込み中...',
           'Education billing': '教育の請求',
           'Current plan: Education {count} student seats. Teacher/admin access is included separately. Seat changes are handled by the Mixroom team.':
               '現在のプラン: 教育学生席 {count}席。教師/管理者アクセスは別枠で含まれます。席数の変更はMixroomチームが対応します。',
@@ -3942,6 +3978,7 @@ class L10n {
           '{count}/day': '1日{count}回',
           '{count}/week': '週{count}回',
           'Renews on {date}.': '{date}に更新されます。',
+          'Access ends on {date}.': '{date}に利用期間が終了します。',
           'Access ended on {date}.': '{date}にアクセスが終了しました。',
           'Enter a valid student email.': '有効な学生メールアドレスを入力してください。',
           'Invite created for {email}.': '{email}への招待を作成しました。',
@@ -4137,6 +4174,8 @@ class L10n {
           'Birthday': '生年月日',
           'Using Mixroom for': 'Mixroomの利用目的',
           'Provider': 'プロバイダー',
+          'Renewal': '更新',
+          'Access ends': '利用終了',
           'Google': 'グーグル',
           'Apple': 'アップル',
           'KakaoTalk': 'KakaoTalk',
@@ -4237,7 +4276,13 @@ class L10n {
           'Daily': '日次',
           'Weekly': '週次',
           'Try again in': '再試行まで',
-          'Blocked until': 'ブロック解除',
+          'Resets': 'リセット',
+          'today at': '今日',
+          'tomorrow at': '明日',
+          'at': '',
+          'Unknown': '不明',
+          'Need more AI?': 'AIをもっと使いますか？',
+          'View Plans': 'プランを見る',
           'Clear chat history?': 'チャット履歴を消去しますか？',
           'This removes the saved project chat context and cannot be undone.':
               '保存されたプロジェクトのチャット履歴を削除します。元に戻せません。',

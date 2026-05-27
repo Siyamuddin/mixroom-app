@@ -69,7 +69,7 @@ class BillingCatalogTests(unittest.TestCase):
 
     def test_merge_limits_preserves_unlimited_plan_limit_over_free_baseline(self):
         merged = merge_limits(
-            {"cloud_projects": 3, "storage_gb": 0.25},
+            {"cloud_projects": 1, "storage_gb": 0.1},
             {"cloud_projects": "custom", "storage_gb": 5},
         )
 
@@ -106,6 +106,7 @@ class BillingCatalogTests(unittest.TestCase):
         ):
             self.assertEqual(education["limits"].get(key), starter["limits"].get(key), key)
         self.assertEqual(education["limits"]["seat_options"], [10, 20, 30])
+        self.assertFalse(education["capabilities"]["team_workspaces"])
         self.assertTrue(education["capabilities"]["education_sandbox"])
         self.assertTrue(education["capabilities"]["compliance_controls"])
 

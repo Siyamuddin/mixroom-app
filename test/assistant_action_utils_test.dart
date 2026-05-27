@@ -180,6 +180,10 @@ void main() {
         'stretch',
       );
       expect(
+        AssistantActionUtils.normalizeClipEditOperation('consolidate_clips'),
+        'glue',
+      );
+      expect(
         AssistantActionUtils.normalizeClipEditOperation('shift_clip'),
         'move',
       );

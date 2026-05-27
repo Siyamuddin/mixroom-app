@@ -17,6 +17,7 @@ It still contains the in-house subscription core that normalizes Apple IAP, Goog
 - Canonical domain model for plans/providers/statuses.
 - Client APIs:
 - `GET /v1/entitlements/me`
+- `GET /v1/feature-flags`
 - `GET /v1/billing/catalog`
 - `GET /v1/users/me`
 - `PATCH /v1/users/me`
@@ -33,6 +34,7 @@ It still contains the in-house subscription core that normalizes Apple IAP, Goog
   - `GET /v1/billing/portal-url`
 - Admin APIs:
   - `GET|PUT /v1/internal/admin/settings/billing-catalog`
+  - `GET|PUT /v1/internal/admin/settings/feature-flags`
   - `GET|POST /v1/internal/admin/billing/organizations`
   - `GET|POST /v1/internal/admin/billing/memberships`
   - `GET|POST /v1/internal/admin/billing/workspaces`
@@ -77,13 +79,29 @@ If you prefer the AWS website over a local terminal, use:
 
 ```bash
 python3 scripts/seed_catalog_mappings.py
-python3 scripts/seed_catalog_mappings.py --apply --stage staging
+python3 scripts/seed_catalog_mappings.py --apply --stage prod
+```
+
+- Print or apply remote feature flags:
+
+```bash
+python3 scripts/set_feature_flags.py \
+  --account-plan-billing-enabled false \
+  --subscription-enforcement-enabled false \
+  --iap-purchases-enabled false
+
+python3 scripts/set_feature_flags.py \
+  --stage prod \
+  --account-plan-billing-enabled true \
+  --subscription-enforcement-enabled true \
+  --iap-purchases-enabled true \
+  --apply
 ```
 
 - Print a rough subscription KPI snapshot after the backend is live:
 
 ```bash
-python3 scripts/subscription_kpi_report.py --stage staging
+python3 scripts/subscription_kpi_report.py --stage prod
 ```
 
 - Run a live auth smoke test against deployed `app_api` and optionally `llm_proxy`:
@@ -108,6 +126,7 @@ Environment variables (set by template and per-stage overrides):
 - `USERS_TABLE`
 - `USERNAME_CLAIMS_TABLE`
 - `CATALOG_MAPPINGS_TABLE`
+- `FEATURE_FLAGS_TABLE`
 - `COLLABORATION_TABLE`
 - `CUSTOMER_LINKS_TABLE`
 - `PURCHASE_TOKENS_TABLE`
@@ -116,12 +135,18 @@ Environment variables (set by template and per-stage overrides):
 - `CLOUD_PROJECT_DOCUMENTS_BUCKET`
 - `AWS_REGION`
 
-Provider secrets should be stored in Secrets Manager and read by handlers:
+Provider secrets should be stored as SSM Parameter Store `SecureString`
+parameters and read by handlers. Secrets Manager ARN parameters are kept as
+legacy fallback inputs only during migration:
 
-- Apple App Store signed-data trust config / receipt shared secret
+- Apple App Store receipt shared secret
 - Google Play developer service account keys
 - Paddle webhook secret/API key
 - Toss webhook secret/API key
+
+Apple signed-data root certificates are public trust material, so store them as
+a plain SSM `String` parameter or another non-secret config asset, not as a
+Secrets Manager secret.
 
 ## Notes
 

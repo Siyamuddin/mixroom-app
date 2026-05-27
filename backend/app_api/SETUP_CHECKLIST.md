@@ -16,14 +16,18 @@ Deploy `backend/app_api/template.yaml` with real values for:
 - `CognitoAppClientId`
 - `AppleBundleId`
 - `AppleAppId`
-- `AppleRootCaSecretArn`
-- `AppleSharedSecretSecretArn`
+- `AppleRootCaParameterName`
+- `AppleSharedSecretParameterName`
 - `GooglePlayPackageName`
-- `GoogleServiceAccountSecretArn`
+- `GoogleServiceAccountParameterName`
 - `GooglePubSubAudience`
 - `GooglePubSubServiceAccountEmail`
 
-You can leave Paddle/Toss secret params empty if you are not using web checkout yet.
+Use SSM Parameter Store for backend secrets. Standard `SecureString` parameters
+are preferred for small static secrets. The old `*SecretArn` inputs are legacy
+fallbacks and should normally be left blank after migration.
+
+You can leave Paddle/Toss parameter params empty if you are not using web checkout yet.
 
 After deploy, the same backend also owns:
 
@@ -44,7 +48,7 @@ You can print or apply the seed rows with:
 ```bash
 cd backend/app_api
 python3 scripts/seed_catalog_mappings.py
-python3 scripts/seed_catalog_mappings.py --apply --stage staging
+python3 scripts/seed_catalog_mappings.py --apply --stage prod
 ```
 
 Recommended shape:
@@ -91,7 +95,7 @@ You need all of the following:
 3. Set the notification URL to:
    `https://YOUR_API_ID.execute-api.YOUR_REGION.amazonaws.com/STAGE/v1/webhooks/apple`
 4. Create an app-specific shared secret for legacy receipt verification fallback.
-5. Create a Secrets Manager secret referenced by `AppleSharedSecretSecretArn`.
+5. Create an SSM `SecureString` parameter referenced by `AppleSharedSecretParameterName`.
    Accepted formats:
 
 ```json
@@ -100,9 +104,11 @@ You need all of the following:
 }
 ```
 
-or a plain string secret.
+or a plain string parameter value.
 
-6. Create a Secrets Manager secret referenced by `AppleRootCaSecretArn` containing the Apple root certificates used by App Store signed data verification.
+6. Create a plain SSM `String` parameter referenced by `AppleRootCaParameterName`
+   containing the Apple root certificates used by App Store signed data
+   verification. These certificates are public trust material, not secrets.
    Accepted formats:
 
 ```json
@@ -147,7 +153,7 @@ You need all of the following:
 1. Create the subscription products/base plans in Play Console.
 2. Link your Play Console app to a Google Cloud project with the Android Publisher API enabled.
 3. Create a service account with Android Publisher access to the app.
-4. Store the full service account JSON in Secrets Manager and use that ARN for `GoogleServiceAccountSecretArn`.
+4. Store the full service account JSON in an SSM `SecureString` parameter and use that name for `GoogleServiceAccountParameterName`.
 5. Create a Pub/Sub topic for Real-time Developer Notifications.
 6. Connect RTDN in Play Console to that Pub/Sub topic.
 7. Create a push subscription that sends to:
@@ -244,5 +250,5 @@ Once the backend is live, you can print a rough active/cancel/churn snapshot wit
 
 ```bash
 cd backend/app_api
-python3 scripts/subscription_kpi_report.py --stage staging
+python3 scripts/subscription_kpi_report.py --stage prod
 ```

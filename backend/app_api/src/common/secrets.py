@@ -11,6 +11,7 @@ import boto3
 from . import config
 
 _secrets_client = boto3.client("secretsmanager")
+_ssm_client = boto3.client("ssm")
 _secret_cache: Dict[str, Tuple[float, str]] = {}
 
 
@@ -44,25 +45,78 @@ def get_secret_string(secret_arn: str) -> str:
     return value
 
 
-def get_secret_json(secret_arn: str) -> Dict[str, Any]:
-    raw = get_secret_string(secret_arn)
+def get_parameter_string(parameter_name: str) -> str:
+    name = str(parameter_name or "").strip()
+    if not name:
+        raise ValueError("Missing SSM parameter name.")
+
+    cache_key = f"ssm:{name}"
+    cached = _secret_cache.get(cache_key)
+    now = time.time()
+    if cached and now - cached[0] < _cache_ttl_seconds():
+        return cached[1]
+
+    response = _ssm_client.get_parameter(Name=name, WithDecryption=True)
+    parameter = response.get("Parameter") or {}
+    value = str(parameter.get("Value") or "")
+    _secret_cache[cache_key] = (now, value)
+    return value
+
+
+def get_configured_secret_string(
+    *,
+    parameter_name: str = "",
+    secret_arn: str = "",
+    label: str = "secret",
+) -> str:
+    if str(parameter_name or "").strip():
+        return get_parameter_string(parameter_name)
+    if str(secret_arn or "").strip():
+        return get_secret_string(secret_arn)
+    raise ValueError(f"{label} is not configured.")
+
+
+def put_secure_parameter_string(parameter_name: str, parameter_value: str) -> str:
+    name = str(parameter_name or "").strip()
+    if not name:
+        raise ValueError("Missing SSM parameter name.")
+    value = str(parameter_value or "")
+    _ssm_client.put_parameter(
+        Name=name,
+        Value=value,
+        Type="SecureString",
+        Overwrite=True,
+    )
+    _secret_cache.pop(f"ssm:{name}", None)
+    return name
+
+
+def get_secret_json(secret_arn: str = "", parameter_name: str = "") -> Dict[str, Any]:
+    raw = get_configured_secret_string(
+        parameter_name=parameter_name,
+        secret_arn=secret_arn,
+        label="JSON secret",
+    )
     parsed = json.loads(raw)
     if not isinstance(parsed, dict):
-        raise ValueError(f"Secret {secret_arn} must contain a JSON object.")
+        source = parameter_name or secret_arn
+        raise ValueError(f"Secret {source} must contain a JSON object.")
     return parsed
 
 
 def load_google_service_account_info() -> Dict[str, Any]:
-    if not config.GOOGLE_SERVICE_ACCOUNT_SECRET_ARN:
-        raise ValueError("GOOGLE_SERVICE_ACCOUNT_SECRET_ARN is not configured.")
-    return get_secret_json(config.GOOGLE_SERVICE_ACCOUNT_SECRET_ARN)
+    return get_secret_json(
+        secret_arn=config.GOOGLE_SERVICE_ACCOUNT_SECRET_ARN,
+        parameter_name=config.GOOGLE_SERVICE_ACCOUNT_PARAMETER_NAME,
+    )
 
 
 def load_apple_root_certificates() -> List[bytes]:
-    if not config.APPLE_ROOT_CA_SECRET_ARN:
-        raise ValueError("APPLE_ROOT_CA_SECRET_ARN is not configured.")
-
-    raw = get_secret_string(config.APPLE_ROOT_CA_SECRET_ARN)
+    raw = get_configured_secret_string(
+        parameter_name=config.APPLE_ROOT_CA_PARAMETER_NAME,
+        secret_arn=config.APPLE_ROOT_CA_SECRET_ARN,
+        label="APPLE_ROOT_CA_PARAMETER_NAME or APPLE_ROOT_CA_SECRET_ARN",
+    )
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
@@ -89,10 +143,11 @@ def load_apple_root_certificates() -> List[bytes]:
 
 
 def load_apple_shared_secret() -> str:
-    if not config.APPLE_SHARED_SECRET_SECRET_ARN:
-        raise ValueError("APPLE_SHARED_SECRET_SECRET_ARN is not configured.")
-
-    raw = get_secret_string(config.APPLE_SHARED_SECRET_SECRET_ARN)
+    raw = get_configured_secret_string(
+        parameter_name=config.APPLE_SHARED_SECRET_PARAMETER_NAME,
+        secret_arn=config.APPLE_SHARED_SECRET_SECRET_ARN,
+        label="APPLE_SHARED_SECRET_PARAMETER_NAME or APPLE_SHARED_SECRET_SECRET_ARN",
+    )
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
@@ -111,8 +166,12 @@ def load_apple_shared_secret() -> str:
     return value
 
 
-def load_webhook_secret(secret_arn: str) -> str:
-    raw = get_secret_string(secret_arn)
+def load_webhook_secret(secret_arn: str = "", parameter_name: str = "") -> str:
+    raw = get_configured_secret_string(
+        parameter_name=parameter_name,
+        secret_arn=secret_arn,
+        label="webhook secret",
+    )
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
@@ -131,11 +190,47 @@ def load_webhook_secret(secret_arn: str) -> str:
     return value
 
 
-def load_social_auth_secret() -> str:
-    if not config.SOCIAL_AUTH_SECRET_ARN:
-        raise ValueError("SOCIAL_AUTH_SECRET_ARN is not configured.")
+def load_provider_api_key(secret_arn: str = "", parameter_name: str = "") -> str:
+    raw = get_configured_secret_string(
+        parameter_name=parameter_name,
+        secret_arn=secret_arn,
+        label="provider API key",
+    )
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = raw
 
-    raw = get_secret_string(config.SOCIAL_AUTH_SECRET_ARN)
+    if isinstance(parsed, dict):
+        for key in (
+            "api_key",
+            "secret_key",
+            "token",
+            "key",
+            "PADDLE_API_KEY",
+            "TOSS_SECRET_KEY",
+            "billing_key",
+            "TOSS_BILLING_KEY",
+        ):
+            value = str(parsed.get(key) or "").strip()
+            if value:
+                return value
+        raise ValueError(
+            f"Provider API key JSON at {parameter_name or secret_arn} must include api_key, secret_key, token, or key."
+        )
+
+    value = str(parsed).strip()
+    if not value:
+        raise ValueError(f"Provider API key at {parameter_name or secret_arn} is empty.")
+    return value
+
+
+def load_social_auth_secret() -> str:
+    raw = get_configured_secret_string(
+        parameter_name=config.SOCIAL_AUTH_SECRET_PARAMETER_NAME,
+        secret_arn=config.SOCIAL_AUTH_SECRET_ARN,
+        label="SOCIAL_AUTH_SECRET_PARAMETER_NAME or SOCIAL_AUTH_SECRET_ARN",
+    )
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
@@ -157,10 +252,11 @@ def load_social_auth_secret() -> str:
 
 
 def load_app_auth_secret() -> str:
-    if not config.APP_AUTH_SECRET_ARN:
-        raise ValueError("APP_AUTH_SECRET_ARN is not configured.")
-
-    raw = get_secret_string(config.APP_AUTH_SECRET_ARN)
+    raw = get_configured_secret_string(
+        parameter_name=config.APP_AUTH_SECRET_PARAMETER_NAME,
+        secret_arn=config.APP_AUTH_SECRET_ARN,
+        label="APP_AUTH_SECRET_PARAMETER_NAME or APP_AUTH_SECRET_ARN",
+    )
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
@@ -184,12 +280,12 @@ def load_app_auth_secret() -> str:
 def load_postmark_server_token() -> str:
     if config.POSTMARK_SERVER_TOKEN:
         return config.POSTMARK_SERVER_TOKEN
-    if not config.POSTMARK_SERVER_TOKEN_SECRET_ARN:
-        raise ValueError(
-            "POSTMARK_SERVER_TOKEN or POSTMARK_SERVER_TOKEN_SECRET_ARN must be configured."
-        )
 
-    raw = get_secret_string(config.POSTMARK_SERVER_TOKEN_SECRET_ARN)
+    raw = get_configured_secret_string(
+        parameter_name=config.POSTMARK_SERVER_TOKEN_PARAMETER_NAME,
+        secret_arn=config.POSTMARK_SERVER_TOKEN_SECRET_ARN,
+        label="POSTMARK_SERVER_TOKEN, POSTMARK_SERVER_TOKEN_PARAMETER_NAME, or POSTMARK_SERVER_TOKEN_SECRET_ARN",
+    )
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
@@ -213,12 +309,12 @@ def load_postmark_server_token() -> str:
 def load_stibee_access_token() -> str:
     if config.STIBEE_ACCESS_TOKEN:
         return config.STIBEE_ACCESS_TOKEN
-    if not config.STIBEE_ACCESS_TOKEN_SECRET_ARN:
-        raise ValueError(
-            "STIBEE_ACCESS_TOKEN or STIBEE_ACCESS_TOKEN_SECRET_ARN must be configured."
-        )
 
-    raw = get_secret_string(config.STIBEE_ACCESS_TOKEN_SECRET_ARN)
+    raw = get_configured_secret_string(
+        parameter_name=config.STIBEE_ACCESS_TOKEN_PARAMETER_NAME,
+        secret_arn=config.STIBEE_ACCESS_TOKEN_SECRET_ARN,
+        label="STIBEE_ACCESS_TOKEN, STIBEE_ACCESS_TOKEN_PARAMETER_NAME, or STIBEE_ACCESS_TOKEN_SECRET_ARN",
+    )
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
@@ -243,10 +339,11 @@ def load_stibee_access_token() -> str:
 
 
 def load_cloud_project_r2_credentials() -> Dict[str, str]:
-    if not config.CLOUD_PROJECT_R2_SECRET_ACCESS_KEY_SECRET_ARN:
-        raise ValueError("CLOUD_PROJECT_R2_SECRET_ACCESS_KEY_SECRET_ARN is not configured.")
-
-    raw = get_secret_string(config.CLOUD_PROJECT_R2_SECRET_ACCESS_KEY_SECRET_ARN)
+    raw = get_configured_secret_string(
+        parameter_name=config.CLOUD_PROJECT_R2_SECRET_ACCESS_KEY_PARAMETER_NAME,
+        secret_arn=config.CLOUD_PROJECT_R2_SECRET_ACCESS_KEY_SECRET_ARN,
+        label="CLOUD_PROJECT_R2_SECRET_ACCESS_KEY_PARAMETER_NAME or CLOUD_PROJECT_R2_SECRET_ACCESS_KEY_SECRET_ARN",
+    )
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
@@ -301,15 +398,16 @@ def load_cloud_project_r2_credentials() -> Dict[str, str]:
 def load_stibee_webhook_shared_secret() -> str:
     if config.STIBEE_WEBHOOK_SHARED_SECRET:
         return config.STIBEE_WEBHOOK_SHARED_SECRET
-    if not config.STIBEE_WEBHOOK_SHARED_SECRET_ARN:
-        raise ValueError(
-            (
-                "STIBEE_WEBHOOK_SHARED_SECRET or "
-                "STIBEE_WEBHOOK_SHARED_SECRET_ARN must be configured."
-            )
-        )
 
-    raw = get_secret_string(config.STIBEE_WEBHOOK_SHARED_SECRET_ARN)
+    raw = get_configured_secret_string(
+        parameter_name=config.STIBEE_WEBHOOK_SHARED_SECRET_PARAMETER_NAME,
+        secret_arn=config.STIBEE_WEBHOOK_SHARED_SECRET_ARN,
+        label=(
+            "STIBEE_WEBHOOK_SHARED_SECRET, "
+            "STIBEE_WEBHOOK_SHARED_SECRET_PARAMETER_NAME, or "
+            "STIBEE_WEBHOOK_SHARED_SECRET_ARN"
+        ),
+    )
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
@@ -336,15 +434,16 @@ def load_stibee_webhook_shared_secret() -> str:
 def load_posthog_personal_api_key() -> str:
     if config.POSTHOG_PERSONAL_API_KEY:
         return config.POSTHOG_PERSONAL_API_KEY
-    if not config.POSTHOG_PERSONAL_API_KEY_SECRET_ARN:
-        raise ValueError(
-            (
-                "POSTHOG_PERSONAL_API_KEY or "
-                "POSTHOG_PERSONAL_API_KEY_SECRET_ARN must be configured."
-            )
-        )
 
-    raw = get_secret_string(config.POSTHOG_PERSONAL_API_KEY_SECRET_ARN)
+    raw = get_configured_secret_string(
+        parameter_name=config.POSTHOG_PERSONAL_API_KEY_PARAMETER_NAME,
+        secret_arn=config.POSTHOG_PERSONAL_API_KEY_SECRET_ARN,
+        label=(
+            "POSTHOG_PERSONAL_API_KEY, "
+            "POSTHOG_PERSONAL_API_KEY_PARAMETER_NAME, or "
+            "POSTHOG_PERSONAL_API_KEY_SECRET_ARN"
+        ),
+    )
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:

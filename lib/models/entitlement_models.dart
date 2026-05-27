@@ -227,7 +227,7 @@ Map<String, bool> defaultCapabilitiesForPlanCode(String planCode) {
         SubscriptionCapability.wavStarterSamples: true,
         SubscriptionCapability.producerProfilePresets: true,
         SubscriptionCapability.cloudProjects: true,
-        SubscriptionCapability.teamWorkspaces: true,
+        SubscriptionCapability.teamWorkspaces: false,
         SubscriptionCapability.educationSandbox: true,
         SubscriptionCapability.complianceControls: true,
         SubscriptionCapability.educationVisibilityControls: true,
@@ -302,7 +302,6 @@ Map<String, dynamic> defaultLimitsForPlanCode(String planCode) {
         'default_seats': 20,
         'cloud_projects': 'custom',
         'storage_gb': 5,
-        'storage_gb_per_seat': 5,
         'platform_upload_hours': 100,
         'ai_prompts_daily': 400,
         'ai_prompts_weekly': 1500,
@@ -312,11 +311,11 @@ Map<String, dynamic> defaultLimitsForPlanCode(String planCode) {
     default:
       return <String, dynamic>{
         'members': 1,
-        'cloud_projects': 3,
-        'storage_gb': 0.25,
-        'platform_upload_hours': 3,
-        'ai_prompts_daily': 50,
-        'ai_prompts_weekly': 200,
+        'cloud_projects': 1,
+        'storage_gb': 0.1,
+        'platform_upload_hours': 1,
+        'ai_prompts_daily': 30,
+        'ai_prompts_weekly': 120,
         'ai_model_tier': 'standard',
         'producer_profile_presets': 'mixroom_producer',
       };
@@ -496,6 +495,9 @@ class AccountAccessSource {
     required this.sourceSubscriptionId,
     required this.managementChannel,
     required this.productCode,
+    required this.nextBilledAt,
+    required this.seatCount,
+    required this.extraStorageTb,
     required this.organizationId,
     required this.organizationName,
     required this.role,
@@ -510,6 +512,9 @@ class AccountAccessSource {
   final String sourceSubscriptionId;
   final String managementChannel;
   final String productCode;
+  final DateTime? nextBilledAt;
+  final int? seatCount;
+  final int extraStorageTb;
   final String organizationId;
   final String organizationName;
   final String role;
@@ -535,6 +540,9 @@ class AccountAccessSource {
       sourceSubscriptionId: (json['source_subscription_id'] ?? '').toString(),
       managementChannel: (json['management_channel'] ?? '').toString(),
       productCode: (json['product_code'] ?? '').toString(),
+      nextBilledAt: _parseDate(json['next_billed_at']),
+      seatCount: _asNullableInt(json['seat_count']),
+      extraStorageTb: _asInt(json['extra_storage_tb']),
       organizationId: (json['organization_id'] ?? '').toString(),
       organizationName: (json['organization_name'] ?? '').toString(),
       role: (json['role'] ?? '').toString(),
@@ -552,6 +560,9 @@ class AccountAccessSource {
       'source_subscription_id': sourceSubscriptionId,
       'management_channel': managementChannel,
       'product_code': productCode,
+      'next_billed_at': nextBilledAt?.toUtc().toIso8601String(),
+      'seat_count': seatCount,
+      'extra_storage_tb': extraStorageTb,
       'organization_id': organizationId,
       'organization_name': organizationName,
       'role': role,
@@ -1359,11 +1370,11 @@ class BillingCatalogSnapshot {
           },
           limits: <String, dynamic>{
             'members': 1,
-            'cloud_projects': 3,
-            'storage_gb': 0.25,
-            'platform_upload_hours': 3,
-            'ai_prompts_daily': 50,
-            'ai_prompts_weekly': 200,
+            'cloud_projects': 1,
+            'storage_gb': 0.1,
+            'platform_upload_hours': 1,
+            'ai_prompts_daily': 30,
+            'ai_prompts_weekly': 120,
             'ai_model_tier': 'standard',
             'producer_profile_presets': 'mixroom_producer',
           },
@@ -1605,6 +1616,108 @@ class BillingCatalogSnapshot {
   }
 }
 
+class BillingAccountSnapshot {
+  const BillingAccountSnapshot({
+    required this.provider,
+    required this.managementChannel,
+    required this.plan,
+    required this.status,
+    required this.productCode,
+    required this.nextBilledAt,
+    required this.expiresAt,
+    required this.cancelAtPeriodEnd,
+    required this.seatCount,
+    required this.extraStorageTb,
+    required this.billingEmail,
+    required this.paymentMethod,
+    required this.manageUrl,
+    required this.updatePaymentMethodUrl,
+    required this.cancelSubscriptionUrl,
+    required this.invoicesUrl,
+    required this.providerManagementConfigured,
+    required this.providerManagementReason,
+  });
+
+  final BillingProvider provider;
+  final String managementChannel;
+  final String plan;
+  final SubscriptionStatus status;
+  final String productCode;
+  final DateTime? nextBilledAt;
+  final DateTime? expiresAt;
+  final bool cancelAtPeriodEnd;
+  final int? seatCount;
+  final int extraStorageTb;
+  final String billingEmail;
+  final BillingPaymentMethodDisplay? paymentMethod;
+  final String manageUrl;
+  final String updatePaymentMethodUrl;
+  final String cancelSubscriptionUrl;
+  final String invoicesUrl;
+  final bool providerManagementConfigured;
+  final String providerManagementReason;
+
+  factory BillingAccountSnapshot.fromJson(Map<String, dynamic> json) {
+    return BillingAccountSnapshot(
+      provider: BillingProviderX.fromValue((json['provider'] ?? '').toString()),
+      managementChannel: (json['management_channel'] ?? '').toString(),
+      plan: normalizePlanCode((json['plan'] ?? '').toString()),
+      status: SubscriptionStatusX.fromValue((json['status'] ?? '').toString()),
+      productCode: (json['product_code'] ?? '').toString(),
+      nextBilledAt:
+          _parseDate(json['next_billed_at'] ?? json['next_billing_at']),
+      expiresAt: _parseDate(json['expires_at'] ?? json['current_period_end']),
+      cancelAtPeriodEnd: _asBool(json['cancel_at_period_end']),
+      seatCount: _asNullableInt(json['seat_count']),
+      extraStorageTb: _asInt(json['extra_storage_tb']),
+      billingEmail: (json['billing_email'] ?? '').toString(),
+      paymentMethod:
+          BillingPaymentMethodDisplay.fromJsonOrNull(json['payment_method']),
+      manageUrl: (json['manage_url'] ?? '').toString(),
+      updatePaymentMethodUrl:
+          (json['update_payment_method_url'] ?? '').toString(),
+      cancelSubscriptionUrl: (json['cancel_subscription_url'] ?? '').toString(),
+      invoicesUrl: (json['invoices_url'] ?? '').toString(),
+      providerManagementConfigured: _asBool(
+          _asStringDynamicMap(json['provider_management'])['configured']),
+      providerManagementReason:
+          (_asStringDynamicMap(json['provider_management'])['reason'] ?? '')
+              .toString(),
+    );
+  }
+}
+
+class BillingPaymentMethodDisplay {
+  const BillingPaymentMethodDisplay({
+    required this.brand,
+    required this.last4,
+    required this.expMonth,
+    required this.expYear,
+  });
+
+  final String brand;
+  final String last4;
+  final int? expMonth;
+  final int? expYear;
+
+  static BillingPaymentMethodDisplay? fromJsonOrNull(Object? raw) {
+    final json = _asStringDynamicMap(raw);
+    final brand = (json['brand'] ?? '').toString().trim();
+    final last4 = (json['last4'] ?? '').toString().trim();
+    final expMonth = _asNullableInt(json['exp_month']);
+    final expYear = _asNullableInt(json['exp_year']);
+    if (brand.isEmpty && last4.isEmpty && expMonth == null && expYear == null) {
+      return null;
+    }
+    return BillingPaymentMethodDisplay(
+      brand: brand,
+      last4: last4,
+      expMonth: expMonth,
+      expYear: expYear,
+    );
+  }
+}
+
 class EntitlementSnapshot {
   const EntitlementSnapshot({
     required this.userId,
@@ -1620,6 +1733,10 @@ class EntitlementSnapshot {
     required this.planLabel,
     required this.planGroup,
     required this.productCode,
+    required this.nextBilledAt,
+    required this.seatCount,
+    required this.extraStorageTb,
+    required this.paddleSubscriptionId,
     required this.limits,
     required this.accessSources,
     required this.workspaceAccessSummary,
@@ -1640,6 +1757,10 @@ class EntitlementSnapshot {
   final String planLabel;
   final String planGroup;
   final String productCode;
+  final DateTime? nextBilledAt;
+  final int? seatCount;
+  final int extraStorageTb;
+  final String paddleSubscriptionId;
   final Map<String, dynamic> limits;
   final List<AccountAccessSource> accessSources;
   final CollaborationAccessSummary workspaceAccessSummary;
@@ -1686,6 +1807,10 @@ class EntitlementSnapshot {
       'plan_label': planLabel,
       'plan_group': planGroup,
       'product_code': productCode,
+      'next_billed_at': nextBilledAt?.toUtc().toIso8601String(),
+      'seat_count': seatCount,
+      'extra_storage_tb': extraStorageTb,
+      'paddle_subscription_id': paddleSubscriptionId,
       'limits': limits,
       'access_sources': accessSources.map((item) => item.toJson()).toList(),
       'workspace_access_summary': workspaceAccessSummary.toJson(),
@@ -1739,6 +1864,10 @@ class EntitlementSnapshot {
         fallback: defaultPlanGroupForCode(planCode),
       ),
       productCode: (json['product_code'] ?? '').toString(),
+      nextBilledAt: _parseDate(json['next_billed_at']),
+      seatCount: _asNullableInt(json['seat_count']),
+      extraStorageTb: _asInt(json['extra_storage_tb']),
+      paddleSubscriptionId: (json['paddle_subscription_id'] ?? '').toString(),
       limits: _parseDynamicMap(
         json['limits'],
         fallback: defaultLimitsForPlanCode(planCode),
@@ -1773,6 +1902,10 @@ class EntitlementSnapshot {
       planLabel: 'Free',
       planGroup: 'individual',
       productCode: '',
+      nextBilledAt: null,
+      seatCount: null,
+      extraStorageTb: 0,
+      paddleSubscriptionId: '',
       limits: defaultLimitsForPlanCode('free'),
       accessSources: const <AccountAccessSource>[],
       workspaceAccessSummary: const CollaborationAccessSummary(

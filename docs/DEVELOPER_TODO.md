@@ -20,10 +20,11 @@ These are okay to ship in the client app, either via `--dart-define` or hardcode
 
 ### Server-only secrets
 
-These should live in AWS env vars, SAM parameters, or AWS Secrets Manager, not in Dart:
+These should live in backend-only AWS env vars, SAM parameters, or SSM
+Parameter Store, not in Dart:
 
 - `OPENAI_API_KEY`
-- provider secret referenced by `LLM_API_KEY_SECRET_ARN` / `OpenAiApiKeySecretArn`
+- provider secret referenced by `LLM_API_KEY_PARAMETER_NAME` / `OpenAiApiKeyParameterName`
 - Apple shared secret
 - Apple root certificate bundle
 - Google Play service account JSON
@@ -61,7 +62,7 @@ These should live in AWS env vars, SAM parameters, or AWS Secrets Manager, not i
   - backend now has a provider adapter boundary, so Flutter does not need changes when switching backend LLMs
   - supported backend provider values are `openai`, `gemini`, and `claude`
   - switch providers later with backend envs: `LLM_PROVIDER` + `LLM_MODEL`
-  - current setup only has an OpenAI API key; if Gemini or Claude are tested later, add their key to AWS Secrets Manager at that time
+  - current setup only has an OpenAI API key; if Gemini or Claude are tested later, add their key to SSM Parameter Store at that time
   - app-facing backend response is still normalized to the current OpenAI Responses-style shape so existing Flutter parsing stays intact
   - Flutter direct debug fallback is still OpenAI-only; production path should stay backend-only
   - do one real smoke test against live provider credentials after any provider switch
@@ -105,7 +106,7 @@ These should live in AWS env vars, SAM parameters, or AWS Secrets Manager, not i
   - create the subscription product IDs used by the app
   - enable App Store Server Notifications V2
   - complete Apple banking + tax forms so Apple can pay out subscription revenue
-  - store Apple shared secret and Apple root cert bundle in AWS Secrets Manager
+  - store Apple shared secret in SSM `SecureString`; store Apple root certs as non-secret config such as a plain SSM `String`
 - In Google Play Console / Google Cloud:
   - create the subscription + base plan
   - enable Android Publisher API

@@ -4,6 +4,9 @@ POSTHOG_API_KEY = os.environ.get("POSTHOG_API_KEY", "").strip()
 POSTHOG_HOST = os.environ.get("POSTHOG_HOST", "").strip()
 SENTRY_DSN = os.environ.get("SENTRY_DSN", "").strip()
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "").strip() or "dev"
+APP_AUTH_SECRET_PARAMETER_NAME = os.environ.get(
+    "APP_AUTH_SECRET_PARAMETER_NAME", ""
+).strip()
 APP_AUTH_SECRET_ARN = os.environ.get("APP_AUTH_SECRET_ARN", "").strip()
 APP_AUTH_ISSUER = os.environ.get("APP_AUTH_ISSUER", "").strip() or "mixroom-native-auth"
 APP_AUTH_AUDIENCE = os.environ.get("APP_AUTH_AUDIENCE", "").strip() or "mixroom-app"

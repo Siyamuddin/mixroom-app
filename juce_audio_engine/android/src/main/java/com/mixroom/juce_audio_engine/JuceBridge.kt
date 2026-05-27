@@ -250,6 +250,7 @@ object JuceBridge {
         wavDithering: Boolean,
         mp3BitrateKbps: Int,
         clipSnapshotJson: String,
+        dryClipRender: Boolean,
     ): String
     @JvmStatic external fun getExportProgressJNI(): Double
 

@@ -75,6 +75,7 @@ class ChatPipeline {
     String? promptTraceId,
     String? projectId,
     String? aiFeature,
+    Map<String, dynamic> clientContext = const <String, dynamic>{},
     bool autoApplyProposals = false,
     bool bypassLearnedMagnitudes = false,
   }) async {
@@ -150,6 +151,7 @@ class ChatPipeline {
         promptTraceId: promptTraceId,
         projectId: projectId,
         aiFeature: aiFeature,
+        clientContext: clientContext,
         pendingMix: _pendingMix,
       );
       final mixPlanStopwatch = Stopwatch()..start();

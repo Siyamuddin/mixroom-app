@@ -152,10 +152,35 @@ class _FakeProducerCaptureWhitelistRepo:
         return dict(self._settings)
 
 
+class _FakeAvatarStorage:
+    def __init__(self):
+        self.deleted = []
+
+    def put_avatar(self, *, user_id, image_data):
+        if image_data == "bad":
+            from common.avatar_storage import AvatarStorageError
+
+            raise AvatarStorageError("Avatar image must be a JPEG.")
+        return {
+            "avatar_object_bucket": "avatars",
+            "avatar_object_key": f"profile-avatars/users/{user_id}/avatar.jpg",
+            "avatar_content_type": "image/jpeg",
+            "avatar_size_bytes": 12345,
+        }
+
+    def delete_avatar_object(self, *, bucket="", key=""):
+        self.deleted.append({"bucket": bucket, "key": key})
+
+    def avatar_url(self, profile, *, expires_in=3600):
+        key = str(profile.get("avatar_object_key") or "").strip()
+        return f"https://cdn.example/{key}" if key else str(profile.get("avatar_url") or "")
+
+
 class UsersApiHandlerTests(unittest.TestCase):
     def setUp(self):
         self._original_repo = users_module.repo
         self._original_whitelist_repo = users_module.producer_capture_whitelist_repo
+        self._original_avatar_storage = users_module.avatar_storage
         self._original_extract_claims = users_module.extract_claims_from_event
         self._original_rate_limiter = users_module.rate_limiter
         self._original_users_table = users_module.config.USERS_TABLE
@@ -166,6 +191,7 @@ class UsersApiHandlerTests(unittest.TestCase):
     def tearDown(self):
         users_module.repo = self._original_repo
         users_module.producer_capture_whitelist_repo = self._original_whitelist_repo
+        users_module.avatar_storage = self._original_avatar_storage
         users_module.extract_claims_from_event = self._original_extract_claims
         users_module.rate_limiter = self._original_rate_limiter
         users_module.config.USERS_TABLE = self._original_users_table
@@ -1026,6 +1052,88 @@ class UsersApiHandlerTests(unittest.TestCase):
         self.assertEqual(
             repo.delete_calls,
             [{"user_id": "user-1", "username_lc": "mixroomer"}],
+        )
+
+    def test_upload_avatar_stores_object_reference_and_returns_signed_url(self):
+        repo = _FakeRepo()
+        repo._profile = {
+            "user_id": "user-123",
+            "email": "artist@example.com",
+            "email_lc": "artist@example.com",
+            "display_name": "Artist",
+            "auth_provider": "email",
+        }
+        users_module.repo = repo
+        users_module.avatar_storage = _FakeAvatarStorage()
+        users_module.extract_claims_from_event = lambda event: {
+            "sub": "user-123",
+            "email": "artist@example.com",
+            "email_verified": True,
+            "provider": "email",
+        }
+
+        result = users_module.handler(
+            {
+                "rawPath": "/v1/users/me/avatar",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": '{"image_data":"data:image/jpeg;base64,abc"}',
+            },
+            object(),
+        )
+
+        self.assertEqual(result["statusCode"], 200)
+        self.assertEqual(repo._profile["avatar_object_bucket"], "avatars")
+        self.assertIn("https://cdn.example/profile-avatars/users/user-123/avatar.jpg", result["body"])
+
+    def test_upload_avatar_rejects_invalid_image(self):
+        users_module.repo = _FakeRepo()
+        users_module.avatar_storage = _FakeAvatarStorage()
+        users_module.extract_claims_from_event = lambda event: {
+            "sub": "user-123",
+            "email": "artist@example.com",
+            "email_verified": True,
+        }
+
+        result = users_module.handler(
+            {
+                "rawPath": "/v1/users/me/avatar",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": '{"image_data":"bad"}',
+            },
+            object(),
+        )
+
+        self.assertEqual(result["statusCode"], 400)
+        self.assertIn("JPEG", result["body"])
+
+    def test_delete_avatar_clears_object_reference(self):
+        repo = _FakeRepo()
+        repo._profile = {
+            "user_id": "user-123",
+            "email": "artist@example.com",
+            "display_name": "Artist",
+            "auth_provider": "email",
+            "avatar_object_bucket": "avatars",
+            "avatar_object_key": "profile-avatars/users/user-123/avatar-old.jpg",
+        }
+        storage = _FakeAvatarStorage()
+        users_module.repo = repo
+        users_module.avatar_storage = storage
+        users_module.extract_claims_from_event = lambda event: {"sub": "user-123"}
+
+        result = users_module.handler(
+            {
+                "rawPath": "/v1/users/me/avatar",
+                "requestContext": {"http": {"method": "DELETE"}},
+            },
+            object(),
+        )
+
+        self.assertEqual(result["statusCode"], 200)
+        self.assertIsNone(repo._profile["avatar_object_key"])
+        self.assertEqual(
+            storage.deleted,
+            [{"bucket": "avatars", "key": "profile-avatars/users/user-123/avatar-old.jpg"}],
         )
 
 

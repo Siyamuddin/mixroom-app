@@ -6,6 +6,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 #define numOutputs 2
@@ -2729,6 +2730,12 @@ public:
         params.mix = apvts.getRawParameterValue("mix")->load() * 0.01f;
     }
 
+    void setManualParameters(float semitones, float mix)
+    {
+        params.semitones = juce::jlimit(-12.0f, 12.0f, semitones);
+        params.mix = juce::jlimit(0.0f, 1.0f, mix);
+    }
+
     void prepare(double inputSampleRate, int maxBlockSize)
     {
         sampleRate = inputSampleRate > 0.0 ? inputSampleRate : 44100.0;
@@ -2902,6 +2909,56 @@ private:
     PitchShiftModule pitchShift;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PitchShiftAudioProcessor)
+};
+
+class PitchCorrectorAudioProcessor : public juce::AudioProcessor
+{
+public:
+    PitchCorrectorAudioProcessor();
+
+    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void processBlock(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+    void reset() override
+    {
+        pitchShift.reset();
+        smoothedCorrectionSemitones = 0.0f;
+    }
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+    bool isBusesLayoutSupported(const BusesLayout &layouts) const override;
+#endif
+
+    juce::AudioProcessorEditor *createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    bool isMidiEffect() const override { return false; }
+
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String &) override {}
+    void releaseResources() override {}
+
+    void getStateInformation(juce::MemoryBlock &destData) override;
+    void setStateInformation(const void *data, int sizeInBytes) override;
+
+    const juce::String getName() const override { return "Pitch Corrector"; }
+
+    juce::AudioProcessorValueTreeState parameters;
+
+private:
+    float estimatePitchHz(const juce::AudioBuffer<float> &buffer) const;
+    float targetCorrectionSemitones(float pitchHz, int key, int scale) const;
+
+    PitchShiftModule pitchShift;
+    double currentSampleRate{44100.0};
+    float smoothedCorrectionSemitones{0.0f};
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PitchCorrectorAudioProcessor)
 };
 
 // ****CHORUS****

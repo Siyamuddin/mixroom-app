@@ -25,7 +25,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--stage",
-        default="staging",
+        default="prod",
         help="Stage suffix used when deriving the allowlist table name.",
     )
     parser.add_argument(

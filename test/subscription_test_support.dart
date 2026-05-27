@@ -236,6 +236,19 @@ class FakeSubscriptionApi {
         200,
       );
     }
+    if (request.method == 'GET' && path.endsWith('/v1/billing/me')) {
+      return http.Response(
+        jsonEncode(<String, dynamic>{
+          'provider': currentEntitlement['source_provider'] ?? 'unknown',
+          'management_channel':
+              currentEntitlement['management_channel'] ?? 'free',
+          'plan': currentEntitlement['plan_code'] ?? 'free',
+          'status': currentEntitlement['status'] ?? 'active',
+          'manage_url': 'https://example.com/manage',
+        }),
+        200,
+      );
+    }
     if (request.method == 'POST' &&
         path.endsWith('/v1/billing/mobile/apple/verify')) {
       currentEntitlement = _proEntitlement('apple');
@@ -531,6 +544,12 @@ EntitlementSnapshot buildPaidEntitlement({
     planLabel: defaultPlanLabelForCode(planCode),
     planGroup: 'individual',
     productCode: productCode,
+    nextBilledAt: DateTime.now().toUtc().add(const Duration(days: 30)),
+    seatCount: null,
+    extraStorageTb: 0,
+    paddleSubscriptionId: sourceProvider == BillingProvider.paddle
+        ? '${sourceProvider.name}-sub-1'
+        : '',
     limits: defaultLimitsForPlanCode(planCode),
     accessSources: const <AccountAccessSource>[],
     workspaceAccessSummary: const CollaborationAccessSummary(

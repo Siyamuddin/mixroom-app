@@ -72,18 +72,188 @@ class ProjectorTests(unittest.TestCase):
                     "management_channel": "web",
                     "product_code": "studio_monthly",
                     "plan_code": "studio",
+                    "seat_count": 7,
+                    "extra_storage_tb": 1,
+                    "next_billed_at": "2026-04-20T00:00:00+00:00",
                 },
             }
         )
 
-        self.assertEqual(result, "projected_free")
+        self.assertEqual(result, "projected")
         self.collaboration_repo.sync_organization_for_subscription.assert_called_once()
         synced = self.collaboration_repo.sync_organization_for_subscription.call_args.args[0]
         self.assertEqual(synced["subscription_id"], "studio-sub")
         self.assertEqual(synced["plan_code"], "studio")
         entitlement = self.repo.get_entitlement("user-1")
-        self.assertEqual(entitlement["plan_code"], "free")
-        self.assertEqual(entitlement["source_subscription_id"], "free-default")
+        self.assertEqual(entitlement["plan_code"], "studio")
+        self.assertEqual(entitlement["source_subscription_id"], "studio-sub")
+        self.assertEqual(entitlement["seat_count"], 7)
+        self.assertEqual(entitlement["extra_storage_tb"], 1)
+        self.assertEqual(entitlement["next_billed_at"], "2026-04-20T00:00:00+00:00")
+        self.assertEqual(entitlement["limit_overrides"]["members"], 7)
+        self.assertEqual(entitlement["limit_overrides"]["shared_storage_gb"], 2048)
+
+    def test_paddle_ignores_non_subscription_noise_events(self):
+        result = module._apply_projection(
+            {
+                "event_id": "paddle:address-created",
+                "provider": "paddle",
+                "user_id": "user-1",
+                "event_type": "address.created",
+                "occurred_at": "2026-03-20T00:00:00+00:00",
+                "created_at": "2026-03-20T00:00:01+00:00",
+                "normalized": {
+                    "provider": "paddle",
+                    "subscription_id": "add_123",
+                    "status": "active",
+                    "plan_code": "producer",
+                },
+            }
+        )
+
+        self.assertEqual(result, "ignored_non_subscription_event")
+        self.assertEqual(self.repo.subscriptions, {})
+        self.assertIsNone(self.repo.get_entitlement("user-1"))
+
+    def test_paddle_transaction_completed_preserves_subscription_billing_date(self):
+        module._apply_projection(
+            {
+                "event_id": "paddle:subscription-created",
+                "provider": "paddle",
+                "user_id": "user-1",
+                "event_type": "subscription.created",
+                "occurred_at": "2026-03-20T00:00:00+00:00",
+                "created_at": "2026-03-20T00:00:01+00:00",
+                "normalized": {
+                    "provider": "paddle",
+                    "subscription_id": "sub_123",
+                    "status": "active",
+                    "plan_code": "producer",
+                    "product_code": "producer_monthly",
+                    "next_billed_at": "2026-04-20T00:00:00+00:00",
+                },
+            }
+        )
+
+        result = module._apply_projection(
+            {
+                "event_id": "paddle:transaction-completed",
+                "provider": "paddle",
+                "user_id": "user-1",
+                "event_type": "transaction.completed",
+                "occurred_at": "2026-03-20T00:01:00+00:00",
+                "created_at": "2026-03-20T00:01:01+00:00",
+                "normalized": {
+                    "provider": "paddle",
+                    "subscription_id": "sub_123",
+                    "status": "active",
+                    "plan_code": "producer",
+                    "product_code": "producer_monthly",
+                    "next_billed_at": None,
+                },
+            }
+        )
+
+        self.assertEqual(result, "projected")
+        subscription = self.repo.get_subscription("sub_123")
+        self.assertEqual(subscription["next_billed_at"], "2026-04-20T00:00:00+00:00")
+        entitlement = self.repo.get_entitlement("user-1")
+        self.assertEqual(entitlement["next_billed_at"], "2026-04-20T00:00:00+00:00")
+
+    def test_studio_projection_removes_addon_overrides_on_quantity_decrease(self):
+        module._apply_projection(
+            {
+                "event_id": "paddle:studio-event-1",
+                "provider": "paddle",
+                "user_id": "user-1",
+                "occurred_at": "2026-03-20T00:00:00+00:00",
+                "created_at": "2026-03-20T00:00:01+00:00",
+                "normalized": {
+                    "provider": "paddle",
+                    "subscription_id": "studio-sub",
+                    "status": "active",
+                    "expires_at": "2099-04-20T00:00:00+00:00",
+                    "product_code": "studio_monthly",
+                    "plan_code": "studio",
+                    "seat_count": 8,
+                    "extra_storage_tb": 2,
+                },
+            }
+        )
+
+        module._apply_projection(
+            {
+                "event_id": "paddle:studio-event-2",
+                "provider": "paddle",
+                "user_id": "user-1",
+                "occurred_at": "2026-03-21T00:00:00+00:00",
+                "created_at": "2026-03-21T00:00:01+00:00",
+                "normalized": {
+                    "provider": "paddle",
+                    "subscription_id": "studio-sub",
+                    "status": "active",
+                    "expires_at": "2099-04-20T00:00:00+00:00",
+                    "product_code": "studio_monthly",
+                    "plan_code": "studio",
+                    "seat_count": 5,
+                    "extra_storage_tb": 0,
+                },
+            }
+        )
+
+        entitlement = self.repo.get_entitlement("user-1")
+        self.assertEqual(entitlement["seat_count"], 5)
+        self.assertEqual(entitlement["extra_storage_tb"], 0)
+        self.assertEqual(entitlement["limit_overrides"]["members"], 5)
+        self.assertNotIn("shared_storage_gb", entitlement["limit_overrides"])
+
+    def test_refunded_current_subscription_falls_back_to_active_subscription(self):
+        self.repo.upsert_subscription(
+            {
+                "subscription_id": "google-sub",
+                "user_id": "user-1",
+                "provider": "google",
+                "plan_code": "starter",
+                "status": "active",
+                "expires_at": "2099-04-20T00:00:00+00:00",
+                "updated_at": "2026-03-19T00:00:00+00:00",
+            }
+        )
+        self.repo.put_entitlement(
+            {
+                "user_id": "user-1",
+                "plan_code": "producer",
+                "status": "active",
+                "source_provider": "paddle",
+                "source_subscription_id": "paddle-sub",
+                "capabilities": {"all_plugins": True},
+                "management_channel": "web",
+                "revision": 1,
+            }
+        )
+
+        result = module._apply_projection(
+            {
+                "event_id": "paddle:refund",
+                "provider": "paddle",
+                "user_id": "user-1",
+                "occurred_at": "2026-03-21T00:00:00+00:00",
+                "created_at": "2026-03-21T00:00:01+00:00",
+                "normalized": {
+                    "provider": "paddle",
+                    "subscription_id": "paddle-sub",
+                    "status": "refunded",
+                    "product_code": "producer_monthly",
+                    "plan_code": "producer",
+                },
+            }
+        )
+
+        self.assertEqual(result, "projected")
+        entitlement = self.repo.get_entitlement("user-1")
+        self.assertEqual(entitlement["source_subscription_id"], "google-sub")
+        self.assertEqual(entitlement["plan_code"], "starter")
+        self.assertEqual(entitlement["status"], "active")
 
     def test_reclaimed_subscription_expires_prior_user_entitlement(self):
         self.repo.put_entitlement(
@@ -237,11 +407,12 @@ class ProjectorTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(result, "ignored_stale_event")
+        self.assertEqual(result, "projected_subscription_only")
+        self.assertEqual(self.repo.subscriptions["sub-old"]["status"], "expired")
         self.assertEqual(self.repo.get_entitlement("user-1")["revision"], 7)
         self.assertEqual(self.eventbridge.entries, [])
 
-    def test_team_subscription_does_not_replace_personal_entitlement(self):
+    def test_studio_subscription_can_replace_personal_entitlement(self):
         self.repo.upsert_subscription(
             {
                 "subscription_id": "studio-sub",
@@ -276,9 +447,9 @@ class ProjectorTests(unittest.TestCase):
 
         self.assertEqual(result, "projected")
         entitlement = self.repo.get_entitlement("user-1")
-        self.assertEqual(entitlement["plan_code"], "producer")
-        self.assertEqual(entitlement["status"], "active")
-        self.assertEqual(entitlement["source_subscription_id"], "pro-sub")
+        self.assertEqual(entitlement["plan_code"], "studio")
+        self.assertEqual(entitlement["status"], "grace_period")
+        self.assertEqual(entitlement["source_subscription_id"], "studio-sub")
 
     def test_expired_higher_plan_does_not_beat_current_lower_plan(self):
         self.repo.upsert_subscription(
@@ -377,6 +548,31 @@ class ProjectorTests(unittest.TestCase):
             self.repo.get_billing_event("apple:event-1")["processing_result"],
             "projected",
         )
+
+    def test_handler_skips_already_processed_event_replay(self):
+        self.repo.put_billing_event_if_new(
+            {
+                "event_id": "apple:event-1",
+                "provider": "apple",
+                "user_id": "user-1",
+                "occurred_at": "2026-03-20T00:00:00+00:00",
+                "created_at": "2026-03-20T00:00:01+00:00",
+                "normalized": {
+                    "provider": "apple",
+                    "subscription_id": "sub-1",
+                    "plan_code": "producer",
+                    "status": "active",
+                },
+            }
+        )
+        module.handler({"Records": [{"body": json.dumps({"event_id": "apple:event-1"})}]}, object())
+        first_revision = self.repo.get_entitlement("user-1")["revision"]
+        first_event_count = len(self.eventbridge.entries)
+
+        module.handler({"Records": [{"body": json.dumps({"event_id": "apple:event-1"})}]}, object())
+
+        self.assertEqual(self.repo.get_entitlement("user-1")["revision"], first_revision)
+        self.assertEqual(len(self.eventbridge.entries), first_event_count)
 
 
 if __name__ == "__main__":

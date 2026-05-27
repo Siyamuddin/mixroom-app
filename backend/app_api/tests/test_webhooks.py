@@ -22,6 +22,7 @@ class WebhookHandlerTests(unittest.TestCase):
         self.original_build_google_webhook_event = module.build_google_webhook_event
         self.original_verify_google_webhook_request = module.verify_google_webhook_request
         self.original_verify_webhook_signature = module.verify_webhook_signature
+        self.original_retrieve_toss_payment = module.retrieve_toss_payment
         self.original_stibee_newsletter_list_id = module.config.STIBEE_NEWSLETTER_LIST_ID
         self.original_stibee_allowed_ips = module.config.STIBEE_WEBHOOK_ALLOWED_IPS
         self.original_stibee_shared_secret = module.config.STIBEE_WEBHOOK_SHARED_SECRET
@@ -38,6 +39,7 @@ class WebhookHandlerTests(unittest.TestCase):
         module.build_google_webhook_event = self.original_build_google_webhook_event
         module.verify_google_webhook_request = self.original_verify_google_webhook_request
         module.verify_webhook_signature = self.original_verify_webhook_signature
+        module.retrieve_toss_payment = self.original_retrieve_toss_payment
         module.config.STIBEE_NEWSLETTER_LIST_ID = self.original_stibee_newsletter_list_id
         module.config.STIBEE_WEBHOOK_ALLOWED_IPS = self.original_stibee_allowed_ips
         module.config.STIBEE_WEBHOOK_SHARED_SECRET = self.original_stibee_shared_secret
@@ -121,16 +123,57 @@ class WebhookHandlerTests(unittest.TestCase):
         self.assertEqual(self.repo.queued_projection_ids, [])
 
     def test_duplicate_toss_webhook_returns_accepted_false(self):
-        module.verify_webhook_signature = mock.Mock(return_value=True)
+        self.repo.put_billing_event_if_new(
+            {
+                "event_id": "toss:checkout-order-order-1",
+                "provider": "toss",
+                "provider_event_id": "checkout-order-order-1",
+                "event_type": "checkout_session_created",
+                "user_id": "user-1",
+                "raw_payload": {
+                    "product_code": "studio_monthly",
+                    "plan_code": "studio",
+                    "toss": {
+                        "amount": 149000,
+                        "order_id": "order-1",
+                        "customer_key": "customer-1",
+                        "seat_count": 5,
+                        "extra_storage_tb": 0,
+                    },
+                },
+                "normalized": {},
+            }
+        )
+        module.retrieve_toss_payment = mock.Mock(
+            return_value={
+                "paymentKey": "pay-1",
+                "orderId": "order-1",
+                "status": "DONE",
+                "totalAmount": 149000,
+                "customerKey": "customer-1",
+                "metadata": {
+                    "mixroom_user_id": "attacker",
+                    "product_code": "starter_monthly",
+                    "plan_code": "starter",
+                },
+            }
+        )
         event = {
             "rawPath": "/v1/webhooks/toss",
-            "headers": {"X-Signature": "sig"},
             "body": json.dumps(
                 {
-                    "id": "evt-1",
-                    "user_id": "user-1",
-                    "subscription_id": "sub-1",
-                    "status": "active",
+                    "eventType": "PAYMENT_STATUS_CHANGED",
+                    "data": {
+                        "paymentKey": "pay-1",
+                        "orderId": "order-1",
+                        "status": "DONE",
+                        "totalAmount": 149000,
+                        "metadata": {
+                            "mixroom_user_id": "attacker",
+                            "product_code": "starter_monthly",
+                            "plan_code": "starter",
+                        },
+                    },
                 }
             ),
         }
@@ -141,6 +184,126 @@ class WebhookHandlerTests(unittest.TestCase):
         self.assertTrue(first["accepted"])
         self.assertFalse(second["accepted"])
         self.assertEqual(len(self.repo.queued_projection_ids), 1)
+        record = self.repo.billing_events[first["event_id"]]
+        self.assertEqual(record["user_id"], "user-1")
+        self.assertEqual(record["normalized"]["product_code"], "studio_monthly")
+        self.assertEqual(record["normalized"]["plan_code"], "studio")
+        self.assertNotEqual(record["normalized"]["product_code"], "starter_monthly")
+
+    def test_toss_webhook_rejects_unknown_order_before_projection(self):
+        module.retrieve_toss_payment = mock.Mock(
+            return_value={
+                "paymentKey": "pay-1",
+                "orderId": "order-1",
+                "status": "DONE",
+                "totalAmount": 149000,
+                "customerKey": "customer-1",
+            }
+        )
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/webhooks/toss",
+                "body": json.dumps(
+                    {
+                        "eventType": "PAYMENT_STATUS_CHANGED",
+                        "data": {
+                            "paymentKey": "pay-1",
+                            "orderId": "order-1",
+                            "status": "DONE",
+                            "totalAmount": 149000,
+                        },
+                    }
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 404)
+        self.assertEqual(self.repo.queued_projection_ids, [])
+
+    def test_toss_webhook_accepts_known_subscription_renewal_without_order_event(self):
+        self.repo.put_customer_link("toss", "customer-1", "user-1")
+        self.repo.upsert_subscription(
+            {
+                "subscription_id": "toss-billing:customer-1:producer_monthly",
+                "user_id": "user-1",
+                "provider": "toss",
+                "customer_id": "customer-1",
+                "status": "active",
+                "plan_code": "producer",
+                "product_code": "producer_monthly",
+                "billing_amount": 29000,
+                "billing_currency": "KRW",
+                "next_billed_at": "2026-06-28T00:00:00+00:00",
+            }
+        )
+        module.retrieve_toss_payment = mock.Mock(
+            return_value={
+                "paymentKey": "pay-renew-1",
+                "orderId": "mixroom-renewal-order",
+                "status": "DONE",
+                "totalAmount": 29000,
+                "customerKey": "customer-1",
+                "metadata": {"product_code": "attacker"},
+            }
+        )
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/webhooks/toss",
+                "body": json.dumps(
+                    {
+                        "eventType": "PAYMENT_STATUS_CHANGED",
+                        "data": {
+                            "paymentKey": "pay-renew-1",
+                            "orderId": "mixroom-renewal-order",
+                            "status": "DONE",
+                            "totalAmount": 29000,
+                        },
+                    }
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 202)
+        payload = decode_json_response(response)
+        record = self.repo.billing_events[payload["event_id"]]
+        self.assertEqual(record["user_id"], "user-1")
+        self.assertEqual(record["normalized"]["product_code"], "producer_monthly")
+        self.assertEqual(record["normalized"]["plan_code"], "producer")
+        self.assertEqual(record["normalized"]["billing_amount"], 29000)
+
+    def test_paddle_webhook_resolves_user_from_customer_link(self):
+        module.verify_webhook_signature = mock.Mock(return_value=True)
+        self.repo.put_customer_link("paddle", "ctm_1", "user-1")
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/webhooks/paddle",
+                "headers": {"Paddle-Signature": "sig"},
+                "body": json.dumps(
+                    {
+                        "event_id": "evt-1",
+                        "event_type": "subscription.updated",
+                        "data": {
+                            "id": "sub_1",
+                            "customer_id": "ctm_1",
+                            "status": "active",
+                            "custom_data": {"plan_key": "producer"},
+                        },
+                    }
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 202)
+        payload = decode_json_response(response)
+        event = self.repo.get_billing_event(payload["event_id"])
+        self.assertEqual(event["user_id"], "user-1")
+        self.assertEqual(self.repo.queued_projection_ids, [payload["event_id"]])
 
     def test_provider_verification_error_bubbles_status(self):
         module.verify_google_webhook_request = mock.Mock()

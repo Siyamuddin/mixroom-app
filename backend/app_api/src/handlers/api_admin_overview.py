@@ -157,6 +157,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         overview["permissions"] = {
             "can_edit_ai_settings": can_edit_ai_settings(email),
             "can_grant_ai_prompts": can_edit_ai_settings(email),
+            "can_apply_entitlement_overrides": True,
         }
         return _finalize(json_response(200, overview))
     except Exception as exc:

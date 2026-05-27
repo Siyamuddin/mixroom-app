@@ -63,6 +63,94 @@ def _postmark_error_code(response_payload: dict[str, Any]) -> int:
         return 0
 
 
+def send_postmark_email(
+    *,
+    from_email: str,
+    to_email: str,
+    subject: str,
+    text_body: str,
+    reply_to_email: str = "",
+    html_body: str = "",
+) -> None:
+    sender = str(from_email or "").strip()
+    recipient = str(to_email or "").strip()
+    if not sender:
+        raise EmailDeliveryError("Postmark sender is not configured.")
+    if not recipient:
+        raise EmailDeliveryError("Postmark recipient is not configured.")
+    token = _load_postmark_token()
+
+    payload: dict[str, Any] = {
+        "From": sender,
+        "To": recipient,
+        "Subject": subject,
+        "TextBody": text_body,
+    }
+    if html_body.strip():
+        payload["HtmlBody"] = html_body
+    if reply_to_email.strip():
+        payload["ReplyTo"] = reply_to_email.strip()
+    if config.POSTMARK_MESSAGE_STREAM:
+        payload["MessageStream"] = config.POSTMARK_MESSAGE_STREAM
+
+    request = urllib.request.Request(
+        _postmark_endpoint(),
+        data=json.dumps(payload, ensure_ascii=True).encode("utf-8"),
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "X-Postmark-Server-Token": token,
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=config.HTTP_TIMEOUT_SECONDS) as response:
+            response_payload = _parse_postmark_response(response.read())
+            error_code = _postmark_error_code(response_payload)
+            if error_code:
+                message = str(response_payload.get("Message") or "").strip()
+                if _is_suppressed_error(error_code=error_code, message=message):
+                    raise EmailSuppressedError(email=recipient, reason="INACTIVE")
+                raise EmailDeliveryError("Failed to send email.")
+            message_id = str(response_payload.get("MessageID") or "").strip()
+            if not message_id:
+                _logger.warning(
+                    "Postmark email request completed without MessageID.",
+                    extra={
+                        "from_address": sender,
+                        "to_domain": recipient.split("@")[-1].lower(),
+                    },
+                )
+    except EmailSuppressedError:
+        raise
+    except urllib.error.HTTPError as exc:
+        response_payload = _parse_postmark_response(exc.read())
+        error_code = _postmark_error_code(response_payload)
+        message = str(response_payload.get("Message") or "").strip()
+        if _is_suppressed_error(error_code=error_code, message=message):
+            raise EmailSuppressedError(email=recipient, reason="INACTIVE") from exc
+        _logger.exception(
+            "Email delivery failed via Postmark.",
+            extra={
+                "from_address": sender,
+                "to_domain": recipient.split("@")[-1].lower(),
+                "http_status": exc.code,
+                "postmark_error_code": error_code,
+            },
+        )
+        raise EmailDeliveryError("Failed to send email.") from exc
+    except Exception as exc:
+        _logger.exception(
+            "Email delivery failed via Postmark.",
+            extra={
+                "from_address": sender,
+                "to_domain": recipient.split("@")[-1].lower(),
+            },
+        )
+        raise EmailDeliveryError("Failed to send email.") from exc
+
+
 def send_auth_email(
     *,
     to_email: str,

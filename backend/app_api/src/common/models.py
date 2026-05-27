@@ -26,7 +26,7 @@ STATUSES = (
     "refunded",
     "revoked",
 )
-ACTIVE_ACCESS_STATUSES = {"trialing", "active", "grace_period"}
+ACTIVE_ACCESS_STATUSES = {"trialing", "active", "grace_period", "past_due"}
 _PLAN_CODE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _STATUS_PRIORITY = {
     "trialing": 4,
@@ -105,7 +105,7 @@ def status_has_active_access(raw: str) -> bool:
 
 def subscription_effective_status(raw: Dict[str, Any]) -> str:
     status = normalize_status(str(raw.get("status") or "expired"))
-    expires_at = _parse_datetime(raw.get("expires_at"))
+    expires_at = _parse_datetime(raw.get("expires_at") or raw.get("current_period_end"))
     if status_has_active_access(status) and expires_at is not None and expires_at <= datetime.now(timezone.utc):
         return "expired"
     return status

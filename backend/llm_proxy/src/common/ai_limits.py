@@ -119,13 +119,13 @@ def _positive_int(value: Any) -> int | None:
     return None
 
 
-def _prompt_limits_from_entitlement(
-    entitlement_limits: Mapping[str, Any] | None,
+def _prompt_limits_from_overrides(
+    limit_overrides: Mapping[str, Any] | None,
 ) -> dict[str, int] | None:
-    if not isinstance(entitlement_limits, Mapping):
+    if not isinstance(limit_overrides, Mapping):
         return None
-    daily_prompts = _positive_int(entitlement_limits.get("ai_prompts_daily"))
-    weekly_prompts = _positive_int(entitlement_limits.get("ai_prompts_weekly"))
+    daily_prompts = _positive_int(limit_overrides.get("ai_prompts_daily"))
+    weekly_prompts = _positive_int(limit_overrides.get("ai_prompts_weekly"))
     if daily_prompts is None or weekly_prompts is None or weekly_prompts < daily_prompts:
         return None
     return {
@@ -216,9 +216,12 @@ def get_tier_limits(tier: str) -> dict[str, int]:
 
 def get_prompt_limits(
     tier: str = "free",
-    entitlement_limits: Mapping[str, Any] | None = None,
+    limit_overrides: Mapping[str, Any] | None = None,
 ) -> dict[str, int]:
-    limits = _prompt_limits_from_entitlement(entitlement_limits) or _default_prompt_limits_for_tier(tier)
+    limits = (
+        _prompt_limits_from_overrides(limit_overrides)
+        or _default_prompt_limits_for_tier(tier)
+    )
     normalized_tier = _normalized_tier_name(tier)
     if normalized_tier != "free":
         return limits

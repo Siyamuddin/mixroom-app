@@ -379,21 +379,29 @@ class AdminUsersHandlerTests(unittest.TestCase):
         self.assertEqual(call["seat_limit"], 5)
         self.assertEqual(call["organization_name"], "Test Studio")
 
-    def test_entitlement_override_requires_ai_editor_email(self):
+    def test_entitlement_override_allows_allowlisted_employee_admin(self):
         self._authenticate(email="other-admin@example.com")
-        admin_module.repo = _FakeRepo()
+        admin_module.repo = _FakeRepo(override_payload={"overridden": True})
 
         result = admin_module.handler(
             {
                 "rawPath": "/v1/internal/admin/users/entitlement-override",
                 "requestContext": {"http": {"method": "POST"}},
-                "body": '{"user_id":"user-1","plan_code":"producer"}',
+                "body": (
+                    '{"user_id":"user-1","plan_code":"producer",'
+                    '"expires_at":"2026-05-20T00:00:00+00:00",'
+                    '"reason":"manual sale","confirm_identifier":"user@example.com",'
+                    '"confirm_admin_first_name":"other-admin"}'
+                ),
             },
             object(),
         )
 
-        self.assertEqual(result["statusCode"], 403)
-        self.assertIn("andrew@mixroom.ai", result["body"])
+        self.assertEqual(result["statusCode"], 200)
+        self.assertIn('"overridden": true', result["body"])
+        call = admin_module.repo.override_calls[0]
+        self.assertEqual(call["granted_by_email"], "other-admin@example.com")
+        self.assertEqual(call["plan_code"], "producer")
 
 
 class AdminUserRepositoryTests(unittest.TestCase):

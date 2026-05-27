@@ -36,7 +36,7 @@ first and then add the deeper doc if needed.
 - DynamoDB: users, entitlements, billing, admin, and AI usage state
 - SQS: billing projection / async processing
 - EventBridge: scheduled reconciliation jobs
-- Secrets Manager: provider keys and webhook secrets
+- SSM Parameter Store: provider keys and webhook secrets
 - CloudWatch: logs, metrics, alarms
 - SNS: alarm fan-out
 - WAF: optional shared protection for public APIs

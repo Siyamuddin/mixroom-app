@@ -27,6 +27,8 @@ class CollaborationApiTests(unittest.TestCase):
             "user_id": user_id,
             "username": "andrew_leew" if user_id == "user-1" else "",
             "display_name": "Andrew" if user_id == "user-1" else "",
+            "email": "student@example.com" if user_id == "user-1" else "",
+            "email_lc": "student@example.com" if user_id == "user-1" else "",
         }
         module.catalog_repo = mock.Mock()
         module.catalog_repo.get_catalog.return_value = {
@@ -35,7 +37,7 @@ class CollaborationApiTests(unittest.TestCase):
                     "code": "free",
                     "group": "individual",
                     "capabilities": {"cloud_projects": True},
-                    "limits": {"cloud_projects": 3, "storage_gb": 0.25},
+                    "limits": {"cloud_projects": 1, "storage_gb": 0.1},
                 },
                 {
                     "code": "producer",
@@ -53,7 +55,7 @@ class CollaborationApiTests(unittest.TestCase):
                     "code": "education",
                     "group": "education",
                     "capabilities": {"cloud_projects": True},
-                    "limits": {"cloud_projects": "custom", "storage_gb_per_seat": 5},
+                    "limits": {"cloud_projects": "custom", "storage_gb": 5},
                 },
             ]
         }
@@ -216,6 +218,7 @@ class CollaborationApiTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 200)
         payload = decode_json_response(response)
         self.assertEqual(payload["organizations"][0]["organization_id"], "org-1")
+        self.assertEqual(payload["organizations"][0]["admin_profiles"][0]["username"], "andrew_leew")
         self.assertEqual(payload["summary"]["organization_count"], 1)
 
     def test_returns_workspaces_snapshot(self):
@@ -309,12 +312,12 @@ class CollaborationApiTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 200)
         payload = decode_json_response(response)
         storage = payload["storage"]
-        self.assertEqual(storage["limit_bytes"], 268435456)
+        self.assertEqual(storage["limit_bytes"], 107374182)
         locations = {
             item["workspace_id"]: item for item in storage.get("locations", [])
         }
         self.assertEqual(locations[""]["used_bytes"], 1024)
-        self.assertEqual(locations[""]["limit_bytes"], 268435456)
+        self.assertEqual(locations[""]["limit_bytes"], 107374182)
         self.assertEqual(locations["ws-studio"]["used_bytes"], 2048)
         self.assertEqual(locations["ws-studio"]["limit_bytes"], 1099511627776)
         self.assertTrue(locations["ws-studio"]["can_write"])
@@ -373,6 +376,114 @@ class CollaborationApiTests(unittest.TestCase):
         self.assertEqual(locations["ws-studio"]["organization_status"], "locked")
         self.assertFalse(payload["cloud_projects"][0]["can_write"])
 
+    def test_education_student_gets_personal_storage_without_shared_location(self):
+        module.billing_repo.get_entitlement.return_value = {
+            "user_id": "user-1",
+            "status": "active",
+            "plan_code": "free",
+            "capabilities": {"cloud_projects": True},
+            "limits": {"cloud_projects": 1, "storage_gb": 0.1},
+        }
+        module.repo.build_user_access_snapshot.return_value = {
+            "organizations": [
+                {
+                    "organization_id": "org-edu",
+                    "name": "Academy",
+                    "plan_code": "education",
+                    "status": "active",
+                    "membership_status": "active",
+                    "membership_role": "student",
+                    "seat_limit": 20,
+                }
+            ],
+            "memberships": [],
+            "workspaces": [
+                {
+                    "workspace_id": "ws-edu",
+                    "organization_id": "org-edu",
+                    "name": "Academy Classroom",
+                    "status": "active",
+                }
+            ],
+            "cloud_projects": [
+                {
+                    "project_id": "personal-1",
+                    "user_id": "user-1",
+                    "storage_mode": "s3_mixroom",
+                    "document_size_bytes": 1024,
+                },
+                {
+                    "project_id": "edu-shared-1",
+                    "user_id": "user-1",
+                    "workspace_id": "ws-edu",
+                    "organization_id": "org-edu",
+                    "storage_mode": "s3_mixroom",
+                    "document_size_bytes": 2048,
+                },
+            ],
+            "summary": {},
+            "configurable": True,
+        }
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/cloud-projects/me",
+                "requestContext": {"http": {"method": "GET"}},
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        storage = payload["storage"]
+        self.assertEqual(storage["plan_code"], "education")
+        self.assertEqual(storage["limit_bytes"], 5368709120)
+        self.assertEqual(
+            [item["storage_scope"] for item in storage.get("locations", [])],
+            ["personal"],
+        )
+        self.assertEqual(storage["locations"][0]["limit_bytes"], 5368709120)
+
+    def test_education_teacher_does_not_receive_student_personal_storage(self):
+        module.billing_repo.get_entitlement.return_value = {
+            "user_id": "user-1",
+            "status": "active",
+            "plan_code": "free",
+            "capabilities": {"cloud_projects": True},
+            "limits": {"cloud_projects": 1, "storage_gb": 0.1},
+        }
+        module.repo.build_user_access_snapshot.return_value = {
+            "organizations": [
+                {
+                    "organization_id": "org-edu",
+                    "name": "Academy",
+                    "plan_code": "education",
+                    "status": "active",
+                    "membership_status": "active",
+                    "membership_role": "teacher",
+                    "seat_limit": 20,
+                }
+            ],
+            "memberships": [],
+            "workspaces": [],
+            "cloud_projects": [],
+            "summary": {},
+            "configurable": True,
+        }
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/cloud-projects/me",
+                "requestContext": {"http": {"method": "GET"}},
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertEqual(payload["storage"]["plan_code"], "free")
+        self.assertEqual(payload["storage"]["limit_bytes"], 107374182)
+
     def test_creates_cloud_project_upload_when_quota_allows(self):
         response = module.handler(
             {
@@ -394,7 +505,7 @@ class CollaborationApiTests(unittest.TestCase):
             "status": "active",
             "plan_code": "free",
             "capabilities": {"cloud_projects": True},
-            "limits": {"cloud_projects": 3, "storage_gb": 0.25},
+            "limits": {"cloud_projects": 1, "storage_gb": 0.1},
         }
         module.repo.build_user_access_snapshot.return_value = {
             "organizations": [
@@ -588,6 +699,199 @@ class CollaborationApiTests(unittest.TestCase):
         self.assertEqual(payload["student_usage"][0]["project_count"], 2)
         module.repo.list_memberships.assert_called_once_with(organization_id="org-1")
 
+    def test_returns_admin_organization_snapshot_for_studio(self):
+        module.repo.build_user_access_snapshot.return_value = {
+            "organizations": [
+                {
+                    "organization_id": "studio-1",
+                    "name": "Studio One",
+                    "plan_code": "studio",
+                    "status": "active",
+                    "seat_limit": 5,
+                    "owner_user_id": "user-1",
+                    "membership_role": "owner",
+                    "membership_status": "active",
+                }
+            ],
+            "memberships": [
+                {
+                    "organization_id": "studio-1",
+                    "user_id": "user-1",
+                    "role": "owner",
+                    "status": "active",
+                }
+            ],
+            "summary": {},
+            "configurable": True,
+        }
+        module.repo.list_memberships.return_value = [
+            {
+                "organization_id": "studio-1",
+                "user_id": "member-1",
+                "email": "member@example.com",
+                "role": "member",
+                "status": "active",
+            }
+        ]
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/organizations/me/admin",
+                "requestContext": {"http": {"method": "GET"}},
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertEqual(payload["organizations"][0]["plan_code"], "studio")
+        self.assertEqual(payload["memberships"][0]["email"], "member@example.com")
+        module.repo.list_memberships.assert_called_once_with(organization_id="studio-1")
+
+    def test_studio_admin_can_invite_member(self):
+        module.repo.build_user_access_snapshot.return_value = {
+            "organizations": [
+                {
+                    "organization_id": "studio-1",
+                    "name": "Studio One",
+                    "plan_code": "studio",
+                    "status": "active",
+                    "seat_limit": 5,
+                    "membership_role": "owner",
+                    "membership_status": "active",
+                }
+            ],
+            "memberships": [
+                {
+                    "organization_id": "studio-1",
+                    "user_id": "user-1",
+                    "role": "owner",
+                    "status": "active",
+                }
+            ],
+            "summary": {},
+            "configurable": True,
+        }
+        module.repo.get_organization.return_value = {
+            "organization_id": "studio-1",
+            "name": "Studio One",
+            "plan_code": "studio",
+        }
+        module.repo.save_membership.return_value = {
+            "organization_id": "studio-1",
+            "user_id": "invite:member",
+            "email": "member@example.com",
+            "role": "member",
+            "status": "pending",
+            "invite_url": "https://www.mixroom.ai/?auth=signup&invite=token",
+        }
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/organizations/me/invites",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": '{"organization_id":"studio-1","email":"member@example.com"}',
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        saved_payload = module.repo.save_membership.call_args.args[0]
+        self.assertEqual(saved_payload["role"], "member")
+        self.assertEqual(saved_payload["status"], "pending")
+
+    def test_studio_admin_can_release_member_seat(self):
+        module.repo.build_user_access_snapshot.return_value = {
+            "organizations": [
+                {
+                    "organization_id": "studio-1",
+                    "name": "Studio One",
+                    "plan_code": "studio",
+                    "status": "active",
+                    "membership_role": "owner",
+                    "membership_status": "active",
+                }
+            ],
+            "memberships": [
+                {
+                    "organization_id": "studio-1",
+                    "user_id": "user-1",
+                    "role": "owner",
+                    "status": "active",
+                }
+            ],
+            "summary": {},
+            "configurable": True,
+        }
+        module.repo.get_organization.return_value = {
+            "organization_id": "studio-1",
+            "plan_code": "studio",
+        }
+        module.repo.get_membership.return_value = {
+            "organization_id": "studio-1",
+            "user_id": "member-1",
+            "email": "member@example.com",
+            "role": "member",
+            "status": "active",
+        }
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/organizations/me/memberships",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": '{"organization_id":"studio-1","user_id":"member-1","status":"inactive"}',
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        saved_payload = module.repo.save_membership.call_args.args[0]
+        self.assertEqual(saved_payload["role"], "member")
+        self.assertEqual(saved_payload["status"], "inactive")
+        self.assertFalse(saved_payload["seat_consumed"])
+
+    def test_studio_admin_cannot_remove_owner_membership(self):
+        module.repo.build_user_access_snapshot.return_value = {
+            "organizations": [
+                {
+                    "organization_id": "studio-1",
+                    "name": "Studio One",
+                    "plan_code": "studio",
+                    "status": "active",
+                    "membership_role": "owner",
+                    "membership_status": "active",
+                }
+            ],
+            "memberships": [
+                {
+                    "organization_id": "studio-1",
+                    "user_id": "user-1",
+                    "role": "owner",
+                    "status": "active",
+                }
+            ],
+            "summary": {},
+            "configurable": True,
+        }
+        module.repo.get_membership.return_value = {
+            "organization_id": "studio-1",
+            "user_id": "owner-1",
+            "role": "owner",
+            "status": "active",
+        }
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/organizations/me/memberships",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": '{"organization_id":"studio-1","user_id":"owner-1","status":"removed"}',
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 403)
+        module.repo.save_membership.assert_not_called()
+
     def test_teacher_can_invite_student(self):
         response = module.handler(
             {
@@ -703,6 +1007,7 @@ class CollaborationApiTests(unittest.TestCase):
         module.repo.accept_invite.assert_called_once_with(
             "invite-token",
             "user-1",
+            accepted_email="student@example.com",
             updated_by_user_id="user-1",
         )
 

@@ -1471,6 +1471,225 @@ bool PitchShiftAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts
 }
 #endif
 
+// =========================
+// **** PITCH CORRECTOR ****
+// =========================
+
+PitchCorrectorAudioProcessor::PitchCorrectorAudioProcessor()
+#ifndef JucePlugin_PreferredChannelConfigurations
+    : AudioProcessor(BusesProperties()
+                         .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+      parameters(*this, nullptr)
+#endif
+{
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "key", "Key",
+            juce::NormalisableRange<float>(0.0f, 11.0f, 1.0f),
+            0.0f));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "scale", "Scale",
+            juce::NormalisableRange<float>(0.0f, 2.0f, 1.0f),
+            1.0f));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "amount", "Amount",
+            juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+            80.0f, "%"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "speed", "Speed",
+            juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+            65.0f, "%"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "mix", "Mix",
+            juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+            100.0f, "%"));
+
+    parameters.state = juce::ValueTree("savedParams");
+}
+
+void PitchCorrectorAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
+{
+    currentSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
+    pitchShift.prepare(currentSampleRate, samplesPerBlock);
+    smoothedCorrectionSemitones = 0.0f;
+}
+
+float PitchCorrectorAudioProcessor::estimatePitchHz(
+    const juce::AudioBuffer<float> &buffer) const
+{
+    const int channels = juce::jmin(buffer.getNumChannels(), getTotalNumInputChannels());
+    const int samples = buffer.getNumSamples();
+    if (channels <= 0 || samples < 96 || currentSampleRate <= 0.0)
+        return 0.0f;
+
+    const auto monoAt = [&buffer, channels](int index) {
+        float sum = 0.0f;
+        for (int ch = 0; ch < channels; ++ch)
+            sum += buffer.getReadPointer(ch)[index];
+        return sum / (float)channels;
+    };
+
+    float mean = 0.0f;
+    for (int i = 0; i < samples; ++i)
+        mean += monoAt(i);
+    mean /= (float)samples;
+
+    float energy = 0.0f;
+    for (int i = 0; i < samples; ++i)
+    {
+        const float x = monoAt(i) - mean;
+        energy += x * x;
+    }
+    if (energy < 1.0e-7f)
+        return 0.0f;
+
+    const int minLag = juce::jmax(2, (int)std::floor(currentSampleRate / 1000.0));
+    const int maxLag = juce::jmin(samples - 2, (int)std::ceil(currentSampleRate / 80.0));
+    if (maxLag <= minLag)
+        return 0.0f;
+
+    int bestLag = 0;
+    float bestScore = 0.0f;
+    for (int lag = minLag; lag <= maxLag; ++lag)
+    {
+        float corr = 0.0f;
+        float aEnergy = 0.0f;
+        float bEnergy = 0.0f;
+        for (int i = 0; i < samples - lag; ++i)
+        {
+            const float a = monoAt(i) - mean;
+            const float b = monoAt(i + lag) - mean;
+            corr += a * b;
+            aEnergy += a * a;
+            bEnergy += b * b;
+        }
+
+        const float denom = std::sqrt(aEnergy * bEnergy) + 1.0e-9f;
+        const float score = corr / denom;
+        if (score > bestScore)
+        {
+            bestScore = score;
+            bestLag = lag;
+        }
+    }
+
+    if (bestLag <= 0 || bestScore < 0.36f)
+        return 0.0f;
+
+    return (float)(currentSampleRate / (double)bestLag);
+}
+
+float PitchCorrectorAudioProcessor::targetCorrectionSemitones(
+    float pitchHz, int key, int scale) const
+{
+    if (pitchHz <= 0.0f)
+        return 0.0f;
+
+    static constexpr int majorIntervals[] = {0, 2, 4, 5, 7, 9, 11};
+    static constexpr int minorIntervals[] = {0, 2, 3, 5, 7, 8, 10};
+
+    const float midi = 69.0f + 12.0f * std::log2(pitchHz / 440.0f);
+    const int roundedMidi = (int)std::round(midi);
+    if (scale <= 0)
+        return juce::jlimit(-2.5f, 2.5f, (float)roundedMidi - midi);
+
+    const int root = ((key % 12) + 12) % 12;
+    const int *intervals = scale == 2 ? minorIntervals : majorIntervals;
+    const int intervalCount = 7;
+    int bestMidi = roundedMidi;
+    float bestDistance = std::numeric_limits<float>::max();
+
+    for (int octave = -1; octave <= 1; ++octave)
+    {
+        const int octaveBase = ((roundedMidi / 12) + octave) * 12;
+        for (int i = 0; i < intervalCount; ++i)
+        {
+            const int candidate = octaveBase + root + intervals[i];
+            const float distance = std::abs((float)candidate - midi);
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                bestMidi = candidate;
+            }
+        }
+    }
+
+    return juce::jlimit(-2.5f, 2.5f, (float)bestMidi - midi);
+}
+
+void PitchCorrectorAudioProcessor::processBlock(
+    juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    for (int ch = getTotalNumInputChannels();
+         ch < getTotalNumOutputChannels(); ++ch)
+        buffer.clear(ch, 0, buffer.getNumSamples());
+
+    const int key = (int)std::round(parameters.getRawParameterValue("key")->load());
+    const int scale = (int)std::round(parameters.getRawParameterValue("scale")->load());
+    const float amount = parameters.getRawParameterValue("amount")->load() * 0.01f;
+    const float speed = parameters.getRawParameterValue("speed")->load() * 0.01f;
+    const float mix = parameters.getRawParameterValue("mix")->load() * 0.01f;
+
+    const float pitchHz = estimatePitchHz(buffer);
+    const float target = pitchHz > 0.0f
+                             ? targetCorrectionSemitones(pitchHz, key, scale) * amount
+                             : 0.0f;
+    const float alpha = pitchHz > 0.0f
+                            ? juce::jmap(speed, 0.015f, 0.42f)
+                            : 0.08f;
+    smoothedCorrectionSemitones +=
+        (target - smoothedCorrectionSemitones) * juce::jlimit(0.0f, 1.0f, alpha);
+
+    if (std::abs(smoothedCorrectionSemitones) < 0.01f || mix <= 0.0f)
+        return;
+
+    pitchShift.setManualParameters(smoothedCorrectionSemitones, mix);
+    pitchShift.process(buffer);
+}
+
+void PitchCorrectorAudioProcessor::getStateInformation(juce::MemoryBlock &destData)
+{
+    std::unique_ptr<juce::XmlElement> outputXml(parameters.state.createXml());
+    copyXmlToBinary(*outputXml, destData);
+}
+
+void PitchCorrectorAudioProcessor::setStateInformation(const void *data, int sizeInBytes)
+{
+    std::unique_ptr<juce::XmlElement> inputXml(getXmlFromBinary(data, sizeInBytes));
+    if (inputXml != nullptr && inputXml->hasTagName(parameters.state.getType()))
+        parameters.state = juce::ValueTree::fromXml(*inputXml);
+}
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+bool PitchCorrectorAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts) const
+{
+#if JucePlugin_IsMidiEffect
+    juce::ignoreUnused(layouts);
+    return true;
+#else
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono() &&
+        layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+        return false;
+#if !JucePlugin_IsSynth
+    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
+        return false;
+#endif
+    return true;
+#endif
+}
+#endif
+
 // =================
 // **** CHORUS ****
 // =================

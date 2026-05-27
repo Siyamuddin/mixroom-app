@@ -6,8 +6,8 @@ export const AI_LIMITS = {
   // usage/telemetry bookkeeping.
   "prompt_limits": {
     "free": {
-      "daily": 50,
-      "weekly": 200
+      "daily": 30,
+      "weekly": 120
     },
     "starter": {
       "daily": 400,

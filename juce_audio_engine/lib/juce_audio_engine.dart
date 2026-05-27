@@ -723,6 +723,7 @@ class JuceAudioEngine {
     bool wavDithering = true,
     int mp3BitrateKbps = 192,
     String? clipSnapshotJson,
+    bool dryClipRender = false,
   }) async {
     try {
       final result = await _ch.invokeMethod<String>(
@@ -734,6 +735,7 @@ class JuceAudioEngine {
           'wavBitDepth': wavBitDepth,
           'wavDithering': wavDithering,
           'mp3BitrateKbps': mp3BitrateKbps,
+          'dryClipRender': dryClipRender,
           if (clipSnapshotJson != null && clipSnapshotJson.isNotEmpty)
             'clipSnapshotJson': clipSnapshotJson,
         },

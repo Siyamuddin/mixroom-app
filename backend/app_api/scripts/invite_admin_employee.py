@@ -29,7 +29,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--email", required=True, help="Employee email address.")
     parser.add_argument(
         "--stage",
-        default="staging",
+        default="prod",
         help="Stage suffix used when deriving the allowlist table name.",
     )
     parser.add_argument(

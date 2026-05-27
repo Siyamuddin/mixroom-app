@@ -18,6 +18,7 @@ _REQUIRED_ENV = {
     "USERS_TABLE": "users",
     "USERNAME_CLAIMS_TABLE": "username-claims",
     "CATALOG_MAPPINGS_TABLE": "catalog-mappings",
+    "FEATURE_FLAGS_TABLE": "feature-flags",
     "CUSTOMER_LINKS_TABLE": "customer-links",
     "PURCHASE_TOKENS_TABLE": "purchase-tokens",
     "RECONCILIATION_JOBS_TABLE": "reconcile-jobs",
@@ -82,6 +83,7 @@ class FakeBillingRepo:
         self.subscriptions = {}
         self.entitlements = {}
         self.user_profiles = {}
+        self.auth_accounts = {}
         self.catalog_mappings = {}
         self.customer_links = {}
         self.purchase_tokens = {}
@@ -111,6 +113,10 @@ class FakeBillingRepo:
 
     def upsert_subscription(self, record):
         self.subscriptions[str(record["subscription_id"])] = dict(record)
+
+    def get_subscription(self, subscription_id):
+        item = self.subscriptions.get(str(subscription_id))
+        return dict(item) if isinstance(item, dict) else None
 
     def get_latest_subscription_for_user(self, user_id):
         matches = self.list_subscriptions_for_user(user_id)
@@ -144,6 +150,13 @@ class FakeBillingRepo:
         item = self.customer_links.get(f"{provider}:{customer_key}")
         return dict(item) if isinstance(item, dict) else None
 
+    def list_customer_links_for_user(self, user_id):
+        return [
+            dict(item)
+            for item in self.customer_links.values()
+            if str(item.get("user_id") or "") == user_id
+        ]
+
     def put_purchase_token(self, provider, token, attributes=None):
         payload = {
             "provider": provider,
@@ -173,6 +186,17 @@ class FakeBillingRepo:
     def get_user_profile_by_email(self, email_lc):
         normalized = str(email_lc or "").strip().lower()
         for item in self.user_profiles.values():
+            if str(item.get("email_lc") or item.get("email") or "").strip().lower() == normalized:
+                return dict(item)
+        return None
+
+    def get_auth_account(self, user_id):
+        item = self.auth_accounts.get(user_id)
+        return dict(item) if isinstance(item, dict) else None
+
+    def get_auth_account_by_email(self, email_lc):
+        normalized = str(email_lc or "").strip().lower()
+        for item in self.auth_accounts.values():
             if str(item.get("email_lc") or item.get("email") or "").strip().lower() == normalized:
                 return dict(item)
         return None
@@ -217,6 +241,20 @@ class FakeBillingRepo:
 
     def record_reconciliation_job(self, job):
         self.reconciliation_jobs.append(dict(job))
+
+    def get_reconciliation_job(self, job_id):
+        safe_id = str(job_id or "")
+        for item in self.reconciliation_jobs:
+            if str(item.get("job_id") or "") == safe_id:
+                return dict(item)
+        return None
+
+    def record_reconciliation_job_once(self, job):
+        job_id = str(job.get("job_id") or "")
+        if any(str(item.get("job_id") or "") == job_id for item in self.reconciliation_jobs):
+            return False
+        self.reconciliation_jobs.append(dict(job))
+        return True
 
 
 class FakeEventBridge:

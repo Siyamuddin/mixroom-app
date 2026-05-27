@@ -297,6 +297,45 @@ class ApiResponsesTests(unittest.TestCase):
             {"role": "user", "content": "Make the vocals clearer."},
         )
 
+    def test_handler_includes_client_entitlement_policy_in_prompt(self) -> None:
+        provider = _FakeProvider()
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "add shimmer and create a bassline",
+                    "project_snapshot": "Track 1: Audio",
+                    "library_snapshot": "instrument_id=mixroom.basic_synth",
+                    "client_context": {
+                        "subscription_plan": "free",
+                        "max_rows": 5,
+                        "current_rows": 5,
+                        "plugin_access": "core_built_in_only",
+                        "row_creation_policy": "Reuse rows at or below row_index 4.",
+                        "allowed_builtin_effects": ["Gain", "EQ 3-Band", "Delay"],
+                        "allowed_instrument_ids": ["mixroom.basic_synth"],
+                    },
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        assert provider.request_body is not None
+        instructions = provider.request_body["instructions"]
+        self.assertIn("CLIENT ENTITLEMENT POLICY", instructions)
+        self.assertIn("Maximum project row_index is 4", instructions)
+        self.assertIn("core_built_in_only", instructions)
+        self.assertIn("Gain, EQ 3-Band, Delay", instructions)
+        self.assertIn("mixroom.basic_synth", instructions)
+        self.assertNotEqual(
+            provider.request_body["prompt_cache_key"],
+            "mixroom-daw-v20260422a:ai_chat:c49fea7425fa",
+        )
+
     def test_handler_applies_remote_ai_runtime_overrides(self) -> None:
         provider = _FakeProvider()
         event = _authed_event(
@@ -665,8 +704,8 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertEqual(len(self.fake_usage_repo.reserve_calls), 1)
         reserve_call = self.fake_usage_repo.reserve_calls[0]
         self.assertEqual(reserve_call["reserved_prompts"], 1)
-        self.assertEqual(reserve_call["daily_prompt_limit"], 50)
-        self.assertEqual(reserve_call["weekly_prompt_limit"], 200)
+        self.assertEqual(reserve_call["daily_prompt_limit"], 30)
+        self.assertEqual(reserve_call["weekly_prompt_limit"], 120)
         self.assertEqual(self.fake_usage_repo.log_calls[-1]["status"], "rate_limited")
         payload = json.loads(result["body"])
         self.assertEqual(payload["error"], "prompt_rate_limit_hit")
@@ -1795,6 +1834,60 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertEqual(payload["soft_error"]["code"], "invalid_structured_output")
         self.assertTrue(payload["soft_error"]["usage_refunded"])
 
+    def test_handler_normalizes_glue_clip_operation_alias(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_glue_clip",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "Consolidating the selected clips.",
+                            "actions": [
+                                {
+                                    "type": "clip_edit",
+                                    "data": {
+                                        "operation": "merge_clips",
+                                        "target": {"prefer_selected": True},
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 200,
+                    "output_tokens": 100,
+                    "total_tokens": 300,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "merge the selected clips",
+                    "project_snapshot": "Track 1: vocal",
+                    "selection_snapshot": "selected_clip_indices=0,1",
+                    "ai_feature": "assistant_chat",
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "daw_assistant_actions")
+        action = output["arguments"]["actions"][0]
+        self.assertEqual(action["type"], "clip_edit")
+        self.assertEqual(action["data"]["operation"], "glue")
+
     def test_handler_sanitizes_internal_leak_in_user_facing_message(self) -> None:
         provider = _FakeProvider(
             response_body={
@@ -2147,21 +2240,17 @@ class ApiResponsesTests(unittest.TestCase):
             soft_failed_call.kwargs["properties"]["soft_error_code"],
             "invalid_structured_output",
         )
-        exception_call = next(
-            call
-            for call in capture_exception_mock.call_args_list
-            if call.kwargs.get("tags")
-            == {
-                "service": "llm_proxy",
-                "error_type": "soft_failed_refunded",
-                "ai_feature": "ai_chat",
-            }
+        self.assertFalse(
+            any(
+                call.kwargs.get("tags")
+                == {
+                    "service": "llm_proxy",
+                    "error_type": "soft_failed_refunded",
+                    "ai_feature": "ai_chat",
+                }
+                for call in capture_exception_mock.call_args_list
+            )
         )
-        self.assertEqual(
-            exception_call.kwargs["context"]["prompt_length_chars"],
-            len("Make the mix more modern."),
-        )
-        self.assertNotIn("prompt_text", exception_call.kwargs["context"])
 
     def test_handler_refunds_usage_for_json_like_message_only_success(self) -> None:
         provider = _FakeProvider(
@@ -2609,6 +2698,33 @@ class ApiResponsesTests(unittest.TestCase):
             clear=False,
         ):
             self.assertEqual(api_responses._load_api_key(), "sk-legacy")
+
+    def test_load_api_key_prefers_ssm_parameter(self) -> None:
+        ssm_client = mock.Mock()
+        ssm_client.get_parameter.return_value = {
+            "Parameter": {
+                "Value": json.dumps({"OPENAI_API_KEY": "sk-parameter"}),
+            },
+        }
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "LLM_API_KEY_PARAMETER_NAME": "/mixroom/prod/llm",
+                "LLM_API_KEY_SECRET_ARN": "arn:aws:secretsmanager:ap-northeast-2:123:secret:test",
+            },
+            clear=False,
+        ):
+            fake_boto3 = mock.Mock()
+            fake_boto3.client.return_value = ssm_client
+            with mock.patch.object(api_responses, "boto3", fake_boto3):
+                self.assertEqual(api_responses._load_api_key("openai"), "sk-parameter")
+
+        fake_boto3.client.assert_called_once_with("ssm")
+        ssm_client.get_parameter.assert_called_once_with(
+            Name="/mixroom/prod/llm",
+            WithDecryption=True,
+        )
 
     def test_load_api_key_accepts_provider_specific_secret_keys(self) -> None:
         secret_client = mock.Mock()

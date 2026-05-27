@@ -1223,6 +1223,9 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     NSNumber *mp3BitrateKbps = settings[@"mp3BitrateKbps"];
     if ([mp3BitrateKbps isKindOfClass:[NSNumber class]])
         options.mp3BitrateKbps = [mp3BitrateKbps intValue];
+    NSNumber *dryClipRender = settings[@"dryClipRender"];
+    if ([dryClipRender isKindOfClass:[NSNumber class]])
+        options.dryClipRender = [dryClipRender boolValue];
     NSString *clipSnapshotJson = settings[@"clipSnapshotJson"];
     if ([clipSnapshotJson isKindOfClass:[NSString class]] && clipSnapshotJson.length > 0)
         options.clipSnapshotJson = juceStringFromNSString(clipSnapshotJson);

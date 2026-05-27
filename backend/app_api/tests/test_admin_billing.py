@@ -11,12 +11,26 @@ module = importlib.import_module("src.handlers.api_admin_billing")
 class AdminBillingApiTests(unittest.TestCase):
     def setUp(self):
         self.original_catalog_repo = module.catalog_repo
+        self.original_feature_flags_repo = module.feature_flags_repo
         self.original_collaboration_repo = module.collaboration_repo
         self.original_access_repo = module.access_repo
         self.original_admin_identity = module._admin_identity
         module.catalog_repo = mock.Mock()
         module.catalog_repo.get_catalog.return_value = default_catalog()
         module.catalog_repo.replace_catalog.return_value = default_catalog()
+        module.feature_flags_repo = mock.Mock()
+        module.feature_flags_repo.get_flags.return_value = {
+            "flags": {"account_plan_billing_enabled": True},
+            "configurable": True,
+        }
+        module.feature_flags_repo.update_flags.return_value = {
+            "flags": {
+                "account_plan_billing_enabled": True,
+                "subscription_enforcement_enabled": True,
+                "iap_purchases_enabled": True,
+            },
+            "configurable": True,
+        }
         module.collaboration_repo = mock.Mock()
         module.collaboration_repo.is_configured.return_value = True
         module.collaboration_repo.list_organizations.return_value = []
@@ -51,6 +65,7 @@ class AdminBillingApiTests(unittest.TestCase):
 
     def tearDown(self):
         module.catalog_repo = self.original_catalog_repo
+        module.feature_flags_repo = self.original_feature_flags_repo
         module.collaboration_repo = self.original_collaboration_repo
         module.access_repo = self.original_access_repo
         module._admin_identity = self.original_admin_identity
@@ -81,6 +96,39 @@ class AdminBillingApiTests(unittest.TestCase):
 
         self.assertEqual(response["statusCode"], 200)
         module.catalog_repo.replace_catalog.assert_called_once()
+
+    def test_gets_feature_flags(self):
+        response = module.handler(
+            {
+                "rawPath": "/v1/internal/admin/settings/feature-flags",
+                "requestContext": {"http": {"method": "GET"}},
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertTrue(payload["flags"]["account_plan_billing_enabled"])
+        self.assertEqual(payload["requested_by"], "admin-1")
+
+    def test_updates_feature_flags(self):
+        response = module.handler(
+            {
+                "rawPath": "/v1/internal/admin/settings/feature-flags",
+                "requestContext": {"http": {"method": "PUT"}},
+                "body": (
+                    '{"flags":{'
+                    '"account_plan_billing_enabled":true,'
+                    '"subscription_enforcement_enabled":true,'
+                    '"iap_purchases_enabled":true'
+                    "}}"
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        module.feature_flags_repo.update_flags.assert_called_once()
 
     def test_saves_organization(self):
         response = module.handler(

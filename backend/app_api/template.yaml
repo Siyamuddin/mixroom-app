@@ -5,7 +5,7 @@ Description: Mixroom app API (accounts, profiles, social auth, entitlements, bil
 Parameters:
   StageName:
     Type: String
-    Default: staging
+    Default: prod
   CognitoUserPoolId:
     Type: String
     Default: ''
@@ -45,7 +45,15 @@ Parameters:
   SocialAuthSecretArn:
     Type: String
     Default: ''
+    AllowedPattern: '^$|^arn:aws[a-zA-Z-]*:secretsmanager:[^:]+:[0-9]{12}:secret:.+$'
+  SocialAuthSecretParameterName:
+    Type: String
+    Default: ''
   AppAuthSecretArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws[a-zA-Z-]*:secretsmanager:[^:]+:[0-9]{12}:secret:.+$'
+  AppAuthSecretParameterName:
     Type: String
     Default: ''
   AppAuthIssuer:
@@ -67,6 +75,10 @@ Parameters:
   PostmarkServerTokenSecretArn:
     Type: String
     Default: ''
+    AllowedPattern: '^$|^arn:aws[a-zA-Z-]*:secretsmanager:[^:]+:[0-9]{12}:secret:.+$'
+  PostmarkServerTokenParameterName:
+    Type: String
+    Default: ''
   PostmarkApiBaseUrl:
     Type: String
     Default: 'https://api.postmarkapp.com'
@@ -78,6 +90,10 @@ Parameters:
     NoEcho: true
     Default: ''
   StibeeAccessTokenSecretArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws[a-zA-Z-]*:secretsmanager:[^:]+:[0-9]{12}:secret:.+$'
+  StibeeAccessTokenParameterName:
     Type: String
     Default: ''
   StibeeApiBaseUrl:
@@ -112,6 +128,10 @@ Parameters:
     NoEcho: true
     Default: ''
   StibeeWebhookSharedSecretArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws[a-zA-Z-]*:secretsmanager:[^:]+:[0-9]{12}:secret:.+$'
+  StibeeWebhookSharedSecretParameterName:
     Type: String
     Default: ''
   StibeeWebhookAllowedIps:
@@ -160,13 +180,25 @@ Parameters:
   AppleRootCaSecretArn:
     Type: String
     Default: ''
+    AllowedPattern: '^$|^arn:aws[a-zA-Z-]*:secretsmanager:[^:]+:[0-9]{12}:secret:.+$'
+  AppleRootCaParameterName:
+    Type: String
+    Default: ''
   AppleSharedSecretSecretArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws[a-zA-Z-]*:secretsmanager:[^:]+:[0-9]{12}:secret:.+$'
+  AppleSharedSecretParameterName:
     Type: String
     Default: ''
   GooglePlayPackageName:
     Type: String
     Default: ''
   GoogleServiceAccountSecretArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws[a-zA-Z-]*:secretsmanager:[^:]+:[0-9]{12}:secret:.+$'
+  GoogleServiceAccountParameterName:
     Type: String
     Default: ''
   GooglePubSubAudience:
@@ -178,9 +210,37 @@ Parameters:
   PaddleWebhookSecretArn:
     Type: String
     Default: ''
+    AllowedPattern: '^$|^arn:aws[a-zA-Z-]*:secretsmanager:[^:]+:[0-9]{12}:secret:.+$'
+  PaddleWebhookSecretParameterName:
+    Type: String
+    Default: ''
   TossWebhookSecretArn:
     Type: String
     Default: ''
+    AllowedPattern: '^$|^arn:aws[a-zA-Z-]*:secretsmanager:[^:]+:[0-9]{12}:secret:.+$'
+  TossWebhookSecretParameterName:
+    Type: String
+    Default: ''
+  PaddleApiKeySecretArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws[a-zA-Z-]*:secretsmanager:[^:]+:[0-9]{12}:secret:.+$'
+  PaddleApiKeyParameterName:
+    Type: String
+    Default: ''
+  PaddleApiBaseUrl:
+    Type: String
+    Default: 'https://api.paddle.com'
+  TossSecretKeySecretArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws[a-zA-Z-]*:secretsmanager:[^:]+:[0-9]{12}:secret:.+$'
+  TossSecretKeyParameterName:
+    Type: String
+    Default: ''
+  TossApiBaseUrl:
+    Type: String
+    Default: 'https://api.tosspayments.com'
   PostHogApiKey:
     Type: String
     Default: 'phc_t3pSmXe8NYEv8jrpk3dfMnxU6iud4EySnHzAAwFL28g'
@@ -198,6 +258,10 @@ Parameters:
     NoEcho: true
     Default: ''
   PostHogPersonalApiKeySecretArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws[a-zA-Z-]*:secretsmanager:[^:]+:[0-9]{12}:secret:.+$'
+  PostHogPersonalApiKeyParameterName:
     Type: String
     Default: ''
   PostHogMetricsCacheTtlSeconds:
@@ -228,6 +292,10 @@ Parameters:
   CloudProjectR2SecretAccessKeySecretArn:
     Type: String
     Default: ''
+    AllowedPattern: '^$|^arn:aws[a-zA-Z-]*:secretsmanager:[^:]+:[0-9]{12}:secret:.+$'
+  CloudProjectR2SecretAccessKeyParameterName:
+    Type: String
+    Default: ''
 
 Conditions:
   ApiDetailedMetricsEnabledCondition: !Equals [!Ref ApiDetailedMetricsEnabled, 'true']
@@ -246,7 +314,8 @@ Conditions:
   HasAppleSharedSecretSecretArn: !Not [!Equals [!Ref AppleSharedSecretSecretArn, '']]
   HasGoogleServiceAccountSecretArn: !Not [!Equals [!Ref GoogleServiceAccountSecretArn, '']]
   HasPaddleWebhookSecretArn: !Not [!Equals [!Ref PaddleWebhookSecretArn, '']]
-  HasTossWebhookSecretArn: !Not [!Equals [!Ref TossWebhookSecretArn, '']]
+  HasPaddleApiKeySecretArn: !Not [!Equals [!Ref PaddleApiKeySecretArn, '']]
+  HasTossSecretKeySecretArn: !Not [!Equals [!Ref TossSecretKeySecretArn, '']]
   HasAlarmTopicArn: !Not [!Equals [!Ref AlarmTopicArn, '']]
   HasPostHogPersonalApiKeySecretArn: !Not [!Equals [!Ref PostHogPersonalApiKeySecretArn, '']]
   IsCloudProjectR2Storage: !Equals [!Ref CloudProjectStorageProvider, 'r2']
@@ -255,11 +324,13 @@ Conditions:
     - !Condition HasAppleRootCaSecretArn
     - !Condition HasAppleSharedSecretSecretArn
     - !Condition HasGoogleServiceAccountSecretArn
+    - !Condition HasPaddleApiKeySecretArn
+    - !Condition HasTossSecretKeySecretArn
   HasWebhookSecrets: !Or
     - !Condition HasAppleRootCaSecretArn
     - !Condition HasGoogleServiceAccountSecretArn
     - !Condition HasPaddleWebhookSecretArn
-    - !Condition HasTossWebhookSecretArn
+    - !Condition HasTossSecretKeySecretArn
   HasWebAclArn: !Not [!Equals [!Ref WebAclArn, '']]
 
 Globals:
@@ -278,6 +349,7 @@ Globals:
         AUTH_SESSIONS_TABLE: !Ref AuthSessionsTable
         AUTH_RATE_LIMITS_TABLE: !Ref AuthRateLimitsTable
         CATALOG_MAPPINGS_TABLE: !Ref CatalogMappingsTable
+        FEATURE_FLAGS_TABLE: !Ref FeatureFlagsTable
         COLLABORATION_TABLE: !Ref CollaborationTable
         CUSTOMER_LINKS_TABLE: !Ref CustomerLinksTable
         PURCHASE_TOKENS_TABLE: !Ref PurchaseTokensTable
@@ -285,12 +357,15 @@ Globals:
         PROJECTION_QUEUE_URL: !Ref BillingProjectionQueue
         USER_TOMBSTONES_TABLE: !Ref UserTombstonesTable
         ADMIN_ENTITLEMENT_OVERRIDES_TABLE: !Ref AdminEntitlementOverridesTable
+        SOCIAL_AUTH_SECRET_PARAMETER_NAME: !Ref SocialAuthSecretParameterName
         SOCIAL_AUTH_SECRET_ARN: !Ref SocialAuthSecretArn
+        APP_AUTH_SECRET_PARAMETER_NAME: !Ref AppAuthSecretParameterName
         APP_AUTH_SECRET_ARN: !Ref AppAuthSecretArn
         APP_AUTH_ISSUER: !Ref AppAuthIssuer
         APP_AUTH_AUDIENCE: !Ref AppAuthAudience
         APP_AUTH_EMAIL_FROM_ADDRESS: !Ref AppAuthEmailFromAddress
         APP_AUTH_EMAIL_REPLY_TO_ADDRESS: !Ref AppAuthEmailReplyToAddress
+        POSTMARK_SERVER_TOKEN_PARAMETER_NAME: !Ref PostmarkServerTokenParameterName
         POSTMARK_SERVER_TOKEN_SECRET_ARN: !Ref PostmarkServerTokenSecretArn
         POSTMARK_API_BASE_URL: !Ref PostmarkApiBaseUrl
         POSTMARK_MESSAGE_STREAM: !Ref PostmarkMessageStream
@@ -305,14 +380,21 @@ Globals:
         COGNITO_APP_CLIENT_ID: !Ref CognitoAppClientId
         APPLE_BUNDLE_ID: !Ref AppleBundleId
         APPLE_APP_ID: !Ref AppleAppId
+        APPLE_ROOT_CA_PARAMETER_NAME: !Ref AppleRootCaParameterName
         APPLE_ROOT_CA_SECRET_ARN: !Ref AppleRootCaSecretArn
+        APPLE_SHARED_SECRET_PARAMETER_NAME: !Ref AppleSharedSecretParameterName
         APPLE_SHARED_SECRET_SECRET_ARN: !Ref AppleSharedSecretSecretArn
         GOOGLE_PLAY_PACKAGE_NAME: !Ref GooglePlayPackageName
+        GOOGLE_SERVICE_ACCOUNT_PARAMETER_NAME: !Ref GoogleServiceAccountParameterName
         GOOGLE_SERVICE_ACCOUNT_SECRET_ARN: !Ref GoogleServiceAccountSecretArn
         GOOGLE_PUBSUB_AUDIENCE: !Ref GooglePubSubAudience
         GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL: !Ref GooglePubSubServiceAccountEmail
+        PADDLE_WEBHOOK_SECRET_PARAMETER_NAME: !Ref PaddleWebhookSecretParameterName
         PADDLE_WEBHOOK_SECRET_ARN: !Ref PaddleWebhookSecretArn
+        TOSS_WEBHOOK_SECRET_PARAMETER_NAME: !Ref TossWebhookSecretParameterName
         TOSS_WEBHOOK_SECRET_ARN: !Ref TossWebhookSecretArn
+        TOSS_BILLING_KEY_PARAMETER_PREFIX: !Sub /mixroom/payment-credentials/${StageName}/toss
+        PAYMENT_CREDENTIAL_SECRET_PREFIX: !Sub mixroom/payment-credentials/${StageName}
         POSTHOG_API_KEY: !Ref PostHogApiKey
         POSTHOG_HOST: !Ref PostHogHost
         SENTRY_DSN: !Ref SentryDsn
@@ -325,6 +407,7 @@ Globals:
         CLOUD_PROJECT_R2_ACCOUNT_ID: !Ref CloudProjectR2AccountId
         CLOUD_PROJECT_R2_ENDPOINT_URL: !Ref CloudProjectR2EndpointUrl
         CLOUD_PROJECT_R2_ACCESS_KEY_ID: !Ref CloudProjectR2AccessKeyId
+        CLOUD_PROJECT_R2_SECRET_ACCESS_KEY_PARAMETER_NAME: !Ref CloudProjectR2SecretAccessKeyParameterName
         CLOUD_PROJECT_R2_SECRET_ACCESS_KEY_SECRET_ARN: !Ref CloudProjectR2SecretAccessKeySecretArn
 
 Resources:
@@ -340,7 +423,7 @@ Resources:
           ThrottlingBurstLimit: !Ref ApiThrottleBurstLimit
           ThrottlingRateLimit: !Ref ApiThrottleRateLimit
       Cors:
-        AllowMethods: "'GET,POST,PATCH,PUT,OPTIONS'"
+        AllowMethods: "'GET,POST,PATCH,PUT,DELETE,OPTIONS'"
         AllowHeaders: "'Content-Type,Authorization,X-Signature'"
         AllowOrigin: "'*'"
 
@@ -621,6 +704,23 @@ Resources:
           AttributeType: S
       KeySchema:
         - AttributeName: provider_product_key
+          KeyType: HASH
+
+  FeatureFlagsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub mixroom-feature-flags-${StageName}
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: flag_set_key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: flag_set_key
           KeyType: HASH
 
   CollaborationTable:
@@ -940,6 +1040,20 @@ Resources:
       CodeUri: src/
       Handler: handlers/api_entitlements.handler
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/app-auth
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+                  kms:CallerAccount: !Ref AWS::AccountId
         - DynamoDBCrudPolicy:
             TableName: !Ref EntitlementsCurrentTable
         - DynamoDBReadPolicy:
@@ -950,11 +1064,14 @@ Resources:
             TableName: !Ref AuthAccountsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref AuthSessionsTable
-        - Statement:
-            - Effect: Allow
-              Action:
-                - secretsmanager:GetSecretValue
-              Resource: !Ref AppAuthSecretArn
+        - !If
+          - HasAppAuthSecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref AppAuthSecretArn
+          - !Ref AWS::NoValue
       Events:
         EntitlementsMe:
           Type: Api
@@ -969,17 +1086,34 @@ Resources:
       CodeUri: src/
       Handler: handlers/api_billing_catalog.handler
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/app-auth
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+                  kms:CallerAccount: !Ref AWS::AccountId
         - DynamoDBReadPolicy:
             TableName: !Ref CatalogMappingsTable
         - DynamoDBReadPolicy:
             TableName: !Ref AuthAccountsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref AuthSessionsTable
-        - Statement:
-            - Effect: Allow
-              Action:
-                - secretsmanager:GetSecretValue
-              Resource: !Ref AppAuthSecretArn
+        - !If
+          - HasAppAuthSecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref AppAuthSecretArn
+          - !Ref AWS::NoValue
       Events:
         BillingCatalogGet:
           Type: Api
@@ -988,12 +1122,70 @@ Resources:
             Path: /v1/billing/catalog
             Method: get
 
+  FeatureFlagsApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/api_feature_flags.handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/app-auth
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+                  kms:CallerAccount: !Ref AWS::AccountId
+        - DynamoDBReadPolicy:
+            TableName: !Ref FeatureFlagsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref AuthAccountsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AuthSessionsTable
+        - !If
+          - HasAppAuthSecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref AppAuthSecretArn
+          - !Ref AWS::NoValue
+      Events:
+        FeatureFlagsGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/feature-flags
+            Method: get
+
   CollaborationApiFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: src/
       Handler: handlers/api_collaboration.handler
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/app-auth
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/postmark/server-token
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/r2/cloud-projects/secret-access-key
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+                  kms:CallerAccount: !Ref AWS::AccountId
         - DynamoDBCrudPolicy:
             TableName: !Ref CollaborationTable
         - DynamoDBCrudPolicy:
@@ -1025,11 +1217,14 @@ Resources:
             TableName: !Ref UsersTable
         - DynamoDBCrudPolicy:
             TableName: !Ref AuthSessionsTable
-        - Statement:
-            - Effect: Allow
-              Action:
-                - secretsmanager:GetSecretValue
-              Resource: !Ref AppAuthSecretArn
+        - !If
+          - HasAppAuthSecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref AppAuthSecretArn
+          - !Ref AWS::NoValue
         - !If
           - HasPostmarkServerTokenSecretArn
           - Statement:
@@ -1045,6 +1240,24 @@ Resources:
             RestApiId: !Ref BillingApi
             Path: /v1/organizations/me
             Method: get
+        OrganizationsMeAdmin:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/organizations/me/admin
+            Method: get
+        OrganizationsInvites:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/organizations/me/invites
+            Method: post
+        OrganizationsMemberships:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/organizations/me/memberships
+            Method: post
         EducationMe:
           Type: Api
           Properties:
@@ -1132,6 +1345,7 @@ Resources:
       Environment:
         Variables:
           PRODUCER_CAPTURE_WHITELIST_TABLE: !Ref ProducerCaptureWhitelistTable
+          STIBEE_ACCESS_TOKEN_PARAMETER_NAME: !Ref StibeeAccessTokenParameterName
           STIBEE_ACCESS_TOKEN_SECRET_ARN: !Ref StibeeAccessTokenSecretArn
           STIBEE_API_BASE_URL: !Ref StibeeApiBaseUrl
           STIBEE_APP_SIGNUPS_LIST_ID: !Ref StibeeAppSignupsListId
@@ -1143,6 +1357,22 @@ Resources:
           STIBEE_USER_ID_FIELD_KEY: !Ref StibeeUserIdFieldKey
           STIBEE_SUBSCRIPTION_STATUS_FIELD_KEY: !Ref StibeeSubscriptionStatusFieldKey
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/app-auth
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/stibee/access-token
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/r2/cloud-projects/secret-access-key
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+                  kms:CallerAccount: !Ref AWS::AccountId
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
         - DynamoDBCrudPolicy:
@@ -1155,6 +1385,16 @@ Resources:
             TableName: !Ref AuthRateLimitsTable
         - DynamoDBReadPolicy:
             TableName: !Ref ProducerCaptureWhitelistTable
+        - S3CrudPolicy:
+            BucketName: !Ref CloudProjectDocumentsBucket
+        - !If
+          - HasCloudProjectR2SecretAccessKeySecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref CloudProjectR2SecretAccessKeySecretArn
+          - !Ref AWS::NoValue
         - !If
           - HasAppAuthSecretArn
           - Statement:
@@ -1184,6 +1424,12 @@ Resources:
             RestApiId: !Ref BillingApi
             Path: /v1/users/me
             Method: ANY
+        UsersMeAvatar:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/users/me/avatar
+            Method: ANY
         UsersMeProducerCaptureAccess:
           Type: Api
           Properties:
@@ -1200,6 +1446,20 @@ Resources:
         Variables:
           FEEDBACK_SUBMISSIONS_TABLE: !Ref FeedbackSubmissionsTable
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/app-auth
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+                  kms:CallerAccount: !Ref AWS::AccountId
         - DynamoDBCrudPolicy:
             TableName: !Ref FeedbackSubmissionsTable
         - DynamoDBReadPolicy:
@@ -1226,6 +1486,50 @@ Resources:
             Path: /v1/feedback
             Method: post
 
+  ContactApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/api_contact.handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/postmark/server-token
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+                  kms:CallerAccount: !Ref AWS::AccountId
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AuthRateLimitsTable
+        - !If
+          - HasPostmarkServerTokenSecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref PostmarkServerTokenSecretArn
+          - !Ref AWS::NoValue
+      Events:
+        ContactSubmit:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/contact
+            Method: post
+        ContactOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/contact
+            Method: options
+
   ProjectTelemetryApiFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1235,6 +1539,20 @@ Resources:
         Variables:
           TELEMETRY_PROJECT_SNAPSHOTS_BUCKET: !Ref TelemetryProjectSnapshotsBucket
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/app-auth
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+                  kms:CallerAccount: !Ref AWS::AccountId
         - DynamoDBReadPolicy:
             TableName: !Ref UsersTable
         - DynamoDBReadPolicy:
@@ -1270,6 +1588,22 @@ Resources:
         Variables:
           GOOGLE_OAUTH_CLIENT_IDS: !Ref GoogleOauthClientIds
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/social-auth
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/app-auth
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/postmark/server-token
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+                  kms:CallerAccount: !Ref AWS::AccountId
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
         - DynamoDBCrudPolicy:
@@ -1409,9 +1743,24 @@ Resources:
             - !Ref CognitoUserPoolId
           POSTHOG_APP_HOST: !Ref PostHogAppHost
           POSTHOG_PROJECT_ID: !Ref PostHogProjectId
+          POSTHOG_PERSONAL_API_KEY_PARAMETER_NAME: !Ref PostHogPersonalApiKeyParameterName
           POSTHOG_PERSONAL_API_KEY_SECRET_ARN: !Ref PostHogPersonalApiKeySecretArn
           POSTHOG_METRICS_CACHE_TTL_SECONDS: !Ref PostHogMetricsCacheTtlSeconds
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/posthog/personal-api-key
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+                  kms:CallerAccount: !Ref AWS::AccountId
         - DynamoDBReadPolicy:
             TableName: !Ref UsersTable
         - DynamoDBReadPolicy:
@@ -1553,10 +1902,26 @@ Resources:
             - !Ref AdminCognitoUserPoolId
             - !Ref CognitoUserPoolId
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/r2/cloud-projects/secret-access-key
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+                  kms:CallerAccount: !Ref AWS::AccountId
         - DynamoDBReadPolicy:
             TableName: !Ref AdminAllowlistTable
         - DynamoDBCrudPolicy:
             TableName: !Ref CatalogMappingsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref FeatureFlagsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref CollaborationTable
         - S3CrudPolicy:
@@ -1581,6 +1946,18 @@ Resources:
           Properties:
             RestApiId: !Ref BillingApi
             Path: /v1/internal/admin/settings/billing-catalog
+            Method: put
+        AdminFeatureFlagsGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/settings/feature-flags
+            Method: get
+        AdminFeatureFlagsPut:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/settings/feature-flags
             Method: put
         AdminBillingOrganizationsGet:
           Type: Api
@@ -1791,7 +2168,35 @@ Resources:
     Properties:
       CodeUri: src/
       Handler: handlers/api_billing.handler
+      Environment:
+        Variables:
+          PADDLE_API_KEY_PARAMETER_NAME: !Ref PaddleApiKeyParameterName
+          PADDLE_API_KEY_SECRET_ARN: !If [HasPaddleApiKeySecretArn, !Ref PaddleApiKeySecretArn, !Ref AWS::NoValue]
+          PADDLE_API_BASE_URL: !Ref PaddleApiBaseUrl
+          TOSS_SECRET_KEY_PARAMETER_NAME: !Ref TossSecretKeyParameterName
+          TOSS_SECRET_KEY_SECRET_ARN: !If [HasTossSecretKeySecretArn, !Ref TossSecretKeySecretArn, !Ref AWS::NoValue]
+          TOSS_API_BASE_URL: !Ref TossApiBaseUrl
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/app-auth
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/apple/root-certs
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/apple/shared-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/google-play/service-account
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/paddle/api-key
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/toss/secret-key
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/payment-credentials/${StageName}/toss/*
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+                  kms:CallerAccount: !Ref AWS::AccountId
         - DynamoDBCrudPolicy:
             TableName: !Ref BillingEventsTable
         - DynamoDBCrudPolicy:
@@ -1808,6 +2213,8 @@ Resources:
             TableName: !Ref AuthAccountsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref AuthSessionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CollaborationTable
         - SQSSendMessagePolicy:
             QueueName: !GetAtt BillingProjectionQueue.QueueName
         - !If
@@ -1820,7 +2227,27 @@ Resources:
                   - !If [HasAppleRootCaSecretArn, !Ref AppleRootCaSecretArn, !Ref AWS::NoValue]
                   - !If [HasAppleSharedSecretSecretArn, !Ref AppleSharedSecretSecretArn, !Ref AWS::NoValue]
                   - !If [HasGoogleServiceAccountSecretArn, !Ref GoogleServiceAccountSecretArn, !Ref AWS::NoValue]
+                  - !If [HasPaddleApiKeySecretArn, !Ref PaddleApiKeySecretArn, !Ref AWS::NoValue]
+                  - !If [HasTossSecretKeySecretArn, !Ref TossSecretKeySecretArn, !Ref AWS::NoValue]
           - !Ref AWS::NoValue
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:PutParameter
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/payment-credentials/${StageName}/toss/*
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+                  kms:CallerAccount: !Ref AWS::AccountId
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:mixroom/payment-credentials/${StageName}/*
         - !If
           - HasAppAuthSecretArn
           - Statement:
@@ -1835,6 +2262,42 @@ Resources:
           Properties:
             RestApiId: !Ref BillingApi
             Path: /v1/billing/web/checkout-session
+            Method: post
+        BillingWebSubscriptionChange:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/billing/web/subscription/change
+            Method: post
+        BillingWebSubscriptionChangePreview:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/billing/web/subscription/change/preview
+            Method: post
+        BillingTossConfirm:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/billing/web/toss/confirm
+            Method: post
+        BillingTossBillingKey:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/billing/web/toss/billing-key
+            Method: post
+        BillingTossSubscription:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/billing/web/toss/subscription
+            Method: post
+        BillingTossCancel:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/billing/web/toss/cancel
             Method: post
         BillingAppleVerify:
           Type: Api
@@ -1860,6 +2323,18 @@ Resources:
             RestApiId: !Ref BillingApi
             Path: /v1/billing/portal-url
             Method: get
+        BillingMe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/billing/me
+            Method: get
+        BillingSubscriptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/billing/subscriptions
+            Method: get
 
   WebhooksFunction:
     Type: AWS::Serverless::Function
@@ -1869,9 +2344,31 @@ Resources:
       Environment:
         Variables:
           STIBEE_NEWSLETTER_LIST_ID: !Ref StibeeNewsletterListId
+          STIBEE_WEBHOOK_SHARED_SECRET_PARAMETER_NAME: !Ref StibeeWebhookSharedSecretParameterName
           STIBEE_WEBHOOK_SHARED_SECRET_ARN: !Ref StibeeWebhookSharedSecretArn
           STIBEE_WEBHOOK_ALLOWED_IPS: !Ref StibeeWebhookAllowedIps
+          TOSS_SECRET_KEY_PARAMETER_NAME: !Ref TossSecretKeyParameterName
+          TOSS_SECRET_KEY_SECRET_ARN: !If [HasTossSecretKeySecretArn, !Ref TossSecretKeySecretArn, !Ref AWS::NoValue]
+          TOSS_API_BASE_URL: !Ref TossApiBaseUrl
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/apple/root-certs
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/google-play/service-account
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/paddle/webhook-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/toss/secret-key
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/stibee/webhook-shared-secret
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+                  kms:CallerAccount: !Ref AWS::AccountId
         - DynamoDBCrudPolicy:
             TableName: !Ref BillingEventsTable
         - DynamoDBCrudPolicy:
@@ -1894,7 +2391,7 @@ Resources:
                   - !If [HasAppleRootCaSecretArn, !Ref AppleRootCaSecretArn, !Ref AWS::NoValue]
                   - !If [HasGoogleServiceAccountSecretArn, !Ref GoogleServiceAccountSecretArn, !Ref AWS::NoValue]
                   - !If [HasPaddleWebhookSecretArn, !Ref PaddleWebhookSecretArn, !Ref AWS::NoValue]
-                  - !If [HasTossWebhookSecretArn, !Ref TossWebhookSecretArn, !Ref AWS::NoValue]
+                  - !If [HasTossSecretKeySecretArn, !Ref TossSecretKeySecretArn, !Ref AWS::NoValue]
           - !Ref AWS::NoValue
         - !If
           - HasStibeeWebhookSharedSecretArn
@@ -1963,15 +2460,60 @@ Resources:
       CodeUri: src/
       Handler: handlers/reconcile.handler
       Timeout: 120
+      Environment:
+        Variables:
+          TOSS_SECRET_KEY_PARAMETER_NAME: !Ref TossSecretKeyParameterName
+          TOSS_SECRET_KEY_SECRET_ARN: !If [HasTossSecretKeySecretArn, !Ref TossSecretKeySecretArn, !Ref AWS::NoValue]
+          TOSS_API_BASE_URL: !Ref TossApiBaseUrl
       Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/toss/secret-key
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/payment-credentials/${StageName}/toss/*
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/postmark/server-token
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+                  kms:CallerAccount: !Ref AWS::AccountId
         - DynamoDBCrudPolicy:
             TableName: !Ref SubscriptionsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref EntitlementsCurrentTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref CatalogMappingsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref CollaborationTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ReconciliationJobsTable
+        - !If
+          - HasTossSecretKeySecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref TossSecretKeySecretArn
+          - !Ref AWS::NoValue
+        - Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:mixroom/payment-credentials/${StageName}/*
+        - !If
+          - HasPostmarkServerTokenSecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref PostmarkServerTokenSecretArn
+          - !Ref AWS::NoValue
       Events:
         HourlyReconcile:
           Type: Schedule
@@ -1998,6 +2540,27 @@ Resources:
       DatapointsToAlarm: 1
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlarmTopicArn
+
+  BillingEventsDlqVisibleMessagesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasAlarmTopicArn
+    Properties:
+      AlarmName: !Sub mixroom-app-api-${StageName}-billing-dlq-visible
+      AlarmDescription: !Sub Billing projection DLQ has messages in ${StageName}.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt BillingEventsDlq.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       AlarmActions:
         - !Ref AlarmTopicArn
@@ -2423,6 +2986,8 @@ Outputs:
     Value: !Ref AuthSessionsTable
   CatalogMappingsTableName:
     Value: !Ref CatalogMappingsTable
+  FeatureFlagsTableName:
+    Value: !Ref FeatureFlagsTable
   CollaborationTableName:
     Value: !Ref CollaborationTable
   CustomerLinksTableName:

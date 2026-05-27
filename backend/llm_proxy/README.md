@@ -29,7 +29,7 @@ Use:
 - API Gateway HTTP API
 - AWS Lambda
 - Amazon Cognito User Pool
-- AWS Secrets Manager
+- AWS Systems Manager Parameter Store
 - CloudWatch Logs
 
 Optional later additions:
@@ -51,17 +51,20 @@ sam deploy --guided
 - `CognitoAppClientId`
 - `LlmProvider`
   Recommended values: `openai`, `gemini`, `claude`
-- `OpenAiApiKeySecretArn` (legacy name, still used by the SAM template)
+- `OpenAiApiKeyParameterName`
+- `AppAuthSecretParameterName`
 - `EntitlementsTableName`
 
 ## Environment
 
 - `LLM_PROVIDER`
+- `LLM_API_KEY_PARAMETER_NAME`
 - `LLM_API_KEY_SECRET_ARN`
 - `LLM_MODEL`
 - `LLM_TIMEOUT_SECONDS`
 - `LLM_SECRET_CACHE_TTL_SECONDS`
 - `ANTHROPIC_VERSION`
+- `OPENAI_API_KEY_PARAMETER_NAME`
 - `OPENAI_API_KEY_SECRET_ARN`
 - `OPENAI_MODEL`
 - `OPENAI_TIMEOUT_SECONDS`
@@ -76,7 +79,9 @@ sam deploy --guided
 
 ## Secrets
 
-Store the active provider API key in AWS Secrets Manager.
+Store the active provider API key in an SSM Parameter Store `SecureString`.
+`OpenAiApiKeySecretArn`, `LLM_API_KEY_SECRET_ARN`, and
+`OPENAI_API_KEY_SECRET_ARN` are legacy fallback paths during migration.
 
 Accepted secret formats:
 
@@ -101,7 +106,7 @@ No special provider-side configuration is required for key rotation.
 Recommended flow:
 
 1. Create a new API key for the active provider.
-2. Update the AWS Secrets Manager secret value.
+2. Update the SSM `SecureString` parameter value.
 3. Wait for the Lambda secret cache TTL to expire, or redeploy/invalidate warm containers.
 4. Verify the proxy works with the new key.
 5. Revoke the old key.

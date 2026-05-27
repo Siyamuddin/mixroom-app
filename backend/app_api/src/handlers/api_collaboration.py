@@ -69,6 +69,17 @@ def _user_profile_summary(
     return summary
 
 
+def _user_profile_email(user_id: str) -> str:
+    safe_user_id = str(user_id or "").strip()
+    if not safe_user_id:
+        return ""
+    try:
+        profile = billing_repo.get_user_profile(safe_user_id) or {}
+    except Exception:
+        return ""
+    return str(profile.get("email_lc") or profile.get("email") or "").strip().lower()
+
+
 def _enrich_cloud_projects_with_profiles(
     cloud_projects: list[Dict[str, Any]],
 ) -> list[Dict[str, Any]]:
@@ -115,6 +126,93 @@ def _education_teacher_organization_ids(snapshot: Dict[str, Any]) -> set[str]:
     }
 
 
+def _admin_organizations(snapshot: Dict[str, Any]) -> list[Dict[str, Any]]:
+    admin_org_ids = _teacher_organization_ids(snapshot)
+    organizations = []
+    cache: Dict[str, Dict[str, Any]] = {}
+    for organization in snapshot.get("organizations") or []:
+        organization_id = str(organization.get("organization_id") or "").strip()
+        if organization_id not in admin_org_ids:
+            continue
+        plan_code = str(organization.get("plan_code") or "").strip().lower()
+        if plan_code not in {"studio", "enterprise", "education"}:
+            continue
+        owner_user_id = str(organization.get("owner_user_id") or "").strip()
+        organizations.append(
+            {
+                **organization,
+                "owner_profile": _user_profile_summary(owner_user_id, cache),
+            }
+        )
+    return organizations
+
+
+def _organization_admin_ids(snapshot: Dict[str, Any]) -> set[str]:
+    return {
+        str(organization.get("organization_id") or "").strip()
+        for organization in _admin_organizations(snapshot)
+    }
+
+
+def _enrich_memberships_with_profiles(
+    memberships: list[Dict[str, Any]],
+) -> list[Dict[str, Any]]:
+    cache: Dict[str, Dict[str, Any]] = {}
+    enriched = []
+    for membership in memberships:
+        user_id = str(membership.get("user_id") or "").strip()
+        profile = {} if user_id.startswith("invite:") else _user_profile_summary(user_id, cache)
+        enriched.append(
+            {
+                **membership,
+                "user_profile": profile,
+                "username": membership.get("username") or profile.get("username"),
+                "display_name": membership.get("display_name") or profile.get("display_name"),
+            }
+        )
+    return enriched
+
+
+def _enrich_organizations_with_admin_profiles(
+    organizations: list[Dict[str, Any]],
+) -> list[Dict[str, Any]]:
+    cache: Dict[str, Dict[str, Any]] = {}
+    enriched: list[Dict[str, Any]] = []
+    for organization in organizations:
+        organization_id = str(organization.get("organization_id") or "").strip()
+        owner_user_id = str(organization.get("owner_user_id") or "").strip()
+        admin_profiles: list[Dict[str, Any]] = []
+        if organization_id:
+            try:
+                memberships = repo.list_memberships(organization_id=organization_id)
+            except Exception:
+                memberships = []
+            if not isinstance(memberships, list):
+                memberships = []
+            for membership in memberships:
+                if not _is_teacher_membership(membership):
+                    continue
+                user_id = str(membership.get("user_id") or "").strip()
+                if not user_id or user_id.startswith("invite:"):
+                    continue
+                profile = _user_profile_summary(user_id, cache)
+                if profile:
+                    admin_profiles.append(
+                        {
+                            **profile,
+                            "role": str(membership.get("role") or "").strip(),
+                        }
+                    )
+        enriched.append(
+            {
+                **organization,
+                "owner_profile": _user_profile_summary(owner_user_id, cache),
+                "admin_profiles": admin_profiles,
+            }
+        )
+    return enriched
+
+
 def _catalog_plan(plan_code: str) -> Dict[str, Any]:
     catalog = catalog_repo.get_catalog()
     for plan in catalog.get("plans") or []:
@@ -139,6 +237,28 @@ def _workspace_status_allows_write(status: Any) -> bool:
     return str(status or "active").strip().lower() == "active"
 
 
+def _organization_grants_education_personal_cloud(organization: Dict[str, Any]) -> bool:
+    return (
+        str(organization.get("plan_code") or "").strip().lower() == "education"
+        and str(organization.get("membership_role") or "").strip().lower() == "student"
+        and str(organization.get("membership_status") or "active").strip().lower() == "active"
+        and _org_status_allows_write(organization.get("status"))
+    )
+
+
+def _organization_supports_shared_cloud(organization: Dict[str, Any]) -> bool:
+    plan_code = str(organization.get("plan_code") or "").strip().lower()
+    if plan_code == "education":
+        return False
+    plan = _catalog_plan(plan_code)
+    limits = plan.get("limits") if isinstance(plan.get("limits"), dict) else {}
+    return bool(
+        (plan.get("capabilities") or {}).get("team_workspaces")
+        or str(plan.get("group") or "").strip().lower() in {"team", "enterprise"}
+        or limits.get("shared_storage_gb") not in (None, "")
+    )
+
+
 def _plan_rank(plan: Dict[str, Any]) -> int:
     try:
         return int(plan.get("rank") or 0)
@@ -155,7 +275,11 @@ def _explicit_limit_overrides(raw: Dict[str, Any]) -> Dict[str, Any]:
     return {}
 
 
-def _personal_entitlement_for_cloud(user_id: str) -> Dict[str, Any]:
+def _personal_entitlement_for_cloud(
+    user_id: str,
+    *,
+    snapshot: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     raw = billing_repo.get_entitlement(user_id)
     if not raw:
         raw = free_entitlement(user_id=user_id).to_dict()
@@ -182,6 +306,23 @@ def _personal_entitlement_for_cloud(user_id: str) -> Dict[str, Any]:
             limits,
             _explicit_limit_overrides(raw),
         )
+    if snapshot is None:
+        snapshot = _snapshot_for_user(user_id)
+    for organization in snapshot.get("organizations") or []:
+        if not _organization_grants_education_personal_cloud(organization):
+            continue
+        education_plan = _catalog_plan("education")
+        capabilities = merge_capabilities(
+            capabilities,
+            education_plan.get("capabilities") or {},
+        )
+        limits = merge_limits(
+            limits,
+            education_plan.get("limits") or {},
+        )
+        plan_code = "education"
+        plan = education_plan
+        break
     return {
         "plan_code": plan.get("code") or plan_code,
         "capabilities": capabilities,
@@ -221,6 +362,8 @@ def _effective_entitlement_for_cloud(
             continue
         if str(organization.get("membership_status") or "active").strip().lower() != "active":
             continue
+        if not _organization_supports_shared_cloud(organization):
+            break
         org_plan = _catalog_plan(str(organization.get("plan_code") or "").strip().lower())
         limits = _shared_cloud_limits_for_org(org_plan, organization)
         capabilities = merge_capabilities(org_plan.get("capabilities") or {})
@@ -244,16 +387,6 @@ def _shared_cloud_limits_for_org(
     if shared_storage not in (None, ""):
         limits["storage_gb"] = shared_storage
         return limits
-
-    storage_per_seat = limits.get("storage_gb_per_seat")
-    if storage_per_seat not in (None, ""):
-        try:
-            seats = int(organization.get("seat_limit") or limits.get("default_seats") or 0)
-            gb = float(storage_per_seat)
-            limits["storage_gb"] = max(0, seats) * max(0.0, gb)
-            return limits
-        except (TypeError, ValueError):
-            pass
 
     if "storage_gb" in limits:
         return limits
@@ -358,7 +491,10 @@ def _cloud_storage_payload(
     snapshot: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     snapshot = snapshot or _snapshot_for_user(user_id)
-    personal_entitlement = entitlement or _personal_entitlement_for_cloud(user_id)
+    personal_entitlement = entitlement or _personal_entitlement_for_cloud(
+        user_id,
+        snapshot=snapshot,
+    )
     personal_limits = (
         personal_entitlement.get("limits")
         if isinstance(personal_entitlement.get("limits"), dict)
@@ -399,6 +535,8 @@ def _cloud_storage_payload(
         if not _org_status_allows_read(organization.get("status")):
             continue
         if str(organization.get("membership_status") or "active").strip().lower() != "active":
+            continue
+        if not _organization_supports_shared_cloud(organization):
             continue
         org_plan = _catalog_plan(str(organization.get("plan_code") or "").strip().lower())
         shared_limits = _shared_cloud_limits_for_org(org_plan, organization)
@@ -532,6 +670,68 @@ def _send_education_invite_email(
             f"<p>You have been invited to join <strong>{safe_org}</strong> on Mixroom.</p>"
             f"<p><a href=\"{safe_url}\">Accept your education seat</a></p>"
             f"{app_link_html}"
+            "<p>If you were not expecting this invite, you can ignore this email.</p>"
+        )
+    try:
+        send_auth_email(
+            to_email=email,
+            subject=subject,
+            text_body=text_body,
+            html_body=html_body,
+        )
+        return True, ""
+    except EmailSuppressedError:
+        return False, "suppressed"
+    except EmailDeliveryError:
+        return False, "delivery_failed"
+
+
+def _send_organization_invite_email(
+    *,
+    membership: Dict[str, Any],
+    organization: Dict[str, Any],
+    locale: str = "",
+) -> tuple[bool, str]:
+    if str(organization.get("plan_code") or "").strip().lower() == "education":
+        return _send_education_invite_email(
+            membership=membership,
+            organization=organization,
+            locale=locale,
+        )
+    email = str(membership.get("email") or "").strip().lower()
+    email_locale = _education_invite_email_locale(locale)
+    invite_url = _url_with_query_param(
+        str(membership.get("invite_url") or "").strip(),
+        "lang",
+        email_locale,
+    )
+    if not email or not invite_url:
+        return False, "missing_invite_email_or_url"
+    organization_name = str(organization.get("name") or "Mixroom Studio").strip()
+    safe_org = escape(organization_name)
+    safe_url = escape(invite_url, quote=True)
+    if email_locale == "ko":
+        subject = f"{organization_name}에서 Mixroom 팀에 초대했습니다"
+        text_body = (
+            f"{organization_name}에서 Mixroom 팀 좌석에 초대했습니다.\n\n"
+            f"아래 링크에서 초대를 수락하세요:\n{invite_url}\n\n"
+            "예상하지 못한 초대라면 이 이메일을 무시해 주세요."
+        )
+        html_body = (
+            f"<p><strong>{safe_org}</strong>에서 Mixroom 팀 좌석에 초대했습니다.</p>"
+            f"<p><a href=\"{safe_url}\">팀 초대 수락하기</a></p>"
+            "<p>예상하지 못한 초대라면 이 이메일을 무시해 주세요.</p>"
+        )
+    else:
+        subject = f"You're invited to {organization_name} on Mixroom"
+        text_body = (
+            f"You have been invited to join {organization_name} on Mixroom.\n\n"
+            f"Accept your team seat here:\n{invite_url}\n\n"
+            "If you were not expecting this invite, you can ignore this email."
+        )
+        html_body = (
+            f"<p>You have been invited to join <strong>{safe_org}</strong> on Mixroom.</p>"
+            f"<p><a href=\"{safe_url}\">Accept your team seat</a></p>"
             "<p>If you were not expecting this invite, you can ignore this email.</p>"
         )
     try:
@@ -694,6 +894,106 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return _finalize(json_response(404, {"error": "Not found"}), error="not_found")
 
         snapshot = repo.build_user_access_snapshot(user_id)
+        if path.endswith("/v1/organizations/me/admin") and method == "GET":
+            organizations = _admin_organizations(snapshot)
+            memberships: list[Dict[str, Any]] = []
+            student_usage: list[Dict[str, Any]] = []
+            for organization in organizations:
+                organization_id = str(organization.get("organization_id") or "").strip()
+                memberships.extend(repo.list_memberships(organization_id=organization_id))
+                if str(organization.get("plan_code") or "").strip().lower() == "education":
+                    student_usage.extend(repo.list_education_student_usage(organization_id))
+            return _finalize(
+                json_response(
+                    200,
+                    {
+                        "organizations": organizations,
+                        "memberships": _enrich_memberships_with_profiles(memberships),
+                        "student_usage": student_usage,
+                        "summary": snapshot.get("summary") or {},
+                        "configurable": snapshot.get("configurable"),
+                    },
+                )
+            )
+        if path.endswith("/v1/organizations/me/invites") and method == "POST":
+            body = parse_json_body(event)
+            organization_id = str(body.get("organization_id") or "").strip()
+            admin_org_ids = _organization_admin_ids(snapshot)
+            if organization_id not in admin_org_ids:
+                return _finalize(
+                    json_response(403, {"error": "Organization admin access required."}),
+                    error="forbidden",
+                )
+            organization = repo.get_organization(organization_id)
+            plan_code = str(organization.get("plan_code") or "").strip().lower()
+            role = "student" if plan_code == "education" else "member"
+            membership = repo.save_membership(
+                {
+                    "organization_id": organization_id,
+                    "email": body.get("email") or body.get("student_email"),
+                    "role": role,
+                    "status": "pending",
+                    "seat_consumed": True,
+                },
+                updated_by_user_id=user_id,
+            )
+            email_sent, email_error = _send_organization_invite_email(
+                membership=membership,
+                organization=organization,
+                locale=_teacher_locale(user_id),
+            )
+            response = {"membership": membership, "email_sent": email_sent}
+            if email_error:
+                response["email_error"] = email_error
+            return _finalize(json_response(200, response))
+        if path.endswith("/v1/organizations/me/memberships") and method == "POST":
+            body = parse_json_body(event)
+            organization_id = str(body.get("organization_id") or "").strip()
+            admin_org_ids = _organization_admin_ids(snapshot)
+            if organization_id not in admin_org_ids:
+                return _finalize(
+                    json_response(403, {"error": "Organization admin access required."}),
+                    error="forbidden",
+                )
+            status = str(body.get("status") or "").strip().lower()
+            if status not in {"pending", "active", "inactive", "revoked", "removed"}:
+                return _finalize(
+                    json_response(400, {"error": "Membership status is invalid."}),
+                    error="bad_request",
+                )
+            target_user_id = str(body.get("user_id") or "").strip()
+            if not target_user_id:
+                return _finalize(
+                    json_response(400, {"error": "Membership user is required."}),
+                    error="bad_request",
+                )
+            existing = repo.get_membership(organization_id, target_user_id)
+            if not existing:
+                return _finalize(
+                    json_response(404, {"error": "Membership not found."}),
+                    error="not_found",
+                )
+            existing_role = str(existing.get("role") or "").strip().lower()
+            if existing_role in {"owner", "admin", "manager", "teacher"}:
+                return _finalize(
+                    json_response(403, {"error": "Admin and owner memberships cannot be changed here."}),
+                    error="forbidden",
+                )
+            organization = repo.get_organization(organization_id)
+            plan_code = str(organization.get("plan_code") or "").strip().lower()
+            role = "student" if plan_code == "education" else existing_role or "member"
+            membership = repo.save_membership(
+                {
+                    "organization_id": organization_id,
+                    "user_id": target_user_id,
+                    "email": existing.get("email") or body.get("email"),
+                    "role": role,
+                    "status": status,
+                    "seat_consumed": status in {"pending", "active"},
+                },
+                updated_by_user_id=user_id,
+            )
+            return _finalize(json_response(200, {"membership": membership}))
         if path.startswith("/v1/education/invites/"):
             invite_token = _path_param(event, "invite_token")
             if not invite_token:
@@ -732,6 +1032,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 membership = repo.accept_invite(
                     invite_token,
                     user_id,
+                    accepted_email=_user_profile_email(user_id),
                     updated_by_user_id=user_id,
                 )
                 return _finalize(json_response(200, {"membership": membership}))
@@ -839,7 +1140,9 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 json_response(
                     200,
                     {
-                        "organizations": snapshot.get("organizations") or [],
+                        "organizations": _enrich_organizations_with_admin_profiles(
+                            snapshot.get("organizations") or []
+                        ),
                         "memberships": snapshot.get("memberships") or [],
                         "summary": snapshot.get("summary") or {},
                         "configurable": snapshot.get("configurable"),

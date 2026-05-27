@@ -722,9 +722,44 @@
               <div class="loading-spinner" aria-hidden="true"></div>
               <p class="loading-copy" data-tab-loading-label="dev">Loading dev settings…</p>
             </div>
+            <section class="dev-overview" aria-labelledby="dev-overview-title">
+              <div>
+                <p class="panel-label" data-i18n="dev.overview.label">Operations</p>
+                <h2 id="dev-overview-title" data-i18n="dev.overview.title">Admin controls</h2>
+                <p class="panel-meta" data-i18n="dev.overview.copy">
+                  Compact controls for support limits, billing catalog checks, and team records.
+                </p>
+              </div>
+              <div class="dev-overview-grid" aria-label="Dev tab sections">
+                <a href="#ai-prompt-limits-panel" class="dev-overview-card">
+                  <span data-i18n="dev.overview.support.title">Support controls</span>
+                  <small data-i18n="dev.overview.support.copy">Prompt limits and feature access</small>
+                </a>
+                <a href="#billing-catalog-panel" class="dev-overview-card">
+                  <span data-i18n="dev.overview.catalog.title">Billing catalog</span>
+                  <small data-i18n="dev.overview.catalog.copy">Plans, products, support links</small>
+                </a>
+                <a href="#billing-organizations-panel" class="dev-overview-card">
+                  <span data-i18n="dev.overview.records.title">Team records</span>
+                  <small data-i18n="dev.overview.records.copy">Organizations, seats, workspaces</small>
+                </a>
+              </div>
+            </section>
             <section class="billing-stack">
-              <section class="panel-grid">
-                <article class="panel">
+              <section class="dev-section" aria-labelledby="dev-support-title">
+                <div class="dev-section-header">
+                  <div>
+                    <p class="panel-label" data-i18n="dev.section.support.label">Support</p>
+                    <h2 id="dev-support-title" data-i18n="dev.section.support.title">
+                      Support-facing controls
+                    </h2>
+                  </div>
+                  <p class="panel-meta" data-i18n="dev.section.support.copy">
+                    Operational toggles used by support. Sensitive runtime controls stay out of this dashboard.
+                  </p>
+                </div>
+                <div class="dev-tool-grid">
+                <article id="ai-prompt-limits-panel" class="panel">
                   <div class="panel-header">
                     <div>
                       <p class="panel-label" data-i18n="panel.aiPromptLimits.label">AI Prompt Limits</p>
@@ -810,6 +845,59 @@
                   <p id="ai-prompt-limits-feedback" class="panel-meta"></p>
                 </article>
 
+                <article id="feature-flags-panel" class="panel">
+                  <div class="panel-header">
+                    <div>
+                      <p class="panel-label">Feature Flags</p>
+                      <h2>Subscription rollout</h2>
+                    </div>
+                    <p id="feature-flags-meta" class="panel-meta">
+                      Remote overrides for shipped app behavior.
+                    </p>
+                  </div>
+                  <div id="feature-flags-summary" class="detail-card settings-summary-card">
+                    <div class="detail-label">Current feature flags</div>
+                    <div class="detail-value">Sign in to load feature flags.</div>
+                  </div>
+                  <form id="feature-flags-form" class="form-stack">
+                    <label class="checkbox-row">
+                      <input id="feature-flag-account-plan-billing" type="checkbox" />
+                      <span>Show account plan billing UI</span>
+                    </label>
+                    <label class="checkbox-row">
+                      <input id="feature-flag-subscription-enforcement" type="checkbox" />
+                      <span>Enforce subscription capability gates</span>
+                    </label>
+                    <label class="checkbox-row">
+                      <input id="feature-flag-iap-purchases" type="checkbox" />
+                      <span>Enable in-app purchase checkout</span>
+                    </label>
+                    <p id="feature-flags-editor-note" class="panel-meta hidden">
+                      Production rollout control. Review before applying.
+                    </p>
+                    <label
+                      id="feature-flags-confirm-wrap"
+                      class="search-input-wrap hidden"
+                      for="feature-flags-confirm-input"
+                    >
+                      <span class="search-label">Type APPLY FEATURE FLAGS to confirm</span>
+                      <input
+                        id="feature-flags-confirm-input"
+                        class="text-input"
+                        type="text"
+                        autocomplete="off"
+                        spellcheck="false"
+                      />
+                    </label>
+                    <div class="search-actions">
+                      <button id="feature-flags-save-button" class="button button-secondary" type="submit">
+                        Save feature flags
+                      </button>
+                    </div>
+                  </form>
+                  <p id="feature-flags-feedback" class="panel-meta"></p>
+                </article>
+
                 <article id="producer-capture-whitelist-panel" class="panel">
                   <div class="panel-header">
                     <div>
@@ -893,7 +981,7 @@
                   <div class="panel-header">
                     <div>
                       <p class="panel-label" data-i18n="panel.aiRuntime.label">AI Runtime</p>
-                      <h2 data-i18n="panel.aiRuntime.title">Server prompt and model config</h2>
+                      <h2 data-i18n="panel.aiRuntime.title">Runtime settings disabled</h2>
                     </div>
                     <p id="ai-runtime-meta" class="panel-meta" data-i18n="panel.aiRuntime.meta">
                       Prompt and runtime overrides for server-owned AI features.
@@ -903,8 +991,21 @@
                     Sign in to load AI runtime settings.
                   </div>
                 </article>
+                </div>
               </section>
 
+              <section class="dev-section" aria-labelledby="dev-catalog-title">
+                <div class="dev-section-header">
+                  <div>
+                    <p class="panel-label" data-i18n="dev.section.catalog.label">Catalog</p>
+                    <h2 id="dev-catalog-title" data-i18n="dev.section.catalog.title">
+                      Billing catalog
+                    </h2>
+                  </div>
+                  <p class="panel-meta" data-i18n="dev.section.catalog.copy">
+                    Review live plans first. Open the editor only when you need to change public pricing or support links.
+                  </p>
+                </div>
               <article id="billing-catalog-panel" class="panel">
                 <div class="panel-header">
                   <div>
@@ -928,6 +1029,13 @@
                     Sign in to load billing catalog settings.
                   </div>
                 </div>
+                <details class="dev-disclosure">
+                  <summary>
+                    <span data-i18n="dev.disclosure.catalogEditor">Edit billing catalog</span>
+                    <small data-i18n="dev.disclosure.catalogEditorHelp">
+                      Advanced: writes the full catalog document.
+                    </small>
+                  </summary>
                 <form id="billing-catalog-form" class="form-stack hidden">
                   <p id="billing-catalog-editor-note" class="panel-meta" data-i18n="billing.catalog.replaceNotice">
                     Save replaces the full billing catalog document. Review plan, product, and provider product JSON together before applying.
@@ -1054,9 +1162,23 @@
                     </button>
                   </div>
                 </form>
+                </details>
                 <p id="billing-catalog-feedback" class="panel-meta"></p>
               </article>
+              </section>
 
+              <section class="dev-section" aria-labelledby="dev-records-title">
+                <div class="dev-section-header">
+                  <div>
+                    <p class="panel-label" data-i18n="dev.section.records.label">Records</p>
+                    <h2 id="dev-records-title" data-i18n="dev.section.records.title">
+                      Team billing records
+                    </h2>
+                  </div>
+                  <p class="panel-meta" data-i18n="dev.section.records.copy">
+                    Tables are the source of truth. Record editors are collapsed to keep the page scannable.
+                  </p>
+                </div>
               <section class="billing-entity-grid">
                 <article id="billing-organizations-panel" class="panel billing-entity-panel">
                   <div class="panel-header">
@@ -1109,12 +1231,19 @@
                       </button>
                     </div>
                   </div>
+                  <details class="dev-disclosure">
+                    <summary>
+                      <span data-i18n="dev.disclosure.educationProvision">Provision Education account</span>
+                      <small data-i18n="dev.disclosure.educationProvisionHelp">
+                        Creates an education org and teacher membership.
+                      </small>
+                    </summary>
                   <form id="billing-education-provision-form" class="form-stack billing-provision-card">
                     <div>
                       <p class="panel-label">Education quick setup</p>
                       <h3>Provision teacher account</h3>
                       <p class="panel-meta">
-                        Creates the Education org, assigns the teacher outside the student seat count, and creates the classroom workspace together.
+                        Creates the Education org and assigns the teacher outside the student seat count. Students receive Starter-level personal cloud storage.
                       </p>
                     </div>
                     <div class="inspector-grid">
@@ -1188,6 +1317,14 @@
                     </div>
                     <p id="billing-education-provision-feedback" class="panel-meta"></p>
                   </form>
+                  </details>
+                  <details class="dev-disclosure">
+                    <summary>
+                      <span data-i18n="dev.disclosure.organizationEditor">Edit organization record</span>
+                      <small data-i18n="dev.disclosure.recordEditorHelp">
+                        Advanced direct record editor.
+                      </small>
+                    </summary>
                   <form id="billing-organization-form" class="form-stack">
                     <p class="panel-meta" data-i18n="billing.form.help">
                       Click a row to edit. Leave the record ID blank to create a new item.
@@ -1278,6 +1415,7 @@
                       </button>
                     </div>
                   </form>
+                  </details>
                   <p id="billing-organization-feedback" class="panel-meta"></p>
                 </article>
 
@@ -1314,6 +1452,13 @@
                   <div class="table-footer">
                     <p id="billing-memberships-page-meta" class="panel-meta"></p>
                   </div>
+                  <details class="dev-disclosure">
+                    <summary>
+                      <span data-i18n="dev.disclosure.membershipEditor">Edit membership record</span>
+                      <small data-i18n="dev.disclosure.recordEditorHelp">
+                        Advanced direct record editor.
+                      </small>
+                    </summary>
                   <form id="billing-membership-form" class="form-stack">
                     <p class="panel-meta" data-i18n="billing.form.help">
                       Click a row to edit. Leave the record ID blank to create a new item.
@@ -1399,6 +1544,7 @@
                       </button>
                     </div>
                   </form>
+                  </details>
                   <p id="billing-membership-feedback" class="panel-meta"></p>
                 </article>
 
@@ -1435,6 +1581,13 @@
                   <div class="table-footer">
                     <p id="billing-workspaces-page-meta" class="panel-meta"></p>
                   </div>
+                  <details class="dev-disclosure">
+                    <summary>
+                      <span data-i18n="dev.disclosure.workspaceEditor">Edit workspace record</span>
+                      <small data-i18n="dev.disclosure.recordEditorHelp">
+                        Advanced direct record editor.
+                      </small>
+                    </summary>
                   <form id="billing-workspace-form" class="form-stack">
                     <p class="panel-meta" data-i18n="billing.form.help">
                       Click a row to edit. Leave the record ID blank to create a new item.
@@ -1533,6 +1686,7 @@
                       </button>
                     </div>
                   </form>
+                  </details>
                   <p id="billing-workspace-feedback" class="panel-meta"></p>
                 </article>
 
@@ -1569,6 +1723,13 @@
                   <div class="table-footer">
                     <p id="billing-cloud-projects-page-meta" class="panel-meta"></p>
                   </div>
+                  <details class="dev-disclosure">
+                    <summary>
+                      <span data-i18n="dev.disclosure.cloudProjectEditor">Edit cloud project record</span>
+                      <small data-i18n="dev.disclosure.recordEditorHelp">
+                        Advanced direct record editor.
+                      </small>
+                    </summary>
                   <form id="billing-cloud-project-form" class="form-stack">
                     <p class="panel-meta" data-i18n="billing.form.help">
                       Click a row to edit. Leave the record ID blank to create a new item.
@@ -1692,6 +1853,7 @@
                       </button>
                     </div>
                   </form>
+                  </details>
                   <p id="billing-cloud-project-feedback" class="panel-meta"></p>
                 </article>
               </section>

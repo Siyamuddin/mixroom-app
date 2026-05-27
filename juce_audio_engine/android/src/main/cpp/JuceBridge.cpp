@@ -1243,7 +1243,8 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_exportMixJNI(JNIEnv *env,
                                                               jint wavBitDepth,
                                                               jboolean wavDithering,
                                                               jint mp3BitrateKbps,
-                                                              jstring clipSnapshotJson)
+                                                              jstring clipSnapshotJson,
+                                                              jboolean dryClipRender)
 {
     const char *c = env->GetStringUTFChars(outPath, nullptr);
     juce::String jucePath = c != nullptr ? juce::String::fromUTF8(c) : juce::String();
@@ -1259,6 +1260,7 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_exportMixJNI(JNIEnv *env,
     options.wavBitDepth = (int)wavBitDepth;
     options.wavDithering = (wavDithering == JNI_TRUE);
     options.mp3BitrateKbps = (int)mp3BitrateKbps;
+    options.dryClipRender = (dryClipRender == JNI_TRUE);
     if (clipSnapshotJson != nullptr)
     {
         const char *clipSnapshotChars = env->GetStringUTFChars(clipSnapshotJson, nullptr);

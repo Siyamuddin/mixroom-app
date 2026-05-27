@@ -112,6 +112,58 @@ class CollaborationRepositoryTests(unittest.TestCase):
         self.assertEqual(snapshot["summary"]["workspace_count"], 1)
         self.assertEqual(snapshot["summary"]["cloud_project_count"], 1)
 
+    def test_build_user_access_snapshot_hides_education_workspaces(self):
+        repository = CollaborationRepository.__new__(CollaborationRepository)
+        repository._table = object()
+        repository.list_memberships = lambda **kwargs: [
+            {
+                "entity_type": "membership",
+                "organization_id": "edu-1",
+                "user_id": "student-1",
+                "role": "student",
+                "status": "active",
+            }
+        ]
+        repository.get_organization = lambda organization_id: {
+            "entity_type": "organization",
+            "organization_id": organization_id,
+            "name": "Academy",
+            "plan_code": "education",
+            "status": "active",
+            "shared_workspace_enabled": False,
+        }
+        repository.list_workspaces = lambda **kwargs: [
+            {
+                "entity_type": "workspace",
+                "workspace_id": "edu-1-classroom",
+                "organization_id": "edu-1",
+                "visibility": "organization",
+                "status": "active",
+            }
+        ]
+        repository.list_cloud_projects = lambda **kwargs: [
+            {
+                "entity_type": "cloud_project",
+                "project_id": "class-project",
+                "workspace_id": "edu-1-classroom",
+                "organization_id": "edu-1",
+                "user_id": "student-1",
+                "status": "active",
+            }
+        ]
+        repository.list_owned_cloud_projects = lambda user_id: []
+        repository.cloud_project_storage_usage = lambda user_id: {
+            "project_count": 0,
+            "used_bytes": 0,
+        }
+
+        snapshot = repository.build_user_access_snapshot("student-1")
+
+        self.assertEqual(snapshot["organizations"][0]["plan_code"], "education")
+        self.assertEqual(snapshot["workspaces"], [])
+        self.assertEqual(snapshot["cloud_projects"], [])
+        self.assertEqual(snapshot["summary"]["workspace_count"], 0)
+
     def test_build_user_access_snapshot_hides_private_project_for_non_owner(self):
         repository = CollaborationRepository.__new__(CollaborationRepository)
         repository._table = object()
@@ -1119,10 +1171,77 @@ class CollaborationRepositoryTests(unittest.TestCase):
         repository.list_memberships = lambda **kwargs: [active, invite]
         repository._get_item = lambda entity_id: {}
 
-        membership = repository.accept_invite("invite-token", "student-1")
+        membership = repository.accept_invite(
+            "invite-token",
+            "student-1",
+            accepted_email="student@example.com",
+        )
 
         self.assertEqual(membership["user_id"], "student-1")
         self.assertEqual(membership["status"], "active")
+        repository._table.delete_item.assert_called_once_with(
+            Key={"entity_id": "membership#org-1:invite"}
+        )
+
+    def test_accept_invite_rejects_wrong_signed_in_email(self):
+        repository = CollaborationRepository.__new__(CollaborationRepository)
+        repository._table = mock.Mock()
+        invite = {
+            "entity_type": "membership",
+            "entity_id": "membership#org-1:invite",
+            "organization_id": "org-1",
+            "user_id": "invite:abc",
+            "email": "student@example.com",
+            "role": "student",
+            "status": "pending",
+            "seat_consumed": True,
+            "invite_token": "invite-token",
+        }
+        repository._list_by_entity_type = lambda entity_type: [invite]
+
+        with self.assertRaisesRegex(PermissionError, "different email"):
+            repository.accept_invite(
+                "invite-token",
+                "student-1",
+                accepted_email="other@example.com",
+            )
+
+        repository._table.delete_item.assert_not_called()
+
+    def test_accept_invite_clears_duplicate_invite_for_existing_member_same_email(self):
+        repository = CollaborationRepository.__new__(CollaborationRepository)
+        repository._table = mock.Mock()
+        invite = {
+            "entity_type": "membership",
+            "entity_id": "membership#org-1:invite",
+            "organization_id": "org-1",
+            "user_id": "invite:abc",
+            "email": "student@example.com",
+            "role": "student",
+            "status": "pending",
+            "seat_consumed": True,
+            "invite_token": "invite-token",
+        }
+        existing = {
+            "entity_type": "membership",
+            "entity_id": "membership#org-1:student-1",
+            "organization_id": "org-1",
+            "user_id": "student-1",
+            "email": "student@example.com",
+            "role": "student",
+            "status": "active",
+            "seat_consumed": True,
+        }
+        repository._list_by_entity_type = lambda entity_type: [invite]
+        repository.get_membership = lambda organization_id, user_id: existing
+
+        membership = repository.accept_invite(
+            "invite-token",
+            "student-1",
+            accepted_email="student@example.com",
+        )
+
+        self.assertEqual(membership, existing)
         repository._table.delete_item.assert_called_once_with(
             Key={"entity_id": "membership#org-1:invite"}
         )
@@ -1151,10 +1270,9 @@ class CollaborationRepositoryTests(unittest.TestCase):
                 "status": "active",
             },
         ]
-        repository.list_cloud_projects = lambda **kwargs: [
+        student_projects = [
             {
                 "entity_type": "cloud_project",
-                "organization_id": "org-1",
                 "project_id": "cp-1",
                 "user_id": "student-1",
                 "status": "active",
@@ -1162,13 +1280,14 @@ class CollaborationRepositoryTests(unittest.TestCase):
             },
             {
                 "entity_type": "cloud_project",
-                "organization_id": "org-1",
                 "project_id": "cp-2",
                 "user_id": "student-1",
                 "status": "archived",
                 "updated_at": "2026-05-03T00:00:00+00:00",
             },
         ]
+        repository.list_cloud_projects = lambda **kwargs: []
+        repository.list_owned_cloud_projects = lambda user_id: student_projects
 
         usage = repository.list_education_student_usage("org-1")
 
@@ -1219,7 +1338,7 @@ class CollaborationRepositoryTests(unittest.TestCase):
                 }
             )
 
-    def test_provision_education_organization_creates_teacher_and_workspace(self):
+    def test_provision_education_organization_creates_teacher_without_workspace(self):
         repository = CollaborationRepository.__new__(CollaborationRepository)
         repository.save_organization = mock.Mock(
             return_value={
@@ -1240,14 +1359,7 @@ class CollaborationRepositoryTests(unittest.TestCase):
                 "seat_consumed": False,
             }
         )
-        repository.save_workspace = mock.Mock(
-            return_value={
-                "entity_type": "workspace",
-                "workspace_id": "edu-1-classroom",
-                "organization_id": "edu-1",
-                "user_id": "teacher-1",
-            }
-        )
+        repository.save_workspace = mock.Mock()
         repository.get_organization = mock.Mock(
             return_value={
                 "entity_type": "organization",
@@ -1273,13 +1385,14 @@ class CollaborationRepositoryTests(unittest.TestCase):
 
         self.assertEqual(payload["organization"]["plan_code"], "education")
         repository.save_organization.assert_called_once()
+        organization_payload = repository.save_organization.call_args.args[0]
+        self.assertFalse(organization_payload["shared_workspace_enabled"])
         membership_payload = repository.save_membership.call_args.args[0]
         self.assertEqual(membership_payload["role"], "teacher")
         self.assertFalse(membership_payload["seat_consumed"])
         self.assertEqual(membership_payload["email"], "teacher@example.com")
-        workspace_payload = repository.save_workspace.call_args.args[0]
-        self.assertEqual(workspace_payload["workspace_id"], "edu-1-classroom")
-        self.assertEqual(workspace_payload["owner_user_id"], "teacher-1")
+        repository.save_workspace.assert_not_called()
+        self.assertEqual(payload["workspace"], {})
 
     def test_provision_education_organization_requires_valid_seat_option(self):
         repository = CollaborationRepository.__new__(CollaborationRepository)

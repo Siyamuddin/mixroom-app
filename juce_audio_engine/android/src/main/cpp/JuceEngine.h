@@ -3758,6 +3758,7 @@ public:
         bool wavDithering{true};
         int mp3BitrateKbps{192};
         juce::String clipSnapshotJson;
+        bool dryClipRender{false};
     };
 
     static JuceEngine &get();

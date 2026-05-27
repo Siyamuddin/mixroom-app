@@ -26,7 +26,7 @@ def unauthorized(message: str = "Unauthorized") -> Dict[str, Any]:
             "Cache-Control": "no-store",
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Signature",
-            "Access-Control-Allow-Methods": "GET,POST,PATCH,OPTIONS",
+            "Access-Control-Allow-Methods": "GET,POST,PATCH,PUT,DELETE,OPTIONS",
         },
         "body": json.dumps({"error": message}, default=_json_default),
     }
@@ -61,7 +61,7 @@ def extract_claims_from_event(
     if not token:
         return {}
 
-    if allow_native and config.APP_AUTH_SECRET_ARN:
+    if allow_native and (config.APP_AUTH_SECRET_PARAMETER_NAME or config.APP_AUTH_SECRET_ARN):
         try:
             payload = _verify_native_session_claims(token)
             if isinstance(payload, dict) and str(payload.get("sub") or "").strip():
@@ -160,7 +160,7 @@ def json_response(
         "Cache-Control": "no-store",
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Signature",
-        "Access-Control-Allow-Methods": "GET,POST,PATCH,OPTIONS",
+        "Access-Control-Allow-Methods": "GET,POST,PATCH,PUT,DELETE,OPTIONS",
     }
     if headers:
         response_headers.update(headers)

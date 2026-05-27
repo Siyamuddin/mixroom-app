@@ -32,7 +32,7 @@ You will use AWS CloudShell from inside the AWS Console.
    - Lambda
    - API Gateway
    - DynamoDB
-   - Secrets Manager
+   - Systems Manager Parameter Store
 
 ## 2. Put the code into CloudShell
 
@@ -77,7 +77,7 @@ sam deploy --guided
 
 For the guided answers, use this baseline:
 
-- Stack Name: `mixroom-app-api-staging`
+- Stack Name: `mixroom-app-api-prod`
 - AWS Region: keep the console Region you already selected
 - Confirm changes before deploy: `Y`
 - Allow SAM CLI IAM role creation: `Y`
@@ -88,20 +88,20 @@ For the guided answers, use this baseline:
 
 Parameter values for the first deploy:
 
-- `StageName`: `staging`
+- `StageName`: `prod`
 - `CognitoUserPoolId`: your Cognito user pool id
 - `CognitoAppClientId`: your Cognito app client id
 - `AllowStudioTier`: `false`
 - `AppleBundleId`: leave blank if not ready
 - `AppleAppId`: `0` if not ready
-- `AppleRootCaSecretArn`: leave blank if not ready
-- `AppleSharedSecretSecretArn`: leave blank if not ready
+- `AppleRootCaParameterName`: leave blank if not ready
+- `AppleSharedSecretParameterName`: leave blank if not ready
 - `GooglePlayPackageName`: leave blank if not ready
-- `GoogleServiceAccountSecretArn`: leave blank if not ready
+- `GoogleServiceAccountParameterName`: leave blank if not ready
 - `GooglePubSubAudience`: leave blank if not ready
 - `GooglePubSubServiceAccountEmail`: leave blank if not ready
-- `PaddleWebhookSecretArn`: leave blank
-- `TossWebhookSecretArn`: leave blank
+- `PaddleWebhookSecretParameterName`: leave blank
+- `TossWebhookSecretParameterName`: leave blank
 
 This first deploy is allowed to be partial. It creates the backend infrastructure even before Apple and Google are fully configured.
 
@@ -111,7 +111,7 @@ After deploy finishes, run:
 
 ```bash
 aws cloudformation describe-stacks \
-  --stack-name mixroom-app-api-staging \
+  --stack-name mixroom-app-api-prod \
   --query "Stacks[0].Outputs"
 ```
 
@@ -126,7 +126,7 @@ You can also see the same outputs in:
 
 - CloudFormation
 - Stacks
-- `mixroom-app-api-staging`
+- `mixroom-app-api-prod`
 - Outputs tab
 
 ## 5. Seed the minimum product mapping rows
@@ -146,14 +146,14 @@ That prints the 2 default rows for:
 When you are ready to write them into DynamoDB:
 
 ```bash
-python3 scripts/seed_catalog_mappings.py --apply --stage staging
+python3 scripts/seed_catalog_mappings.py --apply --stage prod
 ```
 
 You can confirm them in:
 
 - DynamoDB
 - Tables
-- `mixroom-catalog-mappings-staging`
+- `mixroom-catalog-mappings-prod`
 - Explore table items
 
 ## 6. Minimal app hookup after deploy
@@ -162,7 +162,7 @@ Do not enable payments yet. First, point the app at the backend:
 
 ```bash
 flutter run \
-  --dart-define=APP_API_BASE_URL=https://YOUR_API_ID.execute-api.YOUR_REGION.amazonaws.com/staging \
+  --dart-define=APP_API_BASE_URL=https://YOUR_API_ID.execute-api.YOUR_REGION.amazonaws.com/prod \
   --dart-define=SUBSCRIPTION_ENFORCE=false \
   --dart-define=IAP_ENABLE_PURCHASES=false
 ```
@@ -173,10 +173,11 @@ That lets the app talk to the backend without actually charging anyone.
 
 After the first deploy, the next AWS-only tasks are:
 
-1. Create the Apple and Google secrets in Secrets Manager.
-2. Re-deploy the same stack with the real secret ARNs and package names.
+1. Create the Apple and Google values in SSM Parameter Store.
+2. Re-deploy the same stack with the real parameter names and package names.
 3. Verify the webhook URLs are reachable.
-4. Later, if you add Paddle or Toss, store their webhook secrets and re-deploy.
+4. Later, if you add Paddle or Toss, store their webhook secrets as SSM
+   `SecureString` parameters and re-deploy.
 
 ## 8. If you get stuck
 

@@ -20,6 +20,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:mixroom/helpers/app_popup.dart';
 import 'package:mixroom/helpers/project_manager.dart';
 import 'package:mixroom/helpers/project_version_store.dart';
+import 'package:mixroom/helpers/subscription_limits.dart';
 import 'package:mixroom/screens/audio_editor.dart';
 import 'package:mixroom/widgets/app_responsive_body.dart';
 import 'package:mixroom/widgets/app_shell_figma.dart';
@@ -2500,7 +2501,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       await _openProject(local.dir);
       return;
     }
-    final canCreate = await ProjectManager.canCreateNew();
+    final canCreate = await ProjectManager.canCreateNew(
+      maxProjects: _localProjectLimit(),
+    );
     if (!mounted) return;
     if (!canCreate) {
       _showProjectLimitDialog();
@@ -2583,7 +2586,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   Future<void> _importProjectFromIncomingFile(File bundleFile) async {
-    final canCreate = await ProjectManager.canCreateNew();
+    final canCreate = await ProjectManager.canCreateNew(
+      maxProjects: _localProjectLimit(),
+    );
     if (!mounted) return;
 
     if (!canCreate) {
@@ -2649,7 +2654,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   Future<void> _importBundledDemoAndOpen(BundledDemoProjectAsset demo) async {
-    final canCreate = await ProjectManager.canCreateNew();
+    final canCreate = await ProjectManager.canCreateNew(
+      maxProjects: _localProjectLimit(),
+    );
     if (!mounted) return;
 
     if (!canCreate) {
@@ -3070,7 +3077,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     ProjectMeta project,
     ProjectVersionEntry version,
   ) async {
-    if (!await ProjectManager.canCreateNew()) {
+    if (!await ProjectManager.canCreateNew(maxProjects: _localProjectLimit())) {
       if (!mounted) return;
       _showProjectLimitDialog();
       return;
@@ -3182,15 +3189,33 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   void _showProjectLimitDialog() {
+    final limit = _localProjectLimit();
+    if (limit == SubscriptionLimits.freeLocalProjects) {
+      unawaited(
+        showAppUpgradeDialog(
+          context: context,
+          title: 'Upgrade for more projects',
+          message:
+              'Free includes 10 local projects. Export or delete one, or upgrade for more.',
+          icon: Icons.folder_off_outlined,
+          onUpgrade: widget.onUpgradeRequested,
+        ),
+      );
+      return;
+    }
     showAppMessageDialog(
       context: context,
       title: L10n.translate(context, 'Project limit reached'),
       message: L10n.translate(
-        context,
-        'Delete a project to create or import a new one.',
-      ),
+          context, 'Delete a project to create or import a new one.'),
       buttonLabel: L10n.translate(context, 'OK'),
       icon: Icons.folder_off_outlined,
+    );
+  }
+
+  int _localProjectLimit() {
+    return SubscriptionLimits.localProjectLimitFor(
+      context.read<EntitlementService>().entitlement,
     );
   }
 
@@ -3525,7 +3550,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     final entitlement = context.watch<EntitlementService>();
     final canConfigureCloudSync = auth.isSignedIn &&
         entitlement.canUseCapability(SubscriptionCapability.cloudProjects);
-    final canCreate = _projects.length < ProjectManager.maxProjects;
+    final canCreate = _projects.length < _localProjectLimit();
     final hasSearchQuery = _searchController.text.trim().isNotEmpty;
     final searchFocused = _searchFocusNode.hasFocus;
     final showSearchClear = searchFocused || hasSearchQuery;

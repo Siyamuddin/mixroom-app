@@ -5,8 +5,9 @@ from typing import Any, Dict
 
 from common import config
 from common.auth import extract_claims_from_event, json_response, unauthorized
+from common.avatar_storage import AvatarStorage, AvatarStorageError
 from common.events import RequestBodyError, parse_json_body
-from common.models import normalize_plan_code, status_has_active_access
+from common.models import normalize_plan_code, status_has_active_access, subscription_effective_status
 from common.native_auth import AppUserAuthError, verify_current_password
 from common.rate_limits import RequestRateLimiter, client_ip_from_event
 from common.repository import BillingRepository, UsernameClaimConflictError
@@ -26,6 +27,7 @@ from common.users import (
 repo = BillingRepository()
 rate_limiter = RequestRateLimiter()
 producer_capture_whitelist_repo = ProducerCaptureWhitelistRepository()
+avatar_storage = AvatarStorage()
 logger = logging.getLogger(__name__)
 
 
@@ -97,7 +99,18 @@ def _get_me(event: Dict[str, Any]) -> Dict[str, Any]:
         return json_response(503, {"error": "Users table is not configured."})
 
     profile = _resolve_user_profile_for_claims(claims)
-    return json_response(200, profile)
+    return json_response(200, _profile_response(profile))
+
+
+def _profile_response(profile: Dict[str, Any]) -> Dict[str, Any]:
+    payload = dict(profile)
+    try:
+        avatar_url = avatar_storage.avatar_url(payload)
+    except Exception:
+        avatar_url = str(payload.get("avatar_url") or "").strip()
+    if avatar_url:
+        payload["avatar_url"] = avatar_url
+    return payload
 
 
 def _resolve_user_profile_for_claims(claims: Dict[str, Any]) -> Dict[str, Any]:
@@ -185,11 +198,83 @@ def _patch_me(event: Dict[str, Any]) -> Dict[str, Any]:
             profile,
             previous_username_lc=previous_username_lc,
         )
-        return json_response(200, profile)
+        return json_response(200, _profile_response(profile))
     except ValueError as exc:
         return json_response(400, {"error": str(exc)})
     except UsernameClaimConflictError as exc:
         return json_response(409, {"error": str(exc)})
+
+
+def _post_avatar(event: Dict[str, Any]) -> Dict[str, Any]:
+    claims = extract_claims_from_event(event)
+    user_id = str(claims.get("sub") or "").strip()
+    if not user_id:
+        return unauthorized()
+    if not config.USERS_TABLE:
+        return json_response(503, {"error": "Users table is not configured."})
+
+    try:
+        body = parse_json_body(event, max_bytes=900000)
+    except RequestBodyError as exc:
+        return json_response(exc.status_code, {"error": exc.message})
+
+    existing = repo.get_user_profile(user_id)
+    profile = build_user_profile_from_claims(claims, existing=existing)
+    old_bucket = str(profile.get("avatar_object_bucket") or "").strip()
+    old_key = str(profile.get("avatar_object_key") or "").strip()
+    try:
+        avatar = avatar_storage.put_avatar(
+            user_id=user_id,
+            image_data=str(body.get("image_data") or body.get("imageData") or ""),
+        )
+    except AvatarStorageError as exc:
+        return json_response(400, {"error": str(exc)})
+    except Exception:
+        logger.exception("Avatar upload failed.", extra={"user_id": user_id})
+        return json_response(503, {"error": "Avatar upload is not available."})
+
+    profile.update(avatar)
+    profile["avatar_url"] = ""
+    try:
+        repo.upsert_user_profile(
+            profile,
+            previous_username_lc=str((existing or {}).get("username_lc") or "").strip().lower()
+            or None,
+        )
+    except UsernameClaimConflictError as exc:
+        avatar_storage.delete_avatar_object(
+            bucket=avatar.get("avatar_object_bucket") or "",
+            key=avatar.get("avatar_object_key") or "",
+        )
+        return json_response(409, {"error": str(exc)})
+    if old_key and old_key != avatar.get("avatar_object_key"):
+        avatar_storage.delete_avatar_object(bucket=old_bucket, key=old_key)
+    return json_response(200, _profile_response(profile))
+
+
+def _delete_avatar(event: Dict[str, Any]) -> Dict[str, Any]:
+    claims = extract_claims_from_event(event)
+    user_id = str(claims.get("sub") or "").strip()
+    if not user_id:
+        return unauthorized()
+    existing = repo.get_user_profile(user_id) or {}
+    if not existing:
+        return json_response(404, {"error": "Profile not found."})
+    old_bucket = str(existing.get("avatar_object_bucket") or "").strip()
+    old_key = str(existing.get("avatar_object_key") or "").strip()
+    profile = dict(existing)
+    profile["avatar_url"] = None
+    profile["avatar_object_bucket"] = None
+    profile["avatar_object_key"] = None
+    profile["avatar_content_type"] = None
+    profile["avatar_size_bytes"] = None
+    repo.upsert_user_profile(
+        profile,
+        previous_username_lc=str(existing.get("username_lc") or "").strip().lower()
+        or None,
+    )
+    avatar_storage.delete_avatar_object(bucket=old_bucket, key=old_key)
+    return json_response(200, _profile_response(profile))
 
 
 def _delete_me(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -297,6 +382,31 @@ def _delete_me(event: Dict[str, Any]) -> Dict[str, Any]:
                 },
             )
 
+    active_external_subscriptions = []
+    if hasattr(repo, "list_subscriptions_for_user"):
+        active_external_subscriptions = [
+            item
+            for item in repo.list_subscriptions_for_user(user_id)
+            if str(item.get("provider") or "").strip().lower() in {"apple", "google", "paddle", "toss"}
+            and status_has_active_access(subscription_effective_status(item))
+        ]
+    if active_external_subscriptions:
+        return json_response(
+            409,
+            {
+                "error": "Cancel active subscriptions before deleting this account.",
+                "code": "ACTIVE_SUBSCRIPTION_REQUIRES_CANCELLATION",
+                "details": {
+                    "providers": sorted(
+                        {
+                            str(item.get("provider") or "").strip().lower()
+                            for item in active_external_subscriptions
+                        }
+                    )
+                },
+            },
+        )
+
     repo.delete_user_account_data(
         user_id,
         username_lc=str(existing.get("username_lc") or "").strip().lower()
@@ -308,6 +418,13 @@ def _delete_me(event: Dict[str, Any]) -> Dict[str, Any]:
 def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     path = _path(event)
     method = _method(event)
+
+    if path.endswith("/v1/users/me/avatar"):
+        if method == "POST":
+            return _post_avatar(event)
+        if method == "DELETE":
+            return _delete_avatar(event)
+        return json_response(404, {"error": "Not found"})
 
     if method == "GET" and path.endswith("/v1/users/username-availability"):
         return _get_username_availability(event)

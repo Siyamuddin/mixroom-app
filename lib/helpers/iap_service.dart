@@ -67,7 +67,8 @@ class IapService extends ChangeNotifier {
       _lastCompletedPurchaseMayBeDeferred;
 
   bool get isMobilePlatformSupported => IapConfig.isMobileTarget;
-  bool get purchasesEnabled => IapConfig.purchasesEnabled;
+  bool get purchasesEnabled =>
+      _entitlementService?.areIapPurchasesEnabled ?? IapConfig.purchasesEnabled;
 
   @visibleForTesting
   Duration? get purchaseLaunchWatchdogDuration => const Duration(seconds: 6);

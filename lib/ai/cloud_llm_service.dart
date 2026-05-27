@@ -420,7 +420,7 @@ class CloudLlmService {
           'name': 'daw_assistant_actions',
           'strict': false,
           'description':
-              'Use for tutorials, project edits like BPM changes, library sample insertion or replacement, clip arrangement/editing, plugin CRUD, automation edits such as sidechain-like ducking, auto-pan, stereo movement, or filter sweeps, MIDI composition/editing, stem separation, and role override. For drum or beat-building requests using packaged samples, prefer action over explanation: choose semantically matching library files or advertised role aliases like role:kick, arrange them with musical spacing, and keep core roles like kick/snare/hats on separate rows when helpful. For 8+ bar starter grooves or build-ups, prefer a workable scaffold with repetition plus light variation or fills instead of one identical bar copied forever. If the user wants a placed sample swapped out, prefer replacing the targeted clips while preserving timing. Inspect existing plugin chains and selected MIDI note state when available: prefer modifying, unbypassing, extending, or reshaping what is already there when it is close, and remove conflicting effects or rewrite notes only when the current state clearly fights the user goal. Never use for pure sonic mix changes. Only emit actions the app can actually execute.',
+              'Use for tutorials, project edits like BPM changes, library sample insertion or replacement, clip arrangement/editing, plugin CRUD, automation edits such as sidechain-like ducking, auto-pan, stereo movement, or filter sweeps, MIDI composition/editing, stem separation, and role override. Use clip_edit glue for merge/consolidate/bounce-clip requests. For autotune, auto-tune, pitch correction, or Melodyne-style vocal tuning, add the built-in Pitch Corrector effect. For drum or beat-building requests using packaged samples, prefer action over explanation: choose semantically matching library files or advertised role aliases like role:kick, arrange them with musical spacing, and keep core roles like kick/snare/hats on separate rows when helpful. For 8+ bar starter grooves or build-ups, prefer a workable scaffold with repetition plus light variation or fills instead of one identical bar copied forever. If the user wants a placed sample swapped out, prefer replacing the targeted clips while preserving timing. Inspect existing plugin chains and selected MIDI note state when available: prefer modifying, unbypassing, extending, or reshaping what is already there when it is close, and remove conflicting effects or rewrite notes only when the current state clearly fights the user goal. Never use for pure sonic mix changes. Only emit actions the app can actually execute.',
           'parameters': <String, dynamic>{
             'type': 'object',
             'properties': <String, dynamic>{
@@ -616,6 +616,7 @@ class CloudLlmService {
                                 'cut',
                                 'stretch',
                                 'pitch_shift',
+                                'glue',
                                 'move',
                                 'tempo_follow',
                                 'auto_bpm_align',
@@ -1302,8 +1303,17 @@ class CloudLlmService {
     String? projectId,
     String? aiFeature,
     MixingResult? pendingMix,
+    Map<String, dynamic> clientContext = const <String, dynamic>{},
   }) {
     final normalizedAiFeature = _normalizeAiFeatureForProxy(aiFeature);
+    final requestContext = AnalyticsService.instance.buildRequestContext();
+    final analyticsClientContext =
+        (requestContext['client_context'] as Map?)?.cast<String, dynamic>() ??
+            <String, dynamic>{};
+    requestContext['client_context'] = <String, dynamic>{
+      ...analyticsClientContext,
+      ...clientContext,
+    };
     return {
       'conversation': conversation
           .map((m) => {
@@ -1322,7 +1332,7 @@ class CloudLlmService {
       if ((projectId ?? '').trim().isNotEmpty) 'project_id': projectId,
       if (normalizedAiFeature.isNotEmpty) 'ai_feature': normalizedAiFeature,
       if (pendingMix != null) 'pending_mix': pendingMix.toJson(),
-      ...AnalyticsService.instance.buildRequestContext(),
+      ...requestContext,
     };
   }
 
@@ -1375,6 +1385,7 @@ class CloudLlmService {
     required String? projectId,
     required String? aiFeature,
     required MixingResult? pendingMix,
+    required Map<String, dynamic> clientContext,
   }) {
     return _postJson(
       uri: _resolveProxyUri(),
@@ -1392,6 +1403,7 @@ class CloudLlmService {
         projectId: projectId,
         aiFeature: aiFeature,
         pendingMix: pendingMix,
+        clientContext: clientContext,
       ),
     );
   }
@@ -1715,6 +1727,7 @@ class CloudLlmService {
     'cut',
     'stretch',
     'pitch_shift',
+    'glue',
     'move',
     'tempo_follow',
     'auto_bpm_align',
@@ -1804,6 +1817,15 @@ class CloudLlmService {
       'shift_pitch': 'pitch_shift',
       'transpose_audio': 'pitch_shift',
       'transpose_clip': 'pitch_shift',
+      'glue_clips': 'glue',
+      'merge': 'glue',
+      'merge_clip': 'glue',
+      'merge_clips': 'glue',
+      'consolidate': 'glue',
+      'consolidate_clip': 'glue',
+      'consolidate_clips': 'glue',
+      'bounce_clip': 'glue',
+      'bounce_clips': 'glue',
       'move_clip': 'move',
       'reposition': 'move',
       'shift': 'move',
@@ -3123,6 +3145,7 @@ class CloudLlmService {
     String? projectId,
     String? aiFeature,
     MixingResult? pendingMix,
+    Map<String, dynamic> clientContext = const <String, dynamic>{},
   }) async {
     final requestStopwatch = Stopwatch();
     final parseStopwatch = Stopwatch();
@@ -3150,6 +3173,7 @@ class CloudLlmService {
           projectId: projectId,
           aiFeature: aiFeature,
           pendingMix: pendingMix,
+          clientContext: clientContext,
         );
         requestStopwatch.stop();
       } else if (_canUseDirectOpenAi) {
@@ -3309,13 +3333,19 @@ class CloudLlmService {
               ? payload!['message'].toString().trim()
               : 'You have reached the prompt limit. Please try again later.',
         );
+        final rateLimitMeta = <String, dynamic>{
+          ...responseMeta,
+          if (promptRateLimit != null)
+            'prompt_rate_limit': promptRateLimit.toJson(),
+          'prompt_rate_limit_hit': true,
+        };
         return LlmResult.text(
           message,
           {
             'message': message,
             'cancels_pending': false,
           },
-          meta: responseMeta,
+          meta: rateLimitMeta,
         );
       }
       if (response.statusCode == 401 || response.statusCode == 403) {
@@ -3338,6 +3368,7 @@ class CloudLlmService {
                 projectId: projectId,
                 aiFeature: aiFeature,
                 pendingMix: pendingMix,
+                clientContext: clientContext,
               );
               requestStopwatch.stop();
               parseStopwatch

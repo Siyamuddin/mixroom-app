@@ -68,7 +68,7 @@ Deploy or redeploy [template.yaml](../backend/app_api/template.yaml) with:
 
 - `CognitoUserPoolId`
 - `CognitoAppClientId`
-- `SocialAuthSecretArn`
+- `SocialAuthSecretParameterName`
 - `GoogleOauthClientIds`
 - `AppleBundleId`
 
@@ -81,7 +81,7 @@ Use these values:
 
 ### Required AWS secret
 
-Create a Secrets Manager secret for `SocialAuthSecretArn`.
+Create an SSM Parameter Store `SecureString` for `SocialAuthSecretParameterName`.
 
 Accepted format:
 
@@ -106,7 +106,7 @@ Important social-auth parameters during deploy:
 
 - `CognitoUserPoolId`: your real Cognito user pool id
 - `CognitoAppClientId`: your real Cognito app client id
-- `SocialAuthSecretArn`: ARN of the Secrets Manager secret above
+- `SocialAuthSecretParameterName`: name of the SSM `SecureString` parameter above
 - `GoogleOauthClientIds`: `105509343723-lufnthv351v328td07s89j53mf242pl5.apps.googleusercontent.com,105509343723-eatcl74aibc5pdqrnuvrc52n3f4m3mt3.apps.googleusercontent.com,105509343723-3aqmviam9ne4nrqid9fq03m7o06tccu7.apps.googleusercontent.com`
 - `AppleBundleId`: `com.mixroom.mixroomapp`
 
@@ -142,7 +142,7 @@ If a button still fails:
 Send these exact items:
 
 - the `APP_API_BASE_URL` you are running with
-- whether AWS deploy included `SocialAuthSecretArn`
+- whether AWS deploy included `SocialAuthSecretParameterName`
 - whether AWS deploy included `GoogleOauthClientIds`
 - whether Apple `Sign In with Apple` is enabled for `com.mixroom.mixroomapp`
 - which provider button fails: `Google`, `Apple`, or `Kakao`

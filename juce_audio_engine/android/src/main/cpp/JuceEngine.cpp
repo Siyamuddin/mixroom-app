@@ -1924,6 +1924,7 @@ bool isBuiltInEffectIdentifier(const juce::String &pluginId)
         "Reverb",
         "EQ Parametric",
         "Pitch Shift",
+        "Pitch Corrector",
         "Chorus",
         "Vibrato",
         "Stereo",
@@ -2013,6 +2014,29 @@ struct ExportProjectSnapshot
     bool masterMuted = false;
     double tempoBpm = 120.0;
 };
+
+void applyDryClipRenderOptions(ExportProjectSnapshot &snapshot)
+{
+    snapshot.masterEffects.clear();
+    snapshot.masterEffectAutomationLanes.clear();
+    snapshot.masterGainAutomationPoints.clear();
+    snapshot.masterPanAutomationPoints.clear();
+    snapshot.masterGainUi = SimpleGainProcessor::kUiUnity;
+    snapshot.masterPanUi = 0.5f;
+    snapshot.masterMuted = false;
+
+    for (auto &row : snapshot.rows)
+    {
+        row.effects.clear();
+        row.effectAutomationLanes.clear();
+        row.automationPoints.clear();
+        row.gainAutomationPoints.clear();
+        row.panAutomationPoints.clear();
+        row.gainUi = SimpleGainProcessor::kUiUnity;
+        row.panUi = 0.5f;
+        row.muted = false;
+    }
+}
 
 struct OfflineClipRenderState
 {
@@ -2231,6 +2255,8 @@ std::unique_ptr<juce::AudioProcessor> createEffectProcessorFromIdentifier(
             return std::make_unique<ClipperAudioProcessor>();
         if (pluginId == "Pitch Shift")
             return std::make_unique<PitchShiftAudioProcessor>();
+        if (pluginId == "Pitch Corrector")
+            return std::make_unique<PitchCorrectorAudioProcessor>();
         if (pluginId == "Chorus")
             return std::make_unique<ChorusAudioProcessor>();
         if (pluginId == "Vibrato")
@@ -3632,6 +3658,9 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
         return {};
     }
 
+    if (options.dryClipRender)
+        applyDryClipRenderOptions(snapshot);
+
     mixroom::fx::setGlobalTempoBpm(snapshot.tempoBpm);
     const auto result = renderOfflineSnapshotToFile(
         snapshot,
@@ -4522,6 +4551,8 @@ bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath)
             plugin = std::make_unique<ClipperAudioProcessor>();
         else if (pluginPath == "Pitch Shift")
             plugin = std::make_unique<PitchShiftAudioProcessor>();
+        else if (pluginPath == "Pitch Corrector")
+            plugin = std::make_unique<PitchCorrectorAudioProcessor>();
         else if (pluginPath == "Chorus")
             plugin = std::make_unique<ChorusAudioProcessor>();
         else if (pluginPath == "Vibrato")
@@ -5360,6 +5391,8 @@ bool JuceEngine::insertMasterEffect(const juce::String &pluginPath)
             plugin = std::make_unique<ClipperAudioProcessor>();
         else if (pluginPath == "Pitch Shift")
             plugin = std::make_unique<PitchShiftAudioProcessor>();
+        else if (pluginPath == "Pitch Corrector")
+            plugin = std::make_unique<PitchCorrectorAudioProcessor>();
         else if (pluginPath == "Chorus")
             plugin = std::make_unique<ChorusAudioProcessor>();
         else if (pluginPath == "Vibrato")
@@ -6884,83 +6917,63 @@ juce::NamedValueSet JuceEngine::analyzeAudioStereo16k(const juce::File &file)
     if (!reader)
         return out;
 
-    const int64 totalSamples64 = reader->lengthInSamples;
-    const int totalSamples = (int)totalSamples64;
+    const int64 totalSamples = reader->lengthInSamples;
     if (totalSamples <= 0)
         return out;
 
     const int readChannels = reader->numChannels >= 2 ? 2 : 1;
-    juce::AudioBuffer<float> inBuffer(readChannels, totalSamples);
-    reader->read(&inBuffer, 0, totalSamples, 0, true, readChannels >= 2);
-
-    auto copyChannel = [&](int channel) {
-        std::vector<float> v((size_t)totalSamples, 0.0f);
-        if (totalSamples > 0)
-            std::memcpy(v.data(), inBuffer.getReadPointer(channel), (size_t)totalSamples * sizeof(float));
-        return v;
-    };
-
-    std::vector<float> left = copyChannel(0);
-    std::vector<float> right = (readChannels >= 2) ? copyChannel(1) : left;
-
-    auto resampleTo16k = [&](const std::vector<float> &input) {
-        if (input.empty())
-            return std::vector<float>{};
-        if (reader->sampleRate == 16000.0)
-            return input;
-
-        juce::LagrangeInterpolator resampler;
-        resampler.reset();
-
-        const double speedRatio = reader->sampleRate / 16000.0; // input per output
-        const int outSamples = (int)std::ceil((double)input.size() / speedRatio);
-        std::vector<float> output((size_t)juce::jmax(0, outSamples), 0.0f);
-        if (outSamples > 0)
-        {
-            resampler.process(
-                speedRatio,
-                input.data(),
-                output.data(),
-                outSamples,
-                (int)input.size(),
-                0);
-        }
-        return output;
-    };
-
-    left = resampleTo16k(left);
-    right = resampleTo16k(right);
-
-    const int n = juce::jmin(24000, juce::jmin((int)left.size(), (int)right.size()));
-    if (n <= 0)
-        return out;
+    constexpr int kAnalysisChunkSamples = 32768;
+    juce::AudioBuffer<float> inBuffer(readChannels, kAnalysisChunkSamples);
 
     double sumL2 = 0.0;
     double sumR2 = 0.0;
     double sumLR = 0.0;
     double sumMid2 = 0.0;
     double sumSide2 = 0.0;
+    int64 samplesAnalyzed = 0;
 
-    for (int i = 0; i < n; ++i)
+    for (int64 position = 0; position < totalSamples; position += kAnalysisChunkSamples)
     {
-        const double l = (double)left[(size_t)i];
-        const double r = (double)right[(size_t)i];
-        sumL2 += l * l;
-        sumR2 += r * r;
-        sumLR += l * r;
+        const int64 remainingSamples = totalSamples - position;
+        const int samplesThisChunk = (int)(remainingSamples < (int64)kAnalysisChunkSamples
+            ? remainingSamples
+            : (int64)kAnalysisChunkSamples);
+        if (samplesThisChunk <= 0)
+            break;
 
-        const double mid = 0.5 * (l + r);
-        const double side = 0.5 * (l - r);
-        sumMid2 += mid * mid;
-        sumSide2 += side * side;
+        if (inBuffer.getNumSamples() != samplesThisChunk)
+            inBuffer.setSize(readChannels, samplesThisChunk, false, false, true);
+        inBuffer.clear();
+
+        reader->read(&inBuffer, 0, samplesThisChunk, position, true, readChannels >= 2);
+
+        const float *left = inBuffer.getReadPointer(0);
+        const float *right = readChannels >= 2 ? inBuffer.getReadPointer(1) : left;
+        for (int i = 0; i < samplesThisChunk; ++i)
+        {
+            const double l = (double)left[i];
+            const double r = (double)right[i];
+            sumL2 += l * l;
+            sumR2 += r * r;
+            sumLR += l * r;
+
+            const double mid = 0.5 * (l + r);
+            const double side = 0.5 * (l - r);
+            sumMid2 += mid * mid;
+            sumSide2 += side * side;
+        }
+        samplesAnalyzed += samplesThisChunk;
     }
+
+    if (samplesAnalyzed <= 0)
+        return out;
 
     const double phaseCorr =
         sumLR / std::sqrt((sumL2 * sumR2) + 1.0e-12);
-    const double rmsL = std::sqrt(sumL2 / (double)n);
-    const double rmsR = std::sqrt(sumR2 / (double)n);
-    const double midRms = std::sqrt(sumMid2 / (double)n);
-    const double sideRms = std::sqrt(sumSide2 / (double)n);
+    const double rmsL = std::sqrt(sumL2 / (double)samplesAnalyzed);
+    const double rmsR = std::sqrt(sumR2 / (double)samplesAnalyzed);
+    const double midRms = std::sqrt(sumMid2 / (double)samplesAnalyzed);
+    const double sideRms = std::sqrt(sumSide2 / (double)samplesAnalyzed);
     const double sideRatio = sideRms / (midRms + 1.0e-9);
     const double stereoImbalance = std::abs(rmsL - rmsR) / (rmsL + rmsR + 1.0e-9);
 
@@ -8070,6 +8083,7 @@ const juce::StringArray JuceEngine::mixroomPlugins{
     "Reverb",
     "EQ Parametric",
     "Pitch Shift",
+    "Pitch Corrector",
     "Chorus",
     "Vibrato",
     "Stereo",

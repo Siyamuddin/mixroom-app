@@ -10,6 +10,7 @@ from src.common.models import (
     entitlement_capabilities_for_status,
     free_entitlement,
     subscription_priority_key,
+    subscription_effective_status,
     status_has_active_access,
 )
 
@@ -43,16 +44,28 @@ class ModelTests(unittest.TestCase):
         self.assertTrue(status_has_active_access("trialing"))
         self.assertTrue(status_has_active_access("active"))
         self.assertTrue(status_has_active_access("grace_period"))
+        self.assertTrue(status_has_active_access("past_due"))
         self.assertFalse(status_has_active_access("expired"))
+
+    def test_subscription_effective_status_uses_current_period_end(self):
+        self.assertEqual(
+            subscription_effective_status(
+                {
+                    "status": "active",
+                    "current_period_end": "2026-01-01T00:00:00+00:00",
+                }
+            ),
+            "expired",
+        )
 
     def test_free_entitlement_shape(self):
         snapshot = free_entitlement("u-1").to_dict()
         self.assertEqual(snapshot["user_id"], "u-1")
         self.assertEqual(snapshot["tier"], "free")
         self.assertEqual(snapshot["plan_code"], "free")
-        self.assertEqual(snapshot["limits"]["cloud_projects"], 3)
-        self.assertEqual(snapshot["limits"]["ai_prompts_daily"], 50)
-        self.assertEqual(snapshot["limits"]["ai_prompts_weekly"], 200)
+        self.assertEqual(snapshot["limits"]["cloud_projects"], 1)
+        self.assertEqual(snapshot["limits"]["ai_prompts_daily"], 30)
+        self.assertEqual(snapshot["limits"]["ai_prompts_weekly"], 120)
 
     def test_plan_limits_include_weekly_prompt_caps(self):
         self.assertEqual(default_limits_for_plan("starter")["ai_prompts_weekly"], 1500)

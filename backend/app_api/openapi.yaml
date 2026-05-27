@@ -6,6 +6,50 @@ info:
 servers:
   - url: https://api.mixroom.ai
 paths:
+  /v1/contact:
+    options:
+      summary: CORS preflight for public contact and support form submissions
+      responses:
+        '204':
+          description: Origin is allowed
+        '403':
+          description: Origin is not allowed
+    post:
+      summary: Submit a public contact or support form message
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source, subject, message, email]
+              properties:
+                source:
+                  type: string
+                  enum: [contact, support]
+                subject:
+                  type: string
+                message:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                  description: Visitor reply-to email address. This is not used as the sender.
+                pageUrl:
+                  type: string
+                  nullable: true
+                locale:
+                  type: string
+                  nullable: true
+      responses:
+        '200':
+          description: Message accepted and sent
+        '400':
+          description: Validation error
+        '429':
+          description: Too many submissions
+        '502':
+          description: Email delivery failed
   /v1/users/me:
     get:
       summary: Get or create the current app user profile snapshot
@@ -68,6 +112,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Entitlement'
+  /v1/feature-flags:
+    get:
+      summary: Get remote app feature flags for the signed-in user
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: App feature flag config
   /v1/billing/catalog:
     get:
       summary: Get billing catalog, plan configuration, and support metadata
@@ -547,6 +599,33 @@ paths:
       responses:
         '200':
           description: Billing catalog updated
+  /v1/internal/admin/settings/feature-flags:
+    get:
+      summary: Get internal admin app feature flag settings
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: App feature flag settings
+    put:
+      summary: Update internal admin app feature flag settings
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [flags]
+              properties:
+                flags:
+                  type: object
+                  additionalProperties:
+                    type: boolean
+      responses:
+        '200':
+          description: App feature flag settings updated
   /v1/internal/admin/billing/organizations:
     get:
       summary: List internal admin organizations for team billing
@@ -688,6 +767,58 @@ paths:
       responses:
         '200':
           description: Checkout session
+  /v1/billing/web/subscription/change:
+    post:
+      summary: Change the signed-in user's active web subscription
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [product_code]
+              properties:
+                subscription_id:
+                  type: string
+                product_code:
+                  type: string
+                additional_seats:
+                  type: integer
+                extra_storage_tb:
+                  type: integer
+                proration_billing_mode:
+                  type: string
+      responses:
+        '200':
+          description: Subscription changed or provider checkout required
+  /v1/billing/web/subscription/change/preview:
+    post:
+      summary: Preview a signed-in user's web subscription plan change
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [product_code]
+              properties:
+                subscription_id:
+                  type: string
+                product_code:
+                  type: string
+                additional_seats:
+                  type: integer
+                extra_storage_tb:
+                  type: integer
+                proration_billing_mode:
+                  type: string
+      responses:
+        '200':
+          description: Plan change preview with current plan, target plan, amount due now, and next billing details
   /v1/billing/mobile/apple/verify:
     post:
       summary: Verify Apple subscription transaction
