@@ -526,6 +526,12 @@ def _toss_checkout_order_event_id(order_id: str) -> str:
     return provider_event_key("toss", f"checkout-order-{order_id}")
 
 
+def _is_yearly_product(product: Dict[str, Any]) -> bool:
+    interval = str(product.get("billing_interval") or "").strip().lower()
+    code = str(product.get("code") or "").strip().lower()
+    return interval in {"year", "yearly", "annual"} or code.endswith("_yearly")
+
+
 def _handle_checkout(event: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     body = parse_json_body(event)
     region_code = str(body.get("region_code") or "").upper()
@@ -546,6 +552,8 @@ def _handle_checkout(event: Dict[str, Any], user_id: str) -> Dict[str, Any]:
                 "This plan is handled by sales. Contact sales@mixroom.ai to continue.",
                 status_code=409,
             )
+    if provider == "toss" and product and _is_yearly_product(product):
+        provider = "paddle"
 
     _assert_no_conflicting_active_subscription(
         user_id=user_id,
@@ -557,7 +565,7 @@ def _handle_checkout(event: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     if provider == "toss" and product:
         selection = _toss_selection_for_product(product, body)
         toss_order = {
-            "flow": "payment",
+            "flow": "billing",
             "amount": selection["amount"],
             "currency": "KRW",
             "order_id": f"mixroom-{uuid.uuid4().hex[:24]}",
@@ -803,6 +811,8 @@ def _handle_toss_confirm(event: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     checkout_user_id = str((checkout_event or {}).get("user_id") or "").strip()
     if not checkout_toss:
         raise RequestBodyError("Checkout order is not a Toss payment order.", status_code=409)
+    if str(checkout_toss.get("flow") or "").strip().lower() == "billing":
+        raise RequestBodyError("Toss recurring checkout must be confirmed with billing-key.", status_code=409)
     if checkout_user_id != user_id:
         raise RequestBodyError("Checkout order does not belong to this account.", status_code=403)
     try:
@@ -1142,7 +1152,7 @@ def _handle_toss_one_time_change(
     selection = _toss_selection_for_product(product, body)
     product_code = str(product.get("code") or "").strip().lower()
     toss_order = {
-        "flow": "payment",
+        "flow": "billing",
         "amount": selection["amount"],
         "currency": "KRW",
         "order_id": f"mixroom-{uuid.uuid4().hex[:24]}",
@@ -1156,7 +1166,7 @@ def _handle_toss_one_time_change(
     record = build_event_record(
         provider="toss",
         provider_event_id=f"checkout-order-{toss_order['order_id']}",
-        event_type="subscription_change_checkout_created",
+        event_type="subscription_change_billing_checkout_created",
         user_id=user_id,
         payload={
             **body,
@@ -1182,7 +1192,8 @@ def _handle_toss_one_time_change(
             "accepted": True,
             "provider": "toss",
             "checkout_required": True,
-            "effective": "after_payment",
+            "checkout_flow": "toss_billing",
+            "effective": "after_payment_method_setup",
             "product": product,
             "toss": toss_order,
         },
@@ -1477,12 +1488,14 @@ def _handle_toss_subscription_change_preview(
         provider="toss",
         subscription=subscription,
         product={**product, "price_krw": amount},
-        effective="after_payment" if checkout_required else "next_renewal",
+        effective="after_payment_method_setup" if checkout_required else "next_renewal",
         checkout_required=checkout_required,
         amount_due_now=next_transaction if checkout_required else {"amount": 0, "currency": "KRW", "price_formatted": _price_formatted(0, "KRW")},
         next_transaction=next_transaction,
         preferred_currency="KRW",
     )
+    if checkout_required:
+        preview["checkout_flow"] = "toss_billing"
     preview["target"]["amount"] = amount
     preview["target"]["currency"] = "KRW"
     preview["target"]["price_formatted"] = _price_formatted(amount, "KRW") or target.get("price_formatted")
@@ -1656,13 +1669,15 @@ def _replace_toss_payment_method(
     repo.put_entitlement(entitlement)
 
 
-def _handle_toss_cancel(user_id: str) -> Dict[str, Any]:
+def _handle_toss_cancel(event: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    body = parse_json_body(event)
     entitlement = repo.get_entitlement(user_id) or {}
-    if str(entitlement.get("source_provider") or "").strip().lower() != "toss":
-        raise RequestBodyError("No active Toss subscription found.", status_code=404)
-    subscription_id = str(entitlement.get("source_subscription_id") or "").strip()
+    requested_subscription_id = str(body.get("subscription_id") or body.get("subscriptionId") or "").strip()
+    subscription_id = requested_subscription_id or str(entitlement.get("source_subscription_id") or "").strip()
     subscription = repo.get_subscription(subscription_id) if subscription_id else {}
-    if not subscription:
+    if not subscription or str(subscription.get("provider") or "").strip().lower() != "toss":
+        raise RequestBodyError("No active Toss subscription found.", status_code=404)
+    if str(subscription.get("user_id") or "").strip() != user_id:
         raise RequestBodyError("No active Toss subscription found.", status_code=404)
 
     billing_key = _load_toss_billing_key_from_subscription(subscription)
@@ -1678,9 +1693,10 @@ def _handle_toss_cancel(user_id: str) -> Dict[str, Any]:
     subscription["expires_at"] = cancel_effective_at
     subscription["updated_at"] = now_iso
     repo.upsert_subscription(subscription)
-    entitlement["cancel_at_period_end"] = True
-    entitlement["expires_at"] = cancel_effective_at
-    repo.put_entitlement(entitlement)
+    if str(entitlement.get("source_subscription_id") or "").strip() == subscription_id:
+        entitlement["cancel_at_period_end"] = True
+        entitlement["expires_at"] = cancel_effective_at
+        repo.put_entitlement(entitlement)
     return json_response(
         200,
         {
@@ -1796,13 +1812,19 @@ def _handle_billing_me(user_id: str) -> Dict[str, Any]:
         customer_id=customer_id,
         subscription_id=subscription_id,
     )
+    normalized_provider = provider.strip().lower()
+    if normalized_provider == "toss":
+        subscription = repo.get_subscription(subscription_id) if subscription_id else {}
+        if not _subscription_has_toss_billing_key(subscription if isinstance(subscription, dict) else {}):
+            provider_links = {"configured": False, "links": {}, "reason": "toss_one_time_payment"}
+        else:
+            provider_links = {"configured": True, "links": {}, "reason": ""}
     portal = _billing_portal_payload(entitlement, provider_links=provider_links)
     links = provider_links.get("links") if isinstance(provider_links.get("links"), dict) else {}
     payment_provider_ids = {
         "customer_id": customer_id,
         "subscription_id": subscription_id,
     }
-    normalized_provider = provider.strip().lower()
     if normalized_provider == "paddle":
         payment_provider_ids["paddle_customer_id"] = customer_id
         payment_provider_ids["paddle_subscription_id"] = subscription_id
@@ -1868,6 +1890,17 @@ def _billing_links_for_subscription(subscription: Dict[str, Any]) -> Dict[str, A
             },
         }
     if normalized_provider == "toss":
+        if _subscription_has_toss_billing_key(subscription):
+            return {
+                "manage_url": "",
+                "update_payment_method_url": "",
+                "cancel_subscription_url": "",
+                "invoices_url": "",
+                "provider_management": {
+                    "configured": True,
+                    "reason": "",
+                },
+            }
         return {
             "manage_url": "",
             "update_payment_method_url": "",
@@ -2135,7 +2168,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         if method == "POST" and path.endswith("/v1/billing/web/toss/subscription"):
             return _finalize(_handle_toss_subscription_update(event, user_id))
         if method == "POST" and path.endswith("/v1/billing/web/toss/cancel"):
-            return _finalize(_handle_toss_cancel(user_id))
+            return _finalize(_handle_toss_cancel(event, user_id))
         if method == "POST" and path.endswith("/v1/billing/mobile/apple/verify"):
             return _finalize(_handle_mobile_verify(event, user_id, provider="apple"))
         if method == "POST" and path.endswith("/v1/billing/mobile/google/verify"):

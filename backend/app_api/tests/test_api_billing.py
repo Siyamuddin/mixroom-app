@@ -54,6 +54,55 @@ class ApiBillingTests(unittest.TestCase):
         module.put_secure_parameter_string = self.original_put_secure_parameter_string
         module.load_provider_api_key = self.original_load_provider_api_key
 
+    def seed_toss_one_time_checkout_order(
+        self,
+        *,
+        order_id="order-1",
+        amount=149000,
+        product_code="studio_monthly",
+        plan_code="studio",
+        customer_key="customer-1",
+        user_id="user-1",
+        seat_count=None,
+        extra_storage_tb=0,
+    ):
+        self.repo.put_billing_event_if_new(
+            {
+                "event_id": f"toss:checkout-order-{order_id}",
+                "event_type": "checkout_session_created",
+                "provider": "toss",
+                "provider_event_id": f"checkout-order-{order_id}",
+                "user_id": user_id,
+                "raw_payload": {
+                    "provider": "toss",
+                    "product_code": product_code,
+                    "plan_code": plan_code,
+                    "toss": {
+                        "flow": "payment",
+                        "amount": amount,
+                        "currency": "KRW",
+                        "order_id": order_id,
+                        "customer_key": customer_key,
+                        "seat_count": seat_count,
+                        "extra_storage_tb": extra_storage_tb,
+                    },
+                },
+                "normalized": {
+                    "provider": "toss",
+                    "product_code": product_code,
+                    "plan_code": plan_code,
+                    "order_id": order_id,
+                    "amount": amount,
+                    "currency": "KRW",
+                },
+            }
+        )
+        return {
+            "order_id": order_id,
+            "amount": amount,
+            "customer_key": customer_key,
+        }
+
     def test_checkout_session_uses_toss_for_kr(self):
         response = module.handler(
             {
@@ -71,7 +120,7 @@ class ApiBillingTests(unittest.TestCase):
         event = next(iter(self.repo.billing_events.values()))
         self.assertEqual(event["event_type"], "checkout_session_created")
 
-    def test_checkout_session_persists_toss_widget_order(self):
+    def test_checkout_session_persists_toss_billing_order(self):
         module.catalog_repo.get_product.return_value = {
             "code": "studio_monthly",
             "plan_code": "studio",
@@ -101,7 +150,7 @@ class ApiBillingTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 200)
         payload = decode_json_response(response)
         self.assertEqual(payload["provider"], "toss")
-        self.assertEqual(payload["toss"]["flow"], "payment")
+        self.assertEqual(payload["toss"]["flow"], "billing")
         self.assertEqual(payload["toss"]["amount"], 208000)
         self.assertEqual(payload["toss"]["seat_count"], 7)
         order_id = payload["toss"]["order_id"]
@@ -109,6 +158,36 @@ class ApiBillingTests(unittest.TestCase):
         self.assertIsNotNone(event)
         self.assertEqual(event["user_id"], "user-1")
         self.assertEqual(event["raw_payload"]["product_code"], "studio_monthly")
+
+    def test_checkout_session_routes_kr_yearly_to_paddle(self):
+        module.catalog_repo.get_product.return_value = {
+            "code": "producer_yearly",
+            "plan_code": "producer",
+            "type": "subscription",
+            "billing_interval": "yearly",
+            "label": "Producer Yearly",
+            "enabled": True,
+            "price_krw": 290000,
+        }
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/checkout-session",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps(
+                    {
+                        "region_code": "KR",
+                        "product_code": "producer_yearly",
+                    }
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertEqual(payload["provider"], "paddle")
+        self.assertNotIn("toss", payload)
 
     def test_checkout_session_rejects_contract_products(self):
         module.catalog_repo.get_product.return_value = {
@@ -337,20 +416,13 @@ class ApiBillingTests(unittest.TestCase):
             "enabled": True,
             "price_krw": 149000,
         }
-        checkout = module.handler(
-            {
-                "rawPath": "/v1/billing/web/checkout-session",
-                "requestContext": {"http": {"method": "POST"}},
-                "body": json.dumps(
-                    {
-                        "region_code": "KR",
-                        "product_code": "studio_monthly",
-                    }
-                ),
-            },
-            object(),
+        order = self.seed_toss_one_time_checkout_order(
+            order_id="order-1",
+            amount=149000,
+            product_code="studio_monthly",
+            plan_code="studio",
+            customer_key="customer-1",
         )
-        order = decode_json_response(checkout)["toss"]
         module.confirm_toss_payment = mock.Mock(
             return_value={
                 "paymentKey": "pay-1",
@@ -452,7 +524,7 @@ class ApiBillingTests(unittest.TestCase):
         self.assertEqual(payload["error"], "Unauthorized")
         module.confirm_toss_payment.assert_not_called()
 
-    def test_toss_same_plan_one_time_renewal_extends_existing_period(self):
+    def test_toss_same_plan_legacy_one_time_renewal_starts_billing_checkout(self):
         self.repo.upsert_subscription(
             {
                 "subscription_id": "toss-payment:old-order",
@@ -494,37 +566,14 @@ class ApiBillingTests(unittest.TestCase):
             },
             object(),
         )
-        order = decode_json_response(checkout)["toss"]
-        module.confirm_toss_payment = mock.Mock(
-            return_value={
-                "paymentKey": "pay-renew-1",
-                "orderId": order["order_id"],
-                "status": "DONE",
-                "totalAmount": 6600,
-                "approvedAt": "2026-06-01T00:00:00+00:00",
-                "customerKey": order["customer_key"],
-            }
-        )
-
-        response = module.handler(
-            {
-                "rawPath": "/v1/billing/web/toss/confirm",
-                "requestContext": {"http": {"method": "POST"}},
-                "body": json.dumps(
-                    {
-                        "payment_key": "pay-renew-1",
-                        "order_id": order["order_id"],
-                        "amount": 6600,
-                    }
-                ),
-            },
-            object(),
-        )
-
-        self.assertEqual(response["statusCode"], 200)
-        payload = decode_json_response(response)
-        self.assertEqual(payload["normalized"]["product_code"], "starter_monthly")
-        self.assertTrue(str(payload["normalized"]["expires_at"]).startswith("2026-07-21"))
+        self.assertEqual(checkout["statusCode"], 200)
+        payload = decode_json_response(checkout)
+        self.assertEqual(payload["provider"], "toss")
+        self.assertTrue(payload["checkout_required"])
+        self.assertEqual(payload["checkout_flow"], "toss_billing")
+        self.assertEqual(payload["effective"], "after_payment_method_setup")
+        self.assertEqual(payload["toss"]["flow"], "billing")
+        self.assertEqual(payload["toss"]["amount"], 6600)
 
     def test_toss_confirm_duplicate_returns_409_without_reconfirming(self):
         self.repo.put_billing_event_if_new(
@@ -569,20 +618,13 @@ class ApiBillingTests(unittest.TestCase):
             "enabled": True,
             "price_krw": 149000,
         }
-        checkout = module.handler(
-            {
-                "rawPath": "/v1/billing/web/checkout-session",
-                "requestContext": {"http": {"method": "POST"}},
-                "body": json.dumps(
-                    {
-                        "region_code": "KR",
-                        "product_code": "studio_monthly",
-                    }
-                ),
-            },
-            object(),
+        order = self.seed_toss_one_time_checkout_order(
+            order_id="order-1",
+            amount=149000,
+            product_code="studio_monthly",
+            plan_code="studio",
+            customer_key="customer-1",
         )
-        order = decode_json_response(checkout)["toss"]
         module.confirm_toss_payment = mock.Mock()
 
         response = module.handler(
@@ -960,7 +1002,7 @@ class ApiBillingTests(unittest.TestCase):
         preview_subscription.assert_called_once()
         self.assertNotEqual(self.repo.subscriptions["sub_123"]["plan_code"], "producer")
 
-    def test_web_subscription_change_creates_toss_one_time_checkout(self):
+    def test_web_subscription_change_migrates_toss_one_time_to_billing_checkout(self):
         self.repo.upsert_subscription(
             {
                 "subscription_id": "toss-payment:order-1",
@@ -1004,9 +1046,12 @@ class ApiBillingTests(unittest.TestCase):
         payload = decode_json_response(response)
         self.assertEqual(payload["provider"], "toss")
         self.assertTrue(payload["checkout_required"])
+        self.assertEqual(payload["checkout_flow"], "toss_billing")
+        self.assertEqual(payload["effective"], "after_payment_method_setup")
+        self.assertEqual(payload["toss"]["flow"], "billing")
         self.assertEqual(payload["toss"]["amount"], 29000)
 
-    def test_web_subscription_change_preview_quotes_toss_one_time_checkout(self):
+    def test_web_subscription_change_preview_quotes_toss_billing_checkout(self):
         self.repo.upsert_subscription(
             {
                 "subscription_id": "toss-payment:order-1",
@@ -1052,7 +1097,8 @@ class ApiBillingTests(unittest.TestCase):
         payload = decode_json_response(response)
         self.assertEqual(payload["provider"], "toss")
         self.assertTrue(payload["checkout_required"])
-        self.assertEqual(payload["effective"], "after_payment")
+        self.assertEqual(payload["checkout_flow"], "toss_billing")
+        self.assertEqual(payload["effective"], "after_payment_method_setup")
         self.assertEqual(payload["current"]["price_formatted"], "₩6,600")
         self.assertEqual(payload["target"]["price_formatted"], "₩29,000")
         self.assertEqual(payload["amount_due_now"]["price_formatted"], "₩29,000")
@@ -1261,6 +1307,50 @@ class ApiBillingTests(unittest.TestCase):
         self.assertEqual(payload["invoices_url"], "")
         self.assertEqual(payload["provider_management"]["reason"], "toss_one_time_payment")
 
+    def test_billing_me_reports_toss_recurring_management_configured(self):
+        self.repo.upsert_subscription(
+            {
+                "subscription_id": "toss-billing:customer-1:starter_monthly",
+                "user_id": "user-1",
+                "provider": "toss",
+                "customer_id": "customer-1",
+                "plan_code": "starter",
+                "status": "active",
+                "product_code": "starter_monthly",
+                "next_billed_at": "2026-06-18T00:00:00Z",
+                "billing_key_parameter_name": "/mixroom/payment-credentials/test/toss/customer-1",
+                "billing_amount": 6600,
+                "billing_currency": "KRW",
+            }
+        )
+        self.repo.put_entitlement(
+            {
+                "user_id": "user-1",
+                "plan_code": "starter",
+                "status": "active",
+                "source_provider": "toss",
+                "source_subscription_id": "toss-billing:customer-1:starter_monthly",
+                "source_customer_id": "customer-1",
+                "management_channel": "toss",
+                "revision": 2,
+            }
+        )
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/me",
+                "requestContext": {"http": {"method": "GET"}},
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertEqual(payload["provider"], "toss")
+        self.assertEqual(payload["customer_key"], "customer-1")
+        self.assertEqual(payload["provider_management"]["configured"], True)
+        self.assertEqual(payload["provider_management"]["reason"], "")
+
     def test_billing_subscriptions_splits_owned_and_member_access(self):
         module.build_management_links = mock.Mock(
             return_value={
@@ -1380,6 +1470,41 @@ class ApiBillingTests(unittest.TestCase):
         self.assertEqual(item["cancel_subscription_url"], "")
         self.assertFalse(item["manageable"])
         self.assertEqual(item["provider_management"]["reason"], "toss_one_time_payment")
+
+    def test_billing_subscriptions_marks_toss_recurring_management_configured(self):
+        self.repo.upsert_subscription(
+            {
+                "subscription_id": "toss-billing:customer-1:producer_monthly",
+                "user_id": "user-1",
+                "provider": "toss",
+                "customer_id": "customer-1",
+                "plan_code": "producer",
+                "status": "active",
+                "product_code": "producer_monthly",
+                "next_billed_at": "2026-06-18T00:00:00Z",
+                "billing_key_parameter_name": "/mixroom/payment-credentials/test/toss/customer-1",
+                "billing_amount": 29000,
+                "billing_currency": "KRW",
+                "management_channel": "toss",
+            }
+        )
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/subscriptions",
+                "requestContext": {"http": {"method": "GET"}},
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        item = payload["personal"][0]
+        self.assertEqual(item["provider"], "toss")
+        self.assertEqual(item["customer_key"], "customer-1")
+        self.assertEqual(item["provider_management"]["configured"], True)
+        self.assertEqual(item["provider_management"]["reason"], "")
+        self.assertEqual(item["next_billed_at"], "2026-06-18T00:00:00Z")
 
     def test_verification_conflict_returns_409(self):
         module.verify_google_purchase = mock.Mock(
