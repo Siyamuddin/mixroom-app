@@ -4,7 +4,7 @@ Owner: Engineering
 Status: Draft  
 Last reviewed: 2026-06-05  
 Update trigger: Update this when supported platforms, required SDK versions,
-FFmpeg variants, native library selection, or backend local setup changes.
+native library selection, media dependencies, or backend local setup changes.
 
 ## Purpose
 
@@ -29,19 +29,9 @@ From the repo root:
 flutter pub get
 ```
 
-For Android, switch FFmpeg to the Android `16kb` variant before building:
-
-```bash
-dart run tool/switch_ffmpeg_backend.dart 16kb
-flutter pub get
-```
-
-For iOS, switch FFmpeg to the iOS `new_full` variant before building:
-
-```bash
-dart run tool/switch_ffmpeg_backend.dart new_full
-flutter pub get
-```
+The app uses `ffmpeg_kit_flutter_new_full` for Android, iOS, and macOS.
+For Android Play releases, verify the final APK/AAB passes 16 KB native
+library alignment checks before submission.
 
 ## iOS Native Audio Library Selection
 

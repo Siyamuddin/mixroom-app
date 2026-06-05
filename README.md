@@ -4,13 +4,9 @@ Mixroom is the world's first AI-assisted music production app
 
 ## Developer Notes
 
-Platform-specific local setup is required before running the app:
-
-- Android uses the FFmpeg `16kb` variant:
-  `dart run tool/switch_ffmpeg_backend.dart 16kb`
-- iOS uses the FFmpeg `new_full` variant:
-  `dart run tool/switch_ffmpeg_backend.dart new_full`
-- After switching FFmpeg variants, run `flutter pub get`.
+The app uses `ffmpeg_kit_flutter_new_full` for Android, iOS, and macOS.
+For Android Play releases, verify the final APK/AAB passes 16 KB native
+library alignment checks before submission.
 
 For iOS builds, [`juce_audio_engine/ios/juce_audio_engine.podspec`](juce_audio_engine/ios/juce_audio_engine.podspec) selects the correct JUCE archive automatically for simulator, debug device, and Profile/Release device builds.
 
@@ -26,13 +22,3 @@ For iOS builds, [`juce_audio_engine/ios/juce_audio_engine.podspec`](juce_audio_e
 ## Third-party credits
 
 - Instrument references and licensing notes: `docs/THIRD_PARTY_INSTRUMENT_CREDITS.md`
-
-## iOS App Store build requirement
-
-Starting April 28, 2026, App Store Connect requires builds made with the iOS 26 SDK (Xcode 26+).
-
-Run this before release/TestFlight uploads:
-
-```bash
-./tools/ios/check_xcode_26_sdk.sh
-```

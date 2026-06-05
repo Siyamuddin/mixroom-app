@@ -23,8 +23,8 @@ it factual and tied to current code or release requirements.
 
 ## Android
 
-- Android builds use the FFmpeg `16kb` variant through
-  `tool/switch_ffmpeg_backend.dart`.
+- Android, iOS, and macOS use `ffmpeg_kit_flutter_new_full`.
+- Android Play releases must pass 16 KB native library alignment checks.
 - Native audio and asset-pack behavior can depend on ABI, NDK, Gradle, and
   packaged sample/instrument assets.
 - Test real-device audio routing and recording behavior before shipping native

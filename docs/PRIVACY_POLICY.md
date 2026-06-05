@@ -1,6 +1,6 @@
 # Mixroom Privacy Policy
 
-Last updated: 2026-04-15
+Last updated: 2026-06-05
 
 This Privacy Policy explains how (주)믹스룸 (Mixroom) ("Mixroom," "we," "us,"
 or "our") collects, uses, shares, and retains information when you use the
@@ -73,8 +73,13 @@ technologies may affect site functionality.
 
 ### D. AI and project-context data
 
-If you use Mixroom's cloud AI features, Mixroom may send a structured request
-to our backend systems and model providers. That request can include:
+If you choose to submit a Mixroom cloud AI request after the in-app disclosure,
+Mixroom sends a structured request to Mixroom backend systems and the active
+cloud AI model provider for that feature. Mixroom currently uses OpenAI for
+production cloud AI processing. Mixroom may support additional AI providers,
+such as Google or Anthropic, in the future, and will update this policy and the
+subprocessors list before routing production AI requests to a new provider.
+That request can include:
 
 - your prompt and limited recent chat history;
 - project summary data, such as BPM, clip file names, track gain/pan, effect
@@ -87,9 +92,8 @@ For Mixroom's current chat-driven cloud AI flow, raw audio files, rendered
 stems, waveform/sample buffers, the full project file, and plugin state blobs
 are not sent through that cloud chat path.
 
-Mixroom's backend is designed to support multiple alternative cloud AI
-providers. Only the provider that Mixroom has actively enabled for the relevant
-production deployment will process a given cloud AI request.
+Mixroom sends this cloud AI request only when you use a cloud AI feature such
+as AI chat or One-Button Mix.
 
 ### E. Media and device-permission data
 
@@ -175,7 +179,7 @@ We may share information in the following circumstances:
 - with service providers that help us operate Mixroom, such as cloud hosting,
   authentication, analytics, crash reporting, customer support, billing, and
   security vendors;
-- with AI model and infrastructure providers when you use cloud AI features;
+- with the active cloud AI model provider when you use cloud AI features;
 - with app stores, payment processors, and billing partners to process,
   verify, restore, reconcile, and manage subscriptions;
 - with identity providers when you choose social sign-in or linked-account
@@ -198,17 +202,15 @@ Mixroom's service providers or integrated platforms may include:
 - Sentry for crash and error reporting;
 - Apple and Google for app distribution, in-app purchases, purchase
   verification, and subscription management;
-- OpenAI, Anthropic, or Google model services, depending on which cloud AI
-  provider Mixroom has actively configured for the backend handling your
-  request;
+- OpenAI for cloud AI model processing when you use cloud AI features;
 - Google, Apple, and Kakao for sign-in flows;
 - Google/YouTube if you choose an upload-to-YouTube workflow.
 
-Third-party providers process data under their own terms and privacy policies
-in addition to ours.
-
-If you want to know which cloud AI provider is currently active for your
-deployment or request path, contact `privacy@mixroom.ai`.
+Mixroom requires service providers that process personal data on its behalf,
+including AI providers, to protect that data with the same or equal level of
+protection described in this policy and in Mixroom's agreements with those
+providers. Third-party providers also process data under their own terms and
+privacy policies where applicable.
 
 ## 7. Analytics, Diagnostics, and Marketing Choices
 

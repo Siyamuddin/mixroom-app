@@ -8,6 +8,8 @@ class NativeSocialAuthConfig {
   static const String _defaultKakaoNativeAppKey =
       'a70f53b706f3290cd916615b82b3feea';
 
+  static const String _defaultKakaoRestApiKey = '';
+
   static const String googleClientId = String.fromEnvironment(
     'GOOGLE_CLIENT_ID',
     defaultValue: '',
@@ -20,6 +22,11 @@ class NativeSocialAuthConfig {
 
   static const String kakaoNativeAppKey = String.fromEnvironment(
     'KAKAO_NATIVE_APP_KEY',
+    defaultValue: '',
+  );
+
+  static const String kakaoRestApiKey = String.fromEnvironment(
+    'KAKAO_REST_API_KEY',
     defaultValue: '',
   );
 
@@ -41,10 +48,18 @@ class NativeSocialAuthConfig {
     return _defaultKakaoNativeAppKey;
   }
 
+  static String get effectiveKakaoRestApiKey {
+    final configured = kakaoRestApiKey.trim();
+    if (configured.isNotEmpty) return configured;
+    return _defaultKakaoRestApiKey;
+  }
+
   static bool get hasGoogleServerClientId =>
       effectiveGoogleServerClientId.isNotEmpty;
 
   static bool get hasGoogleClientId => effectiveGoogleClientId.isNotEmpty;
 
   static bool get hasKakaoNativeAppKey => effectiveKakaoNativeAppKey.isNotEmpty;
+
+  static bool get hasKakaoRestApiKey => effectiveKakaoRestApiKey.isNotEmpty;
 }

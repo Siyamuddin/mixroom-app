@@ -7,6 +7,6 @@ class LegalConfig {
   static const String subprocessorsUrl = 'https://mixroom.ai/subprocessors';
 
   static const String termsVersion = '2026-03-22';
-  static const String privacyVersion = '2026-03-22';
+  static const String privacyVersion = '2026-06-05';
   static const int minimumSignupAgeYears = 13;
 }

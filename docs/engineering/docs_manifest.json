@@ -4,11 +4,10 @@
     {
       "doc": "docs/engineering/local_setup.md",
       "owner": "Engineering",
-      "update_trigger": "Supported platforms, required SDK versions, FFmpeg variants, native library selection, or backend local setup changes.",
+      "update_trigger": "Supported platforms, required SDK versions, native library selection, media dependencies, or backend local setup changes.",
       "watch_paths": [
         "pubspec.yaml",
         "README.md",
-        "tool/switch_ffmpeg_backend.dart",
         "tool/run_integration_suite.sh",
         "juce_audio_engine/ios/juce_audio_engine.podspec",
         "android/",

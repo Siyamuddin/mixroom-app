@@ -309,6 +309,28 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                   ),
                   const SizedBox(height: 12),
                   _SectionCard(
+                    title: L10n.translate(context, 'Cloud AI Processing'),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(2, 10, 2, 10),
+                        child: Text(
+                          L10n.translate(
+                            context,
+                            'Mixroom AI sends your prompt, recent chat context, and project summary to Mixroom backend systems and the active AI provider. Current provider: OpenAI. Raw audio files are not sent by the chat AI flow.',
+                          ),
+                          style: TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: Colors.white.withValues(alpha: 0.72),
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w500,
+                            height: 1.38,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _SectionCard(
                     title: L10n.translate(context, 'Documents'),
                     children: [
                       _ActionItem(

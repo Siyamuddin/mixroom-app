@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -14,6 +15,11 @@ class SensitiveStorage {
       const FlutterSecureStorage(aOptions: _androidOptions);
 
   Future<String?> read(String key) async {
+    if (_useSharedPreferencesOnly) {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(key);
+    }
+
     final secureValue = await _readSecure(key);
     if (secureValue != null) {
       return secureValue;
@@ -24,6 +30,11 @@ class SensitiveStorage {
   }
 
   Future<String?> readWithMigration(String key) async {
+    if (_useSharedPreferencesOnly) {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(key);
+    }
+
     final secureValue = await _readSecure(key);
     if (secureValue != null && secureValue.isNotEmpty) {
       final prefs = await SharedPreferences.getInstance();
@@ -45,6 +56,12 @@ class SensitiveStorage {
   }
 
   Future<void> write(String key, String value) async {
+    if (_useSharedPreferencesOnly) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(key, value);
+      return;
+    }
+
     final wroteSecure = await _writeSecure(key, value);
     final prefs = await SharedPreferences.getInstance();
     if (wroteSecure) {
@@ -56,9 +73,22 @@ class SensitiveStorage {
   }
 
   Future<void> delete(String key) async {
+    if (_useSharedPreferencesOnly) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(key);
+      return;
+    }
+
     await _deleteSecure(key);
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(key);
+  }
+
+  bool get _useSharedPreferencesOnly {
+    // TODO: Revisit this macOS fallback. SharedPreferences is not appropriate
+    // for sensitive tokens; this should use Keychain-backed storage once the
+    // macOS entitlement/plugin issue is resolved.
+    return !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
   }
 
   Future<String?> _readSecure(String key) async {

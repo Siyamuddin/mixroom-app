@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_appauth/flutter_appauth.dart';
 import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
@@ -21,6 +23,7 @@ class NativeSocialSignInPayload {
 class NativeSocialSignInClient {
   NativeSocialSignInClient._();
 
+  static const FlutterAppAuth _appAuth = FlutterAppAuth();
   static bool _googleInitialized = false;
   static bool _kakaoInitialized = false;
   static const MethodChannel _macosNativeSocialChannel =
@@ -31,6 +34,9 @@ class NativeSocialSignInClient {
       throw const _NativeSocialSignInException(
         'Google sign-in is not configured in this build.',
       );
+    }
+    if (defaultTargetPlatform == TargetPlatform.macOS) {
+      return _signInWithGoogleMacOS();
     }
     await _ensureGoogleInitialized();
 
@@ -61,6 +67,13 @@ class NativeSocialSignInClient {
         e.description?.trim().isNotEmpty == true
             ? e.description!.trim()
             : 'Google sign-in could not be completed.',
+      );
+    } on PlatformException catch (e) {
+      if (defaultTargetPlatform != TargetPlatform.macOS) {
+        rethrow;
+      }
+      throw _NativeSocialSignInException(
+        _friendlyGooglePlatformErrorMessage(e),
       );
     }
   }
@@ -170,6 +183,9 @@ class NativeSocialSignInClient {
     try {
       switch (provider) {
         case AuthProviderType.google:
+          if (defaultTargetPlatform == TargetPlatform.macOS) {
+            return;
+          }
           await _ensureGoogleInitialized();
           await GoogleSignIn.instance.signOut();
           return;
@@ -198,6 +214,93 @@ class NativeSocialSignInClient {
           : null,
     );
     _googleInitialized = true;
+  }
+
+  static Future<NativeSocialSignInPayload> _signInWithGoogleMacOS() async {
+    if (!NativeSocialAuthConfig.hasGoogleClientId) {
+      throw const _NativeSocialSignInException(
+        'Google sign-in is not configured in this desktop build.',
+      );
+    }
+
+    final clientId = NativeSocialAuthConfig.effectiveGoogleClientId;
+    final redirectScheme = _googleRedirectScheme(clientId);
+    final redirectUri = '$redirectScheme:/oauth2redirect';
+
+    try {
+      final result = await _appAuth.authorizeAndExchangeCode(
+        AuthorizationTokenRequest(
+          clientId,
+          redirectUri,
+          issuer: 'https://accounts.google.com',
+          scopes: const <String>['openid', 'email', 'profile'],
+          promptValues: const <String>['select_account'],
+        ),
+      );
+
+      final idToken = result.idToken?.trim() ?? '';
+      if (idToken.isEmpty) {
+        throw const _NativeSocialSignInException(
+          'Google sign-in did not return an ID token.',
+        );
+      }
+
+      final claims = _decodeJwtPayload(idToken);
+      return NativeSocialSignInPayload(
+        provider: AuthProviderType.google,
+        body: <String, dynamic>{
+          'provider': AuthProviderType.google.value,
+          'id_token': idToken,
+          'email': (claims['email'] ?? '').toString().trim().toLowerCase(),
+          'display_name': (claims['name'] ?? '').toString().trim(),
+        },
+      );
+    } on FlutterAppAuthUserCancelledException {
+      throw const _NativeSocialSignInException('Social sign-in was cancelled.');
+    } on FlutterAppAuthPlatformException catch (e) {
+      throw _NativeSocialSignInException(
+        _friendlyGoogleAppAuthErrorMessage(e),
+      );
+    } on PlatformException catch (e) {
+      throw _NativeSocialSignInException(
+        _friendlyGooglePlatformErrorMessage(e),
+      );
+    }
+  }
+
+  static String _googleRedirectScheme(String clientId) {
+    final trimmed = clientId.trim();
+    if (!trimmed.endsWith('.apps.googleusercontent.com')) {
+      return trimmed;
+    }
+    final appId = trimmed.substring(
+      0,
+      trimmed.length - '.apps.googleusercontent.com'.length,
+    );
+    return 'com.googleusercontent.apps.$appId';
+  }
+
+  static Map<String, dynamic> _decodeJwtPayload(String jwt) {
+    final parts = jwt.split('.');
+    if (parts.length < 2) {
+      return const <String, dynamic>{};
+    }
+    try {
+      final normalized = base64Url.normalize(parts[1]);
+      final payload = utf8.decode(base64Url.decode(normalized));
+      final decoded = jsonDecode(payload);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      if (decoded is Map) {
+        return decoded.map(
+          (key, value) => MapEntry(key.toString(), value),
+        );
+      }
+    } catch (_) {
+      return const <String, dynamic>{};
+    }
+    return const <String, dynamic>{};
   }
 
   static Future<void> _ensureKakaoInitialized() async {
@@ -235,11 +338,17 @@ class NativeSocialSignInClient {
         'Kakao sign-in is not configured in this build.',
       );
     }
+    if (!NativeSocialAuthConfig.hasKakaoRestApiKey) {
+      throw const _NativeSocialSignInException(
+        'Kakao REST API key is not configured for this desktop build.',
+      );
+    }
     try {
       final payload = await _macosNativeSocialChannel
           .invokeMapMethod<String, dynamic>(
               'signInWithKakao', <String, dynamic>{
         'nativeAppKey': NativeSocialAuthConfig.effectiveKakaoNativeAppKey,
+        'restApiKey': NativeSocialAuthConfig.effectiveKakaoRestApiKey,
       });
       final accessToken = (payload?['access_token'] ?? '').toString().trim();
       if (accessToken.isEmpty) {
@@ -298,6 +407,51 @@ class NativeSocialSignInClient {
       return 'Kakao sign-in could not be completed.';
     }
     return rawMessage;
+  }
+
+  static String _friendlyGooglePlatformErrorMessage(PlatformException error) {
+    final combined = <String>[
+      error.code,
+      error.message ?? '',
+      error.details?.toString() ?? '',
+    ].join(' ').toLowerCase();
+
+    if (combined.contains('cancel')) {
+      return 'Social sign-in was cancelled.';
+    }
+    if (combined.contains('oauth2.googleapis.com/token') ||
+        combined.contains('nsurlerrordomain') ||
+        combined.contains('kcferrordomaincfnetwork') ||
+        combined.contains('network connection was lost') ||
+        combined.contains('-1005')) {
+      return 'Network error. Please check your connection and try again.';
+    }
+    return 'Google sign-in could not be completed. Please try again.';
+  }
+
+  static String _friendlyGoogleAppAuthErrorMessage(
+    FlutterAppAuthPlatformException error,
+  ) {
+    final combined = <String>[
+      error.code,
+      error.message ?? '',
+      error.details?.toString() ?? '',
+    ].join(' ').toLowerCase();
+
+    if (combined.contains('cancel')) {
+      return 'Social sign-in was cancelled.';
+    }
+    if (combined.contains('oauth2.googleapis.com/token') ||
+        combined.contains('nsurlerrordomain') ||
+        combined.contains('kcferrordomaincfnetwork') ||
+        combined.contains('network connection was lost') ||
+        combined.contains('-1005')) {
+      return 'Network error. Please check your connection and try again.';
+    }
+    if (combined.contains('redirect') || combined.contains('invalid_request')) {
+      return 'Google sign-in is not configured correctly for this desktop build.';
+    }
+    return 'Google sign-in could not be completed. Please try again.';
   }
 
   static String _extractKakaoErrorCode(Object error) {

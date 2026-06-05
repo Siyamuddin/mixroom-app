@@ -42,28 +42,17 @@ directory before deploying.
 
 ### Android
 
-Use the Android FFmpeg variant:
-
-```bash
-dart run tool/switch_ffmpeg_backend.dart 16kb
-flutter pub get
-```
-
-Then build the requested artifact:
+Build the requested artifact:
 
 ```bash
 flutter build apk
 flutter build appbundle
 ```
 
+Before Play submission, verify the final APK/AAB passes Android 16 KB native
+library alignment checks.
+
 ### iOS
-
-Use the iOS FFmpeg variant:
-
-```bash
-dart run tool/switch_ffmpeg_backend.dart new_full
-flutter pub get
-```
 
 `juce_audio_engine/ios/juce_audio_engine.podspec` selects the correct JUCE
 archive automatically for simulator, debug device, and Profile/Release device

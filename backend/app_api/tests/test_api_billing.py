@@ -168,7 +168,7 @@ class ApiBillingTests(unittest.TestCase):
             "billing_interval": "yearly",
             "label": "Producer Yearly",
             "enabled": True,
-            "price_krw": 290000,
+            "price_krw": 299000,
         }
 
         response = module.handler(
@@ -189,6 +189,47 @@ class ApiBillingTests(unittest.TestCase):
         payload = decode_json_response(response)
         self.assertEqual(payload["provider"], "paddle")
         self.assertNotIn("toss", payload)
+        self.assertEqual(
+            payload["paddle"]["items"],
+            [{"priceId": "pri_01krvt15ak2k4ck94fzhfa0mr5", "quantity": 1}],
+        )
+
+    def test_checkout_session_returns_paddle_yearly_studio_seat_items(self):
+        module.catalog_repo.get_product.return_value = {
+            "code": "studio_yearly",
+            "plan_code": "studio",
+            "type": "subscription",
+            "billing_interval": "yearly",
+            "label": "Studio Yearly",
+            "enabled": True,
+            "price_krw": 1490000,
+        }
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/checkout-session",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps(
+                    {
+                        "region_code": "US",
+                        "product_code": "studio_yearly",
+                        "additional_seats": 2,
+                    }
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertEqual(payload["provider"], "paddle")
+        self.assertEqual(
+            payload["paddle"]["items"],
+            [
+                {"priceId": "pri_01krvt4dn9kfz44s6dqyaedpyc", "quantity": 1},
+                {"priceId": "pri_01krvt8a8vhstfkv7qxyjkc1av", "quantity": 2},
+            ],
+        )
 
     def test_checkout_session_rejects_contract_products(self):
         module.catalog_repo.get_product.return_value = {

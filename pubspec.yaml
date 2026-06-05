@@ -16,7 +16,7 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.2.4+41
+version: 1.2.4+42
 
 environment:
   sdk: ^3.6.0
@@ -45,11 +45,7 @@ dependencies:
   file_picker: ^10.3.3
   accessing_security_scoped_resource: ^3.4.0
 
-  # (This might be unnecessary now, can just all use new_full) FFmpeg backend. (iOS = new_full, Android = 16kb) Switch with:
-  #   dart run tool/switch_ffmpeg_backend.dart new_full
-  #   dart run tool/switch_ffmpeg_backend.dart 16kb
   ffmpeg_kit_flutter_new_full: ^1.2.0
-  # ffmpeg_kit_16kb: ^1.0.4
 
   flutter_file_dialog: ^3.0.2
   audio_waveforms: ^2.0.2 #deprecated
@@ -172,6 +168,7 @@ flutter:
     - assets/ig_icon.png
     - assets/youtube_icon.png
     - assets/soundcloud_icon.png
+    - assets/short_white.png
     - assets/short_white_splash.png
     - assets/mixroom_launch_screen.webp
     - assets/auth/

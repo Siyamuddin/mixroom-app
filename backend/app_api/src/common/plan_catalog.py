@@ -275,7 +275,7 @@ PRODUCT_CATALOG = [
         "enabled": True,
         "management_channel": "web_or_mobile",
         "platforms": ["ios", "android", "web"],
-        "price_display": "$216/yr",
+        "price_display": "$214.99/yr",
         "price_krw": 299000,
     },
     {

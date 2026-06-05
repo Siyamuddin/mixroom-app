@@ -7041,7 +7041,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _loadInputDevicesFromJuce();
       await _refreshAudioRouteInfo();
       await _loadBundledInstrumentCatalog();
-      await _refreshDesktopHostedInstrumentCatalog();
       final engineSupportsLiveMidi =
           await JuceAudioEngine.supportsLiveMidiClipPlayback();
       _liveMidiEventPlaybackSupported =
@@ -7059,10 +7058,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _loadProjectIfAny();
       await _flushPendingDesktopFinderDrops();
       setState(() => _isLoadingNextScreen = false);
+      unawaited(_refreshDesktopHostedInstrumentCatalogAfterProjectOpen());
       unawaited(_flushDeferredAndroidRouteRefreshIfNeeded());
       await _runInitialActionIfNeeded();
       await _maybeShowDawOnboarding();
     });
+  }
+
+  Future<void> _refreshDesktopHostedInstrumentCatalogAfterProjectOpen() async {
+    if (!PlatformCapabilities.current.isDesktop ||
+        !_platformCapabilities.externalPluginHosting ||
+        _desktopHostedInstrumentCatalogReady) {
+      return;
+    }
+
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    if (!mounted) return;
+    await _refreshDesktopHostedInstrumentCatalog();
   }
 
   Future<void> _runInitialActionIfNeeded() async {
@@ -13646,32 +13658,37 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                             ),
                                                             const SizedBox(
                                                                 height: 6),
-                                                            SwitchListTile(
-                                                              contentPadding:
-                                                                  EdgeInsets
-                                                                      .zero,
-                                                              title: Text(
-                                                                L10n.translate(
-                                                                    context,
-                                                                    'Normalize loudness'),
-                                                                style:
-                                                                    TextStyle(
-                                                                  color:
-                                                                      mutedText,
+                                                            Material(
+                                                              color: Colors
+                                                                  .transparent,
+                                                              child:
+                                                                  SwitchListTile(
+                                                                contentPadding:
+                                                                    EdgeInsets
+                                                                        .zero,
+                                                                title: Text(
+                                                                  L10n.translate(
+                                                                      context,
+                                                                      'Normalize loudness'),
+                                                                  style:
+                                                                      TextStyle(
+                                                                    color:
+                                                                        mutedText,
+                                                                  ),
                                                                 ),
+                                                                value:
+                                                                    selectedNormalize,
+                                                                activeColor:
+                                                                    exportBlue,
+                                                                onChanged:
+                                                                    (value) {
+                                                                  setSheetState(
+                                                                      () {
+                                                                    selectedNormalize =
+                                                                        value;
+                                                                  });
+                                                                },
                                                               ),
-                                                              value:
-                                                                  selectedNormalize,
-                                                              activeColor:
-                                                                  exportBlue,
-                                                              onChanged:
-                                                                  (value) {
-                                                                setSheetState(
-                                                                    () {
-                                                                  selectedNormalize =
-                                                                      value;
-                                                                });
-                                                              },
                                                             ),
                                                           ],
                                                           if (!nativeWavOnly &&
@@ -13847,30 +13864,35 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                             ),
                                                             const SizedBox(
                                                                 height: 6),
-                                                            SwitchListTile(
-                                                              contentPadding:
-                                                                  EdgeInsets
-                                                                      .zero,
-                                                              title: Text(
-                                                                L10n.translate(
-                                                                    context,
-                                                                    'Enable dithering'),
-                                                                style: TextStyle(
-                                                                    color:
-                                                                        mutedText),
+                                                            Material(
+                                                              color: Colors
+                                                                  .transparent,
+                                                              child:
+                                                                  SwitchListTile(
+                                                                contentPadding:
+                                                                    EdgeInsets
+                                                                        .zero,
+                                                                title: Text(
+                                                                  L10n.translate(
+                                                                      context,
+                                                                      'Enable dithering'),
+                                                                  style: TextStyle(
+                                                                      color:
+                                                                          mutedText),
+                                                                ),
+                                                                value:
+                                                                    selectedWavDithering,
+                                                                activeColor:
+                                                                    exportBlue,
+                                                                onChanged:
+                                                                    (value) {
+                                                                  setSheetState(
+                                                                      () {
+                                                                    selectedWavDithering =
+                                                                        value;
+                                                                  });
+                                                                },
                                                               ),
-                                                              value:
-                                                                  selectedWavDithering,
-                                                              activeColor:
-                                                                  exportBlue,
-                                                              onChanged:
-                                                                  (value) {
-                                                                setSheetState(
-                                                                    () {
-                                                                  selectedWavDithering =
-                                                                      value;
-                                                                });
-                                                              },
                                                             ),
                                                           ] else ...[
                                                             buildDropdownField(
@@ -42485,6 +42507,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       height: 1.35,
                     ),
                   ),
+                  const SizedBox(height: 12),
+                  Text(
+                    L10n.translate(
+                      context,
+                      'AI requests send your prompt, recent chat context, and project summary to Mixroom and the active AI provider. Current provider: OpenAI. Raw audio is not sent.',
+                    ),
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.68),
+                      fontSize: 12.2,
+                      height: 1.35,
+                    ),
+                  ),
                   const SizedBox(height: 16),
                   Text(
                     L10n.translate(context, 'chat_help_can'),
@@ -43920,6 +43955,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           fontWeight: FontWeight.w400,
                           height: 1.4,
                           color: Colors.white.withValues(alpha: 0.86),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        L10n.translate(
+                          context,
+                          'Run sends project context to Mixroom and the active AI provider. Current provider: OpenAI. Raw audio is not sent.',
+                        ),
+                        style: TextStyle(
+                          fontFamily: 'Pretendard',
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          height: 1.35,
+                          color: Colors.white.withValues(alpha: 0.66),
                         ),
                       ),
                       const SizedBox(height: 16),

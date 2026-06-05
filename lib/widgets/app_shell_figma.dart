@@ -11,7 +11,7 @@ const String kMixroomShellBackgroundAsset =
     'assets/app_shell/shell_background.webp';
 const String kMixroomShellBrandMarkAsset = 'assets/app_shell/brand_mark.png';
 const String kMixroomShellWordmarkAsset = 'assets/app_shell/wordmark.png';
-const String kMixroomShortWhiteLogoAsset = 'assets/short_white_splash.png';
+const String kMixroomShortWhiteLogoAsset = 'assets/short_white.png';
 const String kMixroomShellHomeAsset = 'assets/app_shell/nav_home.svg';
 const String kMixroomShellHomeActiveAsset =
     'assets/app_shell/nav_home_active.svg';
@@ -319,9 +319,13 @@ class MixroomShellBackground extends StatelessWidget {
   }
 }
 
+const double _kMixroomLogoRasterOversample = 2.0;
+
 int _mixroomRasterCacheExtent(BuildContext context, double logicalExtent) {
   final devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
-  return (logicalExtent * devicePixelRatio).round().clamp(1, 8192);
+  return (logicalExtent * devicePixelRatio * _kMixroomLogoRasterOversample)
+      .round()
+      .clamp(1, 8192);
 }
 
 class _MixroomShellRasterAsset extends StatelessWidget {
@@ -413,6 +417,33 @@ class MixroomShellWordmark extends StatelessWidget {
     return _MixroomShellRasterAsset(
       assetPath: kMixroomShellWordmarkAsset,
       aspectRatio: _kMixroomWordmarkAspectRatio,
+      width: width,
+      height: height,
+      fit: fit,
+      alignment: alignment,
+    );
+  }
+}
+
+class MixroomShellShortLogo extends StatelessWidget {
+  const MixroomShellShortLogo({
+    super.key,
+    this.width,
+    this.height,
+    this.fit = BoxFit.contain,
+    this.alignment = Alignment.center,
+  });
+
+  final double? width;
+  final double? height;
+  final BoxFit fit;
+  final Alignment alignment;
+
+  @override
+  Widget build(BuildContext context) {
+    return _MixroomShellRasterAsset(
+      assetPath: kMixroomShortWhiteLogoAsset,
+      aspectRatio: _kMixroomBrandMarkAspectRatio,
       width: width,
       height: height,
       fit: fit,
@@ -1001,13 +1032,7 @@ class MixroomMainSideRail extends StatelessWidget {
                     color: Colors.white.withValues(alpha: 0.14),
                   ),
                 ),
-                child: Image.asset(
-                  kMixroomShortWhiteLogoAsset,
-                  fit: BoxFit.contain,
-                  filterQuality: FilterQuality.high,
-                  isAntiAlias: true,
-                  cacheWidth: 96,
-                ),
+                child: const MixroomShellShortLogo(),
               ),
               const SizedBox(height: 24),
               _MixroomDesktopRailIconButton(
@@ -1285,11 +1310,9 @@ class _MixroomInlineFeedbackComposerState
     return Column(
       children: [
         if (widget.compact)
-          Image.asset(
-            kMixroomShellBrandMarkAsset,
+          const MixroomShellBrandMark(
             width: 54,
             fit: BoxFit.contain,
-            filterQuality: FilterQuality.high,
           )
         else
           MixroomShellWordmarkHeader(showWordmark: true),

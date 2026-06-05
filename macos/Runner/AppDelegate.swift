@@ -3,6 +3,7 @@ import FlutterMacOS
 import AuthenticationServices
 
 @main
+@objcMembers
 class AppDelegate: FlutterAppDelegate, ASWebAuthenticationPresentationContextProviding {
   private let channelName = "mixroom/open_file"
   private let nativeSocialChannelName = "mixroom/native_social"
@@ -12,12 +13,13 @@ class AppDelegate: FlutterAppDelegate, ASWebAuthenticationPresentationContextPro
   private var channelsInitialized = false
   private var kakaoAuthSession: ASWebAuthenticationSession?
 
-  override func applicationDidFinishLaunching(_ notification: Notification) {
-    super.applicationDidFinishLaunching(notification)
+  @objc(applicationDidFinishLaunching:)
+  dynamic override func applicationDidFinishLaunching(_ notification: Notification) {
     bindChannelsIfNeeded()
   }
 
-  override func application(_ sender: NSApplication, openFiles filenames: [String]) {
+  @objc(application:openFiles:)
+  dynamic override func application(_ sender: NSApplication, openFiles filenames: [String]) {
     for path in filenames {
       if handleIncomingPath(path) {
         sender.reply(toOpenOrPrint: .success)
@@ -27,11 +29,13 @@ class AppDelegate: FlutterAppDelegate, ASWebAuthenticationPresentationContextPro
     sender.reply(toOpenOrPrint: .failure)
   }
 
-  override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+  @objc(applicationShouldTerminateAfterLastWindowClosed:)
+  dynamic override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
     return true
   }
 
-  override func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
+  @objc(applicationSupportsSecureRestorableState:)
+  dynamic override func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
     return true
   }
 
@@ -86,7 +90,13 @@ class AppDelegate: FlutterAppDelegate, ASWebAuthenticationPresentationContextPro
         let args = call.arguments as? [String: Any]
         let appKey = (args?["nativeAppKey"] as? String)?
           .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        self.startKakaoSignIn(nativeAppKey: appKey, result: result)
+        let restApiKey = (args?["restApiKey"] as? String)?
+          .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.startKakaoSignIn(
+          nativeAppKey: appKey,
+          restApiKey: restApiKey,
+          result: result
+        )
         return
       }
       result(FlutterMethodNotImplemented)
@@ -98,11 +108,23 @@ class AppDelegate: FlutterAppDelegate, ASWebAuthenticationPresentationContextPro
     return mainFlutterWindow ?? NSApplication.shared.windows.first ?? ASPresentationAnchor()
   }
 
-  private func startKakaoSignIn(nativeAppKey: String, result: @escaping FlutterResult) {
+  private func startKakaoSignIn(
+    nativeAppKey: String,
+    restApiKey: String,
+    result: @escaping FlutterResult
+  ) {
     if nativeAppKey.isEmpty {
       result(FlutterError(
         code: "KAKAO_NOT_CONFIGURED",
         message: "Kakao sign-in is not configured in this build.",
+        details: nil
+      ))
+      return
+    }
+    if restApiKey.isEmpty {
+      result(FlutterError(
+        code: "KAKAO_REST_API_KEY_NOT_CONFIGURED",
+        message: "Kakao REST API key is not configured for this desktop build.",
         details: nil
       ))
       return
@@ -121,7 +143,7 @@ class AppDelegate: FlutterAppDelegate, ASWebAuthenticationPresentationContextPro
     var components = URLComponents(string: "https://kauth.kakao.com/oauth/authorize")
     components?.queryItems = [
       URLQueryItem(name: "response_type", value: "code"),
-      URLQueryItem(name: "client_id", value: nativeAppKey),
+      URLQueryItem(name: "client_id", value: restApiKey),
       URLQueryItem(name: "redirect_uri", value: redirectUri),
       URLQueryItem(name: "scope", value: "account_email,profile_nickname")
     ]
@@ -204,7 +226,7 @@ class AppDelegate: FlutterAppDelegate, ASWebAuthenticationPresentationContextPro
       }
       self.exchangeKakaoCode(
         code: code,
-        nativeAppKey: nativeAppKey,
+        restApiKey: restApiKey,
         redirectUri: redirectUri,
         result: result
       )
@@ -225,7 +247,7 @@ class AppDelegate: FlutterAppDelegate, ASWebAuthenticationPresentationContextPro
 
   private func exchangeKakaoCode(
     code: String,
-    nativeAppKey: String,
+    restApiKey: String,
     redirectUri: String,
     result: @escaping FlutterResult
   ) {
@@ -246,7 +268,7 @@ class AppDelegate: FlutterAppDelegate, ASWebAuthenticationPresentationContextPro
     )
     request.httpBody = formEncodedBody([
       "grant_type": "authorization_code",
-      "client_id": nativeAppKey,
+      "client_id": restApiKey,
       "redirect_uri": redirectUri,
       "code": code
     ]).data(using: .utf8)

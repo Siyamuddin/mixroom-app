@@ -1,6 +1,6 @@
 # Mixroom Subprocessors
 
-Last updated: 2026-03-16
+Last updated: 2026-06-05
 
 This page lists the main third-party processors and service providers that may
 process personal data on behalf of (주)믹스룸 (Mixroom), depending on the
@@ -41,19 +41,15 @@ feature you use.
 
 ## AI providers
 
-Mixroom's backend supports multiple alternative cloud AI providers. Only the
-provider actively enabled for the relevant production deployment processes a
-given cloud AI request.
+Mixroom currently uses OpenAI as the active cloud AI model provider for
+production AI requests. Mixroom may support additional AI providers, such as
+Google or Anthropic, in the future, and will update this list before routing
+production AI requests to a new provider. Mixroom sends cloud AI request data
+only when you use a cloud AI feature.
 
 - OpenAI
-  - Purpose: cloud AI processing when OpenAI is the active backend model
-    provider
-- Anthropic
-  - Purpose: cloud AI processing when Anthropic is the active backend model
-    provider
-- Google
-  - Purpose: cloud AI processing when Google is the active backend model
-    provider
+  - Purpose: cloud AI model processing for prompts, limited chat history, and
+    structured project context Mixroom sends when you use cloud AI features
 
 ## Optional third-party content platforms
 
@@ -66,8 +62,5 @@ given cloud AI request.
   features you use and the Mixroom deployment configuration.
 - This list may change as Mixroom's infrastructure evolves. Mixroom will update
   this page when material processor changes occur.
-
-If you want to know which cloud AI provider is currently active, contact
-`privacy@mixroom.ai`.
 
 For privacy questions, contact `privacy@mixroom.ai`.

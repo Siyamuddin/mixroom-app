@@ -16,13 +16,7 @@ PLATFORM="$1"
 DEVICE_ID="$2"
 
 case "$PLATFORM" in
-  ios)
-    dart run tool/switch_ffmpeg_backend.dart new_full
-    flutter pub get
-    ;;
-  android)
-    dart run tool/switch_ffmpeg_backend.dart 16kb
-    flutter pub get
+  ios|android)
     ;;
   *)
     echo "Unsupported platform: $PLATFORM"

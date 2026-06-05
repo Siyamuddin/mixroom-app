@@ -7,11 +7,8 @@ This project includes an emulator-safe Flutter integration suite in:
 The suite uses a test-only app harness with fake auth and entitlement providers so it can run without real backend state.
 It runs through `flutter drive`, which has been more reliable here for emulator/device end-to-end execution than `flutter test integration_test -d ...`.
 
-Before each run, use the platform-aware wrapper so the app is configured with the correct FFmpeg backend:
-
-- iOS: `new_full`
-- Android: `16kb`
-
+Use the platform-aware wrapper to run the suite on Android or iOS.
+The app uses `ffmpeg_kit_flutter_new_full` on both platforms.
 The iOS JUCE podspec selects the simulator archive automatically through sdk-specific linker flags.
 
 The wrapper also prepends a local `tool/bin/xcrun` shim that clamps `xcdevice list` timeouts. This avoids Flutter hanging for long periods when macOS has a stale or unavailable paired iPhone in Apple device discovery.
@@ -55,9 +52,6 @@ tool/run_integration_suite.sh ios "iPhone 16"
 ## Direct Command
 
 ```sh
-dart run tool/switch_ffmpeg_backend.dart new_full   # iOS
-dart run tool/switch_ffmpeg_backend.dart 16kb       # Android
-flutter pub get
 flutter drive \
   --no-pub \
   --driver=test_driver/integration_test.dart \

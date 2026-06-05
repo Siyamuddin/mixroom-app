@@ -37,6 +37,8 @@ For the Google `Web application` OAuth client used as the server client ID:
 
 - Native app key:
   `a70f53b706f3290cd916615b82b3feea`
+- REST API key:
+  Required for macOS desktop Kakao login. Set it with `KAKAO_REST_API_KEY`.
 
 Already wired locally in this repo:
 
@@ -120,7 +122,8 @@ Use a real backend base URL after the AWS deploy finishes:
 flutter run \
   --dart-define=APP_API_BASE_URL=https://YOUR_API_ID.execute-api.YOUR_REGION.amazonaws.com/STAGE \
   --dart-define=GOOGLE_SERVER_CLIENT_ID=105509343723-lufnthv351v328td07s89j53mf242pl5.apps.googleusercontent.com \
-  --dart-define=KAKAO_NATIVE_APP_KEY=a70f53b706f3290cd916615b82b3feea
+  --dart-define=KAKAO_NATIVE_APP_KEY=a70f53b706f3290cd916615b82b3feea \
+  --dart-define=KAKAO_REST_API_KEY=YOUR_KAKAO_REST_API_KEY
 ```
 
 ## 7. Test Order

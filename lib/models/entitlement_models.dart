@@ -1494,7 +1494,7 @@ class BillingCatalogSnapshot {
           enabled: true,
           managementChannel: 'web_or_mobile',
           platforms: <String>['ios', 'android', 'web'],
-          priceDisplay: '\$216/yr',
+          priceDisplay: '\$214.99/yr',
           trialDays: 0,
           rank: 21,
         ),
