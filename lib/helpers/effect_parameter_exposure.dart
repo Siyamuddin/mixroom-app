@@ -54,7 +54,13 @@ const Map<String, List<String>> kExposedEffectParameterNames =
   ],
   'Gain': <String>['Volume'],
   'Pitch Shift': <String>['Semitones', 'Mix'],
-  'Pitch Corrector': <String>['Key', 'Scale', 'Amount', 'Speed', 'Mix'],
+  'Pitch Corrector': <String>[
+    'Key',
+    'Scale',
+    'Correction',
+    'Retune Speed',
+    'Mix',
+  ],
 };
 
 bool hasCanonicalExposedEffectParameters(String effectName) {

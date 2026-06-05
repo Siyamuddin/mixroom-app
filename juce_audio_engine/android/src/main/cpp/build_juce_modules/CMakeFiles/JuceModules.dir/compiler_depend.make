@@ -421,6 +421,497 @@ CMakeFiles/JuceModules.dir/juce/modules/juce_audio_basics/juce_audio_basics.cpp.
   /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/juce_GZIPDecompressorInputStream.h \
   /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/juce_ZipFile.h
 
+CMakeFiles/JuceModules.dir/juce/modules/juce_audio_devices/juce_audio_devices.cpp.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/juce_audio_devices.cpp \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/__stddef_max_align_t.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/float.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/limits.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/stdarg.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/stddef.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/stdint.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/bitsperlong.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/errno.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/fcntl.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/hwcap.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/mman.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/poll.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/posix_types.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/ptrace.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/resource.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/sigcontext.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/siginfo.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/signal.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/sve_context.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/types.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/alloca.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/api-level.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/legacy_errno_inlines.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/legacy_signal_inlines.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/legacy_stdlib_inlines.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/legacy_sys_mman_inlines.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/legacy_sys_stat_inlines.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/legacy_sys_wait_inlines.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/legacy_unistd_inlines.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/ndk-version.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/versioning.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/bitsperlong.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/errno-base.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/errno.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/fcntl.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/hugetlb_encode.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/int-ll64.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/mman-common.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/mman.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/poll.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/posix_types.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/resource.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/siginfo.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/signal-defs.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/signal.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/types.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/ctype_inlines.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fcntl.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/flock.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/flock64.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/fcntl.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/poll.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/stat.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/stdio.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/stdlib.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/string.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/strings.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/unistd.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/getopt.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/ioctl.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/lockf.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/mbstate_t.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/posix_limits.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/pthread_types.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/seek_constants.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/signal_types.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/strcasecmp.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/sysconf.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/timespec.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/wait.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/wchar_limits.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/wctype.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/byteswap.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__bit_reference \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__bsd_locale_fallbacks.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__config \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__debug \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__errc \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__functional_base \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__hash_table \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__locale \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__mutex_base \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__node_handle \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__nullptr \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__split_buffer \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__string \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__threading_support \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__tree \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__tuple \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__undef_macros \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/algorithm \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/array \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/atomic \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/bit \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/bitset \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cctype \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cerrno \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/chrono \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/climits \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cmath \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/condition_variable \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cstdarg \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cstddef \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cstdint \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cstdio \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cstdlib \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cstring \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/ctime \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/ctype.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cwchar \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cwctype \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/deque \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/errno.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/exception \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/float.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/functional \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/future \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/initializer_list \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/iomanip \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/ios \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/iosfwd \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/iostream \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/istream \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/iterator \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/limits \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/limits.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/list \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/locale \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/locale.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/map \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/math.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/memory \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/mutex \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/new \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/numeric \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/optional \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/ostream \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/queue \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/ratio \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/set \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/sstream \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/stddef.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/stdexcept \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/stdint.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/stdio.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/stdlib.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/streambuf \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/string \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/string.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/string_view \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/support/android/locale_bionic.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/system_error \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/thread \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/tuple \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/type_traits \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/typeindex \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/typeinfo \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/unordered_map \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/unordered_set \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/utility \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/variant \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/vector \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/version \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/wchar.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/wctype.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/ctype.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/dirent.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/dlfcn.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/errno.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/fcntl.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/features.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/fnmatch.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/jni.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/limits.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/compiler.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/compiler_types.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/const.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/errno.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/fadvise.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/falloc.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/fcntl.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/kernel.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/limits.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/magic.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/memfd.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/mman.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/openat2.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/poll.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/posix_types.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/ptrace.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/resource.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/sched.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/signal.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/stat.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/stddef.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/sysinfo.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/time.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/time_types.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/types.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/uio.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/utime.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/wait.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/locale.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/malloc.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/math.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/poll.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/pthread.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/pwd.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sched.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/semaphore.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/signal.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/stdint.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/stdio.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/stdlib.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/string.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/strings.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/cdefs.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/endian.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/eventfd.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/mman.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/ptrace.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/resource.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/select.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/stat.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/statfs.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/sysinfo.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/time.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/timerfd.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/types.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/ucontext.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/user.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/vfs.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/wait.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/time.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/unistd.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/utime.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/wchar.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/wctype.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/xlocale.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/local/include/locale.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/local/include/stdlib.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/local/include/wchar.h \
+  /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/local/include/wctype.h \
+  _deps/oboe-src/include/oboe/AudioStream.h \
+  _deps/oboe-src/include/oboe/AudioStreamBase.h \
+  _deps/oboe-src/include/oboe/AudioStreamBuilder.h \
+  _deps/oboe-src/include/oboe/AudioStreamCallback.h \
+  _deps/oboe-src/include/oboe/Definitions.h \
+  _deps/oboe-src/include/oboe/FifoBuffer.h \
+  _deps/oboe-src/include/oboe/FifoControllerBase.h \
+  _deps/oboe-src/include/oboe/FullDuplexStream.h \
+  _deps/oboe-src/include/oboe/LatencyTuner.h \
+  _deps/oboe-src/include/oboe/Oboe.h \
+  _deps/oboe-src/include/oboe/OboeExtensions.h \
+  _deps/oboe-src/include/oboe/ResultWithValue.h \
+  _deps/oboe-src/include/oboe/StabilizedCallback.h \
+  _deps/oboe-src/include/oboe/Utilities.h \
+  _deps/oboe-src/include/oboe/Version.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/audio_play_head/juce_AudioPlayHead.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_AudioChannelSet.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_AudioDataConverters.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_AudioProcessLoadMeasurer.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_AudioSampleBuffer.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_FloatVectorOperations.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/juce_audio_basics.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiBuffer.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiDataConcatenator.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiFile.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiKeyboardState.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiMessage.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiMessageSequence.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiRPN.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPBytesOnGroup.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPDeviceInfo.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEInstrument.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEMessages.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPENote.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPESynthesiser.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPESynthesiserBase.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPESynthesiserVoice.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEUtils.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEValue.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEZoneLayout.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_AudioSource.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_BufferingAudioSource.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_ChannelRemappingAudioSource.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_IIRFilterAudioSource.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_MemoryAudioSource.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_MixerAudioSource.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_PositionableAudioSource.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_ResamplingAudioSource.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_ReverbAudioSource.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_ToneGeneratorAudioSource.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/synthesisers/juce_Synthesiser.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_ADSR.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_AudioWorkgroup.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_Decibels.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_GenericInterpolator.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_IIRFilter.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_Interpolators.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_Reverb.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_SmoothedValue.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/audio_io/juce_AudioDeviceManager.cpp \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/audio_io/juce_AudioDeviceManager.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/audio_io/juce_AudioIODevice.cpp \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/audio_io/juce_AudioIODevice.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/audio_io/juce_AudioIODeviceType.cpp \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/audio_io/juce_AudioIODeviceType.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/audio_io/juce_SampleRateHelpers.cpp \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/audio_io/juce_SystemAudioVolume.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/juce_audio_devices.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/midi_io/juce_MidiDeviceListConnectionBroadcaster.cpp \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/midi_io/juce_MidiDevices.cpp \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/midi_io/juce_MidiDevices.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/midi_io/juce_MidiMessageCollector.cpp \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/midi_io/juce_MidiMessageCollector.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/juce_Audio_android.cpp \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/juce_HighPerformanceAudioHelpers_android.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/juce_Midi_android.cpp \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/juce_Oboe_android.cpp \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/sources/juce_AudioSourcePlayer.cpp \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/sources/juce_AudioSourcePlayer.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/sources/juce_AudioTransportSource.cpp \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/sources/juce_AudioTransportSource.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_AbstractFifo.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_Array.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ArrayAllocationBase.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ArrayBase.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_DynamicObject.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ElementComparator.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_Enumerate.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_FixedSizeFunction.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_HashMap.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_LinkedListPointer.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ListenerList.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_NamedValueSet.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_Optional.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_OwnedArray.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_PropertySet.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ReferenceCountedArray.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ScopedValueSetter.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_SingleThreadedAbstractFifo.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_SortedSet.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_Span.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_SparseSet.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_Variant.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/detail/juce_CallbackListenerList.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/detail/juce_NativeFileHandle.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_AndroidDocument.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_DirectoryIterator.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_File.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_FileFilter.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_FileInputStream.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_FileOutputStream.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_FileSearchPath.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_MemoryMappedFile.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_RangedDirectoryIterator.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_TemporaryFile.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_WildcardFileFilter.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/json/juce_JSON.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/json/juce_JSONSerialisation.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/json/juce_JSONUtils.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/juce_core.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/logging/juce_FileLogger.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/logging/juce_Logger.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_BigInteger.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_Expression.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_MathsFunctions.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_NormalisableRange.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_Random.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_Range.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_StatisticsAccumulator.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_AllocationHooks.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_Atomic.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_ByteOrder.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_ContainerDeletePolicy.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_CopyableHeapBlock.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_HeapBlock.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_HeavyweightLeakedObjectDetector.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_LeakedObjectDetector.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_Memory.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_MemoryBlock.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_OptionalScopedPointer.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_ReferenceCountedObject.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_Reservoir.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_ScopedPointer.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_SharedResourcePointer.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_Singleton.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_WeakReference.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_ConsoleApplication.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_EnumHelpers.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_Functional.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_OptionsHelpers.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_Result.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_RuntimePermissions.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_ScopeGuard.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_Uuid.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_WindowsRegistry.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_BasicNativeHeaders.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_JNIHelpers_android.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_IPAddress.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_MACAddress.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_NamedPipe.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_Socket.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_URL.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_WebInputStream.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/serialisation/juce_Serialisation.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_AndroidDocumentInputSource.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_BufferedInputStream.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_FileInputSource.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_InputSource.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_InputStream.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_MemoryInputStream.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_MemoryOutputStream.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_OutputStream.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_SubregionStream.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_URLInputSource.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/system/juce_CompilerSupport.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/system/juce_CompilerWarnings.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/system/juce_PlatformDefs.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/system/juce_StandardHeader.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/system/juce_SystemStats.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/system/juce_TargetPlatform.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_Base64.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_CharPointer_ASCII.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_CharPointer_UTF16.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_CharPointer_UTF32.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_CharPointer_UTF8.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_CharacterFunctions.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_Identifier.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_LocalisedStrings.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_NewLine.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_String.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_StringArray.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_StringPairArray.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_StringPool.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_StringRef.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_TextDiff.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ChildProcess.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_CriticalSection.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_DynamicLibrary.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_HighResolutionTimer.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_InterProcessLock.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_Process.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ReadWriteLock.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ScopedLock.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ScopedReadLock.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ScopedWriteLock.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_SpinLock.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_Thread.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ThreadLocalValue.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ThreadPool.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_TimeSliceThread.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_WaitableEvent.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/time/juce_PerformanceCounter.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/time/juce_RelativeTime.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/time/juce_Time.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/unit_tests/juce_UnitTest.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/xml/juce_XmlDocument.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/xml/juce_XmlElement.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/juce_GZIPCompressorOutputStream.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/juce_GZIPDecompressorInputStream.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/juce_ZipFile.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_ActionBroadcaster.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_ActionListener.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_AsyncUpdater.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_ChangeBroadcaster.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_ChangeListener.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_LockingAsyncUpdater.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_ChildProcessManager.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_ConnectedChildProcess.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_InterprocessConnection.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_InterprocessConnectionServer.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_NetworkServiceDiscovery.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/juce_events.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_ApplicationBase.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_CallbackMessage.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_DeletedAtShutdown.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_Initialisation.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_Message.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_MessageListener.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_MessageManager.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_MountedVolumeListChangeDetector.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_NotificationType.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/native/juce_ScopedLowPowerModeDisabler.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/timers/juce_MultiTimer.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/timers/juce_TimedCallback.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/timers/juce_Timer.h
+
 CMakeFiles/JuceModules.dir/juce/modules/juce_audio_formats/juce_audio_formats.cpp.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/juce_audio_formats.cpp \
   /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.h \
   /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/__stddef_max_align_t.h \
@@ -6396,21 +6887,17 @@ CMakeFiles/JuceModules.dir/juce/modules/juce_gui_extra/juce_gui_extra.cpp.o: /Us
   /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/native/juce_WebBrowserComponent_android.cpp
 
 
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/native/juce_WebBrowserComponent_android.cpp:
+
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/native/juce_AndroidViewComponent.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_WebControlRelays.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_SystemTrayIconComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_SplashScreen.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_RecentlyOpenedFilesList.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_WebBrowserComponent.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_PushNotifications.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_PreferencesPanel.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_LiveConstantEditor.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_BubbleMessageComponent.cpp:
 
@@ -6419,10 +6906,6 @@ CMakeFiles/JuceModules.dir/juce/modules/juce_gui_extra/juce_gui_extra.cpp.o: /Us
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/documents/juce_FileBasedDocument.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_XMLCodeTokeniser.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_LuaCodeTokeniser.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_CodeEditorComponent.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_CodeDocument.cpp:
 
@@ -6434,565 +6917,559 @@ CMakeFiles/JuceModules.dir/juce/modules/juce_gui_extra/juce_gui_extra.cpp.o: /Us
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_TooltipWindow.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_ThreadWithProgressWindow.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_IIRFilterAudioSource.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/midi_io/juce_MidiDevices.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_ResizableWindow.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/colour/juce_ColourGradient.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_ScopedMessageBox.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_NativeScaleFactorNotifier.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_VST3ClientExtensions.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioThumbnail.cpp:
-
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_NativeMessageBox.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_DocumentWindow.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_DialogWindow.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_CallOutBox.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_AlertWindow.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ToolbarItemPalette.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ToolbarItemComponent.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_TextEditor.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_ShapeButton.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_TableListBox.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_TableHeaderComponent.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ListBox.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ProgressBar.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_MixerAudioSource.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ListBox.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_Label.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ImageComponent.cpp:
 
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ComboBox.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_TextPropertyComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ArrayAllocationBase.h:
+
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_ChoicePropertyComponent.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_ModifierKeys.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/ctype.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_ButtonPropertyComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_BooleanPropertyComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativePoint.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativeParallelogram.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativeCoordinate.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_MarkerList.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/native/juce_Windowing_android.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/native/juce_ScopedDPIAwarenessDisabler.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/native/accessibility/juce_Accessibility.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cstdarg:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_MouseListener.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/posix_types.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_DragAndDropContainer.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPIterator.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/misc/juce_FocusOutline.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/misc/juce_DropShadower.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/menus/juce_PopupMenu.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/menus/juce_BurgerMenuComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/lookandfeel/juce_LookAndFeel_V3.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/lookandfeel/juce_LookAndFeel.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ResizableEdgeComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_GlyphArrangement.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_Chorus.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_GridItem.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_CodeEditorComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_FlexBox.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ComponentBuilder.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_KeyboardFocusTraverser.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileChooserDialogBox.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileChooser.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileBrowserComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_MathsFunctions.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_DirectoryContentsDisplayComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_ScopedMessageBox.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/inflate.c:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativeRectangle.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_SVGParser.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_WebInputStream.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawablePath.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativePointPath.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jerror.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_ToolbarButton.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_FlacAudioFormat.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativeCoordinatePositioner.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_Drawable.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/native/juce_Windowing_android.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_ScopedMessageBoxImpl.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/native/accessibility/juce_AccessibilityTextHelpers.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBScript.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/audio_cd/juce_AudioCDReader.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/accessibility/interfaces/juce_AccessibilityTableInterface.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_MouseListener.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_MouseEvent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_ProcessorDuplicator.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/misc/juce_BubbleComponent.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/resource.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/lookandfeel/juce_LookAndFeel_V3.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/lookandfeel/juce_LookAndFeel_V2.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_TabbedComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/crc32.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_StretchableLayoutResizerBar.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_StretchableLayoutManager.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/features.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_GridItem.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_KeyListener.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_Panner.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_ImagePreviewComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileTreeComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileSearchPathListComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/juce_events.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/lookandfeel/juce_LookAndFeel_V1.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileListComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_PluginHostType.cpp:
+
+_deps/oboe-src/include/oboe/AudioStreamCallback.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_Viewport.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_EnumHelpers.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileChooserDialogBox.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_DirectoryContentsDisplayComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawableText.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/netinet/in6.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawableImage.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_TopLevelWindowManager.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/misc/juce_FocusOutline.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_ScopedMessageBoxInterface.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_ScopedContentSharerImpl.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_PointerState.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_FocusHelpers.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_MouseInputSourceImpl.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_WaitableEvent.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/desktop/juce_Desktop.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_CustomMouseCursorInfo.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/components/juce_ComponentListener.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_AccessibilityHelpers.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/commands/juce_ApplicationCommandTarget.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_AccessibilityHelpers.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/commands/juce_ApplicationCommandManager.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/desktop/juce_Displays.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_TreeView.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ConcertinaPanel.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/components/juce_Component.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_DragAndDropContainer.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/commands/juce_ApplicationCommandInfo.cpp:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/stdint.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_ToggleButton.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_ShapeButton.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_ImageButton.cpp:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/errno.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_DrawableButton.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_GenericInterpolator.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_NamedPipe.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_SystemTrayIconComponent.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_ArrowButton.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_FocusRestorer.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/images/juce_ImageCache.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiFile.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_HyperlinkButton.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_Button.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/juce_gui_basics.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jccoefct.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_Viewport.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SheenBidi.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/accessibility/juce_AccessibilityHandler.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBParagraph.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiMessageSequence.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBMirrorLocator.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/lpc.c:
-
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBLine.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBGeneralCategory.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBCodepointSequence.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/juce_UnicodeUtils.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ToolbarItemPalette.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/juce_UnicodeScript.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/juce_UnicodeGenerated.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/placement/juce_RectanglePlacement.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/window_flac.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/juce_Unicode.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/native/juce_IconHelpers_android.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/native/juce_GraphicsContext_android.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/psych_11.h:
+_deps/oboe-src/include/oboe/AudioStreamBuilder.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/native/juce_Fonts_android.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/psych_8.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/images/juce_ImageConvolutionKernel.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/images/juce_ImageCache.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/images/juce_Image.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngwutil.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/frequency/juce_Convolution.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/mman.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngwtran.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdcoefct.c:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngwrite.c:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_Base64.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngtrans.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_Misc_android.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngstruct.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/block.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngrio.c:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngrtran.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_ScopedPointer.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngread.c:
 
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioProcessorParameterWithID.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativePoint.h:
+
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pnginfo.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_MouseInputSource.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_ThreadWithProgressWindow.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngget.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngdebug.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_GroupComponent.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_FileFilter.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngerror.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngconf.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/transupp.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/setup_44p51.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/png.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AAXClientExtensions.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_DirectoryIterator.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/juce_GIFLoader.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/transupp.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jutils.c:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jquant2.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jpeglib.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jquant1.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jmorecfg.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jmemmgr.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jinclude.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdmerge.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jfdctfst.c:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/endian.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdtrans.c:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdmarker.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_MessageBoxOptions.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/sve_context.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdsample.c:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_WavAudioFormat.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/lookup.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_NamedPipe.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdpostct.c:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdmainct.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_NetworkServiceDiscovery.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/misc/juce_BubbleComponent.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdphuff.c:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/fcntl.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdmaster.c:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdhuff.c:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jddctmgr.c:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdcolor.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdct.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/socket.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdatasrc.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/endswap.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdapistd.c:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawableText.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/log.h:
-
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jcsample.c:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jcphuff.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativeCoordinate.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/players/juce_SoundPlayer.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jcparam.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jcmaster.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jcprepct.c:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jcmarker.c:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jcinit.c:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_TextEditorModel.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/commands/juce_ApplicationCommandID.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jchuff.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jpeglib.h:
-
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jchuff.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jcdctmgr.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jccolor.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_MidiKeyboardComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jcapimin.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_LookAndFeelHelpers.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_PathIterator.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_Path.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/effects/juce_GlowEffect.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_TypefaceFileCache.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_Typeface.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_EdgeTable.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_TextLayout.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_GlyphArrangement.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_FunctionPointerDestructor.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_FontOptions.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_WindowsRegistry.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-unicode.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_StatisticsAccumulator.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/juce_UnicodeBidi.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_Font.cpp:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/tty.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_AttributedString.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-shape-plan.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/in.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-paint.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-ot.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_Variant.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jconfig.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-ot-var.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-ot-shape.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBBase.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_StandardCachedComponentImage.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-ot-meta.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-ot-layout.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiMessageSequence.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-ot-deprecated.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-ot-math.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cstdint:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/stdio.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-face.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-ot-font.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/native/juce_WindowUtils_android.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-map.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/ptrace.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_CodeEditorComponent.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/float.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPUtils.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-draw.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/commands/juce_KeyPressMappingSet.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_LinkedListPointer.h:
-
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-deprecated.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/type_traits:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/lookandfeel/juce_LookAndFeel_V3.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-buffer.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-blob.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdtrans.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/effects/juce_GlowEffect.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/detail/juce_ShapedText.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ListBox.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/images/juce_ScaledImage.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngwutil.c:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/detail/juce_JustifiedText.cpp:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/algorithm:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/system/juce_CompilerWarnings.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/contexts/juce_GraphicsContext.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_PluginDescription.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_CaretComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/colour/juce_ColourGradient.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/local/include/inttypes.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/setjmp.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/setjmp.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/font.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/inttypes.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/misc/juce_DropShadower.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/juce_graphics.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/timers/juce_MultiTimer.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/lsp.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/flock.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_MessageManager.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_ComponentPeer.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_MessageListener.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_DeletedAtShutdown.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_ApplicationBase.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/components/juce_ModalComponentManager.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_ConsoleApplication.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngpread.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/audio_io/juce_SystemAudioVolume.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_InterprocessConnectionServer.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_ConnectedChildProcess.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/in.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_ChildProcessManager.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_ChangeBroadcaster.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/limits.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/contexts/juce_LowLevelGraphicsSoftwareRenderer.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/string_view:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/stddef.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/detail/juce_Unicode.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_ActionBroadcaster.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_AppleRemote.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/juce_events.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_WaveShaper.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_Phaser.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_EdgeTable.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_IIRFilterAudioSource.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_NoiseGate.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jpegint.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/detail/juce_SimpleShapedText.cpp:
 
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/detail/juce_ShapedText.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/detail/juce_Ranges.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/native/juce_NativeMessageBox_android.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/contexts/juce_GraphicsContext.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/colour/juce_Colours.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/setjmp.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/inttypes.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/inttypes.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_MessageListener.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/contexts/juce_LowLevelGraphicsSoftwareRenderer.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_MouseCursor.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/iomanip:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jidctfst.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/app_properties/juce_ApplicationProperties.cpp:
+
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_NoiseGate.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_FirstOrderTPTFilter.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_LockingAsyncUpdater.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_AsyncUpdater.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_ActionBroadcaster.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_DirectoryContentsList.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/logging/juce_Logger.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/juce_events.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_StretchableObjectResizer.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_InterprocessConnection.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__hash_table:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_NoiseGate.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_Limiter.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_Gain.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/wctype.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdpostct.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_LadderFilter.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_Compressor.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawableRectangle.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-ot-color.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_FileInputStream.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/sharedbook.c:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_AudioUnitPluginFormat.mm:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_OutputStream.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_Compressor.cpp:
 
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/juce_graphics.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_Chorus.h:
+
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_Chorus.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_IPAddress.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/commands/juce_ApplicationCommandTarget.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_DialogWindow.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/ioctl.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_Bias.h:
 
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_SliderPropertyComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_NormalisableRange.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_StateVariableTPTFilter.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_KeyPress.h:
+
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_StateVariableFilter.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_ProcessorWrapper.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_FloatVectorOperations.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_ProcessorDuplicator.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_CaretComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/time/juce_RelativeTime.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_ProcessContext.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/juce_gui_basics.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_ChangeBroadcaster.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_TreeView.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ConcertinaPanel.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/colour/juce_Colour.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_LiveConstantEditor.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/system/juce_StandardHeader.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_Oversampling.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_LinkwitzRileyFilter.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/ioctls.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_LinkwitzRileyFilter.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_IIRFilter.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_FirstOrderTPTFilter.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_IIRFilter.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_FIRFilter.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_TableListBox.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__mutex_base:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jcomapi.c:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_FIRFilter.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessor.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_DryWetMixer.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/synthesis.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_DryWetMixer.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_DelayLine.cpp:
+
+_deps/oboe-src/include/oboe/Utilities.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_BallisticsFilter.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_BallisticsFilter.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPESynthesiserVoice.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_AffineTransform.cpp:
-
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/native/juce_SIMDNativeOps_neon.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPESynthesiser.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/native/juce_SIMDNativeOps_neon.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/maths/juce_SpecialFunctions.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/maths/juce_Polynomial.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_StretchableObjectResizer.cpp:
-
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/maths/juce_Phase.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/lookandfeel/juce_LookAndFeel_V2.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/accessibility/juce_AccessibilityState.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioFormat.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/maths/juce_Matrix.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/maths/juce_Matrix.cpp:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/mutex:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/maths/juce_FastMathApproximations.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_OutputStream.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/midi_io/juce_MidiDevices.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/maths/juce_Matrix.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/frequency/juce_Windowing.h:
 
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/native/juce_EventTracing.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/resource.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/frequency/juce_Windowing.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/juce_Audio_android.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileChooser.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/frequency/juce_FFT.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_RangedAudioParameter.h:
+
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/frequency/juce_FFT.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/frequency/juce_Convolution.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawablePath.cpp:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/errno.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_OggVorbisAudioFormat.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jpegint.h:
+_deps/oboe-src/include/oboe/FullDuplexStream.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/frequency/juce_Convolution.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_CodeTokeniser.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_LockingAsyncUpdater.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/filter_design/juce_FilterDesign.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/filter_design/juce_FilterDesign.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/vorbisfile.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_Slider.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/containers/juce_SIMDRegister_Impl.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/containers/juce_SIMDRegister.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/containers/juce_AudioBlock.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/native/juce_Messaging_android.cpp:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/arm_neon.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/juce_dsp.cpp:
 
@@ -7002,2399 +7479,2497 @@ CMakeFiles/JuceModules.dir/juce/modules/juce_gui_extra/juce_gui_extra.cpp.o: /Us
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/values/juce_CachedValue.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/app_properties/juce_PropertiesFile.cpp:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/wait.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_RangedAudioParameter.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/misc/juce_DropShadower.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/app_properties/juce_ApplicationProperties.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/native/juce_Fonts_android.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/juce_data_structures.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-ot-math.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ComponentMovementWatcher.cpp:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/stat.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/zutil.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/wait.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/components/juce_FocusTraverser.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/zlib.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/native/juce_WebBrowserComponent_android.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/gzguts.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/maths/juce_LogRampedValue.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/deflate.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/strcasecmp.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/timers/juce_MultiTimer.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/inftrees.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPESynthesiserVoice.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/inftrees.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_TabbedButtonBar.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/inflate.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/inffast.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/native/juce_SIMDNativeOps_neon.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/inffast.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-ot-var.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/crc32.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_Process.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_StateVariableTPTFilter.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/sstream:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/deflate.c:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/juce_zlib.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/juce_ZipFile.cpp:
-
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/juce_GZIPDecompressorInputStream.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_MessageBoxOptions.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/xml/juce_XmlElement.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_StateVariableTPTFilter.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/signal.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/audio_io/juce_AudioIODeviceType.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/unit_tests/juce_UnitTest.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/time/juce_Time.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_TreeView.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_FileSearchPath.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/trees.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/inflate.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/time/juce_RelativeTime.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_WaitableEvent.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ThreadPool.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/juce_audio_devices.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_PositionableAudioSource.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_TimeSliceThread.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_Thread.cpp:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/stdio.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_WaveShaper.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_InputStream.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_FlacAudioFormat.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ReadWriteLock.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/termios.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_HighResolutionTimer.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/values/juce_ValueTreePropertyWithDefault.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ChildProcess.cpp:
-
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_TextDiff.cpp:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/netinet/tcp.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_IIRFilter.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_StringPool.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_Reverb.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawableShape.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_StringPairArray.cpp:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/sysinfo.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_StringArray.cpp:
 
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_LocalisedStrings.cpp:
+
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_Identifier.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jmemsys.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_MemoryOutputStream.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessorListener.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_GroupComponent.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_TextButton.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ComponentBuilder.cpp:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/arm_neon.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/semaphore.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/sigcontext.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_CharacterFunctions.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_URLInputSource.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/maths/juce_LookupTable.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_OutputStream.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_MemoryInputStream.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_InputStream.cpp:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/lockf.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jquant2.c:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/juce_UnicodeLine.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_URL.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_WebInputStream.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_IPAddress.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_LinkwitzRileyFilter.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_Threads_android.cpp:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/stdbool.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_RuntimePermissions_android.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_ThreadPriorities_native.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_URLInputSource.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_SharedCode_posix.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_KeyMappingEditorComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_PlatformTimer_generic.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_PlatformTimerListener.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_Network_android.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_NamedPipe_posix.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdct.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/float.c:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_JNIHelpers_android.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jfdctflt.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FilenameComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_Files_android.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_BufferingAudioSource.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_RangedAudioParameter.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/timers/juce_Timer.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_CommonFile_linux.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/time.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/audio_io/juce_AudioDeviceManager.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_IPAddress_posix.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_AndroidDocument_android.cpp:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/stdlib.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_SharedResourcePointer.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/stat.h:
-
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_Uuid.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/framing.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBScriptLocator.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_SubregionStream.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_ScopeGuard.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_RuntimePermissions.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_Result.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/limits.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_MemoryBlock.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_Random.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_Expression.cpp:
-
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_BigInteger.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/codec_internal.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/utime.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_InterProcessLock.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_Button.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/compiler.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/logging/juce_FileLogger.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/json/juce_JSON.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/highlevel.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/json/juce_JSONUtils.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_common_MimeTypes.cpp:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/stdbool.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_DragAndDropContainer.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_WildcardFileFilter.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_RangedDirectoryIterator.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_FileInputStream.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_WindowingHelpers.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_FileFilter.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_SparseSet.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_File.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ReferenceCountedArray.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_OwnedArray.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_AbstractFifo.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_NamedValueSet.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/images/juce_ImageCache.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_TextButton.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/socket.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/netinet/in.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/errno.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/net/if.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_TypefaceFileCache.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/swab.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/tty.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/termios.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/images/juce_ScaledImage.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/sockios.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/inttypes.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdatasrc.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/commands/juce_KeyPressMappingSet.cpp:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/ipv6.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_FontOptions.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/ioctl.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/in6.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/byteorder/little_endian.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/future:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/ip_msfilter.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_PropertyComponent.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/endian.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/detail/juce_Ranges.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/ip_mreq_source.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBAlgorithm.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/images/juce_ImageFileFormat.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_URL.cpp:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/in_addr.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/commands/juce_ApplicationCommandTarget.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/termios.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/menus/juce_MenuBarComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_ConsoleApplication.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/termbits.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/swab.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngpriv.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/sockios.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBRun.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/legacy_sys_wait_inlines.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/socket.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioParameterChoice.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/ioctl.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_Variant.cpp:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/log.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ComponentAnimator.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/ioctls.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/arpa/inet.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/netinet/in6.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawableComposite.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/termios.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEValue.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_MouseListener.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_TextInputTarget.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/termbits.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_Threads_android.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_ColourSelector.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/unit_tests/juce_UnitTest.cpp:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/timerfd.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/swab.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_FunctionPointerDestructor.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/detail/juce_Unicode.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawableRectangle.cpp:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/socket.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__undef_macros:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jcmainct.c:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_StretchableObjectResizer.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_Gain.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/juce_audio_utils.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_Socket.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/juce_core.cpp:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/ioctls.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/juce_JPEGLoader.cpp:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/byteorder.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/players/juce_SoundPlayer.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/players/juce_SoundPlayer.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/players/juce_AudioProcessorPlayer.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_AudioUnitPluginFormat.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/juce_core.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_RuntimePermissions_android.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/players/juce_AudioProcessorPlayer.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_WeakReference.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/juce_audio_utils.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_MidiKeyboardComponent.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_MixerAudioSource.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/res0.c:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/png.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-font.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_SVGParser.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_MPEKeyboardComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_NamedPipe.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBMirrorLocator.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_MPEKeyboardComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_TabbedComponent.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_KeyboardComponentBase.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_KeyboardComponentBase.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_LadderFilter.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioVisualiserComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_Interpolators.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/memory:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_FileOutputStream.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioVisualiserComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioThumbnailCache.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioThumbnailCache.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_CPlusPlusCodeTokeniserFunctions.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_StandardCachedComponentImage.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioThumbnailBase.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioThumbnail.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/effects/juce_DropShadowEffect.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioAppComponent.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/string.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ResizableBorderComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioAppComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_MultiChoicePropertyComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/juce_audio_basics.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_PropertyPanel.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_LV2PluginFormat.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/socket.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_WebControlRelays.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_DynamicObject.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_SplashScreen.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_ImagePreviewComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_PushNotifications.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_LiveConstantEditor.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_ColourSelector.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/trees.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/juce_gui_extra.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/bitrate.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/embedding/juce_NSViewComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/deduplication/bitreader_read_rice_signed_block.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/embedding/juce_AndroidViewComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_XMLCodeTokeniser.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ImageComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioParameterBool.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/misc/juce_FocusOutline.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_LuaCodeTokeniser.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_CodeTokeniser.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/colour/juce_Colour.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_TopLevelWindow.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ComboBox.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_TooltipWindow.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/array:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/serialisation/juce_Serialisation.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_BufferedInputStream.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_ThreadWithProgressWindow.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_AlertWindow.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_ResizableWindow.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/inffixed.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/numeric:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_NativeScaleFactorNotifier.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_NativeMessageBox.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/semaphore.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/system/juce_SystemStats.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_DocumentWindow.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_TemporaryFile.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_AlertWindow.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_TreeView.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ToolbarItemFactory.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ToolbarItemComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_EdgeTable.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_CPlusPlusCodeTokeniser.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/ndk-version.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_Toolbar.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_AsyncUpdater.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_ScopedMessageBox.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_TextEditor.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_AudioSource.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_TableListBox.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/signal.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ProgressBar.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jcapistd.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ListBox.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ComboBox.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-ot-metrics.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_AndroidDocumentInputSource.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_TextPropertyComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_PropertyPanel.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/limits.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_PropertyComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_BooleanPropertyComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativeRectangle.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-style.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativePointPath.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativePoint.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/juce_GZIPCompressorOutputStream.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativeParallelogram.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_Limiter.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativeCoordinatePositioner.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/getopt.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_DryWetMixer.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_FileOutputStream.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_MarkerList.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/native/juce_ScopedDPIAwarenessDisabler.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_ToneGeneratorAudioSource.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/application/juce_Application.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/lpc.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_TooltipClient.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_SelectedItemSet.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_StretchableLayoutResizerBar.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_ScalingHelpers.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_MouseInputSource.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/dlfcn.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_MouseInactivityDetector.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_MouseEvent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_DryWetMixer.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_LassoComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_DragAndDropContainer.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_ComponentDragger.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/misc/juce_BubbleComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_PropertySet.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/scanning/juce_PluginListComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/lookandfeel/juce_LookAndFeel_V4.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fcntl.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/lookandfeel/juce_LookAndFeel_V2.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_ContentSharer.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/ioctl.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/lookandfeel/juce_LookAndFeel_V1.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/components/juce_ComponentListener.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_DocumentWindow.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_ComponentDragger.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_ButtonAccessibilityHandler.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/lookandfeel/juce_LookAndFeel.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_MultiChoicePropertyComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_StretchableLayoutManager.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_Viewport.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/config_types.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_TabbedButtonBar.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_SliderPropertyComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/lpc.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ArrayBase.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/byteswap.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_Typeface.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_TextDragAndDropTarget.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_StretchableLayoutResizerBar.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_StretchableLayoutManager.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_FlexBox.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jmemnobs.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ComponentBoundsConstrainer.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/byteorder.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioSubsectionReader.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_BorderedComponentBoundsConstrainer.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/players/juce_SoundPlayer.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/native/juce_EventTracing.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/time.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_AnimatedPositionBehaviours.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_TimeSliceThread.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/detail/juce_Ranges.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/juce_audio_formats.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_AnimatedPosition.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_KeyboardFocusTraverser.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_KeyPress.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngmem.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/juce_gui_basics.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/all.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_ButtonPropertyComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FilenameComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileListComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_CaretComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileChooserDialogBox.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileChooser.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileBrowserListener.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawableText.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawableShape.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawableRectangle.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawablePath.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawableImage.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_AudioWorkgroup.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/desktop/juce_Displays.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/components/juce_FocusTraverser.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativeCoordinate.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/components/juce_ComponentTraverser.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/components/juce_ComponentListener.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/components/juce_Component.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/undomanager/juce_UndoManager.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/ioctl.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/commands/juce_ApplicationCommandManager.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiKeyboardState.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_PathStrokeType.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/commands/juce_ApplicationCommandInfo.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_ToolbarButton.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_ImageButton.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/scanning/juce_KnownPluginList.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_DrawableButton.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_ArrowButton.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/cpu.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_SystemClipboard.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/deflate.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/application/juce_Application.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioProcessorValueTreeState.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/accessibility/juce_AccessibilityState.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/accessibility/juce_AccessibilityHandler.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_TableHeaderComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_RangedDirectoryIterator.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/accessibility/interfaces/juce_AccessibilityValueInterface.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/accessibility/enums/juce_AccessibilityEvent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/placement/juce_RectanglePlacement.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_LeakedObjectDetector.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/native/juce_RenderingHelpers.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/mdct.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/juce_graphics.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_Rectangle.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/legacy_signal_inlines.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_common_MimeTypes.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/unistd.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/juce_audio_basics.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_PathIterator.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/fadvise.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jcomapi.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format/juce_AudioPluginFormat.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_CharacterFunctions.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/tcp.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_KeyListener.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/juce_GZIPCompressorOutputStream.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/mman.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_Path.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/uio.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileTreeComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_Parallelogram.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_SpinLock.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/bitwriter.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_Line.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-common.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_LAMEEncoderAudioFormat.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ScrollBar.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/zconf.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_HeavyweightLeakedObjectDetector.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/colour/juce_FillType.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_TextLayout.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_LruCache.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/codec.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/lsp.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_FontOptions.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_NamedValueSet.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/effects/juce_DropShadowEffect.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawableImage.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_WebInputStream.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cstdlib:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEValue.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/scanning/juce_PluginDirectoryScanner.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/detail/juce_SimpleShapedText.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/native/juce_NativeMessageBox_android.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_String.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/compress.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/contexts/juce_GraphicsContext.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_SystemStats_android.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_InterprocessConnection.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ResizableCornerComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_ReverbAudioSource.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/colour/juce_PixelFormats.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/lookandfeel/juce_LookAndFeel_V3.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_Uuid.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_InterProcessLock.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/embedding/juce_HWNDComponent.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cwchar:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_BluetoothMidiDevicePairingDialogue.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/books/uncoupled/res_books_uncoupled.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cstring:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/colour/juce_Colours.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioVisualiserComponent.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdhuff.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioThumbnailCache.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/timers/juce_Timer.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioThumbnailBase.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/timers/juce_TimedCallback.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_BufferingAudioSource.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/midi_io/juce_MidiMessageCollector.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_Interpolators.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_MountedVolumeListChangeDetector.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioThumbnail.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_MessageManager.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioDeviceSelectorComponent.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_DeletedAtShutdown.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioAppComponent.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioFormat.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/native/juce_ScopedDPIAwarenessDisabler.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/juce_Unicode.cpp:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/math.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioDeviceSelectorComponent.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/juce_audio_utils.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_ApplicationBase.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngget.c:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/stdio.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_WebControlRelays.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jcapimin.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_MixerAudioSource.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_NetworkServiceDiscovery.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_WebControlParameterIndexReceiver.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_InterprocessConnection.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_WebBrowserComponent.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/filter_design/juce_FilterDesign.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEInstrument.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_ChildProcessManager.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_Expression.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ElementComparator.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_SystemTrayIconComponent.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_ActionListener.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_SplashScreen.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_ActionBroadcaster.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/new:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/juce_PNGLoader.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_ChoicePropertyComponent.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/values/juce_ValueTreeSynchroniser.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_AlertWindowHelpers.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/native/accessibility/juce_Accessibility_android.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_RecentlyOpenedFilesList.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/detail/juce_ShapedText.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_PushNotifications.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ResizableBorderComponent.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_GroupComponent.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/values/juce_ValueTree.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_LiveConstantEditor.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/values/juce_CachedValue.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_ARACommon.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/undomanager/juce_UndoableAction.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/stat.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/juce_data_structures.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_KeyMappingEditorComponent.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/mman.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_MP3AudioFormat.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_PluginHostType.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/wait.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEZoneLayout.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_ParameterAttachments.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_ExtensionsVisitor.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_MouseCursor.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_ConnectedChildProcess.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioProcessorParameterWithID.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_NetworkServiceDiscovery.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_LocalisedStrings.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPFactory.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/commands/juce_ApplicationCommandID.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_SmoothedValue.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioParameterInt.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_MessageBoxOptions.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/sources/juce_AudioSourcePlayer.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioParameterFloat.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_ColourSelector.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngrutil.c:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/ARA/juce_ARA_utils.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_AnimatedAppComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/juce_gui_extra.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/embedding/juce_NSViewComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPESynthesiserVoice.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/embedding/juce_AndroidViewComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/embedding/juce_ActiveXControlComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jmemmgr.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/documents/juce_FileBasedDocument.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_OptionsHelpers.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/detail/juce_WebControlRelayEvents.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/net/if.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_XMLCodeTokeniser.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBRun.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_LuaCodeTokeniser.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_CPlusPlusCodeTokeniserFunctions.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioVisualiserComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_CPlusPlusCodeTokeniser.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/juce_PNGLoader.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_WindowUtils.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_VBlankAttachment.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPENote.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/native/juce_SIMDNativeOps_fallback.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_TopLevelWindow.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_ThreadWithProgressWindow.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_ResizableWindow.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-ot-metrics.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_AccessibilityHelpers.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_NativeScaleFactorNotifier.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_DialogWindow.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/synthesisers/juce_Synthesiser.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_ComponentPeer.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativeParallelogram.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_CallOutBox.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_IIRFilter.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_AlertWindow.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ToolbarItemPalette.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/sysinfo.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ToolbarItemFactory.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/map:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ToolbarItemComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_Toolbar.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_TextEditor.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/native/accessibility/juce_Accessibility.cpp:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/ucontext.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/ARA/juce_ARADebug.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/time/juce_PerformanceCounter.cpp:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/posix_types.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativePoint.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileBrowserComponent.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_TooltipWindow.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/colour/juce_Colours.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_Slider.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessorGraph.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/pthread.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/scanning/juce_PluginDirectoryScanner.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ImageComponent.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/scanning/juce_KnownPluginList.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_SliderPropertyComponent.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/errno.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_AppleRemote.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/floor1.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_PropertyComponent.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_ParameterAttachments.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/tcp.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jccolor.c:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/fadvise.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jcprepct.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_ToolbarItemDragAndDropOverlayComponent.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/stream_encoder.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_ButtonPropertyComponent.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_HostedAudioProcessorParameter.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_CodeDocument.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_GenericAudioProcessorEditor.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativeRectangle.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/synthesis.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/ordinals.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_GenericAudioProcessorEditor.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativePointPath.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_FileInputSource.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiMessageSequence.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_PathStrokeType.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_MultiDocumentPanel.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessorParameterGroup.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_BigInteger.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/ifaddrs.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativeParallelogram.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessorParameterGroup.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_MarkerList.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_GlyphArrangement.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_HyperlinkButton.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/native/juce_ScopedDPIAwarenessDisabler.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/inffast.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_NamedValueSet.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_TooltipClient.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_MACAddress.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_TextDragAndDropTarget.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_MouseListener.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/config_types.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_MouseInputSource.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/compress.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_MouseInactivityDetector.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_MouseCursor.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_LassoComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_MP3AudioFormat.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/vorbisenc.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_DragAndDropTarget.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ChildProcess.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_DeletedAtShutdown.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdinput.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_ComponentDragger.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/misc/juce_FocusOutline.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/menus/juce_PopupMenu.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/timers/juce_Timer.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/menus/juce_BurgerMenuComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/lookandfeel/juce_LookAndFeel_V4.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_TemporaryFile.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/lookandfeel/juce_LookAndFeel_V1.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_TabbedButtonBar.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_StretchableLayoutManager.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ResizableCornerComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBCodepoint.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_MultiDocumentPanel.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/support/android/locale_bionic.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/unordered_set:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessorEditor.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_ProcessorWrapper.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_WebControlParameterIndexReceiver.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_CustomMouseCursorInfo.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPIterator.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_MarkerList.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_VSTMidiEventList.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_GridItem.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioPluginInstance.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_Singleton.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/protected/stream_decoder.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioPluginInstance.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ComponentAnimator.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/set:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/juce_audio_processors.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/native/juce_BluetoothMidiDevicePairingDialogue_android.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_VSTPluginFormat.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jidctred.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_WindowsRegistry.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_NormalisableRange.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_VST3PluginFormat.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdcoefct.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_NamedValueSet.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_VST3PluginFormat.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_DirectoryIterator.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/bitmath.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/setup_44.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_LADSPAPluginFormat.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_ARACommon.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_ARACommon.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/optional:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_Point.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cctype:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format/juce_AudioPluginFormatManager.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format/juce_AudioPluginFormatManager.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_MultiDocumentPanel.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/future:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format/juce_AudioPluginFormat.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_JNIHelpers_android.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__errc:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/format.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_BasicNativeHeaders.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/sampler/juce_Sampler.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/menus/juce_BurgerMenuComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/detail/juce_Ranges.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_WavAudioFormat.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/juce_audio_formats.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_BufferingAudioFormatReader.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioFormatWriter.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioFormatWriter.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativeCoordinatePositioner.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/detail/juce_NativeFileHandle.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/stddef.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_FileDragAndDropTarget.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioFormatReaderSource.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/libc-compat.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_WebBrowserComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioFormatReaderSource.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioSubsectionReader.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioFormatReader.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioFormatManager.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdinput.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/images/juce_ImageFileFormat.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioFormat.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/vorbisfile.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/deflate.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/smallft.c:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/signal-defs.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/time/juce_RelativeTime.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/images/juce_ImageConvolutionKernel.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/poll.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ReferenceCountedArray.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioFormatManager.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_ChoicePropertyComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_VST2ClientExtensions.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/registry.c:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/limits.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/psy.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_VST2ClientExtensions.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/stdarg.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/psy.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_PropertyComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/scales.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/setup_X.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/frequency/juce_Windowing.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioDeviceSelectorComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/setup_16.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_WebInputStream.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_FlexItem.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/components/juce_ModalComponentManager.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/undomanager/juce_UndoManager.cpp:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cwctype:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_FlexBox.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/md5.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEZoneLayout.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/setup_11.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ConcertinaPanel.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/timers/juce_MultiTimer.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPacket.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/ARA/juce_ARA_utils.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ComponentMovementWatcher.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_Font.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/audio_cd/juce_AudioCDBurner.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdmaster.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ComponentBoundsConstrainer.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_LocalisedStrings.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ComponentAnimator.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/residue_8.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_BorderedComponentBoundsConstrainer.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/residue_44.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_AnimatedPositionBehaviours.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/residue_16.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_AnimatedPosition.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_GroupComponent.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_TextEditorKeyMapper.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/psych_44.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/ip_msfilter.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/synthesisers/juce_Synthesiser.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/native/accessibility/juce_AccessibilityTextHelpers.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/legacy_unistd_inlines.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_BufferingAudioSource.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/floor_all.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_AbstractFifo.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/books/coupled/res_books_51.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_DrawableButton.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ScrollBar.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/wctype.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/mdct.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/juce_GIFLoader.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_MemoryMappedAudioFormatReader.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_PathIterator.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/masking.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/juce_audio_processors.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/info.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_FlagCache.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/protected/stream_encoder.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/mutex:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_LV2PluginFormat.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/legacy_stdlib_inlines.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/codebook.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_BorderedComponentBoundsConstrainer.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/frequency/juce_FFT.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-shape.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/cdefs.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/crctable.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/endian.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/bitwise.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioFormatReader.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_OggVorbisAudioFormat.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/wctype.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AAXClientExtensions.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/placement/juce_Justification.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/vfs.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_MP3AudioFormat.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jfdctint.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/juce_audio_utils.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_MemoryOutputStream.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/time/juce_PerformanceCounter.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_CoreAudioFormat.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/falloc.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_AiffAudioFormat.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jidctfst.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/accessibility/enums/juce_AccessibilityActions.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/documents/juce_FileBasedDocument.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/stream_encoder_framing.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_SidePanel.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/font_matcher.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/fcntl.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_NotificationType.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ProgressBar.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/stream_encoder.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPReceiver.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/memory.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_ChangeBroadcaster.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_LADSPAPluginFormat.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jinclude.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/lpc_flac.c:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/ioctl.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/backends.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/stream_encoder.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_Panner.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/images/juce_ImageFileFormat.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/memory.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/algorithm:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/md5.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_SingleThreadedAbstractFifo.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_AiffAudioFormat.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__string:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_DirectoryContentsDisplayComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_Drawable.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/float.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/inttypes.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sched.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/hwcap.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/crc.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/cpu.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/bitwriter.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/bitreader.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/bitmath.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/ordinals.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_ContainerDeletePolicy.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_HeapBlock.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/deduplication/lpc_compute_autocorrelation_intrin.c:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/sysinfo.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-map.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/stream_decoder.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ComponentMovementWatcher.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/lpc_intrin_neon.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/scanning/juce_PluginListComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_Misc_android.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/string.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/sources/juce_AudioTransportSource.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_AnimatedAppComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/private.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jctrans.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/adler32.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/endswap.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/menus/juce_MenuBarModel.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/format.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ThreadLocalValue.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/compat.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/assert.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/export.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/statfs.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_OggVorbisAudioFormat.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_Grid.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/poll.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/resource.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/ptrace.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jcdctmgr.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_AffineTransform.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/eventfd.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_Toolbar.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/audio_play_head/juce_AudioPlayHead.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/lookandfeel/juce_LookAndFeel_V4.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngconf.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/containers/juce_SIMDRegister_Impl.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/utime.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_IPAddress_posix.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/resource.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_Message.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngset.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_ARAHosting.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/analysis.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/native/juce_FileChooser_android.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/memfd.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_ScopedPointer.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPUtils.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/kernel.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiBuffer.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_OutputStream.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/jni.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/menus/juce_MenuBarComponent.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/legacy_sys_mman_inlines.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/dirent.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/posix_limits.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_File.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/ioctl.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_AudioWorkgroup.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawableComposite.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ScopedValueSetter.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_DialogWindow.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/alloc.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/poll.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/fcntl.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/resource.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/mbstate_t.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/colour/juce_FillType.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/callback.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_Label.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/hugetlb_encode.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_Grid.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/if.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPDispatcher.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBGeneralCategory.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/fcntl.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_RuntimePermissions.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/undomanager/juce_UndoManager.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/legacy_sys_stat_inlines.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_ImagePreviewComponent.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/ptrace.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/poll.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_ChannelRemappingAudioSource.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/mman.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiFile.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_DragAndDropTarget.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/juce_events.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/versioning.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_AudioSampleBuffer.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/juce_GZIPDecompressorInputStream.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_TextPropertyComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_DelayLine.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/hdlc/ioctl.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/unit_tests/juce_UnitTest.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/sysconf.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/juce_ZipFile.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__tuple:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_WaitableEvent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/accessibility/enums/juce_AccessibilityRole.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/app_properties/juce_PropertiesFile.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_AudioProcessLoadMeasurer.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__debug:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ScopedWriteLock.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_Socket.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/resource.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ScopedReadLock.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_MouseInactivityDetector.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ScopedLock.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ReadWriteLock.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/streambuf:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_CriticalSection.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_LookAndFeelHelpers.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/xml/juce_XmlDocument.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/crc32.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileListComponent.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/bitsperlong.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__tree:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngtrans.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_StringPairArray.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioProcessorValueTreeState.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/time.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/ostream:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_AudioDataConverters.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/fixed.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_StringArray.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_NewLine.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_Identifier.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_AudioChannelSet.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_ComponentPeer.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_DynamicLibrary.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_BigInteger.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_CharPointer_UTF32.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_NamedPipe.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/iostream:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessorParameter.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_ShapeButton.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_CharPointer_ASCII.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/setup_8.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__functional_base:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_HighResolutionTimer.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/system/juce_TargetPlatform.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_ProcessorChain.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/system/juce_CompilerSupport.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ChildProcess.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_Oversampling.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_Span.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_MouseCursor.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/app_properties/juce_ApplicationProperties.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessor.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_OptionsHelpers.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_EnumHelpers.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/stddef.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/ctime:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/stdlib.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_URL.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/mman-common.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/errno.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_OptionalScopedPointer.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/setup_32.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/fcntl.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/detail/juce_JustifiedText.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_MemoryInputStream.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/xml/juce_XmlDocument.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/ios:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_RecentlyOpenedFilesList.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_ContentSharer.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/window.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_Atomic.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/bit:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_AllocationHooks.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/system/juce_PlatformDefs.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/effects/juce_GlowEffect.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_StatisticsAccumulator.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_Reservoir.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_MouseInputSourceImpl.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/termios.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ListenerList.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEInstrument.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_Random.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_Oscillator.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_HashMap.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/posix_types.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_KeyListener.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_Expression.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/ioctl.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_ReferenceCountedObject.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_ImagePreviewComponent.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_AttributedString.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiFile.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_AsyncUpdater.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileSearchPathListComponent.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_Slider.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FilePreviewComponent.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioParameterInt.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileChooserDialogBox.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/json/juce_JSON.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_CharPointer_UTF32.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_Memory.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/juce_JPEGLoader.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/logging/juce_FileLogger.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileBrowserListener.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_Reverb.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_ContentSharer.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/json/juce_JSONUtils.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/audio_io/juce_SampleRateHelpers.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawableText.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/trees.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/hdlc/ioctl.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawableShape.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_WindowedSincInterpolator.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_ButtonPropertyComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ResizableCornerComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawablePath.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/memory.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawableImage.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_Drawable.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/components/juce_ModalComponentManager.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/components/juce_FocusTraverser.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/inftrees.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/components/juce_CachedComponentImage.h:
+
+_deps/oboe-src/include/oboe/Oboe.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/commands/juce_KeyPressMappingSet.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/commands/juce_ApplicationCommandTarget.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/commands/juce_ApplicationCommandInfo.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/audio_io/juce_AudioIODevice.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/zutil.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_ToggleButton.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioFormatReaderSource.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jcphuff.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/components/juce_Component.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_Font.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_ShapeButton.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_ImageButton.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_ArrowButton.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/netdb.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/accessibility/juce_AccessibilityHandler.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_PathStrokeType.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/accessibility/interfaces/juce_AccessibilityValueInterface.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/accessibility/interfaces/juce_AccessibilityTableInterface.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/initializer_list:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/accessibility/interfaces/juce_AccessibilityCellInterface.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/accessibility/enums/juce_AccessibilityRole.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/accessibility/enums/juce_AccessibilityEvent.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/ndk-version.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_MouseEvent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/placement/juce_Justification.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/native/juce_RenderingHelpers.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/menus/juce_MenuBarComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_IIRFilter_Impl.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/juce_UnicodeBidi.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_NamedPipe_posix.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/juce_graphics.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_LagrangeInterpolator.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ThreadLocalValue.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SheenBidi.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_FileInputStream.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/images/juce_Image.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/local/include/wchar.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_ThreadPriorities_native.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/lpc_flac.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_RangedDirectoryIterator.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_Point.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_AffineTransform.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_LruCache.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/sockios.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_MouseInputSourceList.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/detail/juce_SimpleShapedText.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/trees.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/detail/juce_JustifiedText.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/juce_UnicodeGenerated.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/contexts/juce_LowLevelGraphicsContext.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jcapistd.c:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/stdint.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/contexts/juce_GraphicsContext.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/flock.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_DynamicObject.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/colour/juce_Colours.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/effects/juce_GlowEffect.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/transupp.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/colour/juce_Colour.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/xml/juce_XmlElement.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/values/juce_ValueTreeSynchroniser.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_FIRFilter.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_ReverbAudioSource.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/values/juce_Value.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEValue.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/lookandfeel/juce_LookAndFeel.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/juce_data_structures.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_ComponentPeer.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_MemoryBlock.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_VST3ClientExtensions.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/callback.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_VST3ClientExtensions.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-version.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_ChildProcessManager.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/maths/juce_LookupTable.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/time.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/zutil.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_VST2ClientExtensions.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/strcasecmp.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_PluginHostType.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_IIRFilterAudioSource.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_ParameterAttachments.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/ioctl.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_NetworkServiceDiscovery.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/detail/juce_JustifiedText.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_ParameterAttachments.cpp:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/errno.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/unordered_map:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_ToolbarItemDragAndDropOverlayComponent.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_FlagCache.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/lookup.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_OptionalScopedPointer.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_MemoryAudioSource.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioProcessorValueTreeState.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_WildcardFileFilter.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_LockingAsyncUpdater.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-ot-color.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_CallOutBox.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_TemporaryFile.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_Result.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_MemoryMappedFile.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cstddef:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_FileSearchPath.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/stdlib.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_CharPointer_UTF8.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/fixed.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_DirectoryIterator.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_TextEditorKeyMapper.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/desktop/juce_Desktop.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_URLInputSource.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_String.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdsample.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_AndroidDocument.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_ToneGeneratorAudioSource.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/values/juce_Value.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_MouseInputSourceList.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngdebug.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativePointPath.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/system/juce_StandardHeader.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/detail/juce_CallbackListenerList.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ArrayBase.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/local/include/stdlib.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_PlatformTimerListener.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_Variant.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_KeyMappingEditorComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPProtocols.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/complex:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_FixedSizeFunction.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AAXClientExtensions.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_SparseSet.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_SmoothedValue.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/vorbisenc.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_CharPointer_UTF16.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/setup_44p51.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_AttributedString.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ReferenceCountedArray.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/string.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_IIRFilter.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/maths/juce_SpecialFunctions.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_WindowingHelpers.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_Optional.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_InterprocessConnectionServer.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_InputStream.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/stdexcept:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/window.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_SubregionStream.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_BallisticsFilter.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/juce_dsp.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMP.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_Array.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jidctint.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ResizableEdgeComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioParameterChoice.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/xml/juce_XmlElement.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPESynthesiserBase.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/lookandfeel/juce_LookAndFeel_V1.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_LagrangeInterpolator.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBCodepoint.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/juce_audio_devices.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_MemoryOutputStream.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_ToolbarButton.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_Interpolators.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_Phaser.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_ADSR.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/players/juce_AudioProcessorPlayer.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/synthesisers/juce_Synthesiser.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/png.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/detail/juce_WebControlRelayEvents.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_ScopeGuard.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_FirstOrderTPTFilter.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEUtils.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPSysEx7.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_ReverbAudioSource.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_ResamplingAudioSource.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_ResamplingAudioSource.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_RectangleList.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_LAMEEncoderAudioFormat.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/registry.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/commands/juce_KeyPressMappingSet.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/version:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/native/juce_SIMDNativeOps_fallback.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_Enumerate.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/desktop/juce_Desktop.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_Functional.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_PositionableAudioSource.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileSearchPathListComponent.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__locale:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_MemoryAudioSource.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/flock64.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_ComponentHelpers.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jidctflt.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioProcessorParameterWithID.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessorEditor.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/menus/juce_PopupMenu.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiMessage.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cerrno:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_AudioProcessLoadMeasurer.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/sharedbook.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/logging/juce_Logger.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBCodepointSequence.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPUtils.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_IIRFilter.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPENote.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/features.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEUtils.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/iosfwd:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_Range.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ConcertinaPanel.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_IPAddress.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_SidePanel.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/float.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_Button.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/inflate.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_CopyableHeapBlock.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_FileSearchPath.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEMessages.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_TextButton.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/images/juce_Image.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/poll.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/types.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/system/juce_SystemStats.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/xlocale.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_ARAHosting.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_SortedSet.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_AudioChannelSet.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileSearchPathListComponent.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/posix_types.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEInstrument.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/tuple:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPacket.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_CodeDocument.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/contexts/juce_LowLevelGraphicsContext.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cstdio:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPView.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPESynthesiserBase.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiRPN.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEZoneLayout.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/res0.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_CPlusPlusCodeTokeniser.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/floor0.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_ChannelRemappingAudioSource.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/metadata.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/sysinfo.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/types.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPSysEx7.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngpriv.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessorGraph.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_WindowedSincInterpolator.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiBuffer.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_BubbleMessageComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/sampler/juce_Sampler.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_MPEKeyboardComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_FileFilter.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_WebBrowserComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ComponentBuilder.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_ScopedMessageBoxInterface.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_IIRFilter_Impl.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPDeviceInfo.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/utime.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/audio_cd/juce_AudioCDReader.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/books/coupled/res_books_stereo.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/components/juce_FocusTraverser.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cwchar:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_Font.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-set.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/thread:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPConverters.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPView.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiKeyboardState.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_DirectoryContentsList.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPConversion.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/setup_22.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/audio_cd/juce_AudioCDBurner.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ResizableCornerComponent.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/exception:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-ot-font.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiMessage.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/setup_44u.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/window.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/timespec.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/atomic:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/sa_family_t.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/books/floor/floor_books.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/values/juce_Value.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_FloatVectorOperations.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/locale.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_AudioDataConverters.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_CoreAudioFormat.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/local/include/wctype.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/bitrate.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_KeyPress.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_StringRef.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngwtran.c:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/errno-base.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/types.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_MouseEvent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_DirectoryContentsList.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-ot-name.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_GridItem.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/iterator:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_SubregionStream.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/os_types.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/stdint.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/mapping0.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/embedding/juce_ActiveXControlComponent.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/wctype.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/types.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/native/juce_ScopedLowPowerModeDisabler.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessorEditorHostContext.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/time/juce_Time.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_Socket.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/wchar.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiDataConcatenator.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_MidiKeyboardComponent.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/typeinfo:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/json/juce_JSONUtils.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/fcntl.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ComponentMovementWatcher.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBBidiType.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/ratio:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_MemoryInputStream.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_MACAddress.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FilePreviewComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/undomanager/juce_UndoableAction.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_VBlankAttachment.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/wait.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/time_types.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jcmainct.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/crc.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ArrayAllocationBase.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/malloc.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_DelayLine.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_Thread.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_ProcessContext.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiRPN.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_PropertySet.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/ogg.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPMidi1ToMidi2DefaultTranslator.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/signal.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/sched.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__bsd_locale_fallbacks.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileTreeComponent.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/user.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jfdctfst.c:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/netdb.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_BorderSize.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/queue:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/envelope.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEMessages.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/variant:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_PreferencesPanel.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ComponentBoundsConstrainer.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_WindowsMediaAudioFormat.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/time/juce_PerformanceCounter.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/local/include/wchar.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/siginfo.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_VST3ClientExtensions.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_CallOutBox.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_WindowUtils.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_SliderPropertyComponent.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPMidi1ToBytestreamTranslator.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/contexts/juce_LowLevelGraphicsSoftwareRenderer.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/smallft.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_ColourSelector.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_BufferingAudioFormatReader.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/wchar.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/utility:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/select.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_MACAddress.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_StringPool.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_FileInputSource.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_DynamicObject.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_MemoryBlock.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/format.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/juce_core.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/typeindex:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/native/juce_FileChooser_android.cpp:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_ChangeListener.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_LadderFilter.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioProcessorParameterWithID.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/audio_play_head/juce_AudioPlayHead.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioParameterFloat.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/audio_cd/juce_AudioCDReader.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioParameterBool.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ReadWriteLock.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/assert.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngrio.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/ARA/juce_ARA_utils.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_PluginDescription.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/analysis.c:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/os.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/audio_play_head/juce_AudioPlayHead.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cmath:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/falloc.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__bit_reference:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/scanning/juce_PluginListComponent.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/string:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/scanning/juce_PluginDirectoryScanner.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_HyperlinkButton.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-common.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/residue_44p51.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/frequency/juce_Convolution.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPBytesOnGroup.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/scanning/juce_KnownPluginList.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/accessibility/interfaces/juce_AccessibilityCellInterface.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_PluginDescription.cpp:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/new:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_GenericAudioProcessorEditor.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_Decibels.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/juce_UnicodeScript.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_Result.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/application/juce_Application.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/math.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessorGraph.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/wchar_limits.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessorEditor.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/bitwise.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessorEditor.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_BorderedComponentBoundsConstrainer.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/system/juce_SystemStats.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/lookandfeel/juce_LookAndFeel.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/ARA/juce_ARADebug.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEMessages.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessor.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioPluginInstance.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/stream_encoder_framing.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/juce_audio_processors.h:
 
 /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_ScopedContentSharerInterface.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/audio_io/juce_AudioIODevice.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPProtocols.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/effects/juce_ImageEffectFilter.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawableRectangle.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/locale.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiBuffer.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-version.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_DeletedAtShutdown.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_VSTPluginFormat.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_BooleanPropertyComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_VST3PluginFormat.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_Grid.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format/juce_AudioPluginFormat.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_AbstractFifo.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/sampler/juce_Sampler.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_BufferedInputStream.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_BufferingAudioFormatReader.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_BufferingAudioFormatReader.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioSubsectionReader.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/stream_encoder.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioPluginInstance.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_CodeEditorComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioFormatWriter.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdapimin.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/values/juce_Value.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_SystemStats_android.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ComboBox.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_Slider.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioFormatReader.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/psy.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioFormatManager.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioFormat.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_VSTMidiEventList.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/smallft.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_Label.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/app_properties/juce_PropertiesFile.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_MemoryMappedAudioFormatReader.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/psy.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/juce_UnicodeLine.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_Grid.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/os.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_Reservoir.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/setup_X.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_String.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativeCoordinate.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPESynthesiserVoice.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/values/juce_CachedValue.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jccoefct.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/setup_8.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/setup_44.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_BubbleMessageComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/setup_32.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_PlatformTimer_generic.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/format.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/setup_11.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_ConsoleApplication.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/residue_44.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPMidi1ToMidi2DefaultTranslator.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/residue_44p51.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/seek_constants.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/psych_8.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-face.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_SystemTrayIconComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_HighResolutionTimer.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_Phaser.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_PreferencesPanel.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_StretchableLayoutResizerBar.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/psych_16.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/floor_all.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_TableListBox.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_Thread.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/socket.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/books/floor/floor_books.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ScrollBar.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_LocalisedStrings.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_Result.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/misc.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/native/juce_WindowUtils_android.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/bitsperlong.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/stream_encoder_framing.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/masking.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessor.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__nullptr:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/bitmath.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/lsp.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/accessibility/enums/juce_AccessibilityActions.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/detail/juce_CallbackListenerList.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_OggVorbisAudioFormat.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/lsp.c:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cmath:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_Process.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/vorbisfile.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_FlexBox.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_Panner.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/api-level.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/lpc.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_KeyboardFocusTraverser.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioSubsectionReader.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/lpc.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/info.c:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/floor1.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPackets.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/envelope.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_Rectangle.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/mdct.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/format.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/codec_internal.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPIterator.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/codebook.c:
+
+_deps/oboe-src/include/oboe/ResultWithValue.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/bitrate.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/vector:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/limits:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/backends.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/zutil.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jidctflt.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_ResamplingAudioSource.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/placement/juce_RectanglePlacement.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/vorbisfile.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_ToneGeneratorAudioSource.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdmainct.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_MouseInputSource.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/framing.c:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/queue:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_ChannelRemappingAudioSource.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/codec.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-shape.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/float.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_WindowsMediaAudioFormat.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_Line.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_FlacAudioFormat.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_AffineTransform.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/colour/juce_FillType.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_MACAddress.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_AiffAudioFormat.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ResizableEdgeComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/window_flac.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jconfig.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_KeyMappingEditorComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_FileDragAndDropTarget.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/byteorder/little_endian.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/stream_decoder.c:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/swab.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/memory.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/protected/stream_encoder.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/protected/stream_decoder.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_AttributedString.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_Initialisation.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/stream_encoder.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-style.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/window.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_Typeface.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__tree:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/bitsperlong.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/stdio.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_CaretComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/bitwriter.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileBrowserComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/bitreader.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/errno.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/native/accessibility/juce_Accessibility_android.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/fixed.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/deduplication/lpc_compute_autocorrelation_intrin.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/books/coupled/res_books_stereo.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_LegacyAudioParameter.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/float.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_SparseSet.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/deduplication/bitreader_read_rice_signed_block.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_DelayLine.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/stream_decoder.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/sampler/juce_Sampler.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/font.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/app_properties/juce_PropertiesFile.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPUtils.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/all.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/tuple:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/stdbool.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_SplashScreen.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/juce_GZIPCompressorOutputStream.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ResizableBorderComponent.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/locale.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/timers/juce_Timer.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/sigcontext.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_NotificationType.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_MP3AudioFormat.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_ARACommon.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/setup_22.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_FontOptions.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_MountedVolumeListChangeDetector.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_MessageManager.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_MessageListener.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_Message.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/xml/juce_XmlDocument.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/termios.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_ConnectedChildProcess.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_InterprocessConnectionServer.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_SingleThreadedAbstractFifo.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_InterprocessConnection.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_AudioUnitPluginFormat.mm:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawableComposite.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/native/juce_Messaging_android.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_StringPairArray.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_TextEditor.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/mapping0.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_LockingAsyncUpdater.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/ARA/juce_ARA_utils.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_ChangeBroadcaster.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_KeyboardFocusTraverser.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_ActionBroadcaster.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_Array.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_BasicNativeHeaders.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/errno.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/sources/juce_AudioTransportSource.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngerror.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioThumbnailCache.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/juce_Midi_android.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/list:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/os_types.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jfdctint.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPESynthesiser.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_PositionableAudioSource.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/juce_HighPerformanceAudioHelpers_android.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_TemporaryFile.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/png.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessorParameterGroup.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/midi_io/juce_MidiDevices.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEUtils.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_DrawableButton.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/midi_io/juce_MidiDeviceListConnectionBroadcaster.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/crctable.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/audio_io/juce_SystemAudioVolume.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdmarker.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_WavAudioFormat.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/audio_io/juce_AudioIODeviceType.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/audio_cd/juce_AudioCDReader.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_LAMEEncoderAudioFormat.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBScriptLocator.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_TextLayout.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/audio_io/juce_AudioIODeviceType.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_Optional.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_AsyncUpdater.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_LAMEEncoderAudioFormat.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/psych_44.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_PropertySet.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/embedding/juce_UIViewComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/audio_io/juce_AudioIODevice.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiDataConcatenator.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/audio_io/juce_AudioDeviceManager.h:
+
+_deps/oboe-src/include/oboe/StabilizedCallback.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ComponentBuilder.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/signal.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_SidePanel.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/legacy_stdlib_inlines.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_ResizableWindow.cpp:
+
+_deps/oboe-src/include/oboe/FifoControllerBase.h:
+
+_deps/oboe-src/include/oboe/Definitions.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/window.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_ModifierKeys.cpp:
+
+_deps/oboe-src/include/oboe/AudioStreamBase.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/vfs.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_Drawable.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioParameterFloat.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/statfs.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/__stddef_max_align_t.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/colour/juce_FillType.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/mman.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_Span.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_MouseInactivityDetector.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_SidePanel.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/eventfd.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/stdlib.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/stat.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_Functional.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileChooser.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/resource.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/ptrace.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_SystemClipboard.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AAXClientExtensions.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/poll.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/lookandfeel/juce_LookAndFeel_V2.h:
+
+_deps/oboe-src/include/oboe/OboeExtensions.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/juce_Oboe_android.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_AccessibilityHelpers.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioParameterBool.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/magic.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/font_matcher.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/fcntl.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/lpc.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ResizableBorderComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileBrowserComponent.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/condition_variable:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_Files_android.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_AllocationHooks.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_IIRFilter.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/const.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/private.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEInstrument.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_ByteOrder.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_ResamplingAudioSource.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/jni.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/libc-compat.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_PositionableAudioSource.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/juce_audio_processors.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileListComponent.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/legacy_sys_mman_inlines.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/dlfcn.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/dirent.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/sysconf.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/lockf.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_Oscillator.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/getopt.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/stat.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/poll.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/flock64.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ComponentBoundsConstrainer.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/resource.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/poll.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/maths/juce_LogRampedValue.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_RectangleList.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/envelope.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/mman.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/mman-common.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/hugetlb_encode.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_FileOutputStream.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_HostedAudioProcessorParameter.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioParameterInt.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/if.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/fcntl.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/psych_11.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_ViewportHelpers.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_WeakReference.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_RangedAudioParameter.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/native/juce_ScopedLowPowerModeDisabler.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_StringRef.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_MessageManager.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/mman.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_LV2PluginFormat.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngrtran.c:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__locale:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/block.c:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/legacy_sys_stat_inlines.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/ptrace.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_AudioSampleBuffer.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/poll.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/misc/juce_BubbleComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/window.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/ptrace.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/time.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/unit_tests/juce_UnitTest.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/time/juce_PerformanceCounter.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/fixed.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_SparseSet.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/kernel.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_WavAudioFormat.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FilenameComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ThreadPool.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_WildcardFileFilter.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/fcntl.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_ExtensionsVisitor.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_PropertyPanel.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/residue_8.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format/juce_AudioPluginFormatManager.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/lookandfeel/juce_LookAndFeel_V4.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/socket.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ScopedWriteLock.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ScopedReadLock.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ScopedLock.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_FileInputSource.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ReadWriteLock.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/fcntl.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawableShape.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ThreadPool.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cstdint:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/menus/juce_PopupMenu.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_String.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/codebook.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_CriticalSection.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/deque:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPConverters.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/detail/juce_ShapedText.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/native/juce_BluetoothMidiDevicePairingDialogue_android.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngmem.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_PathStrokeType.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/array:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_ApplicationBase.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_ChildProcessManager.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/maths/juce_SpecialFunctions.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/embedding/juce_XEmbedComponent.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/ios:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/components/juce_ModalComponentManager.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/stdint.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdcolor.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ChildProcess.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiFile.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/alloc.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/xml/juce_XmlDocument.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_AudioProcessLoadMeasurer.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_Identifier.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/math.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/stream_encoder.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_CharPointer_UTF8.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_CharPointer_UTF16.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/undomanager/juce_UndoManager.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_FileOutputStream.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/scanning/juce_KnownPluginList.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/scales.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiKeyboardState.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/mdct.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_ComponentDragger.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/detail/juce_NativeFileHandle.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngset.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/system/juce_TargetPlatform.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_PropertyPanel.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/export.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/siginfo.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/application/juce_Application.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/errno.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/system/juce_CompilerWarnings.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/mouse/juce_SelectedItemSet.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format/juce_AudioPluginFormat.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/residue_16.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_CommonFile_linux.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/desktop/juce_Desktop.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/stddef.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_InputSource.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_CopyableHeapBlock.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/values/juce_ValueTree.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/metadata.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_FileInputSource.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/json/juce_JSON.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_VST2ClientExtensions.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_ReverbAudioSource.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/chrono:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_URL.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_Socket.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/legacy_unistd_inlines.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_RuntimePermissions.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_StateVariableTPTFilter.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_TextDiff.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/ifaddrs.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/drawables/juce_DrawableComposite.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_Base64.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_CoreAudioFormat.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_CallbackMessage.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_AndroidDocumentInputSource.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/json/juce_JSON.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_NewLine.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ScrollBar.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_TabbedComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiBuffer.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/effects/juce_DropShadowEffect.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/crc32.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBBase.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/juce_ZipFile.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/poll.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_RuntimePermissions.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_URLInputSource.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_AudioSource.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cstdio:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_CoreAudioFormat.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_ToolbarButton.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_SubregionStream.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/signal.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_LinkedListPointer.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_FloatVectorOperations.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPIterator.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-ot-deprecated.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/timers/juce_MultiTimer.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_ToggleButton.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_LeakedObjectDetector.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/complex:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_SharedCode_posix.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_Variant.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_HeavyweightLeakedObjectDetector.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioParameterChoice.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/images/juce_ImageFileFormat.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/undomanager/juce_UndoableAction.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/mman.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/juce_audio_basics.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/sa_family_t.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessorListener.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPDispatcher.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_CharacterFunctions.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/ioctls.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_ContainerDeletePolicy.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_AiffAudioFormat.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sched.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/hwcap.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/positioning/juce_RelativeCoordinatePositioner.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/memfd.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_Atomic.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_Random.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_MathsFunctions.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/lpc_intrin_neon.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/bitrate.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_BufferedInputStream.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/sched.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/components/juce_ComponentListener.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/logging/juce_FileLogger.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/juce_core.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/json/juce_JSONSerialisation.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jcmaster.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/system/juce_CompilerSupport.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_StringPairArray.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_BufferingAudioSource.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_ScopedMessageBox.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fcntl.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_TextEditorModel.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/audio_io/juce_AudioDeviceManager.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_OwnedArray.h:
+
+_deps/oboe-src/include/oboe/FifoBuffer.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBScript.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_NativeMessageBox.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_BooleanPropertyComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/juce_ZipFile.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/optional:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_File.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_WaitableEvent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/system/juce_PlatformDefs.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_SortedSet.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/exception:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/bitwriter.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ListenerList.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_AudioProcessLoadMeasurer.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_TabbedButtonBar.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_HashMap.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/iterator:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/maths/juce_FastMathApproximations.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_FixedSizeFunction.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-ot-shape.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/ogg.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__config:
 
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ResizableEdgeComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_Enumerate.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_WildcardFileFilter.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/mbstate_t.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/system_error:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/midi_io/juce_MidiMessageCollector.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_MemoryInputStream.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_DynamicObject.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/synthesisers/juce_Synthesiser.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_SmoothedValue.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_LV2PluginFormat.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_ReferenceCountedObject.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiRPN.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_AudioDataConverters.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_Reverb.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/netinet/in.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/time_types.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/md5.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/streambuf:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_SharedResourcePointer.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEUtils.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ArrayBase.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ReferenceCountedArray.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/unistd.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_DynamicLibrary.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/float.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_Decibels.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_TextPropertyComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_MultiChoicePropertyComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_Expression.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_AudioWorkgroup.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/components/juce_Component.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/accessibility/interfaces/juce_AccessibilityTextInterface.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_ADSR.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cwctype:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jquant1.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/cpu.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_CharacterFunctions.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioParameterChoice.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPMidi1ToBytestreamTranslator.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/menus/juce_MenuBarComponent.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/arpa/inet.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FileTreeComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioFormatReaderSource.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_ScopeGuard.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/limits.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_InterprocessConnectionServer.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPConversion.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/placement/juce_RectanglePlacement.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_MixerAudioSource.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/ostream:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/time.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_SmoothedValue.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_MemoryAudioSource.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/inttypes.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/sources/juce_AudioSourcePlayer.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__undef_macros:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_MemoryAudioSource.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_DirectoryContentsList.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/residue_44u.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_ButtonAccessibilityHandler.h:
+
+_deps/oboe-src/include/oboe/LatencyTuner.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBBidiType.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/juce_audio_basics.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEZoneLayout.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioProcessorValueTreeState.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/broadcasters/juce_ActionListener.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/network/juce_IPAddress.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEValue.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_ContentSharer.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/effects/juce_DropShadowEffect.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/wait.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/inffast.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-ot-name.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_Typeface.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/functional:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/scanning/juce_PluginDirectoryScanner.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_IIRFilter.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPESynthesiserBase.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioDeviceSelectorComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/crc.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_FocusHelpers.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_MessageBoxOptions.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_Phaser.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ScopedValueSetter.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPESynthesiser.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_ConsoleApplication.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPView.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/string:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__bit_reference:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_Interpolators.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jfdctflt.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_MemoryOutputStream.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/ctype.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/stddef.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/string_view:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPSysEx7.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPReceiver.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/wchar_limits.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPFactory.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/floor0.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/books/uncoupled/res_books_uncoupled.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/errno-base.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/stdlib.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessorEditorHostContext.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/stdlib.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_Singleton.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_ARAHosting.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_ApplicationBase.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/json/juce_JSONUtils.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/commands/juce_ApplicationCommandManager.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_ToneGeneratorAudioSource.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPDeviceInfo.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessorParameterGroup.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPBytesOnGroup.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_ComponentAnimator.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdmerge.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_HyperlinkButton.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiRPN.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cstdlib:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/juce_GZIPDecompressorInputStream.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/types.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/limits.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiMessage.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_SpinLock.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiMessage.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_ModifierKeys.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiKeyboardState.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jctrans.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_AudioUnitPluginFormat.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/bitreader.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/bitmath.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPENote.h:
+
+_deps/oboe-src/include/oboe/AudioStream.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_FirstOrderTPTFilter.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_StringPool.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/smallft.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/zconf.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_PathIterator.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/crc.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/juce_dsp.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_AudioDataConverters.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_common_MimeTypes.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/uio.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_MemoryMappedFile.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/interprocess/juce_ConnectedChildProcess.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioFormatWriter.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_AudioChannelSet.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/type_traits:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/local/include/wctype.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/local/include/stdlib.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_Path.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_AllocationHooks.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/wctype.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_LADSPAPluginFormat.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/swab.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/native/juce_JNIHelpers_android.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/desktop/juce_Displays.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/cpu.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/version:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_DirectoryIterator.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/types.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioFormatManager.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/endian.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/posix_types.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-paint.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/cdefs.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/posix_types.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/desktop/juce_Displays.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/scanning/juce_PluginListComponent.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/logging/juce_Logger.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/locale.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/typeinfo:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/stdio.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/images/juce_ImageConvolutionKernel.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/signal-defs.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/inffixed.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/sources/juce_AudioTransportSource.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/ratio:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cctype:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/audio_play_head/juce_AudioPlayHead.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/juce_GlyphArrangement.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/wait.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jmemsys.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/adler32.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-unicode.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessorGraph.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/maths/juce_Range.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_RangedDirectoryIterator.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPESynthesiserBase.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/select.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_DirectoryContentsDisplayComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_CPlusPlusCodeTokeniser.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/versioning.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ElementComparator.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/misc/juce_DropShadower.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngwio.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/md5.c:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/string.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMP.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/malloc.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_AudioWorkgroup.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-ot-layout.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_TableHeaderComponent.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/signal.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_Parallelogram.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/highlevel.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jmemnobs.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPMidi1ToMidi2DefaultTranslator.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_ScopedMessageBoxImpl.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/typeindex:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/registry.c:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPView.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__functional_base:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/compat.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_AudioChannelSet.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/components/juce_ComponentTraverser.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__bsd_locale_fallbacks.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/user.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/inftrees.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/midi_io/juce_MidiMessageCollector.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/atomic:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/native/juce_ScopedLowPowerModeDisabler.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/errno.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/variant:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ProgressBar.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/limits.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/code_editor/juce_LuaCodeTokeniser.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/wctype.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/windows/juce_DocumentWindow.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/colour/juce_PixelFormats.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/memory:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_Button.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/stddef.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/ctime:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_StretchableObjectResizer.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/wchar.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__threading_support:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioParameterInt.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/serialisation/juce_Serialisation.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/colour/juce_ColourGradient.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/sources/juce_AudioSourcePlayer.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/misc/juce_RecentlyOpenedFilesList.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/netinet/tcp.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/system/juce_SystemStats.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_PropertySet.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_StringArray.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/filebrowser/juce_FilenameComponent.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_LADSPAPluginFormat.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/juce_gui_basics.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/posix_limits.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/xlocale.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/utility:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jerror.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioAppComponent.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/thread:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/setjmp.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format/juce_AudioPluginFormatManager.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/termbits.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_Base64.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/values/juce_ValueTreePropertyWithDefault.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/menus/juce_MenuBarModel.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/setup_16.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_Oversampling.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/time/juce_RelativeTime.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_Limiter.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/sstream:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/stdexcept:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/string.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_KeyPress.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_PluginDescription.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__errc:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/timers/juce_TimedCallback.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/limits:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_Memory.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_FocusRestorer.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_IIRFilterAudioSource.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/registry.h:
+
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/climits:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/images/juce_ImageCache.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_ARAHosting.cpp:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/openat2.h:
 
@@ -9402,234 +9977,208 @@ CMakeFiles/JuceModules.dir/juce/modules/juce_gui_extra/juce_gui_extra.cpp.o: /Us
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/pwd.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_ViewportHelpers.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/native/juce_ScopedLowPowerModeDisabler.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/math.h:
-
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/istream:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/deque:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/menus/juce_BurgerMenuComponent.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/utime.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/utilities/juce_GenericInterpolator.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/iosfwd:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/setup_44u.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/juce_audio_formats.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/juce_audio_devices.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngpread.c:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/bitset:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/ctype.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/unicode/sheenbidi/Headers/SBAlgorithm.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/iomanip:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_AudioProcessorParameter.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_LegacyAudioParameter.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/embedding/juce_HWNDComponent.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/system_error:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_TimeSliceThread.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/embedding/juce_UIViewComponent.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/types.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/contexts/juce_LowLevelGraphicsSoftwareRenderer.cpp:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/iostream:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/alloca.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/const.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/types.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPackets.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-ot.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/transupp.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/xml/juce_XmlElement.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/components/juce_CachedComponentImage.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/sources/juce_ChannelRemappingAudioSource.cpp:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/errno.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/format/juce_AudioFormatReader.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/functional:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_ToolbarItemPalette.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-font.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_MessageListener.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_ThreadPool.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPESynthesiser.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdapimin.c:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/compiler.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/pnglib/pngwio.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_LadderFilter.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/signal_types.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/chrono:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/widgets/juce_Toolbar.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_Panner.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cerrno:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_InputSource.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_CharPointer_ASCII.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_ByteOrder.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/time/juce_Time.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/ctype.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/bit:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_AlertWindowHelpers.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_utils/gui/juce_AudioThumbnail.cpp:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/pthread.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/pthread_types.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__hash_table:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPSysEx7.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__threading_support:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/string.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_EdgeTable.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/compiler_types.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__tuple:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/local/include/locale.h:
 
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/geometry/juce_BorderSize.h:
+
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/ctype_inlines.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/envelope.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jcparam.c:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_TextDiff.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__string:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/maths/juce_LookupTable.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdphuff.c:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/codebook.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_TabbedComponent.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_ModifierKeys.cpp:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/set:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__split_buffer:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/accessibility/interfaces/juce_AccessibilityTextInterface.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__nullptr:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/juce_audio_formats.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/fnmatch.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__node_handle:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioParameterFloat.cpp:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/stdbool.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/menus/juce_MenuBarModel.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/sve_context.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/initializer_list:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__mutex_base:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/zlib/gzguts.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/app_properties/juce_ApplicationProperties.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_PluginHostType.cpp:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/__debug:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/sys/stat.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/properties/juce_MultiChoicePropertyComponent.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_CallbackMessage.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/books/coupled/res_books_51.h:
+
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/local/include/inttypes.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_TextButton.cpp:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/misc/juce_Uuid.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/strings.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/misc.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/images/juce_ImageConvolutionKernel.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/bitreader.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_ComponentHelpers.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/limits.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/unistd.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/ump/juce_UMPMidi1ToMidi2DefaultTranslator.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cstdarg:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/commands/juce_ApplicationCommandManager.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPEMessages.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/stream_decoder.c:
+_deps/oboe-src/include/oboe/Version.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/__stddef_max_align_t.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_VSTPluginFormat.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_extra/embedding/juce_XEmbedComponent.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/stdarg.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/map:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/zip/juce_GZIPCompressorOutputStream.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_OwnedArray.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_AndroidDocument.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/seek_constants.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/buffers/juce_FloatVectorOperations.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_MultiDocumentPanel.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_AllocationHooks.cpp:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/pthread_types.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/list:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/accessibility/juce_AccessibilityHandler.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/logging/juce_Logger.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jidctint.c:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/stdint.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/legacy_errno_inlines.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_VSTPluginFormat.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_AbstractFifo.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_events/messages/juce_Initialisation.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/byteswap.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/text/juce_Base64.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_Oversampling.cpp:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/threads/juce_TimeSliceThread.cpp:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cstddef:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/strings.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/in_addr.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/layout/juce_Viewport.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/vorbisenc.c:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/menus/juce_MenuBarModel.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/colour/juce_Colour.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/colour/juce_ColourGradient.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/utilities/juce_AudioParameterBool.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/effects/juce_ImageEffectFilter.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_File.cpp:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/numeric:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/sockios.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jdhuff.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/streams/juce_BufferedInputStream.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_FileInputStream.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/lib64/clang/14.0.6/include/float.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/legacy_signal_inlines.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiMessageSequence.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/widgets/juce_Reverb.h:
+
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/format_types/juce_VST3PluginFormat.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/int-ll64.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_ToggleButton.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-set.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/locale:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/json/juce_JSONSerialisation.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/wchar.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/keyboard/juce_TextInputTarget.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/format.c:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/magic.h:
+/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/timespec.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_TopLevelWindowManager.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/detail/juce_ScalingHelpers.h:
 
 /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/aarch64-linux-android/asm/signal.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/asm-generic/bitsperlong.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/maths/juce_LookupTable.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/mpe/juce_MPENote.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_data_structures/undomanager/juce_UndoableAction.cpp:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/residue_44u.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/vorbisenc.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/cstring:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/containers/juce_ArrayBase.cpp:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/stdio.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/fonts/harfbuzz/hb-shape-plan.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/api-level.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/files/juce_FileSearchPath.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/oggvorbis/libvorbis-1.3.7/lib/modes/psych_16.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jidctred.c:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_gui_basics/buttons/juce_ArrowButton.cpp:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_core/memory/juce_HeapBlock.h:
 
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/juce_FlacAudioFormat.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_dsp/processors/juce_ProcessorChain.h:
 
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/c++/v1/condition_variable:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_formats/codecs/flac/libFLAC/include/private/stream_encoder_framing.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/unistd.h:
-
-/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/linux/compiler_types.h:
-
-/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_graphics/image_formats/jpglib/jmorecfg.h:
+/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_processors/processors/juce_GenericAudioProcessorEditor.cpp:

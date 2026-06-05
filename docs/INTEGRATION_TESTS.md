@@ -12,7 +12,7 @@ Before each run, use the platform-aware wrapper so the app is configured with th
 - iOS: `new_full`
 - Android: `16kb`
 
-The iOS JUCE podspec is kept in simulator-safe mode by commenting the `libJuceModules_debug3.a` line and uncommenting the `libJuceModules_sim.a` line.
+The iOS JUCE podspec selects the simulator archive automatically through sdk-specific linker flags.
 
 The wrapper also prepends a local `tool/bin/xcrun` shim that clamps `xcdevice list` timeouts. This avoids Flutter hanging for long periods when macOS has a stale or unavailable paired iPhone in Apple device discovery.
 

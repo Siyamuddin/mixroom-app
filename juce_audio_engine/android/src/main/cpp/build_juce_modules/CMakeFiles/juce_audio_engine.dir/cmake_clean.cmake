@@ -1,5 +1,7 @@
 file(REMOVE_RECURSE
   "CMakeFiles/juce_audio_engine.dir/link.d"
+  "CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.o"
+  "CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.o.d"
   "CMakeFiles/juce_audio_engine.dir/JuceBridge.cpp.o"
   "CMakeFiles/juce_audio_engine.dir/JuceBridge.cpp.o.d"
   "CMakeFiles/juce_audio_engine.dir/JuceEngine.cpp.o"

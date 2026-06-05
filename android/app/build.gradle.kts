@@ -3,7 +3,6 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
-    id("kotlin-android")
     id("dev.flutter.flutter-gradle-plugin")
 }
 
@@ -34,10 +33,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     defaultConfig {
         applicationId = "com.mixroom.mixroomapp"
         minSdk = 29
@@ -48,10 +43,8 @@ android {
         
         // Add FFmpeg config
         ndk {
-            // abiFilters.addAll(setOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")) // Corrected line 31
-            // abiFilters = "arm64-v8a" // Corrected line 31
             abiFilters.clear()
-            abiFilters.add("arm64-v8a")
+            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86_64"))
         }
 
         // for OAuth (youtube upload)
@@ -124,6 +117,12 @@ if (isBundleReleaseBuild) {
                     delete(File(outDir, "flutter_assets/assets/sample_packs"))
                 }
         }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
 }
 

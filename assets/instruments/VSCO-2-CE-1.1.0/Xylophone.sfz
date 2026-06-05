@@ -31,7 +31,7 @@ volume=0
 
 
 <region>
-sample=Xylo_Medium_C4_ff_01_far.flac
+sample=Xylo_Medium_C4_ff_01_far.mp3
 lokey=58
 hikey=63
 pitch_keycenter=60
@@ -41,7 +41,7 @@ volume=8
 
 
 <region>
-sample=Xylo_Medium_C5_ff_01_far.flac
+sample=Xylo_Medium_C5_ff_01_far.mp3
 lokey=70
 hikey=75
 pitch_keycenter=72
@@ -51,7 +51,7 @@ volume=8
 
 
 <region>
-sample=Xylo_Medium_C6_ff_01_far.flac
+sample=Xylo_Medium_C6_ff_01_far.mp3
 lokey=82
 hikey=87
 pitch_keycenter=84
@@ -61,7 +61,7 @@ volume=8
 
 
 <region>
-sample=Xylo_Medium_C7_ff_01_far.flac
+sample=Xylo_Medium_C7_ff_01_far.mp3
 lokey=94
 hikey=96
 pitch_keycenter=96
@@ -71,7 +71,7 @@ volume=8
 
 
 <region>
-sample=Xylo_Medium_G3_ff_01_far.flac
+sample=Xylo_Medium_G3_ff_01_far.mp3
 lokey=55
 hikey=57
 pitch_keycenter=55
@@ -81,7 +81,7 @@ volume=8
 
 
 <region>
-sample=Xylo_Medium_G4_ff_01_far.flac
+sample=Xylo_Medium_G4_ff_01_far.mp3
 lokey=64
 hikey=69
 pitch_keycenter=67
@@ -91,7 +91,7 @@ volume=8
 
 
 <region>
-sample=Xylo_Medium_G5_ff_01_far.flac
+sample=Xylo_Medium_G5_ff_01_far.mp3
 lokey=76
 hikey=81
 pitch_keycenter=79
@@ -101,7 +101,7 @@ volume=8
 
 
 <region>
-sample=Xylo_Medium_G6_ff_01_far.flac
+sample=Xylo_Medium_G6_ff_01_far.mp3
 lokey=88
 hikey=93
 pitch_keycenter=91

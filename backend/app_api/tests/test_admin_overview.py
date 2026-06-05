@@ -64,6 +64,7 @@ else:
 
 admin_module = importlib.import_module("src.handlers.api_admin_overview")
 overview_module = importlib.import_module("src.common.admin_overview_repository")
+posthog_module = importlib.import_module("src.common.posthog_admin_metrics")
 
 
 class _FakeRepo:
@@ -498,6 +499,40 @@ class AdminOverviewRepositoryTests(unittest.TestCase):
 
         repo._posthog_metrics.fetch_live_presence.assert_called_once()
         self.assertEqual(result["active_users"], 4)
+
+    def test_posthog_live_presence_uses_bounded_distinct_user_query(self):
+        client = posthog_module.PosthogAdminMetricsClient()
+        client._build_headers = mock.Mock(return_value={"Authorization": "Bearer token"})
+        client._query_rows = mock.Mock(
+            return_value=[
+                {"person_id": "user-1"},
+                {"person_id": "user-2"},
+            ]
+        )
+
+        result = client.fetch_live_presence()
+
+        self.assertEqual(result["status"], "live")
+        self.assertEqual(result["active_users"], 2)
+        client._query_rows.assert_called_once()
+        _, query = client._query_rows.call_args.args
+        self.assertIn("SELECT DISTINCT person_id", query)
+        self.assertIn("LIMIT 1000", query)
+        self.assertLessEqual(client._query_rows.call_args.kwargs["timeout_seconds"], 6)
+
+    def test_posthog_live_presence_returns_cached_error_when_query_fails(self):
+        client = posthog_module.PosthogAdminMetricsClient()
+        client._build_headers = mock.Mock(return_value={"Authorization": "Bearer token"})
+        client._query_rows = mock.Mock(side_effect=ValueError("timeout"))
+
+        result = client.fetch_live_presence()
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["active_users"], 0)
+        self.assertIn("timeout", result["note"])
+        cached = client.fetch_live_presence()
+        self.assertEqual(cached["status"], "error")
+        client._query_rows.assert_called_once()
 
     def test_build_overview_includes_ai_usage_averages(self):
         repo = overview_module.AdminOverviewRepository.__new__(

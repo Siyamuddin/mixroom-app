@@ -215,7 +215,7 @@ CMAKE_PROJECT_DESCRIPTION:STATIC=
 CMAKE_PROJECT_HOMEPAGE_URL:STATIC=
 
 //Value Computed by CMake
-CMAKE_PROJECT_NAME:STATIC=JuceModules
+CMAKE_PROJECT_NAME:STATIC=juce_audio_engine
 
 //Ranlib
 CMAKE_RANLIB:FILEPATH=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ranlib
@@ -375,7 +375,7 @@ juce_audio_engine_SOURCE_DIR:STATIC=/Users/andrewhyungulee/Mixroom/mixroom-app/j
 log-lib:FILEPATH=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/lib/aarch64-linux-android/29/liblog.so
 
 //Value Computed by CMake
-oboe_BINARY_DIR:STATIC=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-build
+oboe_BINARY_DIR:STATIC=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/juce/modules/juce_audio_devices/native/oboe
 
 //Value Computed by CMake
 oboe_IS_TOP_LEVEL:STATIC=OFF
@@ -384,7 +384,7 @@ oboe_IS_TOP_LEVEL:STATIC=OFF
 oboe_LIB_DEPENDS:STATIC=general;log;general;OpenSLES;
 
 //Value Computed by CMake
-oboe_SOURCE_DIR:STATIC=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-src
+oboe_SOURCE_DIR:STATIC=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/oboe
 
 
 ########################
@@ -533,7 +533,7 @@ CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_NM
 CMAKE_NM-ADVANCED:INTERNAL=1
 //number of local generators
-CMAKE_NUMBER_OF_MAKEFILES:INTERNAL=2
+CMAKE_NUMBER_OF_MAKEFILES:INTERNAL=3
 //ADVANCED property for variable: CMAKE_OBJCOPY
 CMAKE_OBJCOPY-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_OBJDUMP

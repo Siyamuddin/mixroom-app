@@ -1484,26 +1484,26 @@ PitchCorrectorAudioProcessor::PitchCorrectorAudioProcessor()
 #endif
 {
     parameters.createAndAddParameter(
-        std::make_unique<juce::AudioParameterFloat>(
+        std::make_unique<juce::AudioParameterChoice>(
             "key", "Key",
-            juce::NormalisableRange<float>(0.0f, 11.0f, 1.0f),
-            0.0f));
+            juce::StringArray{"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"},
+            0));
 
     parameters.createAndAddParameter(
-        std::make_unique<juce::AudioParameterFloat>(
+        std::make_unique<juce::AudioParameterChoice>(
             "scale", "Scale",
-            juce::NormalisableRange<float>(0.0f, 2.0f, 1.0f),
-            1.0f));
+            juce::StringArray{"Chromatic", "Major", "Minor"},
+            1));
 
     parameters.createAndAddParameter(
         std::make_unique<juce::AudioParameterFloat>(
-            "amount", "Amount",
+            "amount", "Correction",
             juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
             80.0f, "%"));
 
     parameters.createAndAddParameter(
         std::make_unique<juce::AudioParameterFloat>(
-            "speed", "Speed",
+            "speed", "Retune Speed",
             juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
             65.0f, "%"));
 
@@ -1521,39 +1521,84 @@ void PitchCorrectorAudioProcessor::prepareToPlay(double sampleRate, int samplesP
     currentSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
     pitchShift.prepare(currentSampleRate, samplesPerBlock);
     smoothedCorrectionSemitones = 0.0f;
+    lastDetectedPitchHz = 0.0f;
+    pitchAnalysisIntervalSamples = juce::jmax(512, (int)std::round(currentSampleRate * 0.04));
+    pitchAnalysisSamplesUntilNext = 0;
+    pitchAnalysisDecimation = currentSampleRate >= 32000.0 ? 4 : 2;
+    pitchAnalysisSampleRate = currentSampleRate / (double)pitchAnalysisDecimation;
+    pitchAnalysisMono.resize((size_t)juce::jmax(4096, samplesPerBlock));
+    pitchAnalysisHistory.assign(2048, 0.0f);
+    pitchAnalysisHistoryWritePos = 0;
+    pitchAnalysisHistoryFilled = 0;
 }
 
-float PitchCorrectorAudioProcessor::estimatePitchHz(
-    const juce::AudioBuffer<float> &buffer) const
+void PitchCorrectorAudioProcessor::appendPitchAnalysisSamples(
+    const juce::AudioBuffer<float> &buffer)
 {
     const int channels = juce::jmin(buffer.getNumChannels(), getTotalNumInputChannels());
     const int samples = buffer.getNumSamples();
-    if (channels <= 0 || samples < 96 || currentSampleRate <= 0.0)
-        return 0.0f;
+    const int historySize = (int)pitchAnalysisHistory.size();
+    if (channels <= 0 || samples <= 0 || historySize <= 0)
+        return;
 
-    const auto monoAt = [&buffer, channels](int index) {
+    const int stride = juce::jmax(1, pitchAnalysisDecimation);
+    for (int i = 0; i < samples; i += stride)
+    {
         float sum = 0.0f;
         for (int ch = 0; ch < channels; ++ch)
-            sum += buffer.getReadPointer(ch)[index];
-        return sum / (float)channels;
-    };
+            sum += buffer.getReadPointer(ch)[i];
+        pitchAnalysisHistory[(size_t)pitchAnalysisHistoryWritePos] =
+            sum / (float)channels;
+        ++pitchAnalysisHistoryWritePos;
+        if (pitchAnalysisHistoryWritePos >= historySize)
+            pitchAnalysisHistoryWritePos = 0;
+        pitchAnalysisHistoryFilled =
+            juce::jmin(historySize, pitchAnalysisHistoryFilled + 1);
+    }
+}
+
+float PitchCorrectorAudioProcessor::estimatePitchHz()
+{
+    if (currentSampleRate <= 0.0 || pitchAnalysisSampleRate <= 0.0)
+        return 0.0f;
+
+    const int historySize = (int)pitchAnalysisHistory.size();
+    const int analysisSamples =
+        juce::jmin(1536, juce::jmin(historySize, pitchAnalysisHistoryFilled));
+    if (analysisSamples < 128)
+        return 0.0f;
+
+    if ((int)pitchAnalysisMono.size() < analysisSamples)
+        pitchAnalysisMono.resize((size_t)analysisSamples);
+
+    auto *mono = pitchAnalysisMono.data();
+    int readPos = pitchAnalysisHistoryWritePos - analysisSamples;
+    if (readPos < 0)
+        readPos += historySize;
 
     float mean = 0.0f;
-    for (int i = 0; i < samples; ++i)
-        mean += monoAt(i);
-    mean /= (float)samples;
+    for (int i = 0; i < analysisSamples; ++i)
+    {
+        mono[i] = pitchAnalysisHistory[(size_t)readPos];
+        mean += mono[i];
+        ++readPos;
+        if (readPos >= historySize)
+            readPos = 0;
+    }
+    mean /= (float)analysisSamples;
 
     float energy = 0.0f;
-    for (int i = 0; i < samples; ++i)
+    for (int i = 0; i < analysisSamples; ++i)
     {
-        const float x = monoAt(i) - mean;
+        const float x = mono[i] - mean;
+        mono[i] = x;
         energy += x * x;
     }
     if (energy < 1.0e-7f)
         return 0.0f;
 
-    const int minLag = juce::jmax(2, (int)std::floor(currentSampleRate / 1000.0));
-    const int maxLag = juce::jmin(samples - 2, (int)std::ceil(currentSampleRate / 80.0));
+    const int minLag = juce::jmax(2, (int)std::floor(pitchAnalysisSampleRate / 900.0));
+    const int maxLag = juce::jmin(analysisSamples - 2, (int)std::ceil(pitchAnalysisSampleRate / 75.0));
     if (maxLag <= minLag)
         return 0.0f;
 
@@ -1564,10 +1609,10 @@ float PitchCorrectorAudioProcessor::estimatePitchHz(
         float corr = 0.0f;
         float aEnergy = 0.0f;
         float bEnergy = 0.0f;
-        for (int i = 0; i < samples - lag; ++i)
+        for (int i = 0; i < analysisSamples - lag; ++i)
         {
-            const float a = monoAt(i) - mean;
-            const float b = monoAt(i + lag) - mean;
+            const float a = mono[i];
+            const float b = mono[i + lag];
             corr += a * b;
             aEnergy += a * a;
             bEnergy += b * b;
@@ -1585,7 +1630,7 @@ float PitchCorrectorAudioProcessor::estimatePitchHz(
     if (bestLag <= 0 || bestScore < 0.36f)
         return 0.0f;
 
-    return (float)(currentSampleRate / (double)bestLag);
+    return (float)(pitchAnalysisSampleRate / (double)bestLag);
 }
 
 float PitchCorrectorAudioProcessor::targetCorrectionSemitones(
@@ -1640,8 +1685,21 @@ void PitchCorrectorAudioProcessor::processBlock(
     const float amount = parameters.getRawParameterValue("amount")->load() * 0.01f;
     const float speed = parameters.getRawParameterValue("speed")->load() * 0.01f;
     const float mix = parameters.getRawParameterValue("mix")->load() * 0.01f;
+    if (amount <= 0.001f || mix <= 0.001f)
+    {
+        smoothedCorrectionSemitones = 0.0f;
+        return;
+    }
 
-    const float pitchHz = estimatePitchHz(buffer);
+    appendPitchAnalysisSamples(buffer);
+    pitchAnalysisSamplesUntilNext -= buffer.getNumSamples();
+    if (pitchAnalysisSamplesUntilNext <= 0)
+    {
+        lastDetectedPitchHz = estimatePitchHz();
+        pitchAnalysisSamplesUntilNext = pitchAnalysisIntervalSamples;
+    }
+
+    const float pitchHz = lastDetectedPitchHz;
     const float target = pitchHz > 0.0f
                              ? targetCorrectionSemitones(pitchHz, key, scale) * amount
                              : 0.0f;

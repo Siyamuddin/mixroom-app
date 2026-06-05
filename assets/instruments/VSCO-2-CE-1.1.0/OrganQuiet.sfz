@@ -44,7 +44,7 @@ group_label=gr_1
 
 
 <region>
-sample=NT5_Man3Quiet_122_rr1.flac
+sample=NT5_Man3Quiet_122_rr1.mp3
 lokey=36
 hikey=37
 pitch_keycenter=36
@@ -54,7 +54,7 @@ volume=12
 
 
 <region>
-sample=NT5_Man3Quiet_125_rr1.flac
+sample=NT5_Man3Quiet_125_rr1.mp3
 lokey=38
 hikey=40
 pitch_keycenter=39
@@ -64,7 +64,7 @@ volume=12
 
 
 <region>
-sample=NT5_Man3Quiet_128_rr1.flac
+sample=NT5_Man3Quiet_128_rr1.mp3
 lokey=41
 hikey=43
 pitch_keycenter=42
@@ -74,7 +74,7 @@ volume=12
 
 
 <region>
-sample=NT5_Man3Quiet_131_rr1.flac
+sample=NT5_Man3Quiet_131_rr1.mp3
 lokey=44
 hikey=46
 pitch_keycenter=45
@@ -84,7 +84,7 @@ volume=12
 
 
 <region>
-sample=NT5_Man3Quiet_134_rr1.flac
+sample=NT5_Man3Quiet_134_rr1.mp3
 lokey=47
 hikey=49
 pitch_keycenter=48
@@ -94,7 +94,7 @@ volume=12
 
 
 <region>
-sample=NT5_Man3Quiet_137_rr1.flac
+sample=NT5_Man3Quiet_137_rr1.mp3
 lokey=50
 hikey=52
 pitch_keycenter=51
@@ -104,7 +104,7 @@ volume=12
 
 
 <region>
-sample=NT5_Man3Quiet_140_rr1.flac
+sample=NT5_Man3Quiet_140_rr1.mp3
 lokey=53
 hikey=55
 pitch_keycenter=54
@@ -114,7 +114,7 @@ volume=12
 
 
 <region>
-sample=NT5_Man3Quiet_143_rr1.flac
+sample=NT5_Man3Quiet_143_rr1.mp3
 lokey=56
 hikey=58
 pitch_keycenter=57
@@ -124,7 +124,7 @@ volume=12
 
 
 <region>
-sample=NT5_Man3Quiet_146_rr1.flac
+sample=NT5_Man3Quiet_146_rr1.mp3
 lokey=59
 hikey=61
 pitch_keycenter=60
@@ -134,7 +134,7 @@ volume=12
 
 
 <region>
-sample=NT5_Man3Quiet_149_rr1.flac
+sample=NT5_Man3Quiet_149_rr1.mp3
 lokey=62
 hikey=64
 pitch_keycenter=63
@@ -144,7 +144,7 @@ volume=12
 
 
 <region>
-sample=NT5_Man3Quiet_152_rr1.flac
+sample=NT5_Man3Quiet_152_rr1.mp3
 lokey=65
 hikey=67
 pitch_keycenter=66
@@ -154,7 +154,7 @@ volume=12
 
 
 <region>
-sample=NT5_Man3Quiet_155_rr1.flac
+sample=NT5_Man3Quiet_155_rr1.mp3
 lokey=68
 hikey=70
 pitch_keycenter=69
@@ -164,7 +164,7 @@ volume=12
 
 
 <region>
-sample=NT5_Man3Quiet_158_rr1.flac
+sample=NT5_Man3Quiet_158_rr1.mp3
 lokey=71
 hikey=73
 pitch_keycenter=72
@@ -174,7 +174,7 @@ volume=12
 
 
 <region>
-sample=NT5_Man3Quiet_161_rr1.flac
+sample=NT5_Man3Quiet_161_rr1.mp3
 lokey=74
 hikey=76
 pitch_keycenter=75
@@ -184,7 +184,7 @@ volume=12
 
 
 <region>
-sample=NT5_Man3Quiet_164_rr1.flac
+sample=NT5_Man3Quiet_164_rr1.mp3
 lokey=77
 hikey=79
 pitch_keycenter=78
@@ -194,7 +194,7 @@ volume=12
 
 
 <region>
-sample=NT5_Man3Quiet_167_rr1.flac
+sample=NT5_Man3Quiet_167_rr1.mp3
 lokey=80
 hikey=82
 pitch_keycenter=81
@@ -204,7 +204,7 @@ volume=12
 
 
 <region>
-sample=NT5_Man3Quiet_170_rr1.flac
+sample=NT5_Man3Quiet_170_rr1.mp3
 lokey=83
 hikey=85
 pitch_keycenter=84
@@ -214,7 +214,7 @@ volume=12
 
 
 <region>
-sample=NT5_Man3Quiet_173_rr1.flac
+sample=NT5_Man3Quiet_173_rr1.mp3
 lokey=86
 hikey=88
 pitch_keycenter=87
@@ -224,7 +224,7 @@ volume=12
 
 
 <region>
-sample=NT5_Man3Quiet_176_rr1.flac
+sample=NT5_Man3Quiet_176_rr1.mp3
 lokey=89
 hikey=91
 pitch_keycenter=90
@@ -234,7 +234,7 @@ volume=12
 
 
 <region>
-sample=NT5_Man3Quiet_179_rr1.flac
+sample=NT5_Man3Quiet_179_rr1.mp3
 lokey=92
 hikey=94
 pitch_keycenter=93
@@ -244,7 +244,7 @@ volume=12
 
 
 <region>
-sample=NT5_Man3Quiet_182_rr1.flac
+sample=NT5_Man3Quiet_182_rr1.mp3
 lokey=95
 hikey=96
 pitch_keycenter=96

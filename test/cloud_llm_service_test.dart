@@ -543,7 +543,7 @@ void main() {
                         'items': [
                           {
                             'library_path':
-                                'Starter Kit v1/Processed Drums/Kick-01.flac',
+                                'Starter Kit v1/Processed Drums/Kick-01.mp3',
                             'row_index': 0,
                             'start_measure': 1,
                           }
@@ -654,7 +654,7 @@ void main() {
         projectSnapshot: 'Track 1: Lead Vocal',
         selectionSnapshot: 'selected_row_index=0',
         librarySnapshot:
-            'sample_packs:\n- Starter Kit v1/Processed Drums/Kick-01.flac',
+            'sample_packs:\n- Starter Kit v1/Processed Drums/Kick-01.mp3',
         pendingMix: MixingResult(
           actions: [
             MixAction('set_row_gain', {'row': 0, 'delta': 1.5})
@@ -712,7 +712,7 @@ void main() {
                         'items': [
                           {
                             'library_path':
-                                'Starter Kit v1/Processed Drums/Snare-02.flac',
+                                'Starter Kit v1/Processed Drums/Snare-02.mp3',
                             'target': {
                               'row_index': 1,
                               'label_contains': 'snare',
@@ -770,7 +770,7 @@ void main() {
                         'items': [
                           {
                             'library_path':
-                                'Starter Kit v1/Processed Drums/Hi-Hat-01.flac',
+                                'Starter Kit v1/Processed Drums/Hi-Hat-01.mp3',
                             'target': {
                               'row_index': 0,
                             },
@@ -1204,7 +1204,7 @@ void main() {
                         "operation": "insert_audio_clips",
                         "items": [
                           {
-                            "library_path": "Starter Kit v1/Processed Drums/Kick-01.flac",
+                            "library_path": "Starter Kit v1/Processed Drums/Kick-01.mp3",
                             "row_index": 0,
                             "start_measure": 1,
                             "length_measures": 8
@@ -1333,20 +1333,20 @@ void main() {
                         'items': [
                           {
                             'library_path':
-                                'Starter Kit v1/Processed Drums/Kick-01.flac',
+                                'Starter Kit v1/Processed Drums/Kick-01.mp3',
                             'row_index': 0,
                             'repeat_count': 4,
                           },
                           {
                             'library_path':
-                                'Starter Kit v1/Processed Drums/Kick-02.flac',
+                                'Starter Kit v1/Processed Drums/Kick-02.mp3',
                             'row_index': 0,
                             'repeat_count': 4,
                             'start_beat': 3,
                           },
                           {
                             'library_path':
-                                'Starter Kit v1/Processed Drums/Snare-01.flac',
+                                'Starter Kit v1/Processed Drums/Snare-01.mp3',
                             'row_index': 1,
                             'repeat_count': 4,
                           },
@@ -1423,22 +1423,22 @@ void main() {
                         'items': [
                           {
                             'library_path':
-                                'Starter Kit v1/Processed Drums/Kick-01.flac',
+                                'Starter Kit v1/Processed Drums/Kick-01.mp3',
                             'row_index': 0,
                           },
                           {
                             'library_path':
-                                'Starter Kit v1/Processed Drums/Snare-01.flac',
+                                'Starter Kit v1/Processed Drums/Snare-01.mp3',
                             'row_index': 1,
                           },
                           {
                             'library_path':
-                                'Starter Kit v1/Processed Drums/Hat-01.flac',
+                                'Starter Kit v1/Processed Drums/Hat-01.mp3',
                             'row_index': 2,
                           },
                           {
                             'library_path':
-                                'Starter Kit v1/Processed Drums/Crash-01.flac',
+                                'Starter Kit v1/Processed Drums/Crash-01.mp3',
                             'row_index': 3,
                           },
                         ],
@@ -1506,21 +1506,21 @@ void main() {
                         'items': [
                           {
                             'library_path':
-                                'Starter Kit v1/Processed Drums/Kick-01.flac',
+                                'Starter Kit v1/Processed Drums/Kick-01.mp3',
                             'row_index': 0,
                             'start_beat': 1,
                             'step_beats': 2,
                           },
                           {
                             'library_path':
-                                'Starter Kit v1/Processed Drums/Clap-01.flac',
+                                'Starter Kit v1/Processed Drums/Clap-01.mp3',
                             'row_index': 1,
                             'start_beat': 1,
                             'step_beats': 2,
                           },
                           {
                             'library_path':
-                                'Starter Kit v1/Processed Drums/Hat-01.flac',
+                                'Starter Kit v1/Processed Drums/Hat-01.mp3',
                             'row_index': 2,
                           },
                         ],
@@ -1597,43 +1597,43 @@ void main() {
                         'items': [
                           {
                             'library_path':
-                                'Starter Kit v1/Processed Drums/Kick-01.flac',
+                                'Starter Kit v1/Processed Drums/Kick-01.mp3',
                             'row_index': 0,
                             'start_beat': 1,
                           },
                           {
                             'library_path':
-                                'Starter Kit v1/Processed Drums/Kick-01.flac',
+                                'Starter Kit v1/Processed Drums/Kick-01.mp3',
                             'row_index': 0,
                             'start_beat': 3,
                           },
                           {
                             'library_path':
-                                'Starter Kit v1/Processed Drums/Clap-01.flac',
+                                'Starter Kit v1/Processed Drums/Clap-01.mp3',
                             'row_index': 1,
                             'start_beat': 1,
                           },
                           {
                             'library_path':
-                                'Starter Kit v1/Processed Drums/Clap-01.flac',
+                                'Starter Kit v1/Processed Drums/Clap-01.mp3',
                             'row_index': 1,
                             'start_beat': 2,
                           },
                           {
                             'library_path':
-                                'Starter Kit v1/Processed Drums/Clap-01.flac',
+                                'Starter Kit v1/Processed Drums/Clap-01.mp3',
                             'row_index': 1,
                             'start_beat': 3,
                           },
                           {
                             'library_path':
-                                'Starter Kit v1/Processed Drums/Clap-01.flac',
+                                'Starter Kit v1/Processed Drums/Clap-01.mp3',
                             'row_index': 1,
                             'start_beat': 4,
                           },
                           {
                             'library_path':
-                                'Starter Kit v1/Processed Drums/Hat-01.flac',
+                                'Starter Kit v1/Processed Drums/Hat-01.mp3',
                             'row_index': 2,
                             'start_beat': 1,
                             'step_beats': 0.5,

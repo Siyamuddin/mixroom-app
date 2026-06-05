@@ -12,13 +12,7 @@ Platform-specific local setup is required before running the app:
   `dart run tool/switch_ffmpeg_backend.dart new_full`
 - After switching FFmpeg variants, run `flutter pub get`.
 
-For iOS builds, also check [`juce_audio_engine/ios/juce_audio_engine.podspec`](juce_audio_engine/ios/juce_audio_engine.podspec) and make sure `s.ios.vendored_libraries` matches the target you are about to run:
-
-- Debug on a real device: uncomment `ios-arm64/libJuceModules_debug3.a`
-- Release on a real device: uncomment `ios-arm64/libJuceModules.a`
-- Simulator: uncomment `ios-arm64_x86_64-simulator/libJuceModules_sim.a`
-
-Keep the other two entries commented out.
+For iOS builds, [`juce_audio_engine/ios/juce_audio_engine.podspec`](juce_audio_engine/ios/juce_audio_engine.podspec) selects the correct JUCE archive automatically for simulator, debug device, and Profile/Release device builds.
 
 ## Legal
 

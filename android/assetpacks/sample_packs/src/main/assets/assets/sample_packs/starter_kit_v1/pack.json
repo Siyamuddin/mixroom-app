@@ -1,12 +1,11 @@
 {
   "id": "starter_kit_v1",
   "name": "Starter Kit v1",
-  "version": 2,
+  "version": 3,
   "releasedAt": "2026-04-16",
   "license": "Curated third-party CC0/public-domain sample bundle. See LICENSES.md.",
   "formats": {
-    "flac": 117,
-    "mp3": 18
+    "mp3": 135
   },
   "audioFileCount": 135,
   "categories": [

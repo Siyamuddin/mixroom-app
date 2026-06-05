@@ -42,7 +42,7 @@ Parameters:
     Default: gpt-5.4-mini
   AiChatDefaultTemperature:
     Type: String
-    Default: '0.2'
+    Default: '0.35'
   VideoEditorDefaultTemperature:
     Type: String
     Default: '0.1'

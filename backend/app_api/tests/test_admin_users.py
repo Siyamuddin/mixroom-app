@@ -74,18 +74,22 @@ class _FakeRepo:
     def __init__(
         self,
         search_payload=None,
+        create_payload=None,
         delete_payload=None,
         grant_payload=None,
         override_payload=None,
     ):
         self.search_payload = search_payload or {"users": []}
+        self.create_payload = create_payload or {"created": True}
         self.delete_payload = delete_payload or {"deleted": True}
         self.grant_payload = grant_payload or {"granted": True}
         self.override_payload = override_payload or {"overridden": True}
         self.search_calls = []
+        self.create_calls = []
         self.delete_calls = []
         self.grant_calls = []
         self.override_calls = []
+        self.create_error = None
         self.delete_error = None
         self.grant_error = None
         self.override_error = None
@@ -93,6 +97,30 @@ class _FakeRepo:
     def search_users(self, *, query="", limit=24):
         self.search_calls.append({"query": query, "limit": limit})
         return dict(self.search_payload)
+
+    def create_username_account(
+        self,
+        *,
+        username: str,
+        display_name: str,
+        password: str,
+        email: str = "",
+        created_by_user_id: str,
+        created_by_email: str,
+    ):
+        self.create_calls.append(
+            {
+                "username": username,
+                "display_name": display_name,
+                "password": password,
+                "email": email,
+                "created_by_user_id": created_by_user_id,
+                "created_by_email": created_by_email,
+            }
+        )
+        if self.create_error is not None:
+            raise self.create_error
+        return dict(self.create_payload)
 
     def delete_user(
         self,
@@ -241,6 +269,61 @@ class AdminUsersHandlerTests(unittest.TestCase):
         self.assertIn('"requested_email": "admin@example.com"', result["body"])
         self.assertIn('"total_matches": 1', result["body"])
         self.assertEqual(admin_module.repo.search_calls[0]["query"], "user")
+
+    def test_create_username_account_returns_payload(self):
+        self._authenticate()
+        admin_module.repo = _FakeRepo(
+            create_payload={
+                "created": True,
+                "user_id": "user-1",
+                "username": "student_1",
+                "email": "student@example.com",
+                "user": {
+                    "user_id": "user-1",
+                    "username": "student_1",
+                    "email": "student@example.com",
+                },
+            }
+        )
+
+        result = admin_module.handler(
+            {
+                "rawPath": "/v1/internal/admin/users/create-username-account",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": (
+                    '{"username":"student_1","display_name":"Student One",'
+                    '"password":"Password123!","email":"student@example.com"}'
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(result["statusCode"], 200)
+        self.assertIn('"created": true', result["body"])
+        call = admin_module.repo.create_calls[0]
+        self.assertEqual(call["username"], "student_1")
+        self.assertEqual(call["display_name"], "Student One")
+        self.assertEqual(call["password"], "Password123!")
+        self.assertEqual(call["email"], "student@example.com")
+        self.assertEqual(call["created_by_email"], "admin@example.com")
+
+    def test_create_username_account_returns_bad_request_for_invalid_input(self):
+        self._authenticate()
+        repo = _FakeRepo()
+        repo.create_error = ValueError("That username is already taken.")
+        admin_module.repo = repo
+
+        result = admin_module.handler(
+            {
+                "rawPath": "/v1/internal/admin/users/create-username-account",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": '{"username":"student_1","display_name":"Student One","password":"Password123!"}',
+            },
+            object(),
+        )
+
+        self.assertEqual(result["statusCode"], 400)
+        self.assertIn("That username is already taken", result["body"])
 
     def test_delete_returns_bad_request_for_missing_reason(self):
         self._authenticate()
@@ -405,6 +488,68 @@ class AdminUsersHandlerTests(unittest.TestCase):
 
 
 class AdminUserRepositoryTests(unittest.TestCase):
+    def test_create_username_account_writes_native_account_profile_and_free_entitlement(self):
+        repository = repo_module.AdminUserRepository.__new__(repo_module.AdminUserRepository)
+        billing_repo = mock.Mock()
+        billing_repo.get_auth_account_by_email.return_value = None
+        billing_repo.get_user_profile_by_username.return_value = None
+        billing_repo.get_entitlement.return_value = None
+        repository._billing_repo = billing_repo
+        repository._get_entitlement = mock.Mock(return_value={"user_id": "user-1", "plan_code": "free"})
+        repository._build_user_record = mock.Mock(
+            return_value={
+                "user_id": "user-1",
+                "username": "student_1",
+                "email": "student@example.com",
+                "email_verified": True,
+            }
+        )
+
+        payload = repository.create_username_account(
+            username="Student_1",
+            display_name="Student One",
+            password="Password123!",
+            email="Student@Example.com",
+            created_by_user_id="admin-user",
+            created_by_email="Admin@Example.com",
+        )
+
+        self.assertTrue(payload["created"])
+        account = billing_repo.put_auth_account.call_args.args[0]
+        profile = billing_repo.upsert_user_profile.call_args.args[0]
+        self.assertEqual(account["username"] if "username" in account else profile["username"], "student_1")
+        self.assertEqual(account["email"], "student@example.com")
+        self.assertTrue(account["email_verified"])
+        self.assertEqual(account["auth_provider"], "email")
+        self.assertTrue(account["password_hash"])
+        self.assertEqual(profile["username_lc"], "student_1")
+        self.assertEqual(profile["onboarding_state"], "signup_complete")
+        self.assertEqual(profile["accepted_terms_version"], "admin_provisioned")
+        billing_repo.put_entitlement.assert_called_once()
+
+    def test_create_username_account_allows_blank_email(self):
+        repository = repo_module.AdminUserRepository.__new__(repo_module.AdminUserRepository)
+        billing_repo = mock.Mock()
+        billing_repo.get_user_profile_by_username.return_value = None
+        billing_repo.get_entitlement.return_value = None
+        repository._billing_repo = billing_repo
+        repository._get_entitlement = mock.Mock(return_value={"user_id": "user-1", "plan_code": "free"})
+        repository._build_user_record = mock.Mock(return_value={"user_id": "user-1"})
+
+        repository.create_username_account(
+            username="student_1",
+            display_name="Student One",
+            password="Password123!",
+            email="",
+            created_by_user_id="admin-user",
+            created_by_email="admin@example.com",
+        )
+
+        account = billing_repo.put_auth_account.call_args.args[0]
+        self.assertEqual(account["email"], "")
+        self.assertNotIn("email_lc", account)
+        self.assertTrue(account["email_verified"])
+
     def test_override_seat_limits_follow_team_plan_rules(self):
         repository = repo_module.AdminUserRepository.__new__(repo_module.AdminUserRepository)
 

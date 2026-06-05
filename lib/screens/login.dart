@@ -720,25 +720,13 @@ class _LoginScreenState extends State<LoginScreen> {
   }) async {
     switch (conflict.existingProvider) {
       case AuthProviderType.google:
-        await _submitSocial(
-          auth,
-          auth.signInWithGoogle,
-          providerLabel: AuthProviderType.google.label,
-        );
+        await _submitSocialProvider(auth, AuthProviderType.google);
         return;
       case AuthProviderType.apple:
-        await _submitSocial(
-          auth,
-          auth.signInWithApple,
-          providerLabel: AuthProviderType.apple.label,
-        );
+        await _submitSocialProvider(auth, AuthProviderType.apple);
         return;
       case AuthProviderType.kakao:
-        await _submitSocial(
-          auth,
-          auth.signInWithKakao,
-          providerLabel: AuthProviderType.kakao.label,
-        );
+        await _submitSocialProvider(auth, AuthProviderType.kakao);
         return;
       case AuthProviderType.email:
       case null:
@@ -1034,6 +1022,37 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<void> _submitSocialProvider(
+    AuthService auth,
+    AuthProviderType provider,
+  ) async {
+    switch (provider) {
+      case AuthProviderType.google:
+        await _submitSocial(
+          auth,
+          auth.signInWithGoogle,
+          providerLabel: provider.label,
+        );
+        return;
+      case AuthProviderType.apple:
+        await _submitSocial(
+          auth,
+          auth.signInWithApple,
+          providerLabel: provider.label,
+        );
+        return;
+      case AuthProviderType.kakao:
+        await _submitSocial(
+          auth,
+          auth.signInWithKakao,
+          providerLabel: provider.label,
+        );
+        return;
+      case AuthProviderType.email:
+        return;
+    }
+  }
+
   Future<void> _openForgotPasswordFlow(AuthService auth) async {
     final initialEmail = _emailController.text.trim();
 
@@ -1126,10 +1145,12 @@ class _LoginScreenState extends State<LoginScreen> {
     final busy = auth.isBusy;
     final supportsSocialSignIn = !kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.android ||
-            defaultTargetPlatform == TargetPlatform.iOS);
+            defaultTargetPlatform == TargetPlatform.iOS ||
+            defaultTargetPlatform == TargetPlatform.macOS);
     final showGoogle = supportsSocialSignIn && CognitoConfig.enableGoogleSignIn;
     final showApple = supportsSocialSignIn &&
-        defaultTargetPlatform == TargetPlatform.iOS &&
+        (defaultTargetPlatform == TargetPlatform.iOS ||
+            defaultTargetPlatform == TargetPlatform.macOS) &&
         CognitoConfig.enableAppleSignIn;
     final showKakao = supportsSocialSignIn && CognitoConfig.enableKakaoSignIn;
     final showAnySocial = showGoogle || showApple || showKakao;

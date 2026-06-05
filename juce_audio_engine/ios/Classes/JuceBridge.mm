@@ -1,4 +1,6 @@
 #include <float.h>
+#include <cstdlib>
+#include <cstring>
 #import "JuceBridge.h"
 #import "JuceEngine.h"
 #include "InstrumentRenderers.h"
@@ -12,6 +14,7 @@
 #endif
 #if TARGET_OS_OSX
 #import <Cocoa/Cocoa.h>
+#import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 #endif
 #import <onnxruntime_objc/ort_env.h>
@@ -34,17 +37,543 @@ static NSString *const MixroomHostedPluginEditorAutomationNotification =
     @"MixroomHostedPluginEditorAutomationNotification";
 static const void *kMixroomHostedPluginWindowHelperKey =
     &kMixroomHostedPluginWindowHelperKey;
+static const void *kMixroomEmbeddedPluginChromeHelperKey =
+    &kMixroomEmbeddedPluginChromeHelperKey;
 static BOOL gMixroomHostedPluginWindowsDetached = NO;
 extern "C" void mixroomSetHostedPluginWindowsDetached(BOOL detached);
 extern "C" void mixroomRequestHostedPluginEditorClose(void *ownerHandle);
 extern "C" void mixroomSetHostedPluginWindowDetachedForOwner(void *ownerHandle,
                                                              bool detached);
+extern "C" void *mixroomGetFlutterHostNativeView(void);
+extern "C" bool mixroomGetNativeViewSize(void *nativeView,
+                                          double *width,
+                                          double *height);
+extern "C" void mixroomSetNativeViewFrameScale(void *nativeView,
+                                                double x,
+                                                double y,
+                                                double logicalWidth,
+                                                double logicalHeight,
+                                                double scale);
+extern "C" void mixroomConfigureEmbeddedPluginChrome(void *nativeView,
+                                                      const char *title,
+                                                      void *ownerHandle,
+                                                      double scale);
+extern "C" void mixroomReleaseEmbeddedPluginChrome(void *nativeView);
+extern "C" void mixroomScheduleOttPluginEditorAutotest(void);
+extern "C" void mixroomAdoptHostedPluginAuxiliaryWindows(int scopeKind,
+                                                          int row,
+                                                          int effectIndex,
+                                                          int clipId,
+                                                          void *ownerHandle);
+
+static NSRect mixroomScreenContentRectForWindow(NSWindow *window) {
+    if (window == nil) {
+        return NSZeroRect;
+    }
+    NSRect rect = [window contentRectForFrameRect:window.frame];
+    if (NSIsEmptyRect(rect)) {
+        rect = window.frame;
+    }
+    return rect;
+}
+
+static NSWindow *mixroomFindFlutterHostWindow(void) {
+    for (NSWindow *candidate in NSApp.orderedWindows) {
+        if ([candidate.contentViewController isKindOfClass:NSClassFromString(@"FlutterViewController")]) {
+            return candidate;
+        }
+    }
+    for (NSWindow *candidate in NSApp.windows) {
+        if ([candidate.contentViewController isKindOfClass:NSClassFromString(@"FlutterViewController")]) {
+            return candidate;
+        }
+    }
+    return NSApp.mainWindow ?: NSApp.keyWindow;
+}
+
+extern "C" void *mixroomGetFlutterHostNativeView(void) {
+    __block NSView *hostView = nil;
+    void (^resolveHostView)(void) = ^{
+        NSWindow *hostWindow = mixroomFindFlutterHostWindow();
+        hostView = hostWindow.contentView;
+    };
+    if ([NSThread isMainThread]) {
+        resolveHostView();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), resolveHostView);
+    }
+    return (__bridge void *)hostView;
+}
+
+extern "C" bool mixroomGetNativeViewSize(void *nativeView,
+                                          double *width,
+                                          double *height) {
+    if (nativeView == nullptr) {
+        return false;
+    }
+    __block NSSize size = NSZeroSize;
+    void (^readSize)(void) = ^{
+        NSView *view = (__bridge NSView *)nativeView;
+        size = view.bounds.size;
+    };
+    if ([NSThread isMainThread]) {
+        readSize();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), readSize);
+    }
+    if (width != nullptr) {
+        *width = (double)size.width;
+    }
+    if (height != nullptr) {
+        *height = (double)size.height;
+    }
+    return size.width > 0.0 && size.height > 0.0;
+}
+
+extern "C" void mixroomSetNativeViewFrameScale(void *nativeView,
+                                                double x,
+                                                double y,
+                                                double logicalWidth,
+                                                double logicalHeight,
+                                                double scale) {
+    if (nativeView == nullptr || logicalWidth <= 0.0 || logicalHeight <= 0.0) {
+        return;
+    }
+    void (^applyFrame)(void) = ^{
+        NSView *view = (__bridge NSView *)nativeView;
+        NSView *hostView = view.superview;
+        if (hostView == nil) {
+            return;
+        }
+        const CGFloat safeScale = MAX(0.25, MIN(1.0, (CGFloat)scale));
+        const CGFloat displayWidth = (CGFloat)logicalWidth * safeScale;
+        const CGFloat displayHeight = (CGFloat)logicalHeight * safeScale;
+        CGFloat frameY = (CGFloat)y;
+        if (!hostView.isFlipped) {
+            frameY = hostView.bounds.size.height - (CGFloat)y - displayHeight;
+        }
+        view.frame = NSMakeRect((CGFloat)x, frameY, displayWidth, displayHeight);
+        view.bounds = NSMakeRect(0.0, 0.0, (CGFloat)logicalWidth, (CGFloat)logicalHeight);
+    };
+    if ([NSThread isMainThread]) {
+        applyFrame();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), applyFrame);
+    }
+}
+
+@class MixroomEmbeddedPluginChromeHelper;
+
+@interface MixroomEmbeddedPluginChromeView : NSVisualEffectView
+@property(nonatomic, weak) MixroomEmbeddedPluginChromeHelper *helper;
+@end
+
+@interface MixroomEmbeddedPluginChromeHelper : NSObject
+@property(nonatomic, weak) NSView *pluginView;
+@property(nonatomic, strong) MixroomEmbeddedPluginChromeView *barView;
+@property(nonatomic, strong) NSTextField *titleField;
+@property(nonatomic, strong) CATextLayer *titleLayer;
+@property(nonatomic, strong) NSButton *titleButton;
+@property(nonatomic, strong) NSButton *optionsButton;
+@property(nonatomic, strong) NSButton *closeButton;
+@property(nonatomic, copy) NSString *title;
+@property(nonatomic, assign) void *ownerHandle;
+@property(nonatomic, assign) CGFloat scale;
+@property(nonatomic, assign) NSPoint dragStartPoint;
+@property(nonatomic, assign) NSRect dragStartPluginFrame;
+@property(nonatomic, strong) id keyMonitor;
+- (instancetype)initWithPluginView:(NSView *)pluginView
+                              title:(NSString *)title
+                        ownerHandle:(void *)ownerHandle
+                              scale:(CGFloat)scale;
+- (void)updateLayout;
+- (void)beginDragWithEvent:(NSEvent *)event;
+- (void)dragWithEvent:(NSEvent *)event;
+- (void)closePlugin;
+- (void)detach;
+@end
+
+@implementation MixroomEmbeddedPluginChromeView
+
+- (void)mouseDown:(NSEvent *)event {
+    [self.window makeFirstResponder:self];
+    [self.helper beginDragWithEvent:event];
+}
+
+- (void)mouseDragged:(NSEvent *)event {
+    [self.helper dragWithEvent:event];
+}
+
+- (BOOL)acceptsFirstResponder {
+    return YES;
+}
+
+- (void)keyDown:(NSEvent *)event {
+    if (event.keyCode == 53) {
+        [self.helper closePlugin];
+        return;
+    }
+    [super keyDown:event];
+}
+
+@end
+
+@implementation MixroomEmbeddedPluginChromeHelper
+
+- (instancetype)initWithPluginView:(NSView *)pluginView
+                              title:(NSString *)title
+                        ownerHandle:(void *)ownerHandle
+                              scale:(CGFloat)scale {
+    self = [super init];
+    if (self != nil) {
+        _pluginView = pluginView;
+        _title = [title copy] ?: @"Plugin";
+        _ownerHandle = ownerHandle;
+        _scale = scale;
+
+        _barView = [[MixroomEmbeddedPluginChromeView alloc] initWithFrame:NSZeroRect];
+        _barView.helper = self;
+        _barView.material = NSVisualEffectMaterialHeaderView;
+        _barView.blendingMode = NSVisualEffectBlendingModeWithinWindow;
+        _barView.state = NSVisualEffectStateActive;
+        _barView.wantsLayer = YES;
+        _barView.layer.cornerRadius = 10.0;
+        _barView.layer.masksToBounds = YES;
+        _barView.layer.backgroundColor =
+            [NSColor colorWithCalibratedRed:0.055 green:0.075 blue:0.105 alpha:0.98].CGColor;
+        _barView.layer.borderWidth = 1.0;
+        _barView.layer.borderColor = [NSColor colorWithWhite:1.0 alpha:0.14].CGColor;
+
+        CALayer *accent = [CALayer layer];
+        accent.name = @"accent";
+        accent.backgroundColor = [NSColor colorWithCalibratedRed:0.33 green:0.78 blue:1.0 alpha:0.42].CGColor;
+        accent.cornerRadius = 2.0;
+        [_barView.layer addSublayer:accent];
+
+        _titleField = [NSTextField labelWithString:_title];
+        _titleField.font = [NSFont systemFontOfSize:13.0 weight:NSFontWeightSemibold];
+        _titleField.textColor = [NSColor colorWithWhite:1.0 alpha:0.90];
+        _titleField.lineBreakMode = NSLineBreakByTruncatingTail;
+        [_barView addSubview:_titleField];
+        _titleField.hidden = YES;
+
+        _titleLayer = [CATextLayer layer];
+        _titleLayer.string = _title;
+        _titleLayer.fontSize = 13.0;
+        _titleLayer.truncationMode = kCATruncationEnd;
+        _titleLayer.alignmentMode = kCAAlignmentLeft;
+        _titleLayer.contentsScale = NSScreen.mainScreen.backingScaleFactor;
+        _titleLayer.foregroundColor = [NSColor colorWithWhite:1.0 alpha:0.90].CGColor;
+        [_barView.layer addSublayer:_titleLayer];
+
+        _titleButton = [NSButton buttonWithTitle:_title target:nil action:nil];
+        _titleButton.bordered = NO;
+        _titleButton.enabled = NO;
+        _titleButton.hidden = YES;
+        _titleButton.alignment = NSTextAlignmentLeft;
+        _titleButton.font = [NSFont systemFontOfSize:13.0 weight:NSFontWeightSemibold];
+        _titleButton.contentTintColor = [NSColor colorWithWhite:1.0 alpha:0.92];
+        [_barView addSubview:_titleButton];
+
+        _optionsButton = [NSButton buttonWithTitle:@"..."
+                                            target:self
+                                            action:@selector(showOptions:)];
+        _closeButton = [NSButton buttonWithTitle:@"x"
+                                          target:self
+                                          action:@selector(closePlugin:)];
+        for (NSButton *button in @[_optionsButton, _closeButton]) {
+            button.bezelStyle = NSBezelStyleTexturedRounded;
+            button.font = [NSFont systemFontOfSize:13.0 weight:NSFontWeightSemibold];
+            button.contentTintColor = [NSColor colorWithWhite:1.0 alpha:0.85];
+            button.focusRingType = NSFocusRingTypeNone;
+            [_barView addSubview:button];
+        }
+
+        __weak MixroomEmbeddedPluginChromeHelper *weakSelf = self;
+        _keyMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
+                                                            handler:^NSEvent *(NSEvent *event) {
+            MixroomEmbeddedPluginChromeHelper *strongSelf = weakSelf;
+            if (strongSelf == nil || event.keyCode != 53) {
+                return event;
+            }
+            if (strongSelf.barView.window == nil ||
+                event.window != strongSelf.barView.window) {
+                return event;
+            }
+            [strongSelf closePlugin];
+            return nil;
+        }];
+    }
+    return self;
+}
+
+- (void)showOptions:(id)sender {
+    NSMenu *menu = [[NSMenu alloc] initWithTitle:@""];
+    NSMenuItem *floatItem = [[NSMenuItem alloc] initWithTitle:@"Float Plugin Window"
+                                                       action:@selector(floatPlugin:)
+                                                keyEquivalent:@""];
+    floatItem.target = self;
+    [menu addItem:floatItem];
+    [menu popUpMenuPositioningItem:nil
+                        atLocation:NSMakePoint(0.0, self.optionsButton.bounds.size.height + 4.0)
+                            inView:self.optionsButton];
+}
+
+- (void)floatPlugin:(id)sender {
+    [self detach];
+}
+
+- (void)closePlugin:(id)sender {
+    [self closePlugin];
+}
+
+- (void)closePlugin {
+    if (self.ownerHandle != nullptr) {
+        mixroomRequestHostedPluginEditorClose(self.ownerHandle);
+    }
+}
+
+- (void)detach {
+    if (self.ownerHandle != nullptr) {
+        mixroomSetHostedPluginWindowDetachedForOwner(self.ownerHandle, true);
+    }
+}
+
+- (NSPoint)hostPointForEvent:(NSEvent *)event {
+    NSView *hostView = self.pluginView.superview;
+    if (hostView == nil) {
+        return NSZeroPoint;
+    }
+    return [hostView convertPoint:event.locationInWindow fromView:nil];
+}
+
+- (void)beginDragWithEvent:(NSEvent *)event {
+    self.dragStartPoint = [self hostPointForEvent:event];
+    self.dragStartPluginFrame = self.pluginView.frame;
+}
+
+- (void)dragWithEvent:(NSEvent *)event {
+    NSView *pluginView = self.pluginView;
+    NSView *hostView = pluginView.superview;
+    if (pluginView == nil || hostView == nil) {
+        return;
+    }
+    NSPoint point = [self hostPointForEvent:event];
+    NSRect frame = self.dragStartPluginFrame;
+    frame.origin.x += point.x - self.dragStartPoint.x;
+    frame.origin.y += point.y - self.dragStartPoint.y;
+    frame.origin.x = MAX(0.0, MIN(frame.origin.x, hostView.bounds.size.width - frame.size.width));
+    frame.origin.y = MAX(0.0, MIN(frame.origin.y, hostView.bounds.size.height - frame.size.height));
+    pluginView.frame = frame;
+    [self updateLayout];
+}
+
+- (void)updateLayout {
+    NSView *pluginView = self.pluginView;
+    NSView *hostView = pluginView.superview;
+    if (pluginView == nil || hostView == nil) {
+        [self.barView removeFromSuperview];
+        return;
+    }
+    if (self.barView.superview != hostView) {
+        [hostView addSubview:self.barView positioned:NSWindowAbove relativeTo:pluginView];
+    }
+
+    const CGFloat pluginScale = MAX(0.45, MIN(1.0, self.scale));
+    const CGFloat barHeight = MAX(34.0, round(42.0 * pluginScale));
+    NSRect pluginFrame = pluginView.frame;
+    NSRect barFrame = pluginFrame;
+    barFrame.size.height = barHeight;
+    if (hostView.isFlipped) {
+        barFrame.origin.y = pluginFrame.origin.y;
+    } else {
+        barFrame.origin.y = NSMaxY(pluginFrame) - barHeight;
+    }
+    self.barView.frame = NSIntegralRect(barFrame);
+
+    CALayer *accent = [self.barView.layer.sublayers firstObject];
+    accent.frame = CGRectMake(12.0, round((barHeight - 20.0) * 0.5), 4.0, 20.0);
+
+    const CGFloat controlWidth = 34.0;
+    const CGFloat controlHeight = 24.0;
+    const CGFloat controlGap = 8.0;
+    const CGFloat rightInset = 12.0;
+    const CGFloat controlY = round((barHeight - controlHeight) * 0.5);
+    self.closeButton.frame = NSMakeRect(NSWidth(self.barView.bounds) - rightInset - controlWidth,
+                                        controlY,
+                                        controlWidth,
+                                        controlHeight);
+    self.optionsButton.frame = NSMakeRect(NSMinX(self.closeButton.frame) - controlGap - controlWidth,
+                                          controlY,
+                                          controlWidth,
+                                          controlHeight);
+    self.titleField.frame = NSMakeRect(26.0,
+                                       controlY + 2.0,
+                                       MAX(80.0, NSMinX(self.optionsButton.frame) - 34.0),
+                                       controlHeight);
+    self.titleLayer.frame = CGRectMake(26.0,
+                                       controlY + 4.0,
+                                       MAX(80.0, NSMinX(self.optionsButton.frame) - 34.0),
+                                       controlHeight);
+    self.titleButton.frame = NSMakeRect(24.0,
+                                        controlY,
+                                        MAX(80.0, NSMinX(self.optionsButton.frame) - 32.0),
+                                        controlHeight);
+}
+
+- (void)dealloc {
+    if (self.keyMonitor != nil) {
+        [NSEvent removeMonitor:self.keyMonitor];
+        self.keyMonitor = nil;
+    }
+    [self.barView removeFromSuperview];
+}
+
+@end
+
+extern "C" void mixroomConfigureEmbeddedPluginChrome(void *nativeView,
+                                                      const char *title,
+                                                      void *ownerHandle,
+                                                      double scale) {
+    if (nativeView == nullptr) {
+        return;
+    }
+    NSString *copiedTitle =
+        title != nullptr ? [NSString stringWithUTF8String:title] : nil;
+    if (copiedTitle == nil || copiedTitle.length == 0) {
+        copiedTitle = @"Plugin";
+    }
+    void (^configureChrome)(void) = ^{
+        NSView *pluginView = (__bridge NSView *)nativeView;
+        NSString *headerTitle = copiedTitle;
+        MixroomEmbeddedPluginChromeHelper *helper =
+            objc_getAssociatedObject(pluginView, kMixroomEmbeddedPluginChromeHelperKey);
+        if (helper == nil) {
+            helper = [[MixroomEmbeddedPluginChromeHelper alloc] initWithPluginView:pluginView
+                                                                             title:headerTitle
+                                                                       ownerHandle:ownerHandle
+                                                                             scale:(CGFloat)scale];
+            objc_setAssociatedObject(pluginView,
+                                     kMixroomEmbeddedPluginChromeHelperKey,
+                                     helper,
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        } else {
+            helper.title = headerTitle;
+            helper.titleField.stringValue = headerTitle;
+            helper.titleLayer.string = headerTitle;
+            helper.titleButton.title = headerTitle;
+            [helper.titleLayer setNeedsDisplay];
+            helper.ownerHandle = ownerHandle;
+            helper.scale = (CGFloat)scale;
+        }
+        [helper updateLayout];
+    };
+    if ([NSThread isMainThread]) {
+        configureChrome();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), configureChrome);
+    }
+}
+
+extern "C" void mixroomReleaseEmbeddedPluginChrome(void *nativeView) {
+    if (nativeView == nullptr) {
+        return;
+    }
+    void (^releaseChrome)(void) = ^{
+        NSView *pluginView = (__bridge NSView *)nativeView;
+        MixroomEmbeddedPluginChromeHelper *helper =
+            objc_getAssociatedObject(pluginView, kMixroomEmbeddedPluginChromeHelperKey);
+        if (helper != nil) {
+            [helper.barView removeFromSuperview];
+            objc_setAssociatedObject(pluginView,
+                                     kMixroomEmbeddedPluginChromeHelperKey,
+                                     nil,
+                                     OBJC_ASSOCIATION_ASSIGN);
+        }
+    };
+    if ([NSThread isMainThread]) {
+        releaseChrome();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), releaseChrome);
+    }
+}
+
+static void mixroomLogMacWindowSnapshot(NSString *label) {
+    NSLog(@"[Mixroom OTT Autotest] %@ windowCount=%lu", label,
+          (unsigned long)NSApp.windows.count);
+    for (NSWindow *window in NSApp.windows) {
+        NSLog(@"[Mixroom OTT Autotest] window title='%@' class=%@ parent=%@ contentView=%@ controller=%@ frame=%@",
+              window.title ?: @"",
+              NSStringFromClass(window.class),
+              window.parentWindow != nil ? @"yes" : @"no",
+              window.contentView != nil ? NSStringFromClass(window.contentView.class) : @"nil",
+              window.contentViewController != nil ? NSStringFromClass(window.contentViewController.class) : @"nil",
+              NSStringFromRect(window.frame));
+    }
+}
+
+extern "C" void mixroomScheduleOttPluginEditorAutotest(void) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        NSLog(@"[Mixroom OTT Autotest] starting");
+        mixroomLogMacWindowSnapshot(@"before");
+        juce::MessageManager::callAsync([] {
+            auto &engine = JuceEngine::get();
+            engine.initialiseEngine();
+            const auto previousRows = engine.getRows();
+            int rowIndex = previousRows.size();
+            const int rowId = engine.addRow("OTT Autotest", 0);
+            if (rowId < 0) {
+                const auto rows = engine.getRows();
+                rowIndex = juce::jmax(0, rows.size() - 1);
+            }
+
+            const char *pluginPathEnv = std::getenv("MIXROOM_AUTOTEST_PLUGIN_PATH");
+            const juce::String pluginPath(
+                pluginPathEnv != nullptr && std::strlen(pluginPathEnv) > 0
+                    ? pluginPathEnv
+                    : "/Library/Audio/Plug-Ins/VST3/OTT.vst3");
+            const bool inserted = engine.insertTrackEffect(rowIndex, pluginPath);
+            const bool opened = inserted && engine.openTrackPluginEditor(rowIndex, 0);
+            const juce::String result =
+                "OTT autotest inserted=" + juce::String(inserted ? "true" : "false") +
+                " opened=" + juce::String(opened ? "true" : "false") +
+                " rowIndex=" + juce::String(rowIndex) +
+                " path=" + pluginPath;
+            juceLogToFlutter(result.toRawUTF8());
+            NSLog(@"[Mixroom OTT Autotest] %s", result.toRawUTF8());
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                mixroomLogMacWindowSnapshot(@"after-open");
+                const char *closeEnv = std::getenv("MIXROOM_AUTOTEST_OTT_CLOSE");
+                if (closeEnv == nullptr || std::strcmp(closeEnv, "1") != 0) {
+                    return;
+                }
+                for (NSWindow *window in [NSApp.windows copy]) {
+                    if (![window.title isEqualToString:@"Track FX: OTT"]) {
+                        continue;
+                    }
+                    NSLog(@"[Mixroom OTT Autotest] closing hosted OTT window");
+                    [window close];
+                    dispatch_after(
+                        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                        dispatch_get_main_queue(), ^{
+                            mixroomLogMacWindowSnapshot(@"after-close");
+                        });
+                    return;
+                }
+                NSLog(@"[Mixroom OTT Autotest] close requested but hosted OTT window was not found");
+            });
+        });
+    });
+}
 
 @interface MixroomHostedPluginWindowHelper : NSObject
 @property(nonatomic, weak) NSWindow *window;
 @property(nonatomic, strong) id eventMonitor;
 @property(nonatomic, strong) id closeObserver;
 @property(nonatomic, copy) NSDictionary<NSString *, id> *metadata;
+@property(nonatomic, assign) BOOL positionedOnce;
 - (instancetype)initWithWindow:(NSWindow *)window
                       metadata:(NSDictionary<NSString *, id> *)metadata;
 - (void)applyWindowMode;
@@ -72,7 +601,6 @@ extern "C" void mixroomSetHostedPluginWindowDetachedForOwner(void *ownerHandle,
                     }
                     if (strongSelf.eventMonitor != nil) {
                         [NSEvent removeMonitor:strongSelf.eventMonitor];
-                        strongSelf.eventMonitor = nil;
                     }
                     if (strongSelf.window.parentWindow != nil) {
                         [strongSelf.window.parentWindow removeChildWindow:strongSelf.window];
@@ -173,23 +701,8 @@ extern "C" void mixroomSetHostedPluginWindowDetachedForOwner(void *ownerHandle,
     if (parent != nil) {
         return parent;
     }
-    for (NSWindow *candidate in NSApp.orderedWindows) {
-        if (candidate == window) {
-            continue;
-        }
-        if ([candidate.contentViewController isKindOfClass:NSClassFromString(@"FlutterViewController")]) {
-            return candidate;
-        }
-    }
-    for (NSWindow *candidate in NSApp.windows) {
-        if (candidate == window) {
-            continue;
-        }
-        if ([candidate.contentViewController isKindOfClass:NSClassFromString(@"FlutterViewController")]) {
-            return candidate;
-        }
-    }
-    return NSApp.mainWindow ?: NSApp.keyWindow;
+    NSWindow *hostWindow = mixroomFindFlutterHostWindow();
+    return hostWindow != window ? hostWindow : (NSApp.mainWindow ?: NSApp.keyWindow);
 }
 
 - (void)applyWindowMode {
@@ -199,13 +712,12 @@ extern "C" void mixroomSetHostedPluginWindowDetachedForOwner(void *ownerHandle,
     }
 
     pluginWindow.releasedWhenClosed = NO;
-    pluginWindow.titleVisibility = NSWindowTitleHidden;
-    pluginWindow.titlebarAppearsTransparent = YES;
-    pluginWindow.movableByWindowBackground = NO;
     pluginWindow.toolbar = nil;
     pluginWindow.level = NSNormalWindowLevel;
     pluginWindow.collectionBehavior = NSWindowCollectionBehaviorManaged;
 
+    const BOOL usesMixroomShell =
+        [self.metadata[@"mixroomShell"] boolValue];
     NSButton *closeButton =
         [pluginWindow standardWindowButton:NSWindowCloseButton];
     NSButton *miniButton =
@@ -214,29 +726,49 @@ extern "C" void mixroomSetHostedPluginWindowDetachedForOwner(void *ownerHandle,
         [pluginWindow standardWindowButton:NSWindowZoomButton];
 
     NSWindow *hostWindow = [self mixroomHostWindow];
-    if (gMixroomHostedPluginWindowsDetached) {
+    if (gMixroomHostedPluginWindowsDetached || !usesMixroomShell) {
         if (pluginWindow.parentWindow != nil) {
             [pluginWindow.parentWindow removeChildWindow:pluginWindow];
         }
         pluginWindow.styleMask |= NSWindowStyleMaskTitled;
-        pluginWindow.styleMask |= NSWindowStyleMaskResizable;
         pluginWindow.styleMask |= NSWindowStyleMaskClosable;
+        pluginWindow.styleMask |= NSWindowStyleMaskMiniaturizable;
+        pluginWindow.styleMask |= NSWindowStyleMaskResizable;
         pluginWindow.styleMask &= ~NSWindowStyleMaskFullSizeContentView;
-        closeButton.hidden = YES;
-        miniButton.hidden = YES;
-        zoomButton.hidden = YES;
+        pluginWindow.titleVisibility = NSWindowTitleVisible;
+        pluginWindow.titlebarAppearsTransparent = NO;
+        pluginWindow.movableByWindowBackground = NO;
+        pluginWindow.hasShadow = YES;
+        pluginWindow.opaque = NO;
+        pluginWindow.backgroundColor =
+            [NSColor colorWithCalibratedRed:0.045 green:0.055 blue:0.070 alpha:1.0];
+        pluginWindow.contentView.wantsLayer = YES;
+        pluginWindow.contentView.layer.backgroundColor =
+            [NSColor colorWithCalibratedRed:0.045 green:0.055 blue:0.070 alpha:1.0].CGColor;
+        closeButton.hidden = NO;
+        miniButton.hidden = NO;
+        zoomButton.hidden = NO;
         return;
     }
 
-    pluginWindow.styleMask |= NSWindowStyleMaskTitled;
-    pluginWindow.styleMask |= NSWindowStyleMaskClosable;
-    pluginWindow.styleMask |= NSWindowStyleMaskResizable;
-    pluginWindow.styleMask |= NSWindowStyleMaskFullSizeContentView;
+    pluginWindow.titleVisibility = NSWindowTitleHidden;
+    pluginWindow.titlebarAppearsTransparent = YES;
+    pluginWindow.movableByWindowBackground = NO;
+    pluginWindow.styleMask &= ~NSWindowStyleMaskTitled;
+    pluginWindow.styleMask &= ~NSWindowStyleMaskClosable;
+    pluginWindow.styleMask &= ~NSWindowStyleMaskMiniaturizable;
+    pluginWindow.styleMask &= ~NSWindowStyleMaskResizable;
+    pluginWindow.styleMask &= ~NSWindowStyleMaskFullSizeContentView;
+    pluginWindow.hasShadow = YES;
+    pluginWindow.opaque = NO;
+    pluginWindow.backgroundColor = NSColor.clearColor;
     closeButton.hidden = YES;
     miniButton.hidden = YES;
     zoomButton.hidden = YES;
 
-    if (hostWindow != nil && pluginWindow.parentWindow != hostWindow) {
+    const BOOL wasChildOfHost = hostWindow != nil &&
+        pluginWindow.parentWindow == hostWindow;
+    if (hostWindow != nil && !wasChildOfHost) {
         if (pluginWindow.parentWindow != nil) {
             [pluginWindow.parentWindow removeChildWindow:pluginWindow];
         }
@@ -244,13 +776,13 @@ extern "C" void mixroomSetHostedPluginWindowDetachedForOwner(void *ownerHandle,
     }
 
     if (hostWindow != nil) {
-        const NSRect hostRect = hostWindow.contentLayoutRect;
+        const NSRect hostRect = mixroomScreenContentRectForWindow(hostWindow);
         NSRect frame = pluginWindow.frame;
         const CGFloat maxWidth = MAX(320.0, hostRect.size.width - 80.0);
         const CGFloat maxHeight = MAX(220.0, hostRect.size.height - 80.0);
         frame.size.width = MIN(frame.size.width, maxWidth);
         frame.size.height = MIN(frame.size.height, maxHeight);
-        if (!NSIntersectsRect(frame, hostRect)) {
+        if (!self.positionedOnce || !NSIntersectsRect(frame, hostRect)) {
             frame.origin.x =
                 NSMidX(hostRect) - (frame.size.width / 2.0);
             frame.origin.y =
@@ -261,6 +793,7 @@ extern "C" void mixroomSetHostedPluginWindowDetachedForOwner(void *ownerHandle,
         frame.origin.y = MIN(MAX(frame.origin.y, NSMinY(hostRect)),
                              NSMaxY(hostRect) - frame.size.height);
         [pluginWindow setFrame:frame display:YES];
+        self.positionedOnce = YES;
     }
 }
 
@@ -275,19 +808,134 @@ extern "C" void mixroomSetHostedPluginWindowDetachedForOwner(void *ownerHandle,
 
 @end
 
+static NSMutableDictionary<NSString *, id> *mixroomHostedPluginMetadata(
+    int scopeKind,
+    int row,
+    int effectIndex,
+    int clipId,
+    void *ownerHandle) {
+    NSMutableDictionary<NSString *, id> *metadata = [NSMutableDictionary dictionary];
+    metadata[@"scopeKind"] = @(scopeKind);
+    metadata[@"row"] = @(row);
+    metadata[@"effectIndex"] = @(effectIndex);
+    metadata[@"clipId"] = @(clipId);
+    metadata[@"ownerPtr"] = @((unsigned long long)(uintptr_t)ownerHandle);
+    switch (scopeKind) {
+        case 1:
+            metadata[@"scope"] = @"track_fx";
+            break;
+        case 2:
+            metadata[@"scope"] = @"master_fx";
+            break;
+        case 3:
+            metadata[@"scope"] = @"midi_clip";
+            break;
+        default:
+            metadata[@"scope"] = @"unknown";
+            break;
+    }
+    return metadata;
+}
+
+static BOOL mixroomShouldAdoptPluginAuxiliaryWindow(NSWindow *window,
+                                                     NSWindow *hostWindow) {
+    if (window == nil || window == hostWindow) {
+        return NO;
+    }
+    if (objc_getAssociatedObject(window, kMixroomHostedPluginWindowHelperKey) != nil) {
+        return NO;
+    }
+    if (window.parentWindow == hostWindow) {
+        return NO;
+    }
+    if ([window.contentViewController isKindOfClass:NSClassFromString(@"FlutterViewController")]) {
+        return NO;
+    }
+
+    NSString *className = NSStringFromClass(window.class);
+    if ([className isEqualToString:@"TUINSWindow"]) {
+        return NO;
+    }
+    if ([className hasPrefix:@"JUCEWindow_"] &&
+        (window.frame.size.width < 80.0 || window.frame.size.height < 80.0)) {
+        return NO;
+    }
+
+    if (window.frame.size.width < 120.0 || window.frame.size.height < 120.0) {
+        return NO;
+    }
+    return YES;
+}
+
+extern "C" void mixroomAdoptHostedPluginAuxiliaryWindows(int scopeKind,
+                                                          int row,
+                                                          int effectIndex,
+                                                          int clipId,
+                                                          void *ownerHandle) {
+    void (^adoptAttempt)(void) = ^{
+        NSWindow *hostWindow = mixroomFindFlutterHostWindow();
+        if (hostWindow == nil) {
+            return;
+        }
+
+        NSMutableDictionary<NSString *, id> *metadata =
+            mixroomHostedPluginMetadata(scopeKind,
+                                        row,
+                                        effectIndex,
+                                        clipId,
+                                        ownerHandle);
+        for (NSWindow *window in NSApp.windows) {
+            if (!mixroomShouldAdoptPluginAuxiliaryWindow(window, hostWindow)) {
+                continue;
+            }
+            MixroomHostedPluginWindowHelper *helper =
+                [[MixroomHostedPluginWindowHelper alloc] initWithWindow:window
+                                                               metadata:metadata];
+            [helper applyWindowMode];
+            objc_setAssociatedObject(
+                window,
+                kMixroomHostedPluginWindowHelperKey,
+                helper,
+                OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            NSLog(@"[Mixroom Plugin Host] adopted auxiliary plugin window class=%@ frame=%@",
+                  NSStringFromClass(window.class),
+                  NSStringFromRect(window.frame));
+        }
+    };
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.20 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(),
+                   adoptAttempt);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.00 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(),
+                   adoptAttempt);
+}
+
 extern "C" void mixroomConfigureHostedPluginWindow(void *nativeHandle,
                                                     int scopeKind,
                                                     int row,
                                                     int effectIndex,
                                                     int clipId,
-                                                    void *ownerHandle) {
+                                                    void *ownerHandle,
+                                                    bool usesMixroomShell) {
     if (nativeHandle == nullptr) {
         return;
     }
-    dispatch_async(dispatch_get_main_queue(), ^{
-        NSView *nativeView = (__bridge NSView *)nativeHandle;
+    NSView *nativeView = (__bridge NSView *)nativeHandle;
+    __block int attemptsRemaining = 8;
+    __block void (^configureAttempt)(void);
+    configureAttempt = ^{
         NSWindow *pluginWindow = nativeView.window;
         if (pluginWindow == nil) {
+            attemptsRemaining -= 1;
+            if (attemptsRemaining > 0) {
+                dispatch_after(
+                    dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.03 * NSEC_PER_SEC)),
+                    dispatch_get_main_queue(),
+                    configureAttempt);
+            } else {
+                configureAttempt = nil;
+            }
             return;
         }
 
@@ -297,6 +945,7 @@ extern "C" void mixroomConfigureHostedPluginWindow(void *nativeHandle,
         metadata[@"effectIndex"] = @(effectIndex);
         metadata[@"clipId"] = @(clipId);
         metadata[@"ownerPtr"] = @((unsigned long long)(uintptr_t)ownerHandle);
+        metadata[@"mixroomShell"] = @(usesMixroomShell);
         switch (scopeKind) {
             case 1:
                 metadata[@"scope"] = @"track_fx";
@@ -323,7 +972,13 @@ extern "C" void mixroomConfigureHostedPluginWindow(void *nativeHandle,
             kMixroomHostedPluginWindowHelperKey,
             helper,
             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    });
+        configureAttempt = nil;
+    };
+    if ([NSThread isMainThread]) {
+        configureAttempt();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), configureAttempt);
+    }
 }
 
 extern "C" void mixroomSetHostedPluginWindowsDetached(BOOL detached) {
@@ -342,21 +997,12 @@ extern "C" void mixroomSetHostedPluginWindowsDetached(BOOL detached) {
 }
 
 extern "C" void mixroomRequestHostedPluginEditorClose(void *ownerHandle) {
-    if (ownerHandle == nullptr) {
-        return;
-    }
-    juce::MessageManager::callAsync([safeWindow = juce::Component::SafePointer<HostedPluginEditorWindow>(
-                                         reinterpret_cast<HostedPluginEditorWindow *>(ownerHandle))]() mutable {
-        if (safeWindow == nullptr) {
-            return;
-        }
-        safeWindow->requestCloseFromHost();
-    });
+    JuceEngine::get().requestHostedPluginEditorCloseForOwner(ownerHandle);
 }
 
 extern "C" void mixroomSetHostedPluginWindowDetachedForOwner(void *ownerHandle,
                                                              bool detached) {
-    juce::ignoreUnused(ownerHandle, detached);
+    JuceEngine::get().setHostedPluginEditorDetachedForOwner(ownerHandle, detached);
     dispatch_async(dispatch_get_main_queue(), ^{
         for (NSWindow *window in NSApp.windows) {
             MixroomHostedPluginWindowHelper *helper =
@@ -383,19 +1029,60 @@ extern "C" void mixroomSetHostedPluginWindowDetachedForOwner(void *ownerHandle,
     });
 }
 #else
+extern "C" void *mixroomGetFlutterHostNativeView(void) {
+    return nullptr;
+}
+
+extern "C" bool mixroomGetNativeViewSize(void *nativeView,
+                                          double *width,
+                                          double *height) {
+    juce::ignoreUnused(nativeView, width, height);
+    return false;
+}
+
+extern "C" void mixroomSetNativeViewFrameScale(void *nativeView,
+                                                double x,
+                                                double y,
+                                                double logicalWidth,
+                                                double logicalHeight,
+                                                double scale) {
+    juce::ignoreUnused(nativeView, x, y, logicalWidth, logicalHeight, scale);
+}
+
+extern "C" void mixroomConfigureEmbeddedPluginChrome(void *nativeView,
+                                                      const char *title,
+                                                      void *ownerHandle,
+                                                      double scale) {
+    juce::ignoreUnused(nativeView, title, ownerHandle, scale);
+}
+
+extern "C" void mixroomReleaseEmbeddedPluginChrome(void *nativeView) {
+    juce::ignoreUnused(nativeView);
+}
+
 extern "C" void mixroomConfigureHostedPluginWindow(void *nativeHandle,
                                                     int scopeKind,
                                                     int row,
                                                     int effectIndex,
                                                     int clipId,
-                                                    void *ownerHandle) {
+                                                    void *ownerHandle,
+                                                    bool usesMixroomShell) {
     juce::ignoreUnused(
         nativeHandle,
         scopeKind,
         row,
         effectIndex,
         clipId,
-        ownerHandle);
+        ownerHandle,
+        usesMixroomShell);
+}
+
+extern "C" void mixroomAdoptHostedPluginAuxiliaryWindows(int scopeKind,
+                                                          int row,
+                                                          int effectIndex,
+                                                          int clipId,
+                                                          void *ownerHandle) {
+    juce::ignoreUnused(scopeKind, row, effectIndex, clipId, ownerHandle);
 }
 
 extern "C" void mixroomSetHostedPluginWindowsDetached(BOOL detached) {
@@ -1972,6 +2659,18 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     const auto parsedParams = parseMidiParams(params);
 
     bool ok = false;
+#if JUCE_MAC && !JUCE_IOS
+    ok = JuceEngine::get().loadMidiClip((int)clipIndex,
+                                        (int)rowId,
+                                        iid,
+                                        iname,
+                                        parsedNotes,
+                                        parsedParams,
+                                        sourceTempoBpm,
+                                        startSec,
+                                        lengthSec,
+                                        inFileOffsetSec);
+#else
     juce::MessageManager::getInstance()->callSync([&]
                                                   {
         ok = JuceEngine::get().loadMidiClip((int)clipIndex,
@@ -1984,6 +2683,7 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
                                             startSec,
                                             lengthSec,
                                             inFileOffsetSec); });
+#endif
     return (BOOL)ok;
 }
 
@@ -2105,7 +2805,7 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
             @"transportSec" : @(event.transportSec),
         }];
     }
-    return out;
+    return [out copy];
 }
 
 + (NSArray<NSDictionary *> *)getConnectedMidiInputDevicesObjC

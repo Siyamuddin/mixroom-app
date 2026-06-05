@@ -62,7 +62,13 @@ public beta, even after the security/privacy fixes in the app and backend.
 
 ## Operations and Security
 
-1. Local secret storage
+1. Engineering docs freshness
+   - Run `dart run tool/check_docs_freshness.dart --base origin/main` before
+     release sign-off.
+   - If the check flags docs, update the matching page or record why the
+     current documentation still applies.
+
+2. Local secret storage
    - Auth tokens and queued purchase verification records now migrate into
      OS-protected secure storage (iPhone Keychain / Android Keystore-backed
      encrypted storage).
@@ -70,20 +76,39 @@ public beta, even after the security/privacy fixes in the app and backend.
    - Test one upgrade path from an older beta build on a real iPhone and a
      real Android device to confirm secure-storage migration works.
 
-2. Environment separation
+3. Environment separation
    - Separate staging and production AWS accounts or at least separate IAM,
      secrets, data stores, and billing alarms.
 
-3. Access control
+4. Access control
    - MFA on every admin account.
    - Least-privilege IAM for humans and Lambdas.
    - Secret rotation owners and dates.
 
-4. Incident readiness
+5. Incident readiness
    - Backups plus at least one restore drill.
    - Abuse / takedown contact.
    - Incident response runbook and rollback owner.
 
-5. Release sign-off
+6. Release sign-off
    - Record a named owner for security, privacy, licensing, and production
      deployment approval before public beta.
+
+## AI Safety and Copyright
+
+1. Recommendation and factual music chat
+   - Brief song, artist, genre, and style recommendations are allowed when the
+     assistant does not claim to reproduce protected expression.
+
+2. Copyrighted-style generation boundary
+   - The assistant must refuse requests to imitate, continue, transcribe, or
+     generate MIDI/audio/lyrics from a named copyrighted song, artist, band,
+     composer, score, or distinctive work.
+   - The assistant should offer a generic original alternative, such as a broad
+     genre, tempo, instrumentation, or production-trait direction.
+
+3. Regression checks before release
+   - Run backend structured-output tests for allowed recommendations and
+     prohibited imitation/transcription.
+   - Run live chatbar probes against the deployed proxy for the same cases
+     before public release.

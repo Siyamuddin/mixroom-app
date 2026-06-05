@@ -41,7 +41,7 @@ group_label=gr_1
 
 
 <region>
-sample=VlnEns_Pizz_A2_v1_rr1.flac
+sample=VlnEns_Pizz_A2_v1_rr1.mp3
 lokey=56
 hikey=57
 pitch_keycenter=57
@@ -51,7 +51,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_A3_v1_rr1.flac
+sample=VlnEns_Pizz_A3_v1_rr1.mp3
 lokey=68
 hikey=70
 pitch_keycenter=69
@@ -61,7 +61,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_B2_v1_rr1.flac
+sample=VlnEns_Pizz_B2_v1_rr1.mp3
 lokey=58
 hikey=60
 pitch_keycenter=59
@@ -71,7 +71,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_B4_v1_rr1.flac
+sample=VlnEns_Pizz_B4_v1_rr1.mp3
 lokey=81
 hikey=84
 pitch_keycenter=83
@@ -81,7 +81,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_C4_v1_rr1.flac
+sample=VlnEns_Pizz_C4_v1_rr1.mp3
 lokey=71
 hikey=73
 pitch_keycenter=72
@@ -91,7 +91,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_D3_v1_rr1.flac
+sample=VlnEns_Pizz_D3_v1_rr1.mp3
 lokey=61
 hikey=63
 pitch_keycenter=62
@@ -101,7 +101,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_D5_v1_rr1.flac
+sample=VlnEns_Pizz_D5_v1_rr1.mp3
 lokey=85
 hikey=86
 pitch_keycenter=86
@@ -111,7 +111,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_E4_v1_rr1.flac
+sample=VlnEns_Pizz_E4_v1_rr1.mp3
 lokey=74
 hikey=77
 pitch_keycenter=76
@@ -121,7 +121,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_F#3_v1_rr1.flac
+sample=VlnEns_Pizz_F#3_v1_rr1.mp3
 lokey=64
 hikey=67
 pitch_keycenter=66
@@ -131,7 +131,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_G2_v1_rr1.flac
+sample=VlnEns_Pizz_G2_v1_rr1.mp3
 lokey=55
 hikey=55
 pitch_keycenter=55
@@ -141,7 +141,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_G4_v1_rr1.flac
+sample=VlnEns_Pizz_G4_v1_rr1.mp3
 lokey=78
 hikey=80
 pitch_keycenter=79
@@ -151,7 +151,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_A2_v2_rr1.flac
+sample=VlnEns_Pizz_A2_v2_rr1.mp3
 lokey=56
 hikey=57
 pitch_keycenter=57
@@ -161,7 +161,7 @@ volume=6
 
 
 <region>
-sample=VlnEns_Pizz_A3_v2_rr1.flac
+sample=VlnEns_Pizz_A3_v2_rr1.mp3
 lokey=68
 hikey=70
 pitch_keycenter=69
@@ -171,7 +171,7 @@ volume=6
 
 
 <region>
-sample=VlnEns_Pizz_B2_v2_rr1.flac
+sample=VlnEns_Pizz_B2_v2_rr1.mp3
 lokey=58
 hikey=60
 pitch_keycenter=59
@@ -181,7 +181,7 @@ volume=6
 
 
 <region>
-sample=VlnEns_Pizz_B4_v2_rr1.flac
+sample=VlnEns_Pizz_B4_v2_rr1.mp3
 lokey=81
 hikey=84
 pitch_keycenter=83
@@ -191,7 +191,7 @@ volume=6
 
 
 <region>
-sample=VlnEns_Pizz_C4_v2_rr1.flac
+sample=VlnEns_Pizz_C4_v2_rr1.mp3
 lokey=71
 hikey=73
 pitch_keycenter=72
@@ -201,7 +201,7 @@ volume=6
 
 
 <region>
-sample=VlnEns_Pizz_D3_v2_rr1.flac
+sample=VlnEns_Pizz_D3_v2_rr1.mp3
 lokey=61
 hikey=63
 pitch_keycenter=62
@@ -211,7 +211,7 @@ volume=6
 
 
 <region>
-sample=VlnEns_Pizz_D5_v2_rr1.flac
+sample=VlnEns_Pizz_D5_v2_rr1.mp3
 lokey=85
 hikey=86
 pitch_keycenter=86
@@ -221,7 +221,7 @@ volume=6
 
 
 <region>
-sample=VlnEns_Pizz_E4_v2_rr1.flac
+sample=VlnEns_Pizz_E4_v2_rr1.mp3
 lokey=74
 hikey=77
 pitch_keycenter=76
@@ -231,7 +231,7 @@ volume=6
 
 
 <region>
-sample=VlnEns_Pizz_F#3_v2_rr1.flac
+sample=VlnEns_Pizz_F#3_v2_rr1.mp3
 lokey=64
 hikey=67
 pitch_keycenter=66
@@ -241,7 +241,7 @@ volume=6
 
 
 <region>
-sample=VlnEns_Pizz_G2_v2_rr1.flac
+sample=VlnEns_Pizz_G2_v2_rr1.mp3
 lokey=55
 hikey=55
 pitch_keycenter=55
@@ -251,7 +251,7 @@ volume=6
 
 
 <region>
-sample=VlnEns_Pizz_G4_v2_rr1.flac
+sample=VlnEns_Pizz_G4_v2_rr1.mp3
 lokey=78
 hikey=80
 pitch_keycenter=79
@@ -276,7 +276,7 @@ group_label=gr_2
 
 
 <region>
-sample=VlnEns_Pizz_A2_v1_rr2.flac
+sample=VlnEns_Pizz_A2_v1_rr2.mp3
 lokey=56
 hikey=57
 pitch_keycenter=57
@@ -286,7 +286,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_A3_v1_rr2.flac
+sample=VlnEns_Pizz_A3_v1_rr2.mp3
 lokey=68
 hikey=70
 pitch_keycenter=69
@@ -296,7 +296,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_B2_v1_rr2.flac
+sample=VlnEns_Pizz_B2_v1_rr2.mp3
 lokey=58
 hikey=60
 pitch_keycenter=59
@@ -306,7 +306,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_B4_v1_rr2.flac
+sample=VlnEns_Pizz_B4_v1_rr2.mp3
 lokey=81
 hikey=84
 pitch_keycenter=83
@@ -316,7 +316,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_C4_v1_rr2.flac
+sample=VlnEns_Pizz_C4_v1_rr2.mp3
 lokey=71
 hikey=73
 pitch_keycenter=72
@@ -326,7 +326,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_D3_v1_rr2.flac
+sample=VlnEns_Pizz_D3_v1_rr2.mp3
 lokey=61
 hikey=63
 pitch_keycenter=62
@@ -336,7 +336,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_D5_v1_rr2.flac
+sample=VlnEns_Pizz_D5_v1_rr2.mp3
 lokey=85
 hikey=86
 pitch_keycenter=86
@@ -346,7 +346,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_E4_v1_rr2.flac
+sample=VlnEns_Pizz_E4_v1_rr2.mp3
 lokey=74
 hikey=77
 pitch_keycenter=76
@@ -356,7 +356,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_F#3_v1_rr2.flac
+sample=VlnEns_Pizz_F#3_v1_rr2.mp3
 lokey=64
 hikey=67
 pitch_keycenter=66
@@ -366,7 +366,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_G2_v1_rr2.flac
+sample=VlnEns_Pizz_G2_v1_rr2.mp3
 lokey=55
 hikey=55
 pitch_keycenter=55
@@ -376,7 +376,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_G4_v1_rr2.flac
+sample=VlnEns_Pizz_G4_v1_rr2.mp3
 lokey=78
 hikey=80
 pitch_keycenter=79
@@ -386,7 +386,7 @@ volume=17
 
 
 <region>
-sample=VlnEns_Pizz_A2_v2_rr2.flac
+sample=VlnEns_Pizz_A2_v2_rr2.mp3
 lokey=56
 hikey=57
 pitch_keycenter=57
@@ -396,7 +396,7 @@ volume=6
 
 
 <region>
-sample=VlnEns_Pizz_A3_v2_rr2.flac
+sample=VlnEns_Pizz_A3_v2_rr2.mp3
 lokey=68
 hikey=70
 pitch_keycenter=69
@@ -406,7 +406,7 @@ volume=6
 
 
 <region>
-sample=VlnEns_Pizz_B2_v2_rr2.flac
+sample=VlnEns_Pizz_B2_v2_rr2.mp3
 lokey=58
 hikey=60
 pitch_keycenter=59
@@ -416,7 +416,7 @@ volume=6
 
 
 <region>
-sample=VlnEns_Pizz_B4_v2_rr2.flac
+sample=VlnEns_Pizz_B4_v2_rr2.mp3
 lokey=81
 hikey=84
 pitch_keycenter=83
@@ -426,7 +426,7 @@ volume=6
 
 
 <region>
-sample=VlnEns_Pizz_C4_v2_rr2.flac
+sample=VlnEns_Pizz_C4_v2_rr2.mp3
 lokey=71
 hikey=73
 pitch_keycenter=72
@@ -436,7 +436,7 @@ volume=6
 
 
 <region>
-sample=VlnEns_Pizz_D3_v2_rr2.flac
+sample=VlnEns_Pizz_D3_v2_rr2.mp3
 lokey=61
 hikey=63
 pitch_keycenter=62
@@ -446,7 +446,7 @@ volume=6
 
 
 <region>
-sample=VlnEns_Pizz_D5_v2_rr2.flac
+sample=VlnEns_Pizz_D5_v2_rr2.mp3
 lokey=85
 hikey=86
 pitch_keycenter=86
@@ -456,7 +456,7 @@ volume=6
 
 
 <region>
-sample=VlnEns_Pizz_E4_v2_rr2.flac
+sample=VlnEns_Pizz_E4_v2_rr2.mp3
 lokey=74
 hikey=77
 pitch_keycenter=76
@@ -466,7 +466,7 @@ volume=6
 
 
 <region>
-sample=VlnEns_Pizz_F#3_v2_rr2.flac
+sample=VlnEns_Pizz_F#3_v2_rr2.mp3
 lokey=64
 hikey=67
 pitch_keycenter=66
@@ -476,7 +476,7 @@ volume=6
 
 
 <region>
-sample=VlnEns_Pizz_G2_v2_rr2.flac
+sample=VlnEns_Pizz_G2_v2_rr2.mp3
 lokey=55
 hikey=55
 pitch_keycenter=55
@@ -486,7 +486,7 @@ volume=6
 
 
 <region>
-sample=VlnEns_Pizz_G4_v2_rr2.flac
+sample=VlnEns_Pizz_G4_v2_rr2.mp3
 lokey=78
 hikey=80
 pitch_keycenter=79

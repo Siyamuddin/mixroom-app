@@ -46,6 +46,7 @@ class FeatureFlagsRepositoryTests(unittest.TestCase):
                 "account_plan_billing_enabled": True,
                 "subscription_enforcement_enabled": False,
                 "iap_purchases_enabled": True,
+                "cloud_projects_enabled": True,
             },
             updated_by_user_id="admin-1",
             updated_by_email="Admin@Example.com",
@@ -54,6 +55,7 @@ class FeatureFlagsRepositoryTests(unittest.TestCase):
         self.assertTrue(payload["flags"]["account_plan_billing_enabled"])
         self.assertFalse(payload["flags"]["subscription_enforcement_enabled"])
         self.assertTrue(payload["flags"]["iap_purchases_enabled"])
+        self.assertTrue(payload["flags"]["cloud_projects_enabled"])
         self.assertEqual(payload["updated_by_email"], "admin@example.com")
 
     def test_rejects_unknown_flags(self):

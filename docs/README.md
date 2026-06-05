@@ -111,6 +111,9 @@ See [REMOTE_OPERATIONS.md](REMOTE_OPERATIONS.md).
 
 ### Product / Architecture
 
+- [engineering/README.md](engineering/README.md): technical onboarding,
+  architecture maps, platform notes, release process, ADRs, and docs freshness
+  checks
 - [AI_MIXING_OVERVIEW.md](AI_MIXING_OVERVIEW.md)
 - [PLUGIN_AUTOMATION_BLUEPRINT.md](PLUGIN_AUTOMATION_BLUEPRINT.md)
 - [BETA_FEATURE_AUDIT.md](BETA_FEATURE_AUDIT.md)

@@ -2922,6 +2922,11 @@ public:
     {
         pitchShift.reset();
         smoothedCorrectionSemitones = 0.0f;
+        lastDetectedPitchHz = 0.0f;
+        pitchAnalysisSamplesUntilNext = 0;
+        pitchAnalysisHistoryWritePos = 0;
+        pitchAnalysisHistoryFilled = 0;
+        std::fill(pitchAnalysisHistory.begin(), pitchAnalysisHistory.end(), 0.0f);
     }
 
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -2951,12 +2956,22 @@ public:
     juce::AudioProcessorValueTreeState parameters;
 
 private:
-    float estimatePitchHz(const juce::AudioBuffer<float> &buffer) const;
+    void appendPitchAnalysisSamples(const juce::AudioBuffer<float> &buffer);
+    float estimatePitchHz();
     float targetCorrectionSemitones(float pitchHz, int key, int scale) const;
 
     PitchShiftModule pitchShift;
+    std::vector<float> pitchAnalysisMono;
+    std::vector<float> pitchAnalysisHistory;
     double currentSampleRate{44100.0};
     float smoothedCorrectionSemitones{0.0f};
+    float lastDetectedPitchHz{0.0f};
+    int pitchAnalysisIntervalSamples{1024};
+    int pitchAnalysisSamplesUntilNext{0};
+    int pitchAnalysisDecimation{4};
+    int pitchAnalysisHistoryWritePos{0};
+    int pitchAnalysisHistoryFilled{0};
+    double pitchAnalysisSampleRate{12000.0};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PitchCorrectorAudioProcessor)
 };

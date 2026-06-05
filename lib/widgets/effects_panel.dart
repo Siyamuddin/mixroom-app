@@ -630,6 +630,176 @@ String _formatGainDb(double sliderValue, {double uiMax = 3.0}) {
       : "${db.toStringAsFixed(1)} dB";
 }
 
+double _gainUiToPercent(double sliderValue, {double uiMax = 3.0}) {
+  final db = _gainUiToDb(sliderValue, uiMax: uiMax);
+  return (math.pow(10.0, db / 20.0) * 100.0).toDouble();
+}
+
+double _gainPercentToUi(
+  double percent, {
+  required double minValue,
+  required double maxValue,
+}) {
+  const dbMin = -60.0;
+  const dbMax = 6.0;
+  const uiUnity = 2.0;
+
+  final clampedPercent = percent.clamp(0.1, 200.0).toDouble();
+  final db = (20.0 * math.log(clampedPercent / 100.0) / math.ln10)
+      .clamp(dbMin, dbMax)
+      .toDouble();
+  final unity = math.min(uiUnity, maxValue);
+  final ui = db <= 0.0
+      ? unity * ((db - dbMin) / (0.0 - dbMin)).clamp(0.0, 1.0)
+      : unity + ((maxValue - unity) * (db / dbMax).clamp(0.0, 1.0)).toDouble();
+  return ui.clamp(minValue, maxValue).toDouble();
+}
+
+Future<double?> _showGainPercentDialog({
+  required BuildContext context,
+  required double value,
+  required double minValue,
+  required double maxValue,
+}) async {
+  var percent = _gainUiToPercent(value, uiMax: maxValue);
+  final controller = TextEditingController(
+    text: percent.toStringAsFixed(1),
+  );
+  final nextPercent = await showDialog<double>(
+    context: context,
+    builder: (dialogContext) {
+      return AlertDialog(
+        backgroundColor: const Color(0xFF5F666D),
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+        ),
+        title: const Text(
+          'Set volume',
+          style: TextStyle(color: _kFxPanelText),
+        ),
+        content: StatefulBuilder(
+          builder: (context, setDialogState) {
+            void setPercent(double next) {
+              percent = next.clamp(0.1, 200.0).toDouble();
+              controller.text = percent.toStringAsFixed(1);
+              controller.selection = TextSelection.fromPosition(
+                TextPosition(offset: controller.text.length),
+              );
+              setDialogState(() {});
+            }
+
+            final nextUi = _gainPercentToUi(
+              percent,
+              minValue: minValue,
+              maxValue: maxValue,
+            );
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    IconButton(
+                      tooltip: 'Lower volume',
+                      onPressed: () => setPercent(percent - 5.0),
+                      icon: const Icon(Icons.remove, color: _kFxPanelText),
+                    ),
+                    Expanded(
+                      child: TextField(
+                        controller: controller,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: _kFxPanelText),
+                        decoration: InputDecoration(
+                          suffixText: '%',
+                          suffixStyle: TextStyle(
+                            color: _kFxPanelText.withValues(alpha: 0.72),
+                          ),
+                          helperText: '100% = 0 dB',
+                          helperStyle: TextStyle(
+                            color: _kFxPanelText.withValues(alpha: 0.62),
+                          ),
+                          filled: true,
+                          fillColor: Colors.white.withValues(alpha: 0.08),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: Colors.white.withValues(alpha: 0.14),
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: Colors.white.withValues(alpha: 0.42),
+                            ),
+                          ),
+                          isDense: true,
+                        ),
+                        onChanged: (text) {
+                          final parsed = double.tryParse(text.trim());
+                          if (parsed == null || !parsed.isFinite) {
+                            return;
+                          }
+                          percent = parsed.clamp(0.1, 200.0).toDouble();
+                          setDialogState(() {});
+                        },
+                        onSubmitted: (text) {
+                          final parsed = double.tryParse(text.trim());
+                          if (parsed != null) {
+                            Navigator.pop(dialogContext, parsed);
+                          }
+                        },
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Raise volume',
+                      onPressed: () => setPercent(percent + 5.0),
+                      icon: const Icon(Icons.add, color: _kFxPanelText),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  _formatGainDb(nextUi, uiMax: maxValue),
+                  style: TextStyle(
+                    color: _kFxPanelText.withValues(alpha: 0.76),
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final parsed = double.tryParse(controller.text.trim());
+              Navigator.pop(dialogContext, parsed);
+            },
+            child: const Text('Set'),
+          ),
+        ],
+      );
+    },
+  );
+  if (nextPercent == null || !nextPercent.isFinite) return null;
+  return _gainPercentToUi(
+    nextPercent,
+    minValue: minValue,
+    maxValue: maxValue,
+  );
+}
+
 class RowEffectsPanel extends StatefulWidget {
   final int rowIndex;
   final String mode;
@@ -1099,26 +1269,47 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
       effectName: effectName,
       paramName: paramName,
     );
+    void showAutomationSheet(Offset globalPosition) {
+      _showAutomateParameterSheet(
+        effectIndex: effectIndex,
+        effectName: effectName,
+        paramId: paramId,
+        paramName: paramName,
+        haloKeys: haloKeys,
+        anchorGlobalPos: globalPosition,
+      );
+    }
+
     return KeyedSubtree(
       key: ValueKey(
         'row_param_${widget.rowIndex}_${_testKeySlug(effectName)}_${_testKeySlug(paramName)}',
       ),
-      child: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onSecondaryTapDown: PlatformCapabilities.current.isDesktop
-            ? (details) => _showAutomateParameterSheet(
-                  effectIndex: effectIndex,
-                  effectName: effectName,
-                  paramId: paramId,
-                  paramName: paramName,
-                  haloKeys: haloKeys,
-                  anchorGlobalPos: details.globalPosition,
-                )
-            : null,
-        child: _wrapWithHalos(
-          haloKeys: haloKeys,
-          borderRadius: borderRadius,
-          child: child,
+      child: Builder(
+        builder: (gestureContext) => GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onSecondaryTapDown: PlatformCapabilities.current.isDesktop
+              ? (details) => showAutomationSheet(details.globalPosition)
+              : null,
+          onLongPressStart: PlatformCapabilities.current.isDesktop
+              ? null
+              : (details) {
+                  final box = gestureContext.findRenderObject() as RenderBox?;
+                  if (box != null &&
+                      _isLikelyNumericSliderPress(
+                        param: param,
+                        localPosition:
+                            box.globalToLocal(details.globalPosition),
+                        size: box.size,
+                      )) {
+                    return;
+                  }
+                  showAutomationSheet(details.globalPosition);
+                },
+          child: _wrapWithHalos(
+            haloKeys: haloKeys,
+            borderRadius: borderRadius,
+            child: child,
+          ),
         ),
       ),
     );
@@ -1729,6 +1920,22 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         ((param['value'] as num?)?.toDouble() ?? 2.0).clamp(minV, maxV);
     final defaultValue = _paramDefaultAsDouble(param);
     final unity = 2.0.clamp(minV, maxV).toDouble();
+    void commitImmediate(double nextValue) {
+      final target = nextValue.clamp(minV, maxV).toDouble();
+      final oldValue = ((param['value'] as num?)?.toDouble() ?? rawV)
+          .clamp(minV, maxV)
+          .toDouble();
+      if ((oldValue - target).abs() < 1.0e-6) return;
+      setState(() => param['value'] = target);
+      _setTrackEffectParam(widget.rowIndex, effectIndex, paramName, target);
+      _commitTrackEffectParam(
+        widget.rowIndex,
+        effectIndex,
+        paramName,
+        oldValue,
+        target,
+      );
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
@@ -1744,18 +1951,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                   onDoubleTap: () {
                     final target =
                         (defaultValue ?? unity).clamp(minV, maxV).toDouble();
-                    final oldValue = (param['value'] as num).toDouble();
-                    if ((oldValue - target).abs() < 1.0e-6) return;
-                    setState(() => param['value'] = target);
-                    _setTrackEffectParam(
-                        widget.rowIndex, effectIndex, paramName, target);
-                    _commitTrackEffectParam(
-                      widget.rowIndex,
-                      effectIndex,
-                      paramName,
-                      oldValue,
-                      target,
-                    );
+                    commitImmediate(target);
                   },
                   child: SliderTheme(
                     data: SliderTheme.of(context).copyWith(
@@ -1793,10 +1989,28 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
               ),
               SizedBox(
                 width: 58,
-                child: Text(
-                  _formatGainDb(rawV, uiMax: maxV),
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodySmall,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(6),
+                  onTap: () {
+                    WidgetsBinding.instance.addPostFrameCallback((_) async {
+                      if (!mounted) return;
+                      final next = await _showGainPercentDialog(
+                        context: context,
+                        value: rawV,
+                        minValue: minV,
+                        maxValue: maxV,
+                      );
+                      if (next == null || !mounted) return;
+                      commitImmediate(next);
+                    });
+                  },
+                  child: Center(
+                    child: Text(
+                      _formatGainDb(rawV, uiMax: maxV),
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -3141,6 +3355,18 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     if (idx < 0 || idx >= _effects.length) {
       await _loadEffects();
       if (idx < 0 || idx >= _effects.length) return;
+    }
+
+    if (_isLikelyExternalEffectSlot(idx)) {
+      setState(() {
+        _rowEffectsMenuOpen = false;
+        _selectedEffectIndex = null;
+        _paramsLoading = false;
+        _currentParams = [];
+        _returnHighlightedEffectIndex = null;
+      });
+      await _tryOpenTrackPluginEditor(idx);
+      return;
     }
 
     widget.onTutorialEffectOpened?.call(
@@ -4705,26 +4931,47 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
       effectName: effectName,
       paramName: paramName,
     );
+    void showAutomationSheet(Offset globalPosition) {
+      _showAutomateParameterSheet(
+        effectIndex: effectIndex,
+        effectName: effectName,
+        paramId: paramId,
+        paramName: paramName,
+        haloKeys: haloKeys,
+        anchorGlobalPos: globalPosition,
+      );
+    }
+
     return KeyedSubtree(
       key: ValueKey(
         'master_param_${effectIndex}_${_testKeySlug(effectName)}_${_testKeySlug(paramName)}',
       ),
-      child: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onSecondaryTapDown: PlatformCapabilities.current.isDesktop
-            ? (details) => _showAutomateParameterSheet(
-                  effectIndex: effectIndex,
-                  effectName: effectName,
-                  paramId: paramId,
-                  paramName: paramName,
-                  haloKeys: haloKeys,
-                  anchorGlobalPos: details.globalPosition,
-                )
-            : null,
-        child: _wrapWithHalos(
-          haloKeys: haloKeys,
-          borderRadius: borderRadius,
-          child: child,
+      child: Builder(
+        builder: (gestureContext) => GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onSecondaryTapDown: PlatformCapabilities.current.isDesktop
+              ? (details) => showAutomationSheet(details.globalPosition)
+              : null,
+          onLongPressStart: PlatformCapabilities.current.isDesktop
+              ? null
+              : (details) {
+                  final box = gestureContext.findRenderObject() as RenderBox?;
+                  if (box != null &&
+                      _isLikelyNumericSliderPress(
+                        param: param,
+                        localPosition:
+                            box.globalToLocal(details.globalPosition),
+                        size: box.size,
+                      )) {
+                    return;
+                  }
+                  showAutomationSheet(details.globalPosition);
+                },
+          child: _wrapWithHalos(
+            haloKeys: haloKeys,
+            borderRadius: borderRadius,
+            child: child,
+          ),
         ),
       ),
     );
@@ -4742,6 +4989,21 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
         ((param['value'] as num?)?.toDouble() ?? 2.0).clamp(minV, maxV);
     final defaultValue = _paramDefaultAsDouble(param);
     final unity = 2.0.clamp(minV, maxV).toDouble();
+    void commitImmediate(double nextValue) {
+      final target = nextValue.clamp(minV, maxV).toDouble();
+      final oldValue = ((param['value'] as num?)?.toDouble() ?? rawV)
+          .clamp(minV, maxV)
+          .toDouble();
+      if ((oldValue - target).abs() < 1.0e-6) return;
+      setState(() => param['value'] = target);
+      widget.setMasterEffectParam(effectIndex, paramName, target);
+      widget.onMasterPluginParamCommit?.call(
+        effectIndex,
+        paramName,
+        oldValue,
+        target,
+      );
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
@@ -4757,16 +5019,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                   onDoubleTap: () {
                     final target =
                         (defaultValue ?? unity).clamp(minV, maxV).toDouble();
-                    final oldValue = (param['value'] as num).toDouble();
-                    if ((oldValue - target).abs() < 1.0e-6) return;
-                    setState(() => param['value'] = target);
-                    widget.setMasterEffectParam(effectIndex, paramName, target);
-                    widget.onMasterPluginParamCommit?.call(
-                      effectIndex,
-                      paramName,
-                      oldValue,
-                      target,
-                    );
+                    commitImmediate(target);
                   },
                   child: SliderTheme(
                     data: SliderTheme.of(context).copyWith(
@@ -4802,10 +5055,28 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
               ),
               SizedBox(
                 width: 58,
-                child: Text(
-                  _formatGainDb(rawV, uiMax: maxV),
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodySmall,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(6),
+                  onTap: () {
+                    WidgetsBinding.instance.addPostFrameCallback((_) async {
+                      if (!mounted) return;
+                      final next = await _showGainPercentDialog(
+                        context: context,
+                        value: rawV,
+                        minValue: minV,
+                        maxValue: maxV,
+                      );
+                      if (next == null || !mounted) return;
+                      commitImmediate(next);
+                    });
+                  },
+                  child: Center(
+                    child: Text(
+                      _formatGainDb(rawV, uiMax: maxV),
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -6321,6 +6592,23 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
   // =========================
 
   Future<void> _openPluginParams(int idx) async {
+    if (idx < 0 || idx >= _effects.length) {
+      await _loadEffects();
+      if (idx < 0 || idx >= _effects.length) return;
+    }
+
+    if (_isLikelyExternalEffectSlot(idx)) {
+      setState(() {
+        _masterEffectsMenuOpen = false;
+        _selectedEffectIndex = null;
+        _paramsLoading = false;
+        _currentParams = [];
+        _returnHighlightedEffectIndex = null;
+      });
+      await _tryOpenMasterPluginEditor(idx);
+      return;
+    }
+
     setState(() {
       _masterEffectsMenuOpen = false;
       _selectedEffectIndex = idx;
@@ -7936,6 +8224,29 @@ bool _paramValuesEqual(dynamic a, dynamic b) {
     return (a.toDouble() - b.toDouble()).abs() < 1.0e-6;
   }
   return a == b;
+}
+
+bool _isLikelyNumericSliderPress({
+  required Map<String, dynamic> param,
+  required Offset localPosition,
+  required Size size,
+}) {
+  final type = (param['type']?.toString() ?? '').toLowerCase();
+  final hasNumericRange =
+      param['min'] is num && param['max'] is num && param['value'] is num;
+  if (!hasNumericRange &&
+      type != 'float' &&
+      type != 'double' &&
+      type != 'int') {
+    return false;
+  }
+  if (size.height <= 0 || size.width <= 0) return false;
+
+  // Numeric parameter cards put the readable label/value area above the slider.
+  // Long-pressing that header still opens automation; long-pressing the lower
+  // slider/knob area is treated as a value edit gesture and does nothing here.
+  final sliderZoneTop = math.min(42.0, size.height * 0.45);
+  return localPosition.dy >= sliderZoneTop;
 }
 
 double _parseSlopeDbPerOct(dynamic slopeValue) {

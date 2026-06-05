@@ -41,7 +41,7 @@ group_label=gr_1
 
 
 <region>
-sample=Sum_SHTrumpet_stac_A#3_v1_rr1.flac
+sample=Sum_SHTrumpet_stac_A#3_v1_rr1.mp3
 lokey=69
 hikey=71
 pitch_keycenter=70
@@ -51,7 +51,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_A2_v1_rr1.flac
+sample=Sum_SHTrumpet_stac_A2_v1_rr1.mp3
 lokey=55
 hikey=58
 pitch_keycenter=57
@@ -61,7 +61,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_A4_v1_rr1.flac
+sample=Sum_SHTrumpet_stac_A4_v1_rr1.mp3
 lokey=79
 hikey=82
 pitch_keycenter=81
@@ -71,7 +71,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_C3_v1_rr1.flac
+sample=Sum_SHTrumpet_stac_C3_v1_rr1.mp3
 lokey=59
 hikey=61
 pitch_keycenter=60
@@ -81,7 +81,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_C5_v1_rr1.flac
+sample=Sum_SHTrumpet_stac_C5_v1_rr1.mp3
 lokey=83
 hikey=84
 pitch_keycenter=84
@@ -91,7 +91,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_D#3_v1_rr1.flac
+sample=Sum_SHTrumpet_stac_D#3_v1_rr1.mp3
 lokey=62
 hikey=63
 pitch_keycenter=63
@@ -101,7 +101,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_D4_v1_rr1.flac
+sample=Sum_SHTrumpet_stac_D4_v1_rr1.mp3
 lokey=72
 hikey=75
 pitch_keycenter=74
@@ -111,7 +111,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_F2_v1_rr1.flac
+sample=Sum_SHTrumpet_stac_F2_v1_rr1.mp3
 lokey=52
 hikey=54
 pitch_keycenter=53
@@ -121,7 +121,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_F3_v1_rr1.flac
+sample=Sum_SHTrumpet_stac_F3_v1_rr1.mp3
 lokey=64
 hikey=65
 pitch_keycenter=65
@@ -131,7 +131,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_F4_v1_rr1.flac
+sample=Sum_SHTrumpet_stac_F4_v1_rr1.mp3
 lokey=76
 hikey=78
 pitch_keycenter=77
@@ -141,7 +141,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_G3_v1_rr1.flac
+sample=Sum_SHTrumpet_stac_G3_v1_rr1.mp3
 lokey=66
 hikey=68
 pitch_keycenter=67
@@ -151,7 +151,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_A#3_v2_rr1.flac
+sample=Sum_SHTrumpet_stac_A#3_v2_rr1.mp3
 lokey=69
 hikey=71
 pitch_keycenter=70
@@ -161,7 +161,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_A2_v2_rr1.flac
+sample=Sum_SHTrumpet_stac_A2_v2_rr1.mp3
 lokey=55
 hikey=58
 pitch_keycenter=57
@@ -171,7 +171,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_A4_v2_rr1.flac
+sample=Sum_SHTrumpet_stac_A4_v2_rr1.mp3
 lokey=79
 hikey=82
 pitch_keycenter=81
@@ -181,7 +181,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_C3_v2_rr1.flac
+sample=Sum_SHTrumpet_stac_C3_v2_rr1.mp3
 lokey=59
 hikey=61
 pitch_keycenter=60
@@ -191,7 +191,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_C5_v2_rr1.flac
+sample=Sum_SHTrumpet_stac_C5_v2_rr1.mp3
 lokey=83
 hikey=84
 pitch_keycenter=84
@@ -201,7 +201,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_D#3_v2_rr1.flac
+sample=Sum_SHTrumpet_stac_D#3_v2_rr1.mp3
 lokey=62
 hikey=63
 pitch_keycenter=63
@@ -211,7 +211,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_D4_v2_rr1.flac
+sample=Sum_SHTrumpet_stac_D4_v2_rr1.mp3
 lokey=72
 hikey=75
 pitch_keycenter=74
@@ -221,7 +221,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_F2_v2_rr1.flac
+sample=Sum_SHTrumpet_stac_F2_v2_rr1.mp3
 lokey=52
 hikey=54
 pitch_keycenter=53
@@ -231,7 +231,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_F3_v2_rr1.flac
+sample=Sum_SHTrumpet_stac_F3_v2_rr1.mp3
 lokey=64
 hikey=65
 pitch_keycenter=65
@@ -241,7 +241,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_F4_v2_rr1.flac
+sample=Sum_SHTrumpet_stac_F4_v2_rr1.mp3
 lokey=76
 hikey=78
 pitch_keycenter=77
@@ -251,7 +251,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_G3_v2_rr1.flac
+sample=Sum_SHTrumpet_stac_G3_v2_rr1.mp3
 lokey=66
 hikey=68
 pitch_keycenter=67
@@ -261,7 +261,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_A#3_v3_rr1.flac
+sample=Sum_SHTrumpet_stac_A#3_v3_rr1.mp3
 lokey=69
 hikey=71
 pitch_keycenter=70
@@ -271,7 +271,7 @@ volume=5
 
 
 <region>
-sample=Sum_SHTrumpet_stac_A2_v3_rr1.flac
+sample=Sum_SHTrumpet_stac_A2_v3_rr1.mp3
 lokey=55
 hikey=58
 pitch_keycenter=57
@@ -281,7 +281,7 @@ volume=5
 
 
 <region>
-sample=Sum_SHTrumpet_stac_A4_v3_rr1.flac
+sample=Sum_SHTrumpet_stac_A4_v3_rr1.mp3
 lokey=79
 hikey=82
 pitch_keycenter=81
@@ -291,7 +291,7 @@ volume=5
 
 
 <region>
-sample=Sum_SHTrumpet_stac_C3_v3_rr1.flac
+sample=Sum_SHTrumpet_stac_C3_v3_rr1.mp3
 lokey=59
 hikey=61
 pitch_keycenter=60
@@ -301,7 +301,7 @@ volume=5
 
 
 <region>
-sample=Sum_SHTrumpet_stac_C5_v3_rr1.flac
+sample=Sum_SHTrumpet_stac_C5_v3_rr1.mp3
 lokey=83
 hikey=84
 pitch_keycenter=84
@@ -311,7 +311,7 @@ volume=5
 
 
 <region>
-sample=Sum_SHTrumpet_stac_D#3_v3_rr1.flac
+sample=Sum_SHTrumpet_stac_D#3_v3_rr1.mp3
 lokey=62
 hikey=63
 pitch_keycenter=63
@@ -321,7 +321,7 @@ volume=5
 
 
 <region>
-sample=Sum_SHTrumpet_stac_D4_v3_rr1.flac
+sample=Sum_SHTrumpet_stac_D4_v3_rr1.mp3
 lokey=72
 hikey=75
 pitch_keycenter=74
@@ -331,7 +331,7 @@ volume=5
 
 
 <region>
-sample=Sum_SHTrumpet_stac_F2_v3_rr1.flac
+sample=Sum_SHTrumpet_stac_F2_v3_rr1.mp3
 lokey=52
 hikey=54
 pitch_keycenter=53
@@ -341,7 +341,7 @@ volume=5
 
 
 <region>
-sample=Sum_SHTrumpet_stac_F3_v3_rr1.flac
+sample=Sum_SHTrumpet_stac_F3_v3_rr1.mp3
 lokey=64
 hikey=65
 pitch_keycenter=65
@@ -351,7 +351,7 @@ volume=5
 
 
 <region>
-sample=Sum_SHTrumpet_stac_F4_v3_rr1.flac
+sample=Sum_SHTrumpet_stac_F4_v3_rr1.mp3
 lokey=76
 hikey=78
 pitch_keycenter=77
@@ -361,7 +361,7 @@ volume=5
 
 
 <region>
-sample=Sum_SHTrumpet_stac_G3_v3_rr1.flac
+sample=Sum_SHTrumpet_stac_G3_v3_rr1.mp3
 lokey=66
 hikey=68
 pitch_keycenter=67
@@ -386,7 +386,7 @@ group_label=gr_2
 
 
 <region>
-sample=Sum_SHTrumpet_stac_A#3_v1_rr2.flac
+sample=Sum_SHTrumpet_stac_A#3_v1_rr2.mp3
 lokey=69
 hikey=71
 pitch_keycenter=70
@@ -396,7 +396,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_A2_v1_rr2.flac
+sample=Sum_SHTrumpet_stac_A2_v1_rr2.mp3
 lokey=55
 hikey=58
 pitch_keycenter=57
@@ -406,7 +406,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_A4_v1_rr2.flac
+sample=Sum_SHTrumpet_stac_A4_v1_rr2.mp3
 lokey=79
 hikey=82
 pitch_keycenter=81
@@ -416,7 +416,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_C3_v1_rr2.flac
+sample=Sum_SHTrumpet_stac_C3_v1_rr2.mp3
 lokey=59
 hikey=61
 pitch_keycenter=60
@@ -426,7 +426,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_C5_v1_rr2.flac
+sample=Sum_SHTrumpet_stac_C5_v1_rr2.mp3
 lokey=83
 hikey=84
 pitch_keycenter=84
@@ -436,7 +436,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_D#3_v1_rr2.flac
+sample=Sum_SHTrumpet_stac_D#3_v1_rr2.mp3
 lokey=62
 hikey=63
 pitch_keycenter=63
@@ -446,7 +446,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_D4_v1_rr2.flac
+sample=Sum_SHTrumpet_stac_D4_v1_rr2.mp3
 lokey=72
 hikey=75
 pitch_keycenter=74
@@ -456,7 +456,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_F2_v1_rr2.flac
+sample=Sum_SHTrumpet_stac_F2_v1_rr2.mp3
 lokey=52
 hikey=54
 pitch_keycenter=53
@@ -466,7 +466,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_F3_v1_rr2.flac
+sample=Sum_SHTrumpet_stac_F3_v1_rr2.mp3
 lokey=64
 hikey=65
 pitch_keycenter=65
@@ -476,7 +476,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_F4_v1_rr2.flac
+sample=Sum_SHTrumpet_stac_F4_v1_rr2.mp3
 lokey=76
 hikey=78
 pitch_keycenter=77
@@ -486,7 +486,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_G3_v1_rr2.flac
+sample=Sum_SHTrumpet_stac_G3_v1_rr2.mp3
 lokey=66
 hikey=68
 pitch_keycenter=67
@@ -496,7 +496,7 @@ volume=23
 
 
 <region>
-sample=Sum_SHTrumpet_stac_A#3_v2_rr2.flac
+sample=Sum_SHTrumpet_stac_A#3_v2_rr2.mp3
 lokey=69
 hikey=71
 pitch_keycenter=70
@@ -506,7 +506,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_A2_v2_rr2.flac
+sample=Sum_SHTrumpet_stac_A2_v2_rr2.mp3
 lokey=55
 hikey=58
 pitch_keycenter=57
@@ -516,7 +516,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_A4_v2_rr2.flac
+sample=Sum_SHTrumpet_stac_A4_v2_rr2.mp3
 lokey=79
 hikey=82
 pitch_keycenter=81
@@ -526,7 +526,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_C3_v2_rr2.flac
+sample=Sum_SHTrumpet_stac_C3_v2_rr2.mp3
 lokey=59
 hikey=61
 pitch_keycenter=60
@@ -536,7 +536,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_C5_v2_rr2.flac
+sample=Sum_SHTrumpet_stac_C5_v2_rr2.mp3
 lokey=83
 hikey=84
 pitch_keycenter=84
@@ -546,7 +546,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_D#3_v2_rr2.flac
+sample=Sum_SHTrumpet_stac_D#3_v2_rr2.mp3
 lokey=62
 hikey=63
 pitch_keycenter=63
@@ -556,7 +556,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_D4_v2_rr2.flac
+sample=Sum_SHTrumpet_stac_D4_v2_rr2.mp3
 lokey=72
 hikey=75
 pitch_keycenter=74
@@ -566,7 +566,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_F2_v2_rr2.flac
+sample=Sum_SHTrumpet_stac_F2_v2_rr2.mp3
 lokey=52
 hikey=54
 pitch_keycenter=53
@@ -576,7 +576,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_F3_v2_rr2.flac
+sample=Sum_SHTrumpet_stac_F3_v2_rr2.mp3
 lokey=64
 hikey=65
 pitch_keycenter=65
@@ -586,7 +586,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_F4_v2_rr2.flac
+sample=Sum_SHTrumpet_stac_F4_v2_rr2.mp3
 lokey=76
 hikey=78
 pitch_keycenter=77
@@ -596,7 +596,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_G3_v2_rr2.flac
+sample=Sum_SHTrumpet_stac_G3_v2_rr2.mp3
 lokey=66
 hikey=68
 pitch_keycenter=67
@@ -606,7 +606,7 @@ volume=14
 
 
 <region>
-sample=Sum_SHTrumpet_stac_A#3_v3_rr2.flac
+sample=Sum_SHTrumpet_stac_A#3_v3_rr2.mp3
 lokey=69
 hikey=71
 pitch_keycenter=70
@@ -616,7 +616,7 @@ volume=5
 
 
 <region>
-sample=Sum_SHTrumpet_stac_A2_v3_rr2.flac
+sample=Sum_SHTrumpet_stac_A2_v3_rr2.mp3
 lokey=55
 hikey=58
 pitch_keycenter=57
@@ -626,7 +626,7 @@ volume=5
 
 
 <region>
-sample=Sum_SHTrumpet_stac_A4_v3_rr2.flac
+sample=Sum_SHTrumpet_stac_A4_v3_rr2.mp3
 lokey=79
 hikey=82
 pitch_keycenter=81
@@ -636,7 +636,7 @@ volume=5
 
 
 <region>
-sample=Sum_SHTrumpet_stac_C3_v3_rr2.flac
+sample=Sum_SHTrumpet_stac_C3_v3_rr2.mp3
 lokey=59
 hikey=61
 pitch_keycenter=60
@@ -646,7 +646,7 @@ volume=5
 
 
 <region>
-sample=Sum_SHTrumpet_stac_C5_v3_rr2.flac
+sample=Sum_SHTrumpet_stac_C5_v3_rr2.mp3
 lokey=83
 hikey=84
 pitch_keycenter=84
@@ -656,7 +656,7 @@ volume=5
 
 
 <region>
-sample=Sum_SHTrumpet_stac_D#3_v3_rr2.flac
+sample=Sum_SHTrumpet_stac_D#3_v3_rr2.mp3
 lokey=62
 hikey=63
 pitch_keycenter=63
@@ -666,7 +666,7 @@ volume=5
 
 
 <region>
-sample=Sum_SHTrumpet_stac_D4_v3_rr2.flac
+sample=Sum_SHTrumpet_stac_D4_v3_rr2.mp3
 lokey=72
 hikey=75
 pitch_keycenter=74
@@ -676,7 +676,7 @@ volume=5
 
 
 <region>
-sample=Sum_SHTrumpet_stac_F2_v3_rr2.flac
+sample=Sum_SHTrumpet_stac_F2_v3_rr2.mp3
 lokey=52
 hikey=54
 pitch_keycenter=53
@@ -686,7 +686,7 @@ volume=5
 
 
 <region>
-sample=Sum_SHTrumpet_stac_F3_v3_rr2.flac
+sample=Sum_SHTrumpet_stac_F3_v3_rr2.mp3
 lokey=64
 hikey=65
 pitch_keycenter=65
@@ -696,7 +696,7 @@ volume=5
 
 
 <region>
-sample=Sum_SHTrumpet_stac_F4_v3_rr2.flac
+sample=Sum_SHTrumpet_stac_F4_v3_rr2.mp3
 lokey=76
 hikey=78
 pitch_keycenter=77
@@ -706,7 +706,7 @@ volume=5
 
 
 <region>
-sample=Sum_SHTrumpet_stac_G3_v3_rr2.flac
+sample=Sum_SHTrumpet_stac_G3_v3_rr2.mp3
 lokey=66
 hikey=68
 pitch_keycenter=67

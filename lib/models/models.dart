@@ -15,6 +15,22 @@ extension ClipKindWire on ClipKind {
   }
 }
 
+const String kTempoWarpModeBeats = 'beats';
+const String kTempoWarpModeComplex = 'complex';
+const String kTempoWarpModeRepitch = 'repitch';
+
+String normalizeTempoWarpMode(String? value) {
+  switch ((value ?? '').trim().toLowerCase()) {
+    case kTempoWarpModeBeats:
+      return kTempoWarpModeBeats;
+    case kTempoWarpModeRepitch:
+      return kTempoWarpModeRepitch;
+    case kTempoWarpModeComplex:
+    default:
+      return kTempoWarpModeComplex;
+  }
+}
+
 class MidiNote {
   String id;
   int pitch; // MIDI note number (0..127)
@@ -84,6 +100,7 @@ class AudioTrack {
   double sourceTempoBpm; // detected/imported source BPM (<=0 means unknown)
   bool stretchToProjectTempo; // clip follows project tempo when enabled
   bool tempoStretchPreservePitch; // false=resample, true=stretch-preserve
+  String tempoWarpMode; // beats, complex, or repitch for desktop warp UI
   double reverb; // deprecated
   double echo; // deprecated
   bool didExtractWaveform;
@@ -122,6 +139,7 @@ class AudioTrack {
     this.sourceTempoBpm = 0.0,
     this.stretchToProjectTempo = false,
     this.tempoStretchPreservePitch = false,
+    String tempoWarpMode = kTempoWarpModeComplex,
     this.reverb = 0.0,
     this.echo = 0.0,
     this.didExtractWaveform = false,
@@ -138,6 +156,7 @@ class AudioTrack {
     List<MidiNote>? midiNotes,
     this.hostedInstrumentStateBase64 = '',
   })  : clipId = _normalizeAudioTrackClipId(clipId),
+        tempoWarpMode = normalizeTempoWarpMode(tempoWarpMode),
         currentPosition = currentPosition ?? Duration.zero,
         instrumentParams = instrumentParams ?? const <String, double>{},
         midiNotes = midiNotes ?? const <MidiNote>[],
@@ -168,6 +187,7 @@ class AudioTrack {
     double sourceTempoBpm = 0.0,
     bool stretchToProjectTempo = false,
     bool tempoStretchPreservePitch = false,
+    String tempoWarpMode = kTempoWarpModeComplex,
     double reverb = 0.0,
     double echo = 0.0,
     bool didExtractWaveform = false,
@@ -207,6 +227,7 @@ class AudioTrack {
       sourceTempoBpm: sourceTempoBpm,
       stretchToProjectTempo: stretchToProjectTempo,
       tempoStretchPreservePitch: tempoStretchPreservePitch,
+      tempoWarpMode: tempoWarpMode,
       reverb: reverb,
       echo: echo,
       didExtractWaveform: didExtractWaveform,
@@ -249,16 +270,67 @@ String _normalizeAudioTrackClipId(String? raw) {
   return 'clip_${DateTime.now().microsecondsSinceEpoch}_$_audioTrackClipIdCounter';
 }
 
+enum TimelineRowKind {
+  audio('audio'),
+  instrument('instrument');
+
+  final String wireName;
+
+  const TimelineRowKind(this.wireName);
+
+  static TimelineRowKind fromWire(String? raw) {
+    switch ((raw ?? '').trim().toLowerCase()) {
+      case 'instrument':
+      case 'instrument_lane':
+      case 'midi':
+        return TimelineRowKind.instrument;
+      case 'audio':
+      default:
+        return TimelineRowKind.audio;
+    }
+  }
+}
+
 class TimelineRow {
   final int rowId;
   String name;
   int iconId;
+  TimelineRowKind kind;
+  String instrumentId;
+  String instrumentName;
+  Map<String, double> instrumentParams;
 
   TimelineRow({
     required this.rowId,
     required this.name,
     required this.iconId,
-  });
+    this.kind = TimelineRowKind.audio,
+    this.instrumentId = '',
+    this.instrumentName = '',
+    Map<String, double>? instrumentParams,
+  }) : instrumentParams = instrumentParams ?? const <String, double>{};
+
+  bool get isInstrumentLane => kind == TimelineRowKind.instrument;
+
+  TimelineRow copyWith({
+    int? rowId,
+    String? name,
+    int? iconId,
+    TimelineRowKind? kind,
+    String? instrumentId,
+    String? instrumentName,
+    Map<String, double>? instrumentParams,
+  }) {
+    return TimelineRow(
+      rowId: rowId ?? this.rowId,
+      name: name ?? this.name,
+      iconId: iconId ?? this.iconId,
+      kind: kind ?? this.kind,
+      instrumentId: instrumentId ?? this.instrumentId,
+      instrumentName: instrumentName ?? this.instrumentName,
+      instrumentParams: instrumentParams ?? this.instrumentParams,
+    );
+  }
 }
 
 // consider making extendable to general automation points, not just volume
@@ -482,6 +554,7 @@ extension AudioTrackSerialization on AudioTrack {
       "sourceTempoBpm": sourceTempoBpm,
       "stretchToProjectTempo": stretchToProjectTempo,
       "tempoStretchPreservePitch": tempoStretchPreservePitch,
+      "tempoWarpMode": normalizeTempoWarpMode(tempoWarpMode),
       "rowIndex": rowIndex,
       "rowId": rowId,
       "clipId": clipId,

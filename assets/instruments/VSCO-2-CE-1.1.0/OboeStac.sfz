@@ -41,7 +41,7 @@ group_label=gr_1
 
 
 <region>
-sample=Oboe_Stacc_A#2_v1_rr1_Main.flac
+sample=Oboe_Stacc_A#2_v1_rr1_Main.mp3
 lokey=58
 hikey=59
 pitch_keycenter=58
@@ -51,7 +51,7 @@ volume=17
 
 
 <region>
-sample=Oboe_Stacc_A#3_v1_rr1_Main.flac
+sample=Oboe_Stacc_A#3_v1_rr1_Main.mp3
 lokey=68
 hikey=71
 pitch_keycenter=70
@@ -61,7 +61,7 @@ volume=17
 
 
 <region>
-sample=Oboe_Stacc_A#4_v1_rr1_Main.flac
+sample=Oboe_Stacc_A#4_v1_rr1_Main.mp3
 lokey=80
 hikey=83
 pitch_keycenter=82
@@ -71,7 +71,7 @@ volume=17
 
 
 <region>
-sample=Oboe_Stacc_D3_v1_rr1_Main.flac
+sample=Oboe_Stacc_D3_v1_rr1_Main.mp3
 lokey=60
 hikey=63
 pitch_keycenter=62
@@ -81,7 +81,7 @@ volume=17
 
 
 <region>
-sample=Oboe_Stacc_D4_v1_rr1_Main.flac
+sample=Oboe_Stacc_D4_v1_rr1_Main.mp3
 lokey=72
 hikey=75
 pitch_keycenter=74
@@ -91,7 +91,7 @@ volume=17
 
 
 <region>
-sample=Oboe_Stacc_D5_v1_rr1_Main.flac
+sample=Oboe_Stacc_D5_v1_rr1_Main.mp3
 lokey=84
 hikey=87
 pitch_keycenter=86
@@ -101,7 +101,7 @@ volume=15
 
 
 <region>
-sample=Oboe_Stacc_F3_v1_rr1_Main.flac
+sample=Oboe_Stacc_F3_v1_rr1_Main.mp3
 lokey=64
 hikey=67
 pitch_keycenter=65
@@ -111,7 +111,7 @@ volume=17
 
 
 <region>
-sample=Oboe_Stacc_F4_v1_rr1_Main.flac
+sample=Oboe_Stacc_F4_v1_rr1_Main.mp3
 lokey=76
 hikey=79
 pitch_keycenter=77
@@ -121,7 +121,7 @@ volume=17
 
 
 <region>
-sample=Oboe_Stacc_F5_v1_rr1_Main.flac
+sample=Oboe_Stacc_F5_v1_rr1_Main.mp3
 lokey=88
 hikey=89
 pitch_keycenter=89
@@ -131,7 +131,7 @@ volume=17
 
 
 <region>
-sample=Oboe_Stacc_A#2_v2_rr1_Main.flac
+sample=Oboe_Stacc_A#2_v2_rr1_Main.mp3
 lokey=58
 hikey=59
 pitch_keycenter=58
@@ -141,7 +141,7 @@ volume=10
 
 
 <region>
-sample=Oboe_Stacc_A#3_v2_rr1_Main.flac
+sample=Oboe_Stacc_A#3_v2_rr1_Main.mp3
 lokey=68
 hikey=71
 pitch_keycenter=70
@@ -151,7 +151,7 @@ volume=10
 
 
 <region>
-sample=Oboe_Stacc_A#4_v2_rr1_Main.flac
+sample=Oboe_Stacc_A#4_v2_rr1_Main.mp3
 lokey=80
 hikey=83
 pitch_keycenter=82
@@ -161,7 +161,7 @@ volume=10
 
 
 <region>
-sample=Oboe_Stacc_D3_v2_rr1_Main.flac
+sample=Oboe_Stacc_D3_v2_rr1_Main.mp3
 lokey=60
 hikey=63
 pitch_keycenter=62
@@ -171,7 +171,7 @@ volume=10
 
 
 <region>
-sample=Oboe_Stacc_D4_v2_rr1_Main.flac
+sample=Oboe_Stacc_D4_v2_rr1_Main.mp3
 lokey=72
 hikey=75
 pitch_keycenter=74
@@ -181,7 +181,7 @@ volume=10
 
 
 <region>
-sample=Oboe_Stacc_F3_v2_rr1_Main.flac
+sample=Oboe_Stacc_F3_v2_rr1_Main.mp3
 lokey=64
 hikey=67
 pitch_keycenter=65
@@ -191,7 +191,7 @@ volume=10
 
 
 <region>
-sample=Oboe_Stacc_F4_v2_rr1_Main.flac
+sample=Oboe_Stacc_F4_v2_rr1_Main.mp3
 lokey=76
 hikey=79
 pitch_keycenter=77
@@ -201,7 +201,7 @@ volume=10
 
 
 <region>
-sample=Oboe_Stacc_F5_v2_rr1_Main.flac
+sample=Oboe_Stacc_F5_v2_rr1_Main.mp3
 lokey=88
 hikey=89
 pitch_keycenter=89
@@ -211,7 +211,7 @@ volume=10
 
 
 <region>
-sample=Oboe_Stacc_A#2_v3_rr1_Main.flac
+sample=Oboe_Stacc_A#2_v3_rr1_Main.mp3
 lokey=58
 hikey=59
 pitch_keycenter=58
@@ -221,7 +221,7 @@ volume=9
 
 
 <region>
-sample=Oboe_Stacc_A#3_v3_rr1_Main.flac
+sample=Oboe_Stacc_A#3_v3_rr1_Main.mp3
 lokey=68
 hikey=71
 pitch_keycenter=70
@@ -231,7 +231,7 @@ volume=9
 
 
 <region>
-sample=Oboe_Stacc_A#4_v3_rr1_Main.flac
+sample=Oboe_Stacc_A#4_v3_rr1_Main.mp3
 lokey=80
 hikey=83
 pitch_keycenter=82
@@ -241,7 +241,7 @@ volume=9
 
 
 <region>
-sample=Oboe_Stacc_D3_v3_rr1_Main.flac
+sample=Oboe_Stacc_D3_v3_rr1_Main.mp3
 lokey=60
 hikey=63
 pitch_keycenter=62
@@ -251,7 +251,7 @@ volume=9
 
 
 <region>
-sample=Oboe_Stacc_D4_v3_rr1_Main.flac
+sample=Oboe_Stacc_D4_v3_rr1_Main.mp3
 lokey=72
 hikey=75
 pitch_keycenter=74
@@ -261,7 +261,7 @@ volume=9
 
 
 <region>
-sample=Oboe_Stacc_D5_v3_rr1_Main.flac
+sample=Oboe_Stacc_D5_v3_rr1_Main.mp3
 lokey=84
 hikey=87
 pitch_keycenter=86
@@ -271,7 +271,7 @@ volume=9
 
 
 <region>
-sample=Oboe_Stacc_F3_v3_rr1_Main.flac
+sample=Oboe_Stacc_F3_v3_rr1_Main.mp3
 lokey=64
 hikey=67
 pitch_keycenter=65
@@ -281,7 +281,7 @@ volume=9
 
 
 <region>
-sample=Oboe_Stacc_F4_v3_rr1_Main.flac
+sample=Oboe_Stacc_F4_v3_rr1_Main.mp3
 lokey=76
 hikey=79
 pitch_keycenter=77
@@ -291,7 +291,7 @@ volume=9
 
 
 <region>
-sample=Oboe_Stacc_F5_v3_rr1_Main.flac
+sample=Oboe_Stacc_F5_v3_rr1_Main.mp3
 lokey=88
 hikey=89
 pitch_keycenter=89
@@ -316,7 +316,7 @@ group_label=gr_2
 
 
 <region>
-sample=Oboe_Stacc_A#2_v1_rr2_Main.flac
+sample=Oboe_Stacc_A#2_v1_rr2_Main.mp3
 lokey=58
 hikey=59
 pitch_keycenter=58
@@ -326,7 +326,7 @@ volume=17
 
 
 <region>
-sample=Oboe_Stacc_A#3_v1_rr2_Main.flac
+sample=Oboe_Stacc_A#3_v1_rr2_Main.mp3
 lokey=68
 hikey=71
 pitch_keycenter=70
@@ -336,7 +336,7 @@ volume=17
 
 
 <region>
-sample=Oboe_Stacc_A#4_v1_rr2_Main.flac
+sample=Oboe_Stacc_A#4_v1_rr2_Main.mp3
 lokey=80
 hikey=83
 pitch_keycenter=82
@@ -346,7 +346,7 @@ volume=17
 
 
 <region>
-sample=Oboe_Stacc_D3_v1_rr2_Main.flac
+sample=Oboe_Stacc_D3_v1_rr2_Main.mp3
 lokey=60
 hikey=63
 pitch_keycenter=62
@@ -356,7 +356,7 @@ volume=17
 
 
 <region>
-sample=Oboe_Stacc_D4_v1_rr2_Main.flac
+sample=Oboe_Stacc_D4_v1_rr2_Main.mp3
 lokey=72
 hikey=75
 pitch_keycenter=74
@@ -366,7 +366,7 @@ volume=17
 
 
 <region>
-sample=Oboe_Stacc_D5_v1_rr2_Main.flac
+sample=Oboe_Stacc_D5_v1_rr2_Main.mp3
 lokey=84
 hikey=87
 pitch_keycenter=86
@@ -376,7 +376,7 @@ volume=15
 
 
 <region>
-sample=Oboe_Stacc_F3_v1_rr2_Main.flac
+sample=Oboe_Stacc_F3_v1_rr2_Main.mp3
 lokey=64
 hikey=67
 pitch_keycenter=65
@@ -386,7 +386,7 @@ volume=17
 
 
 <region>
-sample=Oboe_Stacc_F4_v1_rr2_Main.flac
+sample=Oboe_Stacc_F4_v1_rr2_Main.mp3
 lokey=76
 hikey=79
 pitch_keycenter=77
@@ -396,7 +396,7 @@ volume=17
 
 
 <region>
-sample=Oboe_Stacc_F5_v1_rr2_Main.flac
+sample=Oboe_Stacc_F5_v1_rr2_Main.mp3
 lokey=88
 hikey=89
 pitch_keycenter=89
@@ -406,7 +406,7 @@ volume=17
 
 
 <region>
-sample=Oboe_Stacc_A#2_v2_rr2_Main.flac
+sample=Oboe_Stacc_A#2_v2_rr2_Main.mp3
 lokey=58
 hikey=59
 pitch_keycenter=58
@@ -416,7 +416,7 @@ volume=10
 
 
 <region>
-sample=Oboe_Stacc_A#3_v2_rr2_Main.flac
+sample=Oboe_Stacc_A#3_v2_rr2_Main.mp3
 lokey=68
 hikey=71
 pitch_keycenter=70
@@ -426,7 +426,7 @@ volume=10
 
 
 <region>
-sample=Oboe_Stacc_A#4_v2_rr2_Main.flac
+sample=Oboe_Stacc_A#4_v2_rr2_Main.mp3
 lokey=80
 hikey=83
 pitch_keycenter=82
@@ -436,7 +436,7 @@ volume=10
 
 
 <region>
-sample=Oboe_Stacc_D3_v2_rr2_Main.flac
+sample=Oboe_Stacc_D3_v2_rr2_Main.mp3
 lokey=60
 hikey=63
 pitch_keycenter=62
@@ -446,7 +446,7 @@ volume=10
 
 
 <region>
-sample=Oboe_Stacc_D4_v2_rr2_Main.flac
+sample=Oboe_Stacc_D4_v2_rr2_Main.mp3
 lokey=72
 hikey=75
 pitch_keycenter=74
@@ -456,7 +456,7 @@ volume=10
 
 
 <region>
-sample=Oboe_Stacc_F3_v2_rr2_Main.flac
+sample=Oboe_Stacc_F3_v2_rr2_Main.mp3
 lokey=64
 hikey=67
 pitch_keycenter=65
@@ -466,7 +466,7 @@ volume=10
 
 
 <region>
-sample=Oboe_Stacc_F4_v2_rr2_Main.flac
+sample=Oboe_Stacc_F4_v2_rr2_Main.mp3
 lokey=76
 hikey=79
 pitch_keycenter=77
@@ -476,7 +476,7 @@ volume=10
 
 
 <region>
-sample=Oboe_Stacc_F5_v2_rr2_Main.flac
+sample=Oboe_Stacc_F5_v2_rr2_Main.mp3
 lokey=88
 hikey=89
 pitch_keycenter=89
@@ -486,7 +486,7 @@ volume=10
 
 
 <region>
-sample=Oboe_Stacc_A#2_v3_rr2_Main.flac
+sample=Oboe_Stacc_A#2_v3_rr2_Main.mp3
 lokey=58
 hikey=59
 pitch_keycenter=58
@@ -496,7 +496,7 @@ volume=9
 
 
 <region>
-sample=Oboe_Stacc_A#3_v3_rr2_Main.flac
+sample=Oboe_Stacc_A#3_v3_rr2_Main.mp3
 lokey=68
 hikey=71
 pitch_keycenter=70
@@ -506,7 +506,7 @@ volume=9
 
 
 <region>
-sample=Oboe_Stacc_A#4_v3_rr2_Main.flac
+sample=Oboe_Stacc_A#4_v3_rr2_Main.mp3
 lokey=80
 hikey=83
 pitch_keycenter=82
@@ -516,7 +516,7 @@ volume=9
 
 
 <region>
-sample=Oboe_Stacc_D3_v3_rr2_Main.flac
+sample=Oboe_Stacc_D3_v3_rr2_Main.mp3
 lokey=60
 hikey=63
 pitch_keycenter=62
@@ -526,7 +526,7 @@ volume=9
 
 
 <region>
-sample=Oboe_Stacc_D4_v3_rr2_Main.flac
+sample=Oboe_Stacc_D4_v3_rr2_Main.mp3
 lokey=72
 hikey=75
 pitch_keycenter=74
@@ -536,7 +536,7 @@ volume=9
 
 
 <region>
-sample=Oboe_Stacc_D5_v3_rr1_Main.flac
+sample=Oboe_Stacc_D5_v3_rr1_Main.mp3
 lokey=84
 hikey=87
 pitch_keycenter=86
@@ -546,7 +546,7 @@ volume=9
 
 
 <region>
-sample=Oboe_Stacc_F3_v3_rr2_Main.flac
+sample=Oboe_Stacc_F3_v3_rr2_Main.mp3
 lokey=64
 hikey=67
 pitch_keycenter=65
@@ -556,7 +556,7 @@ volume=9
 
 
 <region>
-sample=Oboe_Stacc_F4_v3_rr2_Main.flac
+sample=Oboe_Stacc_F4_v3_rr2_Main.mp3
 lokey=76
 hikey=79
 pitch_keycenter=77
@@ -566,7 +566,7 @@ volume=9
 
 
 <region>
-sample=Oboe_Stacc_F5_v3_rr2_Main.flac
+sample=Oboe_Stacc_F5_v3_rr2_Main.mp3
 lokey=88
 hikey=89
 pitch_keycenter=89

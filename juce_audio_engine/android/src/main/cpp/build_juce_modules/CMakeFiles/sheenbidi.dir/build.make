@@ -72,412 +72,412 @@ include CMakeFiles/sheenbidi.dir/flags.make
 CMakeFiles/sheenbidi.dir/codegen:
 .PHONY : CMakeFiles/sheenbidi.dir/codegen
 
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiChain.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiChain.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/BidiChain.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiChain.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiChain.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiChain.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiChain.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiChain.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/BidiChain.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiChain.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiChain.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/BidiChain.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiChain.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiChain.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiChain.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/BidiChain.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiChain.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiTypeLookup.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiTypeLookup.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/BidiTypeLookup.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiTypeLookup.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiTypeLookup.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiTypeLookup.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiTypeLookup.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiTypeLookup.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/BidiTypeLookup.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiTypeLookup.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiTypeLookup.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/BidiTypeLookup.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiTypeLookup.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiTypeLookup.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiTypeLookup.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/BidiTypeLookup.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiTypeLookup.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BracketQueue.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BracketQueue.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/BracketQueue.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BracketQueue.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BracketQueue.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BracketQueue.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BracketQueue.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BracketQueue.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/BracketQueue.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BracketQueue.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BracketQueue.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/BracketQueue.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BracketQueue.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BracketQueue.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BracketQueue.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/BracketQueue.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BracketQueue.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/GeneralCategoryLookup.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/GeneralCategoryLookup.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/GeneralCategoryLookup.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/GeneralCategoryLookup.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/GeneralCategoryLookup.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/GeneralCategoryLookup.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/GeneralCategoryLookup.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/GeneralCategoryLookup.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/GeneralCategoryLookup.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/GeneralCategoryLookup.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/GeneralCategoryLookup.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/GeneralCategoryLookup.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/GeneralCategoryLookup.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/GeneralCategoryLookup.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/GeneralCategoryLookup.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/GeneralCategoryLookup.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/GeneralCategoryLookup.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/IsolatingRun.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/IsolatingRun.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/IsolatingRun.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/IsolatingRun.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/IsolatingRun.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/IsolatingRun.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/IsolatingRun.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/IsolatingRun.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/IsolatingRun.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/IsolatingRun.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/IsolatingRun.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/IsolatingRun.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/IsolatingRun.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/IsolatingRun.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/IsolatingRun.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/IsolatingRun.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/IsolatingRun.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/LevelRun.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/LevelRun.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/LevelRun.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/LevelRun.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/LevelRun.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/LevelRun.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/LevelRun.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/LevelRun.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/LevelRun.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/LevelRun.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/LevelRun.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/LevelRun.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/LevelRun.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/LevelRun.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/LevelRun.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/LevelRun.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/LevelRun.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Memory.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Memory.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/Memory.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Memory.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Memory.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Memory.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Memory.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Memory.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/Memory.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Memory.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Memory.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/Memory.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Memory.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Memory.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Memory.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/Memory.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Memory.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Object.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Object.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/Object.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Object.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Object.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Object.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Object.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Object.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/Object.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Object.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Object.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/Object.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Object.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Object.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Object.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/Object.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Object.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Once.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Once.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/Once.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Once.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Once.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Once.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Once.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Once.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/Once.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Once.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Once.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/Once.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Once.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Once.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Once.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/Once.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Once.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/PairingLookup.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/PairingLookup.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/PairingLookup.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/PairingLookup.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/PairingLookup.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/PairingLookup.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/PairingLookup.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/PairingLookup.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/PairingLookup.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/PairingLookup.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/PairingLookup.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/PairingLookup.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/PairingLookup.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/PairingLookup.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/PairingLookup.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/PairingLookup.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/PairingLookup.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/RunQueue.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/RunQueue.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/RunQueue.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/RunQueue.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/RunQueue.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/RunQueue.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/RunQueue.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/RunQueue.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/RunQueue.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/RunQueue.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/RunQueue.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/RunQueue.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/RunQueue.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/RunQueue.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/RunQueue.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/RunQueue.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/RunQueue.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAlgorithm.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAlgorithm.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBAlgorithm.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAlgorithm.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_12) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAlgorithm.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAlgorithm.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAlgorithm.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAlgorithm.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBAlgorithm.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAlgorithm.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAlgorithm.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBAlgorithm.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAlgorithm.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAlgorithm.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAlgorithm.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBAlgorithm.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAlgorithm.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAllocator.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAllocator.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBAllocator.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAllocator.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_13) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAllocator.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAllocator.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAllocator.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAllocator.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBAllocator.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAllocator.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAllocator.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBAllocator.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAllocator.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAllocator.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAllocator.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBAllocator.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAllocator.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBBase.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBBase.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBBase.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBBase.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_14) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBBase.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBBase.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBBase.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBBase.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBBase.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBBase.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBBase.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBBase.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBBase.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBBase.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBBase.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBBase.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBBase.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepoint.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepoint.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBCodepoint.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepoint.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_15) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepoint.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepoint.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepoint.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepoint.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBCodepoint.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepoint.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepoint.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBCodepoint.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepoint.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepoint.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepoint.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBCodepoint.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepoint.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepointSequence.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepointSequence.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBCodepointSequence.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepointSequence.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_16) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepointSequence.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepointSequence.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepointSequence.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepointSequence.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBCodepointSequence.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepointSequence.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepointSequence.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBCodepointSequence.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepointSequence.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepointSequence.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepointSequence.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBCodepointSequence.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepointSequence.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLine.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLine.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBLine.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLine.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_17) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLine.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLine.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLine.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLine.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBLine.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLine.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLine.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBLine.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLine.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLine.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLine.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBLine.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLine.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLog.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLog.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBLog.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLog.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_18) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLog.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLog.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLog.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLog.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBLog.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLog.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLog.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBLog.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLog.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLog.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLog.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBLog.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLog.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBMirrorLocator.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBMirrorLocator.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBMirrorLocator.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBMirrorLocator.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_19) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBMirrorLocator.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBMirrorLocator.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBMirrorLocator.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBMirrorLocator.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBMirrorLocator.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBMirrorLocator.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBMirrorLocator.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBMirrorLocator.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBMirrorLocator.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBMirrorLocator.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBMirrorLocator.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBMirrorLocator.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBMirrorLocator.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBParagraph.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBParagraph.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBParagraph.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBParagraph.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_20) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBParagraph.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBParagraph.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBParagraph.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBParagraph.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBParagraph.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBParagraph.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBParagraph.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBParagraph.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBParagraph.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBParagraph.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBParagraph.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBParagraph.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBParagraph.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBScriptLocator.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBScriptLocator.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBScriptLocator.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBScriptLocator.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_21) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBScriptLocator.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBScriptLocator.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBScriptLocator.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBScriptLocator.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBScriptLocator.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBScriptLocator.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBScriptLocator.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBScriptLocator.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBScriptLocator.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBScriptLocator.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBScriptLocator.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SBScriptLocator.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBScriptLocator.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptLookup.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptLookup.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/ScriptLookup.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptLookup.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_22) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptLookup.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptLookup.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptLookup.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptLookup.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/ScriptLookup.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptLookup.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptLookup.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/ScriptLookup.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptLookup.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptLookup.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptLookup.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/ScriptLookup.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptLookup.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptStack.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptStack.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/ScriptStack.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptStack.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_23) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptStack.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptStack.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptStack.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptStack.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/ScriptStack.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptStack.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptStack.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/ScriptStack.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptStack.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptStack.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptStack.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/ScriptStack.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptStack.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SheenBidi.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SheenBidi.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SheenBidi.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SheenBidi.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_24) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SheenBidi.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SheenBidi.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SheenBidi.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SheenBidi.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SheenBidi.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SheenBidi.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SheenBidi.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SheenBidi.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SheenBidi.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SheenBidi.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SheenBidi.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/SheenBidi.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SheenBidi.c.s
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/StatusStack.c.o: CMakeFiles/sheenbidi.dir/flags.make
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/StatusStack.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/StatusStack.c
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/StatusStack.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_25) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/StatusStack.c.o"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/StatusStack.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/StatusStack.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/StatusStack.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/StatusStack.c
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/StatusStack.c.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/StatusStack.c.i"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/StatusStack.c > CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/StatusStack.c.i
-
-CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/StatusStack.c.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/StatusStack.c.s"
-	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Source/StatusStack.c -o CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/StatusStack.c.s
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiChain.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiChain.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/BidiChain.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiChain.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiChain.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiChain.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiChain.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiChain.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/BidiChain.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiChain.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiChain.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/BidiChain.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiChain.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiChain.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiChain.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/BidiChain.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiChain.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiTypeLookup.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiTypeLookup.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/BidiTypeLookup.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiTypeLookup.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiTypeLookup.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiTypeLookup.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiTypeLookup.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiTypeLookup.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/BidiTypeLookup.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiTypeLookup.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiTypeLookup.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/BidiTypeLookup.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiTypeLookup.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiTypeLookup.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiTypeLookup.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/BidiTypeLookup.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiTypeLookup.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BracketQueue.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BracketQueue.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/BracketQueue.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BracketQueue.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BracketQueue.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BracketQueue.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BracketQueue.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BracketQueue.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/BracketQueue.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BracketQueue.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BracketQueue.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/BracketQueue.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BracketQueue.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BracketQueue.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BracketQueue.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/BracketQueue.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BracketQueue.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/IsolatingRun.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/IsolatingRun.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/IsolatingRun.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/IsolatingRun.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/IsolatingRun.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/IsolatingRun.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/IsolatingRun.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/IsolatingRun.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/IsolatingRun.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/IsolatingRun.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/IsolatingRun.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/IsolatingRun.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/IsolatingRun.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/IsolatingRun.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/IsolatingRun.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/IsolatingRun.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/IsolatingRun.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/LevelRun.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/LevelRun.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/LevelRun.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/LevelRun.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/LevelRun.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/LevelRun.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/LevelRun.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/LevelRun.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/LevelRun.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/LevelRun.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/LevelRun.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/LevelRun.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/LevelRun.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/LevelRun.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/LevelRun.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/LevelRun.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/LevelRun.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Memory.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Memory.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/Memory.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Memory.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Memory.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Memory.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Memory.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Memory.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/Memory.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Memory.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Memory.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/Memory.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Memory.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Memory.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Memory.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/Memory.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Memory.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Object.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Object.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/Object.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Object.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Object.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Object.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Object.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Object.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/Object.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Object.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Object.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/Object.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Object.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Object.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Object.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/Object.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Object.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Once.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Once.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/Once.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Once.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Once.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Once.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Once.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Once.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/Once.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Once.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Once.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/Once.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Once.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Once.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Once.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/Once.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Once.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/PairingLookup.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/PairingLookup.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/PairingLookup.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/PairingLookup.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/PairingLookup.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/PairingLookup.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/PairingLookup.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/PairingLookup.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/PairingLookup.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/PairingLookup.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/PairingLookup.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/PairingLookup.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/PairingLookup.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/PairingLookup.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/PairingLookup.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/PairingLookup.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/PairingLookup.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/RunQueue.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/RunQueue.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/RunQueue.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/RunQueue.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_11) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/RunQueue.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/RunQueue.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/RunQueue.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/RunQueue.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/RunQueue.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/RunQueue.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/RunQueue.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/RunQueue.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/RunQueue.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/RunQueue.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/RunQueue.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/RunQueue.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/RunQueue.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAlgorithm.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAlgorithm.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBAlgorithm.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAlgorithm.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_12) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAlgorithm.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAlgorithm.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAlgorithm.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAlgorithm.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBAlgorithm.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAlgorithm.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAlgorithm.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBAlgorithm.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAlgorithm.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAlgorithm.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAlgorithm.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBAlgorithm.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAlgorithm.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAllocator.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAllocator.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBAllocator.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAllocator.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_13) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAllocator.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAllocator.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAllocator.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAllocator.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBAllocator.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAllocator.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAllocator.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBAllocator.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAllocator.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAllocator.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAllocator.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBAllocator.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAllocator.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBBase.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBBase.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBBase.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBBase.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_14) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBBase.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBBase.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBBase.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBBase.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBBase.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBBase.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBBase.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBBase.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBBase.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBBase.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBBase.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBBase.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBBase.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepoint.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepoint.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBCodepoint.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepoint.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_15) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepoint.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepoint.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepoint.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepoint.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBCodepoint.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepoint.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepoint.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBCodepoint.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepoint.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepoint.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepoint.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBCodepoint.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepoint.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepointSequence.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepointSequence.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBCodepointSequence.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepointSequence.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_16) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepointSequence.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepointSequence.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepointSequence.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepointSequence.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBCodepointSequence.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepointSequence.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepointSequence.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBCodepointSequence.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepointSequence.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepointSequence.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepointSequence.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBCodepointSequence.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepointSequence.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLine.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLine.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBLine.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLine.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_17) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLine.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLine.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLine.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLine.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBLine.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLine.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLine.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBLine.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLine.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLine.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLine.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBLine.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLine.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLog.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLog.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBLog.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLog.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_18) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLog.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLog.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLog.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLog.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBLog.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLog.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLog.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBLog.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLog.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLog.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLog.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBLog.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLog.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBMirrorLocator.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBMirrorLocator.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBMirrorLocator.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBMirrorLocator.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_19) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBMirrorLocator.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBMirrorLocator.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBMirrorLocator.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBMirrorLocator.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBMirrorLocator.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBMirrorLocator.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBMirrorLocator.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBMirrorLocator.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBMirrorLocator.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBMirrorLocator.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBMirrorLocator.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBMirrorLocator.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBMirrorLocator.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBParagraph.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBParagraph.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBParagraph.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBParagraph.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_20) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBParagraph.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBParagraph.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBParagraph.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBParagraph.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBParagraph.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBParagraph.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBParagraph.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBParagraph.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBParagraph.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBParagraph.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBParagraph.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBParagraph.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBParagraph.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBScriptLocator.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBScriptLocator.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBScriptLocator.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBScriptLocator.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_21) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBScriptLocator.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBScriptLocator.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBScriptLocator.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBScriptLocator.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBScriptLocator.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBScriptLocator.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBScriptLocator.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBScriptLocator.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBScriptLocator.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBScriptLocator.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBScriptLocator.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SBScriptLocator.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBScriptLocator.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptLookup.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptLookup.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/ScriptLookup.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptLookup.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_22) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptLookup.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptLookup.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptLookup.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptLookup.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/ScriptLookup.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptLookup.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptLookup.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/ScriptLookup.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptLookup.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptLookup.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptLookup.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/ScriptLookup.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptLookup.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptStack.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptStack.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/ScriptStack.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptStack.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_23) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptStack.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptStack.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptStack.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptStack.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/ScriptStack.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptStack.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptStack.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/ScriptStack.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptStack.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptStack.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptStack.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/ScriptStack.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptStack.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SheenBidi.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SheenBidi.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SheenBidi.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SheenBidi.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_24) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SheenBidi.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SheenBidi.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SheenBidi.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SheenBidi.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SheenBidi.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SheenBidi.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SheenBidi.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SheenBidi.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SheenBidi.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SheenBidi.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SheenBidi.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/SheenBidi.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SheenBidi.c.s
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/StatusStack.c.o: CMakeFiles/sheenbidi.dir/flags.make
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/StatusStack.c.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/StatusStack.c
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/StatusStack.c.o: CMakeFiles/sheenbidi.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_25) "Building C object CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/StatusStack.c.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/StatusStack.c.o -MF CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/StatusStack.c.o.d -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/StatusStack.c.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/StatusStack.c
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/StatusStack.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/StatusStack.c.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/StatusStack.c > CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/StatusStack.c.i
+
+CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/StatusStack.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/StatusStack.c.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Source/StatusStack.c -o CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/StatusStack.c.s
 
 # Object files for target sheenbidi
 sheenbidi_OBJECTS = \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiChain.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiTypeLookup.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BracketQueue.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/GeneralCategoryLookup.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/IsolatingRun.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/LevelRun.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Memory.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Object.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Once.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/PairingLookup.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/RunQueue.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAlgorithm.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAllocator.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBBase.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepoint.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepointSequence.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLine.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLog.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBMirrorLocator.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBParagraph.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBScriptLocator.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptLookup.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptStack.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SheenBidi.c.o" \
-"CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/StatusStack.c.o"
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiChain.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiTypeLookup.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BracketQueue.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/IsolatingRun.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/LevelRun.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Memory.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Object.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Once.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/PairingLookup.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/RunQueue.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAlgorithm.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAllocator.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBBase.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepoint.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepointSequence.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLine.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLog.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBMirrorLocator.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBParagraph.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBScriptLocator.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptLookup.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptStack.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SheenBidi.c.o" \
+"CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/StatusStack.c.o"
 
 # External object files for target sheenbidi
 sheenbidi_EXTERNAL_OBJECTS =
 
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiChain.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BidiTypeLookup.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/BracketQueue.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/GeneralCategoryLookup.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/IsolatingRun.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/LevelRun.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Memory.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Object.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/Once.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/PairingLookup.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/RunQueue.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAlgorithm.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBAllocator.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBBase.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepoint.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBCodepointSequence.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLine.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBLog.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBMirrorLocator.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBParagraph.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SBScriptLocator.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptLookup.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/ScriptStack.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/SheenBidi.c.o
-libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/SheenBidi/Source/StatusStack.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiChain.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiTypeLookup.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BracketQueue.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/IsolatingRun.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/LevelRun.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Memory.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Object.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Once.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/PairingLookup.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/RunQueue.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAlgorithm.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAllocator.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBBase.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepoint.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepointSequence.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLine.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLog.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBMirrorLocator.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBParagraph.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBScriptLocator.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptLookup.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptStack.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SheenBidi.c.o
+libsheenbidi.a: CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/StatusStack.c.o
 libsheenbidi.a: CMakeFiles/sheenbidi.dir/build.make
 libsheenbidi.a: CMakeFiles/sheenbidi.dir/link.txt
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_26) "Linking C static library libsheenbidi.a"

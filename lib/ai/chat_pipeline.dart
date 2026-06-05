@@ -65,6 +65,7 @@ class ChatPipeline {
     required double bpmFallback,
     String projectKey = '',
     List<String> rowNames = const [],
+    List<TimelineRow> timelineRows = const <TimelineRow>[],
     String librarySnapshot = '',
     double masterGain0to3 = 1.0,
     double masterPan0to1 = 0.5,
@@ -115,6 +116,7 @@ class ChatPipeline {
         masterGain0to3: masterGain0to3,
         masterPan0to1: masterPan0to1,
         roleOverrides: _roleOverrides,
+        timelineRows: timelineRows,
       );
       projectBuildStopwatch.stop();
       projectStatsMs = projectBuildStopwatch.elapsedMilliseconds;
@@ -1034,6 +1036,9 @@ class ChatPipeline {
 
     for (final r in p.rows) {
       final rowTracks = tracksByRow[r.rowIndex] ?? const <AudioTrack>[];
+      final detailRowTracks = _rowTracksForSnapshotDetail(rowTracks);
+      final omittedDetailClipCount =
+          math.max(0, rowTracks.length - detailRowTracks.length);
       final roles = r.roleProbs.entries.toList()
         ..sort((a, b) => b.value.compareTo(a.value));
       final top = roles
@@ -1068,24 +1073,31 @@ class ChatPipeline {
       final interpretationFlags = interpretation.flags.take(8).join(', ');
       final interpretationNotes = interpretation.notes.take(2).join(' | ');
       final clipKinds = _rowClipKindSummary(rowTracks);
-      final rowLabels = _rowLabelSummary(rowTracks);
-      final fileHints = _rowFileSummary(rowTracks);
-      final instrumentHints = _rowInstrumentSummary(rowTracks);
-      final sampleHints = _rowSampleHintSummary(rowTracks);
-      final arrangementSketch = _rowArrangementSketch(rowTracks, p.bpm);
-      final midiState = _rowMidiStateSummary(rowTracks);
+      final rowLabels = _rowLabelSummary(detailRowTracks);
+      final fileHints = _rowFileSummary(detailRowTracks);
+      final instrumentHints = _rowInstrumentSummary(detailRowTracks);
+      final sampleHints = _rowSampleHintSummary(detailRowTracks);
+      final arrangementSketch = _rowArrangementSketch(detailRowTracks, p.bpm);
+      final midiState = _rowMidiStateSummary(detailRowTracks);
       final coverageSummary = _rowCoverageSummary(rowTracks);
       final referenceHints = _rowReferenceHintSummary(
           interpretation: interpretation, rowTracks: rowTracks);
       final rowPosition = _rowPositionSummary(r.rowIndex, p.rows.length);
-      final rowName = _rowNameForSnapshot(r.rowIndex, rowNames);
+      final rowName = r.rowName.trim().isNotEmpty
+          ? r.rowName.trim().replaceAll('"', "'")
+          : _rowNameForSnapshot(r.rowIndex, rowNames);
+      final laneSummary = r.laneKind == 'instrument'
+          ? 'lane_kind=instrument lane_instrument_id=${r.instrumentId.isEmpty ? 'unset' : r.instrumentId} lane_instrument_name="${r.instrumentName.isEmpty ? 'Instrument' : r.instrumentName.replaceAll('"', "'")}" '
+          : 'lane_kind=audio ';
 
       b.writeln(
         'Track ${r.rowIndex + 1}: '
         '${rowName.isEmpty ? '' : 'row_name="$rowName" '}'
         'row_position=$rowPosition '
         'occupied_row_position=${_occupiedRowPositionSummary(r.rowIndex, occupiedRows)} '
+        '$laneSummary'
         'clip_count=${rowTracks.length} '
+        '${omittedDetailClipCount > 0 ? 'detail_clips_sampled=${detailRowTracks.length} omitted_detail_clips=$omittedDetailClipCount ' : ''}'
         'has_audio=${r.hasAudio} '
         'clip_kinds=[$clipKinds] '
         'labels=[$rowLabels] '
@@ -1194,9 +1206,14 @@ class ChatPipeline {
         interpretation: row.interpretation,
         rowTracks: rowTracks,
       );
-      final rowName = _rowNameForSnapshot(selectedRowIndex, rowNames);
+      final rowName = row.rowName.trim().isNotEmpty
+          ? row.rowName.trim().replaceAll('"', "'")
+          : _rowNameForSnapshot(selectedRowIndex, rowNames);
+      final laneSummary = row.laneKind == 'instrument'
+          ? 'lane_kind=instrument,instrument_id=${row.instrumentId.isEmpty ? 'unset' : row.instrumentId},instrument_name="${row.instrumentName.isEmpty ? 'Instrument' : row.instrumentName.replaceAll('"', "'")}",'
+          : 'lane_kind=audio,';
       out.writeln(
-        'selected_row_context{row_index=$selectedRowIndex,track_number=${selectedRowIndex + 1},${rowName.isEmpty ? '' : 'row_name="$rowName",'}row_position=${_rowPositionSummary(selectedRowIndex, project.rows.length)},occupied_row_position=${_occupiedRowPositionSummary(selectedRowIndex, occupiedRows)},clip_count=${rowTracks.length},clip_kinds=[${_rowClipKindSummary(rowTracks)}],labels=[${_rowLabelSummary(rowTracks)}],files=[${_rowFileSummary(rowTracks)}],instruments=[${_rowInstrumentSummary(rowTracks)}],sample_hints=[${_rowSampleHintSummary(rowTracks)}],arrangement={$arrangementSketch},midi_state={${_rowMidiStateSummary(rowTracks)}},coverage={$coverageSummary},reference_hints=[$referenceHints],fx_count=${row.effects.length},active_fx_count=$selectedActiveFxCount,fx_chain=[$selectedFxChain],top_role=${row.interpretation.topRole},source_type=${row.interpretation.sourceType},flags=[${flags.isEmpty ? 'none' : flags}]}',
+        'selected_row_context{row_index=$selectedRowIndex,track_number=${selectedRowIndex + 1},${rowName.isEmpty ? '' : 'row_name="$rowName",'}row_position=${_rowPositionSummary(selectedRowIndex, project.rows.length)},occupied_row_position=${_occupiedRowPositionSummary(selectedRowIndex, occupiedRows)},clip_count=${rowTracks.length},clip_kinds=[${_rowClipKindSummary(rowTracks)}],${laneSummary}labels=[${_rowLabelSummary(rowTracks)}],files=[${_rowFileSummary(rowTracks)}],instruments=[${_rowInstrumentSummary(rowTracks)}],sample_hints=[${_rowSampleHintSummary(rowTracks)}],arrangement={$arrangementSketch},midi_state={${_rowMidiStateSummary(rowTracks)}},coverage={$coverageSummary},reference_hints=[$referenceHints],fx_count=${row.effects.length},active_fx_count=$selectedActiveFxCount,fx_chain=[$selectedFxChain],top_role=${row.interpretation.topRole},source_type=${row.interpretation.sourceType},flags=[${flags.isEmpty ? 'none' : flags}]}',
       );
       out.writeln(
           'selected_row_automation_targets=${_automationTargetsSnapshotForRow(row)}');
@@ -1310,6 +1327,22 @@ class ChatPipeline {
     if (audioCount > 0) out.add('audio:$audioCount');
     if (midiCount > 0) out.add('midi:$midiCount');
     return out.join(', ');
+  }
+
+  List<AudioTrack> _rowTracksForSnapshotDetail(List<AudioTrack> rowTracks) {
+    const maxDetailedClips = 64;
+    if (rowTracks.length <= maxDetailedClips) return rowTracks;
+    final ordered = List<AudioTrack>.from(rowTracks)
+      ..sort((a, b) {
+        final byOffset = a.offset.compareTo(b.offset);
+        if (byOffset != 0) return byOffset;
+        return a.label.compareTo(b.label);
+      });
+    const edgeCount = maxDetailedClips ~/ 2;
+    return <AudioTrack>[
+      ...ordered.take(edgeCount),
+      ...ordered.skip(math.max(edgeCount, ordered.length - edgeCount)),
+    ];
   }
 
   String _clipSampleHintSummary(AudioTrack clip) {

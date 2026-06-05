@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:mixroom/helpers/desktop_editor_prefs.dart';
@@ -47,6 +45,7 @@ class DesktopPanelShell extends StatefulWidget {
     required this.child,
     this.minWidth = 320,
     this.minHeight = 220,
+    this.topContextMenuHeight = 14,
     this.onResetLayout,
   });
 
@@ -58,10 +57,228 @@ class DesktopPanelShell extends StatefulWidget {
   final Widget child;
   final double minWidth;
   final double minHeight;
+  final double topContextMenuHeight;
   final VoidCallback? onResetLayout;
 
   @override
   State<DesktopPanelShell> createState() => _DesktopPanelShellState();
+}
+
+class _DesktopPanelMenuRow extends StatelessWidget {
+  const _DesktopPanelMenuRow({
+    required this.label,
+    required this.icon,
+  });
+
+  final String label;
+  final Widget icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        icon,
+        const SizedBox(width: 10),
+        Flexible(
+          child: Text(
+            label,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DesktopPanelPresetIcon extends StatelessWidget {
+  const _DesktopPanelPresetIcon({
+    this.preset,
+    this.maximize = false,
+    this.reset = false,
+  });
+
+  final DesktopPanelPreset? preset;
+  final bool maximize;
+  final bool reset;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 24,
+      height: 18,
+      child: CustomPaint(
+        painter: _DesktopPanelPresetIconPainter(
+          preset: preset,
+          maximize: maximize,
+          reset: reset,
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopPanelPresetIconPainter extends CustomPainter {
+  const _DesktopPanelPresetIconPainter({
+    required this.preset,
+    required this.maximize,
+    required this.reset,
+  });
+
+  final DesktopPanelPreset? preset;
+  final bool maximize;
+  final bool reset;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final outer = RRect.fromRectAndRadius(
+      Offset.zero & size,
+      const Radius.circular(4),
+    );
+    final framePaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.18)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.1;
+    final fillPaint = Paint()
+      ..color = const Color(0xFF7DD5FF).withValues(alpha: 0.82)
+      ..style = PaintingStyle.fill;
+    final faintPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.06)
+      ..style = PaintingStyle.fill;
+
+    canvas.drawRRect(outer, faintPaint);
+
+    final inset = 2.0;
+    final inner = Rect.fromLTWH(
+      inset,
+      inset,
+      size.width - (inset * 2),
+      size.height - (inset * 2),
+    );
+    final fillRect = reset
+        ? Rect.fromCenter(
+            center: inner.center,
+            width: inner.width * 0.58,
+            height: inner.height * 0.58,
+          )
+        : _presetFillRect(inner);
+
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(fillRect, const Radius.circular(2.5)),
+      fillPaint,
+    );
+
+    if (reset) {
+      final arrowPaint = Paint()
+        ..color = Colors.white.withValues(alpha: 0.82)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.25
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round;
+      final arrowPath = Path()
+        ..moveTo(inner.left + 3, inner.top + 5)
+        ..quadraticBezierTo(
+          inner.center.dx,
+          inner.top - 2,
+          inner.right - 4,
+          inner.top + 5,
+        );
+      canvas.drawPath(arrowPath, arrowPaint);
+      final head = Path()
+        ..moveTo(inner.left + 3, inner.top + 5)
+        ..lineTo(inner.left + 7, inner.top + 4)
+        ..moveTo(inner.left + 3, inner.top + 5)
+        ..lineTo(inner.left + 5, inner.top + 1);
+      canvas.drawPath(head, arrowPaint);
+    }
+
+    if (maximize) {
+      final cornerPaint = Paint()
+        ..color = Colors.white.withValues(alpha: 0.84)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.2
+        ..strokeCap = StrokeCap.round;
+      const corner = 5.0;
+      canvas.drawLine(
+        Offset(inner.left + 2, inner.top + 2),
+        Offset(inner.left + corner, inner.top + 2),
+        cornerPaint,
+      );
+      canvas.drawLine(
+        Offset(inner.left + 2, inner.top + 2),
+        Offset(inner.left + 2, inner.top + corner),
+        cornerPaint,
+      );
+      canvas.drawLine(
+        Offset(inner.right - 2, inner.bottom - 2),
+        Offset(inner.right - corner, inner.bottom - 2),
+        cornerPaint,
+      );
+      canvas.drawLine(
+        Offset(inner.right - 2, inner.bottom - 2),
+        Offset(inner.right - 2, inner.bottom - corner),
+        cornerPaint,
+      );
+    }
+
+    canvas.drawRRect(outer, framePaint);
+  }
+
+  Rect _presetFillRect(Rect bounds) {
+    switch (preset) {
+      case DesktopPanelPreset.topHalf:
+        return Rect.fromLTWH(
+          bounds.left,
+          bounds.top,
+          bounds.width,
+          bounds.height * 0.5,
+        );
+      case DesktopPanelPreset.bottomHalf:
+        return Rect.fromLTWH(
+          bounds.left,
+          bounds.center.dy,
+          bounds.width,
+          bounds.height * 0.5,
+        );
+      case DesktopPanelPreset.leftHalf:
+        return Rect.fromLTWH(
+          bounds.left,
+          bounds.top,
+          bounds.width * 0.5,
+          bounds.height,
+        );
+      case DesktopPanelPreset.leftThird:
+        return Rect.fromLTWH(
+          bounds.left,
+          bounds.top,
+          bounds.width / 3,
+          bounds.height,
+        );
+      case DesktopPanelPreset.rightHalf:
+        return Rect.fromLTWH(
+          bounds.center.dx,
+          bounds.top,
+          bounds.width * 0.5,
+          bounds.height,
+        );
+      case DesktopPanelPreset.rightThird:
+        return Rect.fromLTWH(
+          bounds.right - (bounds.width / 3),
+          bounds.top,
+          bounds.width / 3,
+          bounds.height,
+        );
+      case null:
+        return bounds;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DesktopPanelPresetIconPainter oldDelegate) {
+    return oldDelegate.preset != preset ||
+        oldDelegate.maximize != maximize ||
+        oldDelegate.reset != reset;
+  }
 }
 
 class _DesktopPanelShellState extends State<DesktopPanelShell> {
@@ -329,39 +546,78 @@ class _DesktopPanelShellState extends State<DesktopPanelShell> {
           value: widget.fullscreen
               ? _DesktopPanelMenuAction.exitFullscreen
               : _DesktopPanelMenuAction.enterFullscreen,
-          child: Text(widget.fullscreen ? 'Restore Window' : 'Maximize'),
+          child: _DesktopPanelMenuRow(
+            label: widget.fullscreen ? 'Restore Window' : 'Maximize',
+            icon: _DesktopPanelPresetIcon(
+              preset: widget.fullscreen ? null : DesktopPanelPreset.topHalf,
+              maximize: !widget.fullscreen,
+            ),
+          ),
         ),
         const PopupMenuDivider(),
-        const PopupMenuItem<_DesktopPanelMenuAction>(
+        PopupMenuItem<_DesktopPanelMenuAction>(
           value: _DesktopPanelMenuAction.topHalf,
-          child: Text('Top Half'),
+          child: _DesktopPanelMenuRow(
+            label: 'Top Half',
+            icon: _DesktopPanelPresetIcon(
+              preset: DesktopPanelPreset.topHalf,
+            ),
+          ),
         ),
-        const PopupMenuItem<_DesktopPanelMenuAction>(
+        PopupMenuItem<_DesktopPanelMenuAction>(
           value: _DesktopPanelMenuAction.bottomHalf,
-          child: Text('Bottom Half'),
+          child: _DesktopPanelMenuRow(
+            label: 'Bottom Half',
+            icon: _DesktopPanelPresetIcon(
+              preset: DesktopPanelPreset.bottomHalf,
+            ),
+          ),
         ),
-        const PopupMenuItem<_DesktopPanelMenuAction>(
+        PopupMenuItem<_DesktopPanelMenuAction>(
           value: _DesktopPanelMenuAction.leftHalf,
-          child: Text('Left 1/2'),
+          child: _DesktopPanelMenuRow(
+            label: 'Left 1/2',
+            icon: _DesktopPanelPresetIcon(
+              preset: DesktopPanelPreset.leftHalf,
+            ),
+          ),
         ),
-        const PopupMenuItem<_DesktopPanelMenuAction>(
+        PopupMenuItem<_DesktopPanelMenuAction>(
           value: _DesktopPanelMenuAction.leftThird,
-          child: Text('Left 1/3'),
+          child: _DesktopPanelMenuRow(
+            label: 'Left 1/3',
+            icon: _DesktopPanelPresetIcon(
+              preset: DesktopPanelPreset.leftThird,
+            ),
+          ),
         ),
-        const PopupMenuItem<_DesktopPanelMenuAction>(
+        PopupMenuItem<_DesktopPanelMenuAction>(
           value: _DesktopPanelMenuAction.rightHalf,
-          child: Text('Right 1/2'),
+          child: _DesktopPanelMenuRow(
+            label: 'Right 1/2',
+            icon: _DesktopPanelPresetIcon(
+              preset: DesktopPanelPreset.rightHalf,
+            ),
+          ),
         ),
-        const PopupMenuItem<_DesktopPanelMenuAction>(
+        PopupMenuItem<_DesktopPanelMenuAction>(
           value: _DesktopPanelMenuAction.rightThird,
-          child: Text('Right 1/3'),
+          child: _DesktopPanelMenuRow(
+            label: 'Right 1/3',
+            icon: _DesktopPanelPresetIcon(
+              preset: DesktopPanelPreset.rightThird,
+            ),
+          ),
         ),
         if (widget.onResetLayout !=
             null) ...<PopupMenuEntry<_DesktopPanelMenuAction>>[
           const PopupMenuDivider(),
-          const PopupMenuItem<_DesktopPanelMenuAction>(
+          PopupMenuItem<_DesktopPanelMenuAction>(
             value: _DesktopPanelMenuAction.resetDefault,
-            child: Text('Reset Default Window'),
+            child: _DesktopPanelMenuRow(
+              label: 'Reset Default Window',
+              icon: _DesktopPanelPresetIcon(reset: true),
+            ),
           ),
         ],
       ],
@@ -440,17 +696,21 @@ class _DesktopPanelShellState extends State<DesktopPanelShell> {
     final rect = widget.fullscreen
         ? widget.availableBounds
         : (_liveRect ?? _rectFromLayout(widget.layout));
-    final shellPadding = widget.fullscreen
-        ? EdgeInsets.zero
-        : const EdgeInsets.fromLTRB(8, 10, 8, 8);
-    final dragStripHeight = widget.fullscreen ? 0.0 : 12.0;
+    final shellPadding =
+        widget.fullscreen ? EdgeInsets.zero : const EdgeInsets.all(8);
+    final dragStripHeight = widget.fullscreen ? 0.0 : 10.0;
+    final topMenuHeight = widget.fullscreen
+        ? 0.0
+        : widget.topContextMenuHeight.clamp(0.0, rect.height);
 
     return Positioned.fromRect(
       rect: rect,
       child: Listener(
         behavior: HitTestBehavior.translucent,
         onPointerDown: (event) {
-          if (event.kind == PointerDeviceKind.mouse &&
+          if (!widget.fullscreen &&
+              event.localPosition.dy <= topMenuHeight &&
+              event.kind == PointerDeviceKind.mouse &&
               event.buttons == kSecondaryMouseButton) {
             _showPanelMenu(event.position);
           }
@@ -473,16 +733,7 @@ class _DesktopPanelShellState extends State<DesktopPanelShell> {
                   onPanStart: _beginDrag,
                   onPanUpdate: _updateDrag,
                   onPanEnd: _endDrag,
-                  child: Center(
-                    child: Container(
-                      width: math.min(84, math.max(48, rect.width * 0.16)),
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.28),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                    ),
-                  ),
+                  child: const SizedBox.expand(),
                 ),
               ),
             if (!widget.fullscreen) ...<Widget>[

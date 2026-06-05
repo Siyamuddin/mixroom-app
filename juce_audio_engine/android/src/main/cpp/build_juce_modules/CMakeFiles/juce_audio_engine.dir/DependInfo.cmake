@@ -8,6 +8,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
+  "/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/InstrumentRenderers.cpp" "CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.o" "gcc" "CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.o.d"
   "/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/JuceBridge.cpp" "CMakeFiles/juce_audio_engine.dir/JuceBridge.cpp.o" "gcc" "CMakeFiles/juce_audio_engine.dir/JuceBridge.cpp.o.d"
   "/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/JuceEngine.cpp" "CMakeFiles/juce_audio_engine.dir/JuceEngine.cpp.o" "gcc" "CMakeFiles/juce_audio_engine.dir/JuceEngine.cpp.o.d"
   "/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/JuceLogBridge.cpp" "CMakeFiles/juce_audio_engine.dir/JuceLogBridge.cpp.o" "gcc" "CMakeFiles/juce_audio_engine.dir/JuceLogBridge.cpp.o.d"

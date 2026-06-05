@@ -292,7 +292,7 @@ void main() {
         'sampleRolePriorityScore prefers low-end one-shots over bass loops for bass role',
         () {
       final oneShotScore = AssistantActionUtils.sampleRolePriorityScore(
-        'Starter Kit v1/Processed Drums/808-01.flac',
+        'Starter Kit v1/Processed Drums/808-01.mp3',
         'bass',
       );
       final loopScore = AssistantActionUtils.sampleRolePriorityScore(
@@ -307,7 +307,7 @@ void main() {
         'sampleRolePriorityScore prefers processed hi-hats over drumset open hats',
         () {
       final processedHatScore = AssistantActionUtils.sampleRolePriorityScore(
-        'Starter Kit v1/Processed Drums/Hi-Hat-01.flac',
+        'Starter Kit v1/Processed Drums/Hi-Hat-01.mp3',
         'hat',
       );
       final drumsetOpenHatScore = AssistantActionUtils.sampleRolePriorityScore(
@@ -350,13 +350,13 @@ void main() {
     test('tempoHintsFromText extracts loop bpm tags but ignores ordinals', () {
       expect(
         AssistantActionUtils.tempoHintsFromText(
-          'Starter Kit v1/Loops/Trap Drum Loop-11(130).flac',
+          'Starter Kit v1/Loops/Trap Drum Loop-11(130).mp3',
         ),
         <int>[130],
       );
       expect(
         AssistantActionUtils.tempoHintsFromText(
-          'Starter Kit v1/Processed Drums/808-01.flac',
+          'Starter Kit v1/Processed Drums/808-01.mp3',
         ),
         isEmpty,
       );
@@ -491,6 +491,48 @@ void main() {
           stepMs: 1000.0,
         ),
         8,
+      );
+    });
+
+    test('derives repeat counts from second and millisecond spans', () {
+      expect(
+        AssistantActionUtils.resolvePlacementRepeatCount(
+          data: const {
+            'start_measure': 1,
+            'step_beats': 4,
+            'duration_seconds': 60,
+          },
+          target: const {},
+          bpm: 120,
+          startMs: 0.0,
+          stepMs: 2000.0,
+        ),
+        30,
+      );
+
+      expect(
+        AssistantActionUtils.resolvePlacementRepeatCount(
+          data: const {
+            'start_measure': 1,
+            'step_ms': 1000,
+            'length_ms': 4000,
+          },
+          target: const {},
+          bpm: 120,
+          startMs: 0.0,
+          stepMs: 1000.0,
+        ),
+        4,
+      );
+    });
+
+    test('derives midi target length from seconds', () {
+      expect(
+        AssistantActionUtils.resolveMidiTargetLengthBeatsFromAction(
+          const {'duration_seconds': 60},
+          bpm: 120,
+        ),
+        120,
       );
     });
 

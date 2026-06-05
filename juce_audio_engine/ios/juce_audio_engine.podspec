@@ -28,17 +28,9 @@ Pod::Spec.new do |s|
   #   'Classes/juce/modules/**/juce_audio_plugin_client/**',
   # ]
 
-  # Link against prebuilt .a libs from the xcframework
-  s.ios.vendored_libraries = [
-    # Release on a real device: uncomment this and comment out the other two entries.
-    'JuceModules.xcframework/ios-arm64/libJuceModules.a',
-    # Debug on a real device: uncomment this and comment out the other two entries.
-    # 'JuceModules.xcframework/ios-arm64/libJuceModules_debug3.a',
-    # Simulator builds: keep this uncommented and comment out the two iphoneos entries above.
-    # 'JuceModules.xcframework/ios-arm64_x86_64-simulator/libJuceModules_sim.a'
-  ]
-
-  
+  # Keep the prebuilt JUCE archives available without linking one unconditionally.
+  # The selected archive is linked by sdk/config-specific OTHER_LDFLAGS below.
+  s.preserve_paths = 'JuceModules.xcframework/**/*'
 
   s.platform         = :ios, '13.0'
   s.requires_arc     = false
@@ -56,12 +48,22 @@ Pod::Spec.new do |s|
     'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',
     'CLANG_CXX_LIBRARY'           => 'libc++',
     'GCC_PREPROCESSOR_DEFINITIONS[config=Release]' => '$(inherited) JUCE_PLUGINHOST_AU=1 JUCE_IOS=1 NDEBUG=1',
+    'GCC_PREPROCESSOR_DEFINITIONS[config=Profile]' => '$(inherited) JUCE_PLUGINHOST_AU=1 JUCE_IOS=1 NDEBUG=1',
     'GCC_PREPROCESSOR_DEFINITIONS[config=Debug]'   => '$(inherited) JUCE_PLUGINHOST_AU=1 JUCE_IOS=1 JUCE_IOS_AUDIO_EXPLICIT_SAMPLERATES=44100',
     'HEADER_SEARCH_PATHS' => '$(inherited) "${PODS_TARGET_SRCROOT}/JuceModules.xcframework/ios-arm64/Headers" "${PODS_TARGET_SRCROOT}/JuceModules.xcframework/ios-arm64_x86_64-simulator/Headers"',
-    'OTHER_LDFLAGS[sdk=iphoneos*][config=Debug]' => '-force_load "${PODS_TARGET_SRCROOT}/JuceModules.xcframework/ios-arm64/libJuceModules_debug3.a"',
-    'OTHER_LDFLAGS[sdk=iphoneos*][config=Release]' => '-force_load "${PODS_TARGET_SRCROOT}/JuceModules.xcframework/ios-arm64/libJuceModules.a"',
-    'OTHER_LDFLAGS[sdk=iphonesimulator*]' => '-force_load "${PODS_TARGET_SRCROOT}/JuceModules.xcframework/ios-arm64_x86_64-simulator/libJuceModules_sim.a"',
+    'OTHER_LDFLAGS[sdk=iphoneos*][config=Debug]' => '$(inherited) -force_load "${PODS_TARGET_SRCROOT}/JuceModules.xcframework/ios-arm64/libJuceModules_debug3.a"',
+    'OTHER_LDFLAGS[sdk=iphoneos*][config=Profile]' => '$(inherited) -force_load "${PODS_TARGET_SRCROOT}/JuceModules.xcframework/ios-arm64/libJuceModules.a"',
+    'OTHER_LDFLAGS[sdk=iphoneos*][config=Release]' => '$(inherited) -force_load "${PODS_TARGET_SRCROOT}/JuceModules.xcframework/ios-arm64/libJuceModules.a"',
+    'OTHER_LDFLAGS[sdk=iphonesimulator*]' => '$(inherited) -force_load "${PODS_TARGET_SRCROOT}/JuceModules.xcframework/ios-arm64_x86_64-simulator/libJuceModules_sim.a"',
     'OTHER_CFLAGS'         => '$(inherited) -isysroot "${SDK_DIR}"',
     'CLANG_ENABLE_OBJC_ARC' => 'YES'
+  }
+
+  s.user_target_xcconfig = {
+    'JUCE_AUDIO_ENGINE_IOS_SRCROOT' => '${PODS_ROOT}/../.symlinks/plugins/juce_audio_engine/ios',
+    'OTHER_LDFLAGS[sdk=iphoneos*][config=Debug]' => '$(inherited) -force_load "${JUCE_AUDIO_ENGINE_IOS_SRCROOT}/JuceModules.xcframework/ios-arm64/libJuceModules_debug3.a"',
+    'OTHER_LDFLAGS[sdk=iphoneos*][config=Profile]' => '$(inherited) -force_load "${JUCE_AUDIO_ENGINE_IOS_SRCROOT}/JuceModules.xcframework/ios-arm64/libJuceModules.a"',
+    'OTHER_LDFLAGS[sdk=iphoneos*][config=Release]' => '$(inherited) -force_load "${JUCE_AUDIO_ENGINE_IOS_SRCROOT}/JuceModules.xcframework/ios-arm64/libJuceModules.a"',
+    'OTHER_LDFLAGS[sdk=iphonesimulator*]' => '$(inherited) -force_load "${JUCE_AUDIO_ENGINE_IOS_SRCROOT}/JuceModules.xcframework/ios-arm64_x86_64-simulator/libJuceModules_sim.a"'
   }
 end

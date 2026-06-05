@@ -41,7 +41,7 @@ group_label=gr_1
 
 
 <region>
-sample=PSBassoon_A1_v1_rr1.flac
+sample=PSBassoon_A1_v1_rr1.mp3
 lokey=43
 hikey=46
 pitch_keycenter=45
@@ -51,7 +51,7 @@ volume=12
 
 
 <region>
-sample=PSBassoon_A2_v1_rr1.flac
+sample=PSBassoon_A2_v1_rr1.mp3
 lokey=56
 hikey=58
 pitch_keycenter=57
@@ -61,7 +61,7 @@ volume=12
 
 
 <region>
-sample=PSBassoon_C2_v1_rr1.flac
+sample=PSBassoon_C2_v1_rr1.mp3
 lokey=47
 hikey=49
 pitch_keycenter=48
@@ -71,7 +71,7 @@ volume=12
 
 
 <region>
-sample=PSBassoon_C3_v1_rr1.flac
+sample=PSBassoon_C3_v1_rr1.mp3
 lokey=59
 hikey=61
 pitch_keycenter=60
@@ -81,7 +81,7 @@ volume=12
 
 
 <region>
-sample=PSBassoon_C4_v1_rr1.flac
+sample=PSBassoon_C4_v1_rr1.mp3
 lokey=70
 hikey=72
 pitch_keycenter=72
@@ -91,7 +91,7 @@ volume=12
 
 
 <region>
-sample=PSBassoon_E2_v1_rr1.flac
+sample=PSBassoon_E2_v1_rr1.mp3
 lokey=52
 hikey=53
 pitch_keycenter=52
@@ -101,7 +101,7 @@ volume=12
 
 
 <region>
-sample=PSBassoon_E3_v1_rr1.flac
+sample=PSBassoon_E3_v1_rr1.mp3
 lokey=62
 hikey=65
 pitch_keycenter=64
@@ -111,7 +111,7 @@ volume=12
 
 
 <region>
-sample=PSBassoon_F1_v1_rr1.flac
+sample=PSBassoon_F1_v1_rr1.mp3
 lokey=40
 hikey=42
 pitch_keycenter=41
@@ -121,7 +121,7 @@ volume=12
 
 
 <region>
-sample=PSBassoon_G2_v1_rr1.flac
+sample=PSBassoon_G2_v1_rr1.mp3
 lokey=54
 hikey=55
 pitch_keycenter=55
@@ -131,7 +131,7 @@ volume=12
 
 
 <region>
-sample=PSBassoon_G3_v1_rr1.flac
+sample=PSBassoon_G3_v1_rr1.mp3
 lokey=66
 hikey=69
 pitch_keycenter=67
@@ -141,7 +141,7 @@ volume=12
 
 
 <region>
-sample=PSBassoon_A#0_v2_rr1.flac
+sample=PSBassoon_A#0_v2_rr1.mp3
 lokey=34
 hikey=35
 pitch_keycenter=34
@@ -151,7 +151,7 @@ volume=10
 
 
 <region>
-sample=PSBassoon_A1_v2_rr1.flac
+sample=PSBassoon_A1_v2_rr1.mp3
 lokey=43
 hikey=46
 pitch_keycenter=45
@@ -161,7 +161,7 @@ volume=0
 
 
 <region>
-sample=PSBassoon_A2_v2_rr1.flac
+sample=PSBassoon_A2_v2_rr1.mp3
 lokey=56
 hikey=58
 pitch_keycenter=57
@@ -171,7 +171,7 @@ volume=0
 
 
 <region>
-sample=PSBassoon_C2_v2_rr1.flac
+sample=PSBassoon_C2_v2_rr1.mp3
 lokey=47
 hikey=49
 pitch_keycenter=48
@@ -181,7 +181,7 @@ volume=0
 
 
 <region>
-sample=PSBassoon_C3_v2_rr1.flac
+sample=PSBassoon_C3_v2_rr1.mp3
 lokey=59
 hikey=61
 pitch_keycenter=60
@@ -191,7 +191,7 @@ volume=0
 
 
 <region>
-sample=PSBassoon_C4_v2_rr1.flac
+sample=PSBassoon_C4_v2_rr1.mp3
 lokey=70
 hikey=72
 pitch_keycenter=72
@@ -201,7 +201,7 @@ volume=0
 
 
 <region>
-sample=PSBassoon_D#2_v2_rr1.flac
+sample=PSBassoon_D#2_v2_rr1.mp3
 lokey=50
 hikey=51
 pitch_keycenter=51
@@ -211,7 +211,7 @@ volume=10
 
 
 <region>
-sample=PSBassoon_D1_v2_rr1.flac
+sample=PSBassoon_D1_v2_rr1.mp3
 lokey=36
 hikey=39
 pitch_keycenter=38
@@ -221,7 +221,7 @@ volume=10
 
 
 <region>
-sample=PSBassoon_E2_v2_rr1.flac
+sample=PSBassoon_E2_v2_rr1.mp3
 lokey=52
 hikey=53
 pitch_keycenter=52
@@ -231,7 +231,7 @@ volume=0
 
 
 <region>
-sample=PSBassoon_E3_v2_rr1.flac
+sample=PSBassoon_E3_v2_rr1.mp3
 lokey=62
 hikey=65
 pitch_keycenter=64
@@ -241,7 +241,7 @@ volume=0
 
 
 <region>
-sample=PSBassoon_F1_v2_rr1.flac
+sample=PSBassoon_F1_v2_rr1.mp3
 lokey=40
 hikey=42
 pitch_keycenter=41
@@ -251,7 +251,7 @@ volume=0
 
 
 <region>
-sample=PSBassoon_G2_v2_rr1.flac
+sample=PSBassoon_G2_v2_rr1.mp3
 lokey=54
 hikey=55
 pitch_keycenter=55
@@ -261,7 +261,7 @@ volume=0
 
 
 <region>
-sample=PSBassoon_G3_v2_rr1.flac
+sample=PSBassoon_G3_v2_rr1.mp3
 lokey=66
 hikey=69
 pitch_keycenter=67
@@ -286,7 +286,7 @@ group_label=gr_2
 
 
 <region>
-sample=PSBassoon_A1_v1_rr2.flac
+sample=PSBassoon_A1_v1_rr2.mp3
 lokey=43
 hikey=46
 pitch_keycenter=45
@@ -296,7 +296,7 @@ volume=12
 
 
 <region>
-sample=PSBassoon_A2_v1_rr2.flac
+sample=PSBassoon_A2_v1_rr2.mp3
 lokey=56
 hikey=58
 pitch_keycenter=57
@@ -306,7 +306,7 @@ volume=12
 
 
 <region>
-sample=PSBassoon_C2_v1_rr2.flac
+sample=PSBassoon_C2_v1_rr2.mp3
 lokey=47
 hikey=49
 pitch_keycenter=48
@@ -316,7 +316,7 @@ volume=12
 
 
 <region>
-sample=PSBassoon_C3_v1_rr2.flac
+sample=PSBassoon_C3_v1_rr2.mp3
 lokey=59
 hikey=61
 pitch_keycenter=60
@@ -326,7 +326,7 @@ volume=12
 
 
 <region>
-sample=PSBassoon_C4_v1_rr2.flac
+sample=PSBassoon_C4_v1_rr2.mp3
 lokey=70
 hikey=72
 pitch_keycenter=72
@@ -336,7 +336,7 @@ volume=12
 
 
 <region>
-sample=PSBassoon_E2_v1_rr2.flac
+sample=PSBassoon_E2_v1_rr2.mp3
 lokey=52
 hikey=53
 pitch_keycenter=52
@@ -346,7 +346,7 @@ volume=12
 
 
 <region>
-sample=PSBassoon_E3_v1_rr2.flac
+sample=PSBassoon_E3_v1_rr2.mp3
 lokey=62
 hikey=65
 pitch_keycenter=64
@@ -356,7 +356,7 @@ volume=12
 
 
 <region>
-sample=PSBassoon_F1_v1_rr2.flac
+sample=PSBassoon_F1_v1_rr2.mp3
 lokey=40
 hikey=42
 pitch_keycenter=41
@@ -366,7 +366,7 @@ volume=12
 
 
 <region>
-sample=PSBassoon_G2_v1_rr2.flac
+sample=PSBassoon_G2_v1_rr2.mp3
 lokey=54
 hikey=55
 pitch_keycenter=55
@@ -376,7 +376,7 @@ volume=12
 
 
 <region>
-sample=PSBassoon_G3_v1_rr2.flac
+sample=PSBassoon_G3_v1_rr2.mp3
 lokey=66
 hikey=69
 pitch_keycenter=67
@@ -386,7 +386,7 @@ volume=12
 
 
 <region>
-sample=PSBassoon_A#0_v2_rr2.flac
+sample=PSBassoon_A#0_v2_rr2.mp3
 lokey=34
 hikey=35
 pitch_keycenter=34
@@ -396,7 +396,7 @@ volume=10
 
 
 <region>
-sample=PSBassoon_A1_v2_rr2.flac
+sample=PSBassoon_A1_v2_rr2.mp3
 lokey=43
 hikey=46
 pitch_keycenter=45
@@ -406,7 +406,7 @@ volume=0
 
 
 <region>
-sample=PSBassoon_A2_v2_rr2.flac
+sample=PSBassoon_A2_v2_rr2.mp3
 lokey=56
 hikey=58
 pitch_keycenter=57
@@ -416,7 +416,7 @@ volume=0
 
 
 <region>
-sample=PSBassoon_C2_v2_rr2.flac
+sample=PSBassoon_C2_v2_rr2.mp3
 lokey=47
 hikey=49
 pitch_keycenter=48
@@ -426,7 +426,7 @@ volume=0
 
 
 <region>
-sample=PSBassoon_C3_v2_rr2.flac
+sample=PSBassoon_C3_v2_rr2.mp3
 lokey=59
 hikey=61
 pitch_keycenter=60
@@ -436,7 +436,7 @@ volume=0
 
 
 <region>
-sample=PSBassoon_C4_v2_rr2.flac
+sample=PSBassoon_C4_v2_rr2.mp3
 lokey=70
 hikey=72
 pitch_keycenter=72
@@ -446,7 +446,7 @@ volume=0
 
 
 <region>
-sample=PSBassoon_D#2_v2_rr2.flac
+sample=PSBassoon_D#2_v2_rr2.mp3
 lokey=50
 hikey=51
 pitch_keycenter=51
@@ -456,7 +456,7 @@ volume=10
 
 
 <region>
-sample=PSBassoon_D1_v2_rr2.flac
+sample=PSBassoon_D1_v2_rr2.mp3
 lokey=36
 hikey=39
 pitch_keycenter=38
@@ -466,7 +466,7 @@ volume=10
 
 
 <region>
-sample=PSBassoon_E2_v2_rr2.flac
+sample=PSBassoon_E2_v2_rr2.mp3
 lokey=52
 hikey=53
 pitch_keycenter=52
@@ -476,7 +476,7 @@ volume=0
 
 
 <region>
-sample=PSBassoon_E3_v2_rr2.flac
+sample=PSBassoon_E3_v2_rr2.mp3
 lokey=62
 hikey=65
 pitch_keycenter=64
@@ -486,7 +486,7 @@ volume=0
 
 
 <region>
-sample=PSBassoon_F1_v2_rr2.flac
+sample=PSBassoon_F1_v2_rr2.mp3
 lokey=40
 hikey=42
 pitch_keycenter=41
@@ -496,7 +496,7 @@ volume=0
 
 
 <region>
-sample=PSBassoon_G2_v2_rr2.flac
+sample=PSBassoon_G2_v2_rr2.mp3
 lokey=54
 hikey=55
 pitch_keycenter=55
@@ -506,7 +506,7 @@ volume=0
 
 
 <region>
-sample=PSBassoon_G3_v2_rr2.flac
+sample=PSBassoon_G3_v2_rr2.mp3
 lokey=66
 hikey=69
 pitch_keycenter=67

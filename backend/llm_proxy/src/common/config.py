@@ -28,7 +28,7 @@ AI_RUNTIME_DEFAULT_MODEL = os.environ.get(
     os.environ.get("LLM_MODEL", os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")),
 ).strip() or "gpt-4.1-mini"
 AI_CHAT_DEFAULT_TEMPERATURE = float(
-    os.environ.get("AI_CHAT_DEFAULT_TEMPERATURE", "0.2") or "0.2"
+    os.environ.get("AI_CHAT_DEFAULT_TEMPERATURE", "0.35") or "0.35"
 )
 VIDEO_EDITOR_DEFAULT_TEMPERATURE = float(
     os.environ.get("VIDEO_EDITOR_DEFAULT_TEMPERATURE", "0.1") or "0.1"

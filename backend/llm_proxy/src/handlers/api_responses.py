@@ -1797,6 +1797,10 @@ def _normalize_success_payload(
         normalized_output.append(normalized_item)
 
     if saw_function_call:
+        if normalized_output:
+            normalized_payload = dict(payload)
+            normalized_payload["output"] = normalized_output
+            return normalized_payload, issues, False
         if issues:
             return _fallback_success_payload(
                 payload=payload,

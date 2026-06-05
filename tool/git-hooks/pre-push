@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+
+if [ -z "$upstream" ]; then
+  echo "No upstream branch configured. Skipping docs freshness pre-push check."
+  exit 0
+fi
+
+dart run tool/check_docs_freshness.dart --base "$upstream"
+

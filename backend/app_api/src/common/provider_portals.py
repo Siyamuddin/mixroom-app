@@ -108,7 +108,9 @@ def _build_paddle_management_links(
 
 
 def _build_toss_management_links(*, customer_id: str) -> Dict[str, Any]:
-    return {"configured": False, "links": {}, "reason": "toss_one_time_payment"}
+    if not customer_id:
+        return {"configured": False, "links": {}, "reason": "missing_customer_id"}
+    return {"configured": True, "links": {}, "reason": ""}
 
 
 def _post_json(url: str, payload: Dict[str, Any], *, headers: Dict[str, str]) -> Dict[str, Any]:

@@ -396,7 +396,7 @@ class LocalMixingModel {
               "I found multiple $roleName tracks ($rowsStr) that overlap. Which one is the *main* $roleName?",
           isNoOp: true,
           notes: const [
-            "Tip: say “Track 2 is lead vocals” and “Track 4 is backing vocals”."
+            'Tip: name the main part and backing part by track number.'
           ],
         );
       }
@@ -441,7 +441,7 @@ class LocalMixingModel {
       return const MixingResult(
         actions: [],
         summary:
-            "I'm not confident which track you mean. Tell me “Track N is vocals/bass/drums/guitar/synth”.",
+            "I'm not confident which track you mean. Tell me the track number and role.",
         isNoOp: true,
       );
     }
@@ -453,7 +453,7 @@ class LocalMixingModel {
       return const MixingResult(
         actions: [],
         summary:
-            "I couldn't find that target. If you tell me “Track N is vocals”, I'll remember it.",
+            "I couldn't find that target. Tell me the track number and what role it should have.",
         isNoOp: true,
       );
     }

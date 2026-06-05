@@ -6,6 +6,8 @@ const PKCE_VERIFIER_KEY = "mixroom.admin.site.pkce_verifier.v1";
 const OVERVIEW_PATH = "/v1/internal/admin/overview";
 const LIVE_PRESENCE_PATH = "/v1/internal/admin/live-presence";
 const ADMIN_USERS_PATH = "/v1/internal/admin/users";
+const ADMIN_USERS_CREATE_USERNAME_ACCOUNT_PATH =
+  "/v1/internal/admin/users/create-username-account";
 const ADMIN_USERS_DELETE_PATH = "/v1/internal/admin/users/delete";
 const ADMIN_USERS_GRANT_PROMPTS_PATH = "/v1/internal/admin/users/grant-prompts";
 const ADMIN_USERS_ENTITLEMENT_OVERRIDE_PATH =
@@ -189,6 +191,9 @@ const MESSAGES = {
     "panel.userAdmin.label": "User Admin",
     "panel.userAdmin.title": "Find user",
     "panel.userAdmin.meta.default": "Email, username, or user ID.",
+    "panel.createUsernameAccount.label": "Quick Account",
+    "panel.createUsernameAccount.title": "Create username account",
+    "panel.createUsernameAccount.meta": "Optional email is auto-verified.",
     "search.label": "User lookup",
     "search.placeholder": "email, username, display name, or user ID",
     "analytics.label": "Product Analytics",
@@ -284,6 +289,9 @@ const MESSAGES = {
       "Producer capture whitelist settings loaded.",
     "status.noUsersFound": "No users found.",
     "status.searchUsersFailed": "Could not search users.",
+    "status.creatingUsernameAccount": "Creating account for {target}...",
+    "status.usernameAccountCreated": "Account created.",
+    "status.createUsernameAccountFailed": "Could not create account.",
     "status.loadFeedbackFailed": "Could not load user feedback or bug reports.",
     "status.loadAiPromptLimitsFailed": "Could not load AI prompt limit settings.",
     "status.loadAiRuntimeFailed": "Could not load AI runtime settings.",
@@ -367,6 +375,17 @@ const MESSAGES = {
     "search.meta": "Search: {query}",
     "search.recentAccounts": "Recent accounts",
     "adminUsers.none": "No users matched that search.",
+    "createAccount.username": "Username",
+    "createAccount.usernamePlaceholder": "student_1",
+    "createAccount.name": "Name",
+    "createAccount.namePlaceholder": "Student One",
+    "createAccount.email": "Email, optional",
+    "createAccount.emailPlaceholder": "student@example.com",
+    "createAccount.password": "Password",
+    "createAccount.passwordPlaceholder": "Temporary password",
+    "createAccount.button": "Create account",
+    "createAccount.creating": "Creating...",
+    "createAccount.created": "Created @{username}.",
     "feedback.none": "No feedback or bug report submissions yet.",
     "feedback.detail.user": "User",
     "feedback.detail.source": "Source",
@@ -638,6 +657,9 @@ const MESSAGES = {
     "panel.userAdmin.label": "사용자 관리",
     "panel.userAdmin.title": "사용자 찾기",
     "panel.userAdmin.meta.default": "이메일, 사용자명 또는 사용자 ID.",
+    "panel.createUsernameAccount.label": "빠른 계정",
+    "panel.createUsernameAccount.title": "사용자명 계정 생성",
+    "panel.createUsernameAccount.meta": "이메일을 입력하면 자동 인증됩니다.",
     "search.label": "사용자 조회",
     "search.placeholder": "이메일, 사용자명, 표시 이름 또는 사용자 ID",
     "analytics.label": "제품 분석",
@@ -733,6 +755,9 @@ const MESSAGES = {
       "프로듀서 캡처 화이트리스트 설정을 불러왔습니다.",
     "status.noUsersFound": "일치하는 사용자가 없습니다.",
     "status.searchUsersFailed": "사용자 검색에 실패했습니다.",
+    "status.creatingUsernameAccount": "{target} 계정을 생성하는 중...",
+    "status.usernameAccountCreated": "계정을 생성했습니다.",
+    "status.createUsernameAccountFailed": "계정을 생성하지 못했습니다.",
     "status.loadFeedbackFailed": "사용자 피드백 또는 버그 제보를 불러오지 못했습니다.",
     "status.loadAiPromptLimitsFailed": "AI 프롬프트 제한 설정을 불러오지 못했습니다.",
     "status.loadAiRuntimeFailed": "AI 런타임 설정을 불러오지 못했습니다.",
@@ -816,6 +841,17 @@ const MESSAGES = {
     "search.meta": "검색: {query}",
     "search.recentAccounts": "최근 계정",
     "adminUsers.none": "검색 조건에 맞는 사용자가 없습니다.",
+    "createAccount.username": "사용자명",
+    "createAccount.usernamePlaceholder": "student_1",
+    "createAccount.name": "이름",
+    "createAccount.namePlaceholder": "Student One",
+    "createAccount.email": "이메일, 선택 사항",
+    "createAccount.emailPlaceholder": "student@example.com",
+    "createAccount.password": "비밀번호",
+    "createAccount.passwordPlaceholder": "임시 비밀번호",
+    "createAccount.button": "계정 생성",
+    "createAccount.creating": "생성 중...",
+    "createAccount.created": "@{username} 계정을 생성했습니다.",
     "feedback.none": "아직 제출된 피드백이나 버그 제보가 없습니다.",
     "feedback.detail.user": "사용자",
     "feedback.detail.source": "출처",
@@ -1071,6 +1107,7 @@ const elements = {
     "#feature-flag-subscription-enforcement",
   ),
   featureFlagIapPurchasesInput: document.querySelector("#feature-flag-iap-purchases"),
+  featureFlagCloudProjectsInput: document.querySelector("#feature-flag-cloud-projects"),
   featureFlagsEditorNote: document.querySelector("#feature-flags-editor-note"),
   featureFlagsConfirmWrap: document.querySelector("#feature-flags-confirm-wrap"),
   featureFlagsConfirmInput: document.querySelector("#feature-flags-confirm-input"),
@@ -1243,6 +1280,9 @@ const elements = {
   userSearchButton: document.querySelector("#user-search-button"),
   userSearchClearButton: document.querySelector("#user-search-clear-button"),
   userSearchMeta: document.querySelector("#user-search-meta"),
+  createUsernameAccountForm: document.querySelector("#create-username-account-form"),
+  createUsernameAccountButton: document.querySelector("#create-username-account-button"),
+  createUsernameAccountFeedback: document.querySelector("#create-username-account-feedback"),
   adminUsersTableBody: document.querySelector("#admin-users-table-body"),
   adminUsersPageMeta: document.querySelector("#admin-users-page-meta"),
   adminUsersShowLessButton: document.querySelector("#admin-users-show-less-button"),
@@ -1277,6 +1317,8 @@ const state = {
   locale: loadLocale(),
   overviewBusy: false,
   userSearchBusy: false,
+  createUsernameAccountBusy: false,
+  createUsernameAccountFeedback: null,
   feedbackBusy: false,
   aiPromptLimitsBusy: false,
   producerCaptureWhitelistBusy: false,
@@ -1371,6 +1413,10 @@ function bindEvents() {
   });
   elements.userSearchForm.addEventListener("submit", handleUserSearchSubmit);
   elements.userSearchClearButton.addEventListener("click", clearUserSearch);
+  elements.createUsernameAccountForm?.addEventListener(
+    "submit",
+    handleCreateUsernameAccountSubmit,
+  );
   elements.adminUsersShowLessButton.addEventListener("click", handleAdminUsersShowLess);
   elements.adminUsersShowMoreButton.addEventListener("click", handleAdminUsersShowMore);
   elements.adminUsersTableBody.addEventListener("click", handleAdminUsersTableClick);
@@ -1537,6 +1583,7 @@ function rerenderForLocale() {
   renderBillingWorkspaces();
   renderBillingCloudProjects();
   renderUserSearchMeta(state.lastUserSearchPayload || {});
+  renderCreateUsernameAccountFeedback();
   updateTabView();
 }
 
@@ -2862,6 +2909,7 @@ function renderFeatureFlagsSettings() {
     elements.featureFlagAccountPlanBillingInput.checked = false;
     elements.featureFlagSubscriptionEnforcementInput.checked = false;
     elements.featureFlagIapPurchasesInput.checked = false;
+    elements.featureFlagCloudProjectsInput.checked = false;
     elements.featureFlagsConfirmInput.value = "";
     elements.featureFlagsForm.classList.add("hidden");
     elements.featureFlagsEditorNote.classList.add("hidden");
@@ -2888,7 +2936,8 @@ function renderFeatureFlagsSettings() {
     <div class="detail-value">
       Billing UI: ${escapeHtml(flags.account_plan_billing_enabled ? "on" : "off")}<br />
       Enforcement: ${escapeHtml(flags.subscription_enforcement_enabled ? "on" : "off")}<br />
-      IAP checkout: ${escapeHtml(flags.iap_purchases_enabled ? "on" : "off")}
+      IAP checkout: ${escapeHtml(flags.iap_purchases_enabled ? "on" : "off")}<br />
+      Cloud projects: ${escapeHtml(flags.cloud_projects_enabled ? "on" : "off")}
     </div>
   `;
   elements.featureFlagAccountPlanBillingInput.checked =
@@ -2896,6 +2945,7 @@ function renderFeatureFlagsSettings() {
   elements.featureFlagSubscriptionEnforcementInput.checked =
     flags.subscription_enforcement_enabled === true;
   elements.featureFlagIapPurchasesInput.checked = flags.iap_purchases_enabled === true;
+  elements.featureFlagCloudProjectsInput.checked = flags.cloud_projects_enabled === true;
   elements.featureFlagsForm.classList.remove("hidden");
   elements.featureFlagsEditorNote.classList.remove("hidden");
   elements.featureFlagsConfirmWrap.classList.remove("hidden");
@@ -5370,6 +5420,21 @@ function renderUserSearchMeta(payload) {
     : detail;
 }
 
+function renderCreateUsernameAccountFeedback() {
+  const node = elements.createUsernameAccountFeedback;
+  if (!node) {
+    return;
+  }
+  const feedback = state.createUsernameAccountFeedback;
+  if (!feedback) {
+    node.className = "status-panel hidden";
+    node.textContent = "";
+    return;
+  }
+  node.className = `status-panel status-${feedback.tone || "success"}`;
+  node.textContent = feedback.message || "";
+}
+
 function renderAdminUsers(users) {
   if (!tokens?.idToken) {
     elements.adminUsersTableBody.innerHTML = `
@@ -6250,7 +6315,11 @@ function setSignedOutState() {
 
 function updateBusyState() {
   const signedIn = !!tokens?.idToken;
-  const destructiveBusy = state.deleteBusy || state.grantBusy || state.overrideBusy;
+  const destructiveBusy =
+    state.deleteBusy
+    || state.grantBusy
+    || state.overrideBusy
+    || state.createUsernameAccountBusy;
   elements.refreshButton.disabled = !signedIn || state.overviewBusy;
   elements.signInButtonSecondary.disabled = signedIn;
   elements.signOutButton.disabled = !signedIn;
@@ -6260,6 +6329,18 @@ function updateBusyState() {
   elements.userSearchButton.disabled = !signedIn || state.userSearchBusy || destructiveBusy;
   elements.userSearchClearButton.disabled = !signedIn || state.userSearchBusy || destructiveBusy;
   elements.userSearchInput.disabled = !signedIn || destructiveBusy;
+  if (elements.createUsernameAccountButton) {
+    elements.createUsernameAccountButton.disabled =
+      !signedIn || state.createUsernameAccountBusy;
+    elements.createUsernameAccountButton.textContent = state.createUsernameAccountBusy
+      ? t("createAccount.creating")
+      : t("createAccount.button");
+  }
+  elements.createUsernameAccountForm
+    ?.querySelectorAll("input, button")
+    .forEach((node) => {
+      node.disabled = !signedIn || state.createUsernameAccountBusy;
+    });
   elements.adminUsersShowLessButton.disabled =
     !signedIn || state.userSearchBusy || state.userSearchLimit <= DEFAULT_ADMIN_USERS_LIMIT;
   elements.adminUsersShowMoreButton.disabled =
@@ -6322,6 +6403,7 @@ function updateBusyState() {
   elements.featureFlagSubscriptionEnforcementInput.disabled =
     state.featureFlagsBusy || !signedIn;
   elements.featureFlagIapPurchasesInput.disabled = state.featureFlagsBusy || !signedIn;
+  elements.featureFlagCloudProjectsInput.disabled = state.featureFlagsBusy || !signedIn;
   elements.featureFlagsConfirmInput.disabled = state.featureFlagsBusy || !signedIn;
   elements.featureFlagsSaveButton.disabled =
     state.featureFlagsBusy || !signedIn || !featureFlagsConfirmationMatches();
@@ -6646,6 +6728,65 @@ function decodeIdToken(idToken) {
     };
   } catch (_) {
     return null;
+  }
+}
+
+async function handleCreateUsernameAccountSubmit(event) {
+  event.preventDefault();
+  if (!tokens?.idToken || state.createUsernameAccountBusy) {
+    return;
+  }
+
+  const form = event.currentTarget;
+  const formData = new FormData(form);
+  const username = `${formData.get("username") || ""}`.trim();
+  const displayName = `${formData.get("displayName") || ""}`.trim();
+  const email = `${formData.get("email") || ""}`.trim();
+  const password = `${formData.get("password") || ""}`;
+
+  state.createUsernameAccountBusy = true;
+  state.createUsernameAccountFeedback = null;
+  renderCreateUsernameAccountFeedback();
+  updateBusyState();
+  setStatus(
+    t("status.creatingUsernameAccount", { target: username || displayName || email }),
+    "info",
+  );
+
+  try {
+    const payload = await fetchAdminJson(ADMIN_USERS_CREATE_USERNAME_ACCOUNT_PATH, {
+      method: "POST",
+      body: JSON.stringify({
+        username,
+        display_name: displayName,
+        email,
+        password,
+      }),
+    });
+    if (payload.user) {
+      upsertAdminUser(payload.user);
+      state.selectedUserId = payload.user.user_id || "";
+    }
+    state.createUsernameAccountFeedback = {
+      tone: "success",
+      message: t("createAccount.created", { username: payload.username || username }),
+    };
+    form.reset();
+    renderAdminUsers(state.adminUsers);
+    renderInspector();
+    renderCreateUsernameAccountFeedback();
+    renderUserSearchMeta(state.lastUserSearchPayload || {});
+    setStatus(t("status.usernameAccountCreated"), "success");
+  } catch (error) {
+    handleAdminRequestError(error, t("status.createUsernameAccountFailed"));
+    state.createUsernameAccountFeedback = {
+      tone: "error",
+      message: error.message || t("status.createUsernameAccountFailed"),
+    };
+    renderCreateUsernameAccountFeedback();
+  } finally {
+    state.createUsernameAccountBusy = false;
+    updateBusyState();
   }
 }
 
@@ -7158,6 +7299,7 @@ async function handleFeatureFlagsSubmit(event) {
           subscription_enforcement_enabled:
             elements.featureFlagSubscriptionEnforcementInput.checked === true,
           iap_purchases_enabled: elements.featureFlagIapPurchasesInput.checked === true,
+          cloud_projects_enabled: elements.featureFlagCloudProjectsInput.checked === true,
         },
       }),
     });
@@ -7296,10 +7438,27 @@ async function handleAiRuntimeSubmit(event) {
 }
 
 function replaceAdminUser(user) {
-  const nextUsers = state.adminUsers.map((candidate) =>
-    candidate.user_id === user.user_id ? user : candidate,
-  );
-  state.adminUsers = nextUsers;
+  upsertAdminUser(user);
+}
+
+function upsertAdminUser(user) {
+  const safeUserId = `${user?.user_id || ""}`.trim();
+  if (!safeUserId) {
+    return;
+  }
+  const existingIndex = state.adminUsers.findIndex((candidate) => candidate.user_id === safeUserId);
+  if (existingIndex >= 0) {
+    state.adminUsers = state.adminUsers.map((candidate) =>
+      candidate.user_id === safeUserId ? user : candidate,
+    );
+    return;
+  }
+  state.adminUsers = [user, ...state.adminUsers].slice(0, RESULT_LIMIT_MAX);
+  const currentTotal = Number(state.lastUserSearchPayload?.total_matches || 0);
+  state.lastUserSearchPayload = {
+    ...(state.lastUserSearchPayload || {}),
+    total_matches: Math.max(currentTotal, state.adminUsers.length),
+  };
 }
 
 function syncSelectedFeedback(autoSelect) {
@@ -7341,6 +7500,8 @@ function resetAdminState() {
   destroyAllAnalyticsCharts();
   state.overviewBusy = false;
   state.userSearchBusy = false;
+  state.createUsernameAccountBusy = false;
+  state.createUsernameAccountFeedback = null;
   state.feedbackBusy = false;
   state.aiPromptLimitsBusy = false;
   state.featureFlagsBusy = false;

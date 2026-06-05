@@ -199,6 +199,21 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     return raw.replaceFirst('Exception: ', '').replaceFirst('StateError: ', '');
   }
 
+  bool get _cloudProjectsFeatureEnabled {
+    try {
+      return context.read<EntitlementService>().areCloudProjectsEnabled;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _clearCloudProjectState() {
+    _cloudProjects = <CloudProjectAccessItem>[];
+    _cloudStorage = null;
+    _cloudError = null;
+    _cloudLoading = false;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -371,6 +386,16 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       if (mounted) {
         setState(() => _loading = false);
       }
+      if (!_cloudProjectsFeatureEnabled) {
+        _clearCloudProjectState();
+        if (_libraryTab == _ProjectLibraryTab.cloudProjects) {
+          _setLibraryTab(_ProjectLibraryTab.yourProjects);
+        }
+        if (mounted) {
+          setState(() {});
+        }
+        return;
+      }
       final hasCloudLinkedLocalProjects = _projects.any(
         (project) => (project.cloudProjectId ?? '').trim().isNotEmpty,
       );
@@ -398,6 +423,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   void _seedCloudProjectsFromEntitlementCache() {
+    if (!_cloudProjectsFeatureEnabled) {
+      _clearCloudProjectState();
+      return;
+    }
     final snapshot = context.read<EntitlementService>().cloudProjectsAccess;
     if (snapshot == null) return;
     _cloudProjects = snapshot.cloudProjects;
@@ -414,10 +443,15 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     }
     final completer = Completer<void>();
     _cloudRefreshInFlight = completer.future;
+    if (!_cloudProjectsFeatureEnabled) {
+      _clearCloudProjectState();
+      _cloudRefreshInFlight = null;
+      completer.complete();
+      return;
+    }
     final auth = context.read<AuthService>();
     if (!auth.isSignedIn) {
-      _cloudProjects = <CloudProjectAccessItem>[];
-      _cloudStorage = null;
+      _clearCloudProjectState();
       _cloudRefreshInFlight = null;
       completer.complete();
       return;
@@ -444,6 +478,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   Future<void> _persistCloudLinksForLocalMatches() async {
+    if (!_cloudProjectsFeatureEnabled) return;
     if (_projects.isEmpty || _cloudProjects.isEmpty) return;
     for (final cloud in _cloudProjects) {
       if (!cloud.isBundleStorage) continue;
@@ -1472,6 +1507,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       case _ProjectLibraryTab.yourProjects:
         return _visibleProjects().map(_ProjectListEntry.project).toList();
       case _ProjectLibraryTab.cloudProjects:
+        if (!_cloudProjectsFeatureEnabled) return const <_ProjectListEntry>[];
         return _visibleCloudProjects().map(_ProjectListEntry.cloud).toList();
       case _ProjectLibraryTab.demoProjects:
         return _visibleBundledDemoProjects()
@@ -1509,6 +1545,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   void _setLibraryTab(_ProjectLibraryTab tab, {bool animatePage = true}) {
+    if (tab == _ProjectLibraryTab.cloudProjects &&
+        !_cloudProjectsFeatureEnabled) {
+      tab = _ProjectLibraryTab.yourProjects;
+    }
     if (_libraryTab == tab) return;
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
@@ -1539,6 +1579,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   Future<void> _refreshCloudProjectsForUi() async {
     if (!mounted) return;
+    if (!_cloudProjectsFeatureEnabled) {
+      setState(() {
+        _clearCloudProjectState();
+      });
+      return;
+    }
     final hasCloudSnapshot = _cloudStorage != null || _cloudProjects.isNotEmpty;
     setState(() {
       _cloudError = null;
@@ -1812,6 +1858,159 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     return result == true;
   }
 
+  Future<BundleAudioMode?> _chooseProjectBundleAudioMode() {
+    return showDialog<BundleAudioMode>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.58),
+      builder: (dialogContext) {
+        Widget option({
+          required BundleAudioMode mode,
+          required IconData icon,
+          required String title,
+          required String subtitle,
+        }) {
+          return Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () => Navigator.of(dialogContext).pop(mode),
+              borderRadius: BorderRadius.circular(18),
+              splashColor: Colors.white.withValues(alpha: 0.12),
+              highlightColor: Colors.white.withValues(alpha: 0.08),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+                decoration: BoxDecoration(
+                  color: const Color.fromRGBO(244, 244, 244, 0.08),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.10),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: const Color.fromRGBO(112, 139, 166, 0.28),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Icon(
+                        icon,
+                        color: const Color(0xFFF4F4F4),
+                        size: 19,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            L10n.translate(dialogContext, title),
+                            style: const TextStyle(
+                              fontFamily: 'Pretendard',
+                              color: Color(0xFFF4F4F4),
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            L10n.translate(dialogContext, subtitle),
+                            style: TextStyle(
+                              fontFamily: 'Pretendard',
+                              color: Colors.white.withValues(alpha: 0.66),
+                              fontSize: 12,
+                              height: 1.35,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(30),
+          ),
+          clipBehavior: Clip.antiAlias,
+          elevation: 0,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 16),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 430),
+            child: MixroomShellSurface(
+              radius: 30,
+              strong: true,
+              color: const Color.fromRGBO(244, 244, 244, 0.14),
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    L10n.translate(dialogContext, 'Project bundle format'),
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Color(0xFFF4F4F4),
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 7),
+                  Text(
+                    L10n.translate(
+                      dialogContext,
+                      'Choose how audio should be packed into the .mixroom file.',
+                    ),
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.70),
+                      fontSize: 13,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  option(
+                    mode: BundleAudioMode.flacLossless,
+                    icon: Icons.compress_rounded,
+                    title: 'Lossless FLAC',
+                    subtitle:
+                        'Smaller file, keeps audio lossless, best for sharing.',
+                  ),
+                  const SizedBox(height: 10),
+                  option(
+                    mode: BundleAudioMode.preserveAsIs,
+                    icon: Icons.folder_copy_outlined,
+                    title: 'Original files',
+                    subtitle:
+                        'Keeps the current audio formats exactly as stored.',
+                  ),
+                  const SizedBox(height: 14),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      child: Text(L10n.translate(dialogContext, 'Cancel')),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _deleteSelectedProjects() async {
     final selectedProjects = _projects
         .where((project) => _selectedProjectPaths.contains(project.dir.path))
@@ -1965,15 +2164,17 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                 label: L10n.translate(context, 'Version History'),
                 onTap: () => Navigator.of(context).pop('version_history'),
               ),
-              const SizedBox(height: 4),
-              _ProjectToolAction(
-                icon: Icons.cloud_upload_rounded,
-                label: L10n.translate(
-                  context,
-                  !_hasCloudReference(project) ? 'Sync to Cloud' : 'Sync Now',
+              if (_cloudProjectsFeatureEnabled) ...[
+                const SizedBox(height: 4),
+                _ProjectToolAction(
+                  icon: Icons.cloud_upload_rounded,
+                  label: L10n.translate(
+                    context,
+                    !_hasCloudReference(project) ? 'Sync to Cloud' : 'Sync Now',
+                  ),
+                  onTap: () => Navigator.of(context).pop('sync_cloud'),
                 ),
-                onTap: () => Navigator.of(context).pop('sync_cloud'),
-              ),
+              ],
               const SizedBox(height: 4),
               _ProjectToolAction(
                 icon: Icons.download_rounded,
@@ -2305,6 +2506,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   Future<String?> _exportProjectBundle(ProjectMeta meta) async {
+    final audioMode = await _chooseProjectBundleAudioMode();
+    if (audioMode == null || !mounted) return null;
+
     showLoadingDialog(
       context,
       message: L10n.translate(context, 'Exporting…'),
@@ -2315,7 +2519,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     try {
       return await ProjectBundle.exportMixroomBundle(
         projectDir: meta.dir,
-        audioMode: BundleAudioMode.flacLossless,
+        audioMode: audioMode,
       );
     } finally {
       if (mounted && Navigator.of(context).canPop()) {
@@ -2327,6 +2531,14 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   Future<void> _syncProjectToCloud(ProjectMeta meta) async {
     final auth = context.read<AuthService>();
     final entitlement = context.read<EntitlementService>();
+    if (!entitlement.areCloudProjectsEnabled) {
+      showAppSnackBar(
+        context,
+        L10n.translate(context, 'Cloud projects are not available.'),
+        tone: AppPopupTone.warning,
+      );
+      return;
+    }
     if (!auth.isSignedIn) {
       showAppSnackBar(
         context,
@@ -2496,6 +2708,14 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   Future<void> _openCloudProject(CloudProjectAccessItem cloud) async {
+    if (!_cloudProjectsFeatureEnabled) {
+      showAppSnackBar(
+        context,
+        L10n.translate(context, 'Cloud projects are not available.'),
+        tone: AppPopupTone.warning,
+      );
+      return;
+    }
     final local = _localProjectForCloud(cloud);
     if (local != null) {
       await _openProject(local.dir);
@@ -2706,6 +2926,14 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   Future<void> _deleteCloudProject(CloudProjectAccessItem cloud) async {
+    if (!_cloudProjectsFeatureEnabled) {
+      showAppSnackBar(
+        context,
+        L10n.translate(context, 'Cloud projects are not available.'),
+        tone: AppPopupTone.warning,
+      );
+      return;
+    }
     if (!cloud.canWrite) {
       showAppSnackBar(
         context,
@@ -3214,8 +3442,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   int _localProjectLimit() {
+    final entitlementService = context.read<EntitlementService>();
+    if (!entitlementService.isEnforcementEnabled) {
+      return SubscriptionLimits.paidLocalProjects;
+    }
     return SubscriptionLimits.localProjectLimitFor(
-      context.read<EntitlementService>().entitlement,
+      entitlementService.entitlement,
     );
   }
 
@@ -3548,7 +3780,22 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
     final entitlement = context.watch<EntitlementService>();
-    final canConfigureCloudSync = auth.isSignedIn &&
+    final cloudProjectsEnabled = entitlement.areCloudProjectsEnabled;
+    final visibleLibraryOptions =
+        cloudProjectsEnabled ? const [0, 1, 2] : const [0, 2];
+    final selectedLibraryTab =
+        !cloudProjectsEnabled && _libraryTab == _ProjectLibraryTab.cloudProjects
+            ? _ProjectLibraryTab.yourProjects
+            : _libraryTab;
+    if (!cloudProjectsEnabled &&
+        _libraryTab == _ProjectLibraryTab.cloudProjects) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _setLibraryTab(_ProjectLibraryTab.yourProjects);
+      });
+    }
+    final canConfigureCloudSync = cloudProjectsEnabled &&
+        auth.isSignedIn &&
         entitlement.canUseCapability(SubscriptionCapability.cloudProjects);
     final canCreate = _projects.length < _localProjectLimit();
     final hasSearchQuery = _searchController.text.trim().isNotEmpty;
@@ -3562,6 +3809,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     final listBottomBaseline = dockOverlayBottom + (useDesktopRail ? 28 : 14);
     final floatingControlsBottom =
         dockOverlayBottom + (useDesktopRail ? 28 : 14);
+    final pageMaxWidth = useDesktopRail ? 940.0 : 980.0;
+    final pageHorizontalPadding = useDesktopRail ? 0.0 : 16.0;
+    final pageTopPadding = useDesktopRail ? 14.0 : 14.0;
     final searchBarBottom = searchFocused && keyboardInset > 0
         ? keyboardInset + 14
         : floatingControlsBottom;
@@ -3575,12 +3825,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
           SafeArea(
             bottom: false,
             child: AppResponsiveBody(
-              maxWidth: 980,
+              maxWidth: pageMaxWidth,
               expandToHeight: true,
               padding: EdgeInsets.fromLTRB(
-                16,
-                14,
-                16,
+                pageHorizontalPadding,
+                pageTopPadding,
+                pageHorizontalPadding,
                 listBottomBaseline + 64,
               ),
               child: Column(
@@ -3598,8 +3848,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: MixroomShellSegmentedControl<int>(
-                          value: _libraryTab.index,
-                          options: const [0, 1, 2],
+                          value: selectedLibraryTab.index,
+                          options: visibleLibraryOptions,
                           labelBuilder: (value) => L10n.translate(
                             context,
                             value == 0
@@ -3672,7 +3922,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                   Expanded(
                     child: PageView.builder(
                       controller: _libraryPageController,
-                      physics: const _ProjectLibraryPageScrollPhysics(),
+                      physics: cloudProjectsEnabled
+                          ? const _ProjectLibraryPageScrollPhysics()
+                          : const NeverScrollableScrollPhysics(),
                       itemCount: _ProjectLibraryTab.values.length,
                       onPageChanged: _handleLibraryPageChanged,
                       itemBuilder: (context, pageIndex) {

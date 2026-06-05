@@ -1,0 +1,182 @@
+{
+  "version": 1,
+  "docs": [
+    {
+      "doc": "docs/engineering/local_setup.md",
+      "owner": "Engineering",
+      "update_trigger": "Supported platforms, required SDK versions, FFmpeg variants, native library selection, or backend local setup changes.",
+      "watch_paths": [
+        "pubspec.yaml",
+        "README.md",
+        "tool/switch_ffmpeg_backend.dart",
+        "tool/run_integration_suite.sh",
+        "juce_audio_engine/ios/juce_audio_engine.podspec",
+        "android/",
+        "ios/",
+        "macos/",
+        "windows/",
+        "backend/app_api/README.md",
+        "backend/app_api/requirements.txt",
+        "backend/app_api/samconfig.toml",
+        "backend/llm_proxy/README.md"
+      ]
+    },
+    {
+      "doc": "docs/engineering/app_architecture.md",
+      "owner": "Engineering",
+      "update_trigger": "Navigation, state ownership, service boundaries, backend contracts, or top-level product surfaces change.",
+      "watch_paths": [
+        "lib/main.dart",
+        "lib/screens/auth_gate.dart",
+        "lib/screens/signed_in_shell.dart",
+        "lib/screens/projects.dart",
+        "lib/screens/audio_editor.dart",
+        "lib/screens/audio_timeline_pro.dart",
+        "lib/screens/account.dart",
+        "lib/ai/chat_pipeline.dart",
+        "lib/ai/cloud_llm_service.dart",
+        "lib/ai/project_state_builder.dart",
+        "backend/app_api/README.md",
+        "backend/app_api/openapi.yaml",
+        "backend/llm_proxy/README.md",
+        "admin_site/README.md"
+      ]
+    },
+    {
+      "doc": "docs/engineering/audio_engine_architecture.md",
+      "owner": "Audio Engineering",
+      "update_trigger": "Playback, recording, plugin scanning, rendering/export, MIDI, routing, bundled native libraries, or JUCE build inputs change.",
+      "watch_paths": [
+        "juce_audio_engine/",
+        "lib/screens/audio_editor.dart",
+        "lib/screens/audio_timeline_pro.dart",
+        "lib/widgets/effects_panel.dart",
+        "lib/helpers/audio_export_plan.dart",
+        "lib/helpers/export_save_dialog.dart"
+      ]
+    },
+    {
+      "doc": "docs/engineering/flutter_native_bridge.md",
+      "owner": "Engineering",
+      "update_trigger": "Method-channel names, payloads, event payloads, platform implementations, or native social/auth bridge behavior changes.",
+      "watch_paths": [
+        "juce_audio_engine/lib/",
+        "juce_audio_engine/ios/",
+        "juce_audio_engine/android/",
+        "ios/Runner/AppDelegate.swift",
+        "android/app/src/main/kotlin/",
+        "lib/helpers/native_social_sign_in.dart",
+        "lib/config/native_social_auth_config.dart"
+      ]
+    },
+    {
+      "doc": "docs/engineering/auth_account_flows.md",
+      "owner": "Engineering",
+      "update_trigger": "Sign-in, sign-up, token storage, account deletion, social auth, subscription identity, or employee/admin auth behavior changes.",
+      "watch_paths": [
+        "lib/screens/auth_gate.dart",
+        "lib/screens/login.dart",
+        "lib/screens/account.dart",
+        "lib/helpers/auth_service.dart",
+        "lib/helpers/app_user_service.dart",
+        "lib/helpers/native_social_sign_in.dart",
+        "lib/core/security/sensitive_storage.dart",
+        "lib/widgets/delete_account_sheet.dart",
+        "backend/app_api/src/handlers/api_auth.py",
+        "backend/app_api/src/handlers/api_users.py",
+        "backend/app_api/src/common/auth.py",
+        "backend/app_api/src/common/app_auth_tokens.py",
+        "backend/app_api/src/common/password_auth.py",
+        "backend/app_api/src/common/social_auth.py",
+        "backend/app_api/src/common/native_auth.py",
+        "backend/app_api/src/common/users.py"
+      ]
+    },
+    {
+      "doc": "docs/engineering/project_file_model.md",
+      "owner": "Engineering",
+      "update_trigger": "Project schema, clip storage, waveform storage, asset import, backup/recovery, cloud sync, collaboration, or export file behavior changes.",
+      "watch_paths": [
+        "lib/helpers/project_manager.dart",
+        "lib/helpers/audio_project_persistence.dart",
+        "lib/helpers/project_version_store.dart",
+        "lib/helpers/project_version_preferences.dart",
+        "lib/helpers/project_undo_history_store.dart",
+        "lib/helpers/cloud_project_service.dart",
+        "lib/helpers/cloud_sync_preferences.dart",
+        "lib/helpers/audio_export_plan.dart",
+        "lib/helpers/export_save_dialog.dart",
+        "lib/models/",
+        "lib/screens/projects.dart",
+        "lib/screens/audio_editor.dart",
+        "lib/screens/audio_timeline_pro.dart",
+        "backend/app_api/src/handlers/api_project_telemetry.py",
+        "backend/app_api/src/handlers/api_collaboration.py",
+        "backend/app_api/src/common/cloud_object_storage.py",
+        "backend/app_api/src/common/collaboration_repository.py",
+        "backend/app_api/src/common/project_telemetry_repository.py"
+      ]
+    },
+    {
+      "doc": "docs/engineering/build_release_process.md",
+      "owner": "Release Engineering",
+      "update_trigger": "Build commands, release targets, signing, store requirements, compliance gates, SDK requirements, deployment steps, or release ownership changes.",
+      "watch_paths": [
+        "pubspec.yaml",
+        "README.md",
+        "android/",
+        "ios/",
+        "macos/",
+        "windows/",
+        "juce_audio_engine/ios/juce_audio_engine.podspec",
+        "tool/",
+        "script/",
+        "backend/app_api/template.yaml",
+        "backend/llm_proxy/template.yaml",
+        "docs/RELEASE_COMPLIANCE_CHECKLIST.md"
+      ]
+    },
+    {
+      "doc": "docs/engineering/known_platform_issues.md",
+      "owner": "Engineering",
+      "update_trigger": "Platform support, SDK requirements, plugin behavior, audio routing, permissions, file access, or store requirements change.",
+      "watch_paths": [
+        "android/",
+        "ios/",
+        "macos/",
+        "windows/",
+        "juce_audio_engine/ios/juce_audio_engine.podspec",
+        "juce_audio_engine/android/build.gradle",
+        "juce_audio_engine/android/build.gradle.kts",
+        "docs/DESKTOP_PLUGIN_HOSTING.md",
+        "docs/RELEASE_COMPLIANCE_CHECKLIST.md"
+      ]
+    },
+    {
+      "doc": "docs/engineering/testing_debugging_playbook.md",
+      "owner": "Engineering",
+      "update_trigger": "Test commands, QA flows, diagnostics, logging, crash reporting, integration tests, or release gates change.",
+      "watch_paths": [
+        "test/",
+        "integration_test/",
+        "backend/app_api/tests/",
+        "tool/run_integration_suite.sh",
+        "docs/INTEGRATION_TESTS.md",
+        "docs/BETA_AUTH_QA_CHECKLIST.md",
+        "docs/ANALYTICS.md",
+        "lib/core/analytics/",
+        "lib/core/crash_reporting/"
+      ]
+    },
+    {
+      "doc": "docs/engineering/how_to_add_a_feature.md",
+      "owner": "Engineering",
+      "update_trigger": "Feature development workflow, review expectations, test strategy, release gates, or code ownership changes.",
+      "watch_paths": [
+        "docs/engineering/README.md",
+        "docs/engineering/how_to_add_a_feature.md",
+        "README.md"
+      ]
+    }
+  ]
+}

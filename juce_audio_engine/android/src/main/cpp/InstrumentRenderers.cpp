@@ -39,6 +39,8 @@ struct InstrumentPreset
     double pitchDropSemitones = 0.0;
     double noise = 0.02;
     double padDetuneOffset = 0.008;
+    double decayMs = 120.0;
+    double sustainLevel = 0.86;
 };
 
 struct NoteState
@@ -86,6 +88,45 @@ static double wrapPhase(double phase)
     if (phase < 0.0)
         phase += 1.0;
     return phase;
+}
+
+static double envelopeHoldLevel(
+    double ageSec,
+    double attackSec,
+    double decaySec,
+    double sustainLevel)
+{
+    attackSec = juce::jmax(0.001, attackSec);
+    decaySec = juce::jmax(0.001, decaySec);
+    sustainLevel = juce::jlimit(0.05, 1.0, sustainLevel);
+    if (ageSec < attackSec)
+        return juce::jlimit(0.0, 1.0, ageSec / attackSec);
+
+    const double decayAge = ageSec - attackSec;
+    if (decayAge < decaySec)
+    {
+        const double t = decayAge / decaySec;
+        return 1.0 + ((sustainLevel - 1.0) * t);
+    }
+    return sustainLevel;
+}
+
+static double envelopeLevel(
+    double ageSec,
+    double holdSec,
+    double attackSec,
+    double decaySec,
+    double sustainLevel,
+    double releaseSec)
+{
+    if (ageSec < holdSec)
+        return envelopeHoldLevel(ageSec, attackSec, decaySec, sustainLevel);
+
+    releaseSec = juce::jmax(0.02, releaseSec);
+    const double releaseAge = ageSec - holdSec;
+    const double releaseStart =
+        envelopeHoldLevel(holdSec, attackSec, decaySec, sustainLevel);
+    return releaseStart * (1.0 - (releaseAge / releaseSec));
 }
 
 static double waveFromType(int type, double phase)
@@ -821,6 +862,10 @@ static void applyParamOverrides(InstrumentPreset &preset, const juce::NamedValue
         preset.cutoffHz = juce::jlimit(200.0, 16000.0, rawValue);
     if (readParam(params, "attackMs", rawValue))
         preset.attackMs = juce::jlimit(0.0, 1000.0, rawValue);
+    if (readParam(params, "decayMs", rawValue))
+        preset.decayMs = juce::jlimit(0.0, 2000.0, rawValue);
+    if (readParam(params, "sustainLevel", rawValue))
+        preset.sustainLevel = juce::jlimit(0.05, 1.0, rawValue);
     if (readParam(params, "releaseMs", rawValue))
         preset.releaseMs = juce::jlimit(20.0, 2400.0, rawValue);
     if (readParam(params, "drive", rawValue))
@@ -896,6 +941,7 @@ juce::String renderInstrumentClipToWav(const InstrumentRenderRequest &request)
         const int noteStart = (int)std::round(note.startBeat * msPerBeat * sampleRate / 1000.0);
         const int sustainSamples = juce::jmax(1, (int)std::round(note.lengthBeats * msPerBeat * sampleRate / 1000.0));
         const int attackSamples = juce::jmax(1, (int)std::round(preset.attackMs * sampleRate / 1000.0));
+        const int decaySamples = juce::jmax(1, (int)std::round(preset.decayMs * sampleRate / 1000.0));
         const int releaseSamples = juce::jmax(1, (int)std::round(preset.releaseMs * sampleRate / 1000.0));
         const int totalNoteSamples = sustainSamples + releaseSamples;
         const double frequencyHz = 440.0 * std::pow(2.0, ((double)note.pitch - 69.0) / 12.0);
@@ -919,16 +965,13 @@ juce::String renderInstrumentClipToWav(const InstrumentRenderRequest &request)
             if (idx < 0 || idx >= totalSamples)
                 break;
 
-            double envelope = 1.0;
-            if (i < attackSamples)
-            {
-                envelope = (double)i / (double)attackSamples;
-            }
-            else if (i >= sustainSamples)
-            {
-                const int releasePos = i - sustainSamples;
-                envelope = 1.0 - ((double)releasePos / (double)releaseSamples);
-            }
+            double envelope = envelopeLevel(
+                (double)i / sampleRate,
+                (double)sustainSamples / sampleRate,
+                (double)attackSamples / sampleRate,
+                (double)decaySamples / sampleRate,
+                preset.sustainLevel,
+                (double)releaseSamples / sampleRate);
             envelope = juce::jlimit(0.0, 1.0, envelope);
 
             const double noteProgress =

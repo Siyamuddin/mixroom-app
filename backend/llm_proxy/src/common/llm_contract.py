@@ -1368,7 +1368,7 @@ Action data
 - `stem_separate`: `{"operation":"vocal_instrumental","target":{...}}`
 - `role_override`: `{"operation":"set|clear","target":{"row_index":0},"role":"vocals|drums|bass|guitar|synth|other"}`
 - `project_edit`: `{"operation":"set_tempo","tempo_bpm":156}`
-- `sample_insert`: `{"operation":"insert_audio_clips|replace_audio_clips","items":[{"library_path":"Starter Kit v1/Processed Drums/Kick-01.flac","row_index":0,"start_measure":1}]}`
+- `sample_insert`: `{"operation":"insert_audio_clips|replace_audio_clips","items":[{"library_path":"Starter Kit v1/Processed Drums/Kick-01.mp3","row_index":0,"start_measure":1}]}`
   - for beat-building from packaged samples, choose files whose folder/name semantics directly match the requested drum role
   - use musical placement fields like `repeat_count`, `step_beats`, and `step_measures` instead of hand-writing every hit when a repeating pattern is intended
   - keep kick/snare/hat layers on separate rows when that makes the arrangement clearer
@@ -1655,8 +1655,11 @@ starter rhythm, prefer action over clarification.
   files whose folder/name semantics most directly match the requested role,
   keep kick/snare/hat layers on separate rows when helpful, and use musical
   spacing fields like repeat_count, step_beats, or
-  step_measures. For longer sections, you may use length_measures or
-  until_measure instead of giant repeated item lists. Do not substitute low-end
+  step_measures. For longer sections, you may use length_measures,
+  duration_seconds, or until_measure instead of giant repeated item lists.
+  For "1 minute" or similar arrangement-extension requests, prefer one
+  continuous span with bar-aligned repeated material and small variations
+  rather than separate disconnected blocks. Do not substitute low-end
   or bass material for kick/snare requests. Prefer ordinary drum hits from
   starter kit groups like Processed Drums or Drumset before reaching for bass
   files or loops. Prefer one-shots over loops when the
@@ -1788,8 +1791,8 @@ starter rhythm, prefer action over clarification.
   For follow-up span edits like "make that 8 bars long", "double it", or
   "extend this to 16 measures" on an existing MIDI clip, preserve the current
   musical material and set preserve_existing_notes=true with the requested
-  length_measures or length_beats instead of emitting replace_notes with no
-  notes.
+  length_measures, length_beats, or duration_seconds instead of emitting
+  replace_notes with no notes.
   For key, mode, or chord-quality changes on an existing harmonic clip, prefer
   preserving the broad timing layout and span while replacing pitches/harmony
   instead of collapsing it into a much shorter new phrase.
@@ -2000,6 +2003,9 @@ TOOLS = [
                                                         "length_ms": {
                                                             "type": "number"
                                                         },
+                                                        "duration_seconds": {
+                                                            "type": "number"
+                                                        },
                                                         "length_measures": {
                                                             "type": "number"
                                                         },
@@ -2119,6 +2125,9 @@ TOOLS = [
                                                 "type": "number"
                                             },
                                             "length_beats": {
+                                                "type": "number"
+                                            },
+                                            "duration_seconds": {
                                                 "type": "number"
                                             },
                                         },
@@ -2347,6 +2356,9 @@ TOOLS = [
                                                 "minimum": 1,
                                             },
                                             "length_ms": {"type": "number"},
+                                            "duration_seconds": {
+                                                "type": "number"
+                                            },
                                             "length_measures": {
                                                 "type": "number"
                                             },

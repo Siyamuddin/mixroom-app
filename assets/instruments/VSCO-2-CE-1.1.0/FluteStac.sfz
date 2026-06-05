@@ -41,7 +41,7 @@ group_label=gr_1
 
 
 <region>
-sample=LDFlute_stac_A3_v1_rr1.flac
+sample=LDFlute_stac_A3_v1_rr1.mp3
 lokey=65
 hikey=70
 pitch_keycenter=69
@@ -51,7 +51,7 @@ volume=17
 
 
 <region>
-sample=LDFlute_stac_A4_v1_rr1.flac
+sample=LDFlute_stac_A4_v1_rr1.mp3
 lokey=79
 hikey=82
 pitch_keycenter=81
@@ -61,7 +61,7 @@ volume=17
 
 
 <region>
-sample=LDFlute_stac_A5_v1_rr1.flac
+sample=LDFlute_stac_A5_v1_rr1.mp3
 lokey=91
 hikey=94
 pitch_keycenter=93
@@ -71,7 +71,7 @@ volume=17
 
 
 <region>
-sample=LDFlute_stac_C4_v1_rr1.flac
+sample=LDFlute_stac_C4_v1_rr1.mp3
 lokey=71
 hikey=73
 pitch_keycenter=72
@@ -81,7 +81,7 @@ volume=18
 
 
 <region>
-sample=LDFlute_stac_C5_v1_rr1.flac
+sample=LDFlute_stac_C5_v1_rr1.mp3
 lokey=83
 hikey=85
 pitch_keycenter=84
@@ -91,7 +91,7 @@ volume=17
 
 
 <region>
-sample=LDFlute_stac_C6_v1_rr1.flac
+sample=LDFlute_stac_C6_v1_rr1.mp3
 lokey=95
 hikey=96
 pitch_keycenter=96
@@ -101,7 +101,7 @@ volume=15
 
 
 <region>
-sample=LDFlute_stac_E4_v1_rr1.flac
+sample=LDFlute_stac_E4_v1_rr1.mp3
 lokey=74
 hikey=78
 pitch_keycenter=76
@@ -111,7 +111,7 @@ volume=17
 
 
 <region>
-sample=LDFlute_stac_E5_v1_rr1.flac
+sample=LDFlute_stac_E5_v1_rr1.mp3
 lokey=86
 hikey=90
 pitch_keycenter=88
@@ -121,7 +121,7 @@ volume=17
 
 
 <region>
-sample=LDFlute_stac_A3_v2_rr1.flac
+sample=LDFlute_stac_A3_v2_rr1.mp3
 lokey=65
 hikey=70
 pitch_keycenter=69
@@ -131,7 +131,7 @@ volume=10
 
 
 <region>
-sample=LDFlute_stac_A4_v2_rr1.flac
+sample=LDFlute_stac_A4_v2_rr1.mp3
 lokey=79
 hikey=82
 pitch_keycenter=81
@@ -141,7 +141,7 @@ volume=10
 
 
 <region>
-sample=LDFlute_stac_A5_v2_rr1.flac
+sample=LDFlute_stac_A5_v2_rr1.mp3
 lokey=91
 hikey=94
 pitch_keycenter=93
@@ -151,7 +151,7 @@ volume=10
 
 
 <region>
-sample=LDFlute_stac_C4_v2_rr1.flac
+sample=LDFlute_stac_C4_v2_rr1.mp3
 lokey=71
 hikey=73
 pitch_keycenter=72
@@ -161,7 +161,7 @@ volume=13
 
 
 <region>
-sample=LDFlute_stac_C5_v2_rr1.flac
+sample=LDFlute_stac_C5_v2_rr1.mp3
 lokey=83
 hikey=85
 pitch_keycenter=84
@@ -171,7 +171,7 @@ volume=10
 
 
 <region>
-sample=LDFlute_stac_C6_v2_rr1.flac
+sample=LDFlute_stac_C6_v2_rr1.mp3
 lokey=95
 hikey=96
 pitch_keycenter=96
@@ -181,7 +181,7 @@ volume=5
 
 
 <region>
-sample=LDFlute_stac_E4_v2_rr1.flac
+sample=LDFlute_stac_E4_v2_rr1.mp3
 lokey=74
 hikey=78
 pitch_keycenter=76
@@ -191,7 +191,7 @@ volume=10
 
 
 <region>
-sample=LDFlute_stac_E5_v2_rr1.flac
+sample=LDFlute_stac_E5_v2_rr1.mp3
 lokey=86
 hikey=90
 pitch_keycenter=88
@@ -201,7 +201,7 @@ volume=10
 
 
 <region>
-sample=LDFlute_stac_A3_v3_rr1.flac
+sample=LDFlute_stac_A3_v3_rr1.mp3
 lokey=65
 hikey=70
 pitch_keycenter=69
@@ -211,7 +211,7 @@ volume=3
 
 
 <region>
-sample=LDFlute_stac_A4_v3_rr1.flac
+sample=LDFlute_stac_A4_v3_rr1.mp3
 lokey=79
 hikey=82
 pitch_keycenter=81
@@ -221,7 +221,7 @@ volume=3
 
 
 <region>
-sample=LDFlute_stac_A5_v3_rr1.flac
+sample=LDFlute_stac_A5_v3_rr1.mp3
 lokey=91
 hikey=94
 pitch_keycenter=93
@@ -231,7 +231,7 @@ volume=3
 
 
 <region>
-sample=LDFlute_stac_C4_v3_rr1.flac
+sample=LDFlute_stac_C4_v3_rr1.mp3
 lokey=71
 hikey=73
 pitch_keycenter=72
@@ -241,7 +241,7 @@ volume=8
 
 
 <region>
-sample=LDFlute_stac_C5_v3_rr1.flac
+sample=LDFlute_stac_C5_v3_rr1.mp3
 lokey=83
 hikey=85
 pitch_keycenter=84
@@ -251,7 +251,7 @@ volume=3
 
 
 <region>
-sample=LDFlute_stac_E4_v3_rr1.flac
+sample=LDFlute_stac_E4_v3_rr1.mp3
 lokey=74
 hikey=78
 pitch_keycenter=76
@@ -261,7 +261,7 @@ volume=3
 
 
 <region>
-sample=LDFlute_stac_E5_v3_rr1.flac
+sample=LDFlute_stac_E5_v3_rr1.mp3
 lokey=86
 hikey=90
 pitch_keycenter=88
@@ -271,7 +271,7 @@ volume=3
 
 
 <region>
-sample=LDFlute_stac_C4_v4_rr1.flac
+sample=LDFlute_stac_C4_v4_rr1.mp3
 lokey=71
 hikey=73
 pitch_keycenter=72
@@ -296,7 +296,7 @@ group_label=gr_2
 
 
 <region>
-sample=LDFlute_stac_A3_v1_rr2.flac
+sample=LDFlute_stac_A3_v1_rr2.mp3
 lokey=65
 hikey=70
 pitch_keycenter=69
@@ -306,7 +306,7 @@ volume=17
 
 
 <region>
-sample=LDFlute_stac_A4_v1_rr2.flac
+sample=LDFlute_stac_A4_v1_rr2.mp3
 lokey=79
 hikey=82
 pitch_keycenter=81
@@ -316,7 +316,7 @@ volume=17
 
 
 <region>
-sample=LDFlute_stac_A5_v1_rr2.flac
+sample=LDFlute_stac_A5_v1_rr2.mp3
 lokey=91
 hikey=94
 pitch_keycenter=93
@@ -326,7 +326,7 @@ volume=17
 
 
 <region>
-sample=LDFlute_stac_C4_v1_rr2.flac
+sample=LDFlute_stac_C4_v1_rr2.mp3
 lokey=71
 hikey=73
 pitch_keycenter=72
@@ -336,7 +336,7 @@ volume=18
 
 
 <region>
-sample=LDFlute_stac_C5_v1_rr2.flac
+sample=LDFlute_stac_C5_v1_rr2.mp3
 lokey=83
 hikey=85
 pitch_keycenter=84
@@ -346,7 +346,7 @@ volume=17
 
 
 <region>
-sample=LDFlute_stac_C6_v1_rr2.flac
+sample=LDFlute_stac_C6_v1_rr2.mp3
 lokey=95
 hikey=96
 pitch_keycenter=96
@@ -356,7 +356,7 @@ volume=15
 
 
 <region>
-sample=LDFlute_stac_E4_v1_rr2.flac
+sample=LDFlute_stac_E4_v1_rr2.mp3
 lokey=74
 hikey=78
 pitch_keycenter=76
@@ -366,7 +366,7 @@ volume=17
 
 
 <region>
-sample=LDFlute_stac_E5_v1_rr2.flac
+sample=LDFlute_stac_E5_v1_rr2.mp3
 lokey=86
 hikey=90
 pitch_keycenter=88
@@ -376,7 +376,7 @@ volume=17
 
 
 <region>
-sample=LDFlute_stac_A3_v2_rr2.flac
+sample=LDFlute_stac_A3_v2_rr2.mp3
 lokey=65
 hikey=70
 pitch_keycenter=69
@@ -386,7 +386,7 @@ volume=10
 
 
 <region>
-sample=LDFlute_stac_A4_v2_rr2.flac
+sample=LDFlute_stac_A4_v2_rr2.mp3
 lokey=79
 hikey=82
 pitch_keycenter=81
@@ -396,7 +396,7 @@ volume=10
 
 
 <region>
-sample=LDFlute_stac_A5_v2_rr2.flac
+sample=LDFlute_stac_A5_v2_rr2.mp3
 lokey=91
 hikey=94
 pitch_keycenter=93
@@ -406,7 +406,7 @@ volume=10
 
 
 <region>
-sample=LDFlute_stac_C4_v2_rr2.flac
+sample=LDFlute_stac_C4_v2_rr2.mp3
 lokey=71
 hikey=73
 pitch_keycenter=72
@@ -416,7 +416,7 @@ volume=13
 
 
 <region>
-sample=LDFlute_stac_C5_v2_rr2.flac
+sample=LDFlute_stac_C5_v2_rr2.mp3
 lokey=83
 hikey=85
 pitch_keycenter=84
@@ -426,7 +426,7 @@ volume=10
 
 
 <region>
-sample=LDFlute_stac_C6_v2_rr2.flac
+sample=LDFlute_stac_C6_v2_rr2.mp3
 lokey=95
 hikey=96
 pitch_keycenter=96
@@ -436,7 +436,7 @@ volume=5
 
 
 <region>
-sample=LDFlute_stac_E4_v2_rr2.flac
+sample=LDFlute_stac_E4_v2_rr2.mp3
 lokey=74
 hikey=78
 pitch_keycenter=76
@@ -446,7 +446,7 @@ volume=10
 
 
 <region>
-sample=LDFlute_stac_E5_v2_rr2.flac
+sample=LDFlute_stac_E5_v2_rr2.mp3
 lokey=86
 hikey=90
 pitch_keycenter=88
@@ -456,7 +456,7 @@ volume=10
 
 
 <region>
-sample=LDFlute_stac_A3_v3_rr2.flac
+sample=LDFlute_stac_A3_v3_rr2.mp3
 lokey=65
 hikey=70
 pitch_keycenter=69
@@ -466,7 +466,7 @@ volume=3
 
 
 <region>
-sample=LDFlute_stac_A4_v3_rr2.flac
+sample=LDFlute_stac_A4_v3_rr2.mp3
 lokey=79
 hikey=82
 pitch_keycenter=81
@@ -476,7 +476,7 @@ volume=3
 
 
 <region>
-sample=LDFlute_stac_A5_v3_rr2.flac
+sample=LDFlute_stac_A5_v3_rr2.mp3
 lokey=91
 hikey=94
 pitch_keycenter=93
@@ -486,7 +486,7 @@ volume=3
 
 
 <region>
-sample=LDFlute_stac_C4_v3_rr2.flac
+sample=LDFlute_stac_C4_v3_rr2.mp3
 lokey=71
 hikey=73
 pitch_keycenter=72
@@ -496,7 +496,7 @@ volume=8
 
 
 <region>
-sample=LDFlute_stac_C5_v3_rr2.flac
+sample=LDFlute_stac_C5_v3_rr2.mp3
 lokey=83
 hikey=85
 pitch_keycenter=84
@@ -506,7 +506,7 @@ volume=3
 
 
 <region>
-sample=LDFlute_stac_E4_v3_rr2.flac
+sample=LDFlute_stac_E4_v3_rr2.mp3
 lokey=74
 hikey=78
 pitch_keycenter=76
@@ -516,7 +516,7 @@ volume=3
 
 
 <region>
-sample=LDFlute_stac_E5_v3_rr2.flac
+sample=LDFlute_stac_E5_v3_rr2.mp3
 lokey=86
 hikey=90
 pitch_keycenter=88
@@ -526,7 +526,7 @@ volume=3
 
 
 <region>
-sample=LDFlute_stac_C4_v4_rr2.flac
+sample=LDFlute_stac_C4_v4_rr2.mp3
 lokey=71
 hikey=73
 pitch_keycenter=72

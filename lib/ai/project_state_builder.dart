@@ -129,12 +129,16 @@ class ProjectStateBuilder {
     double masterGain0to3 = 1.0,
     double masterPan0to1 = 0.5,
     Map<int, String> roleOverrides = const {},
+    List<TimelineRow> timelineRows = const <TimelineRow>[],
   }) async {
     int inferredRows = 0;
     if (rowGain.length > inferredRows) inferredRows = rowGain.length;
     if (rowPan.length > inferredRows) inferredRows = rowPan.length;
     if (rowAutomation.length > inferredRows) {
       inferredRows = rowAutomation.length;
+    }
+    if (timelineRows.length > inferredRows) {
+      inferredRows = timelineRows.length;
     }
     if (roleOverrides.isNotEmpty) {
       final overrideMax = roleOverrides.keys
@@ -247,11 +251,17 @@ class ProjectStateBuilder {
 
       final rowTracks = audioTracks.where((t) => t.rowIndex == row).toList();
       final hasAudio = rowTracks.isNotEmpty;
+      final rowMeta = row < timelineRows.length ? timelineRows[row] : null;
 
       if (!hasAudio) {
         rows.add(
           RowState(
             rowIndex: row,
+            rowId: rowMeta?.rowId ?? -1,
+            rowName: rowMeta?.name ?? '',
+            laneKind: rowMeta?.kind.wireName ?? 'audio',
+            instrumentId: rowMeta?.instrumentId ?? '',
+            instrumentName: rowMeta?.instrumentName ?? '',
             clips: const [],
             hasAudio: false,
             approxRms: 0,
@@ -538,6 +548,11 @@ class ProjectStateBuilder {
       rows.add(
         RowState(
           rowIndex: row,
+          rowId: rowMeta?.rowId ?? -1,
+          rowName: rowMeta?.name ?? '',
+          laneKind: rowMeta?.kind.wireName ?? 'audio',
+          instrumentId: rowMeta?.instrumentId ?? '',
+          instrumentName: rowMeta?.instrumentName ?? '',
           clips: clipsByRow[row],
           approxRms: rms,
           approxCrest: crest,

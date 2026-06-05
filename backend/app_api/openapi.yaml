@@ -427,6 +427,30 @@ paths:
       responses:
         '200':
           description: Matching internal admin user records
+  /v1/internal/admin/users/create-username-account:
+    post:
+      summary: Create an admin-provisioned username/password account
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, display_name, password]
+              properties:
+                username:
+                  type: string
+                display_name:
+                  type: string
+                email:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Username account created
   /v1/internal/admin/users/delete:
     post:
       summary: Tombstone-delete a user account from internal admin

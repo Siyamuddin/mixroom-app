@@ -41,7 +41,7 @@ group_label=gr_1
 
 
 <region>
-sample=DCClar_stac_A#2_v1_rr1_sum.flac
+sample=DCClar_stac_A#2_v1_rr1_sum.mp3
 lokey=56
 hikey=59
 pitch_keycenter=58
@@ -51,7 +51,7 @@ volume=16
 
 
 <region>
-sample=DCClar_stac_A#3_v1_rr1_sum.flac
+sample=DCClar_stac_A#3_v1_rr1_sum.mp3
 lokey=68
 hikey=71
 pitch_keycenter=70
@@ -61,7 +61,7 @@ volume=16
 
 
 <region>
-sample=DCClar_stac_A#4_v1_rr1_sum.flac
+sample=DCClar_stac_A#4_v1_rr1_sum.mp3
 lokey=80
 hikey=83
 pitch_keycenter=82
@@ -71,7 +71,7 @@ volume=16
 
 
 <region>
-sample=DCClar_stac_D2_v1_rr1_sum.flac
+sample=DCClar_stac_D2_v1_rr1_sum.mp3
 lokey=50
 hikey=51
 pitch_keycenter=50
@@ -81,7 +81,7 @@ volume=16
 
 
 <region>
-sample=DCClar_stac_D3_v1_rr1_sum.flac
+sample=DCClar_stac_D3_v1_rr1_sum.mp3
 lokey=60
 hikey=63
 pitch_keycenter=62
@@ -91,7 +91,7 @@ volume=16
 
 
 <region>
-sample=DCClar_stac_D4_v1_rr1_sum.flac
+sample=DCClar_stac_D4_v1_rr1_sum.mp3
 lokey=72
 hikey=75
 pitch_keycenter=74
@@ -101,7 +101,7 @@ volume=16
 
 
 <region>
-sample=DCClar_stac_F2_v1_rr1_sum.flac
+sample=DCClar_stac_F2_v1_rr1_sum.mp3
 lokey=52
 hikey=55
 pitch_keycenter=53
@@ -111,7 +111,7 @@ volume=16
 
 
 <region>
-sample=DCClar_stac_F3_v1_rr1_sum.flac
+sample=DCClar_stac_F3_v1_rr1_sum.mp3
 lokey=64
 hikey=67
 pitch_keycenter=65
@@ -121,7 +121,7 @@ volume=16
 
 
 <region>
-sample=DCClar_stac_F4_v1_rr1_sum.flac
+sample=DCClar_stac_F4_v1_rr1_sum.mp3
 lokey=76
 hikey=79
 pitch_keycenter=77
@@ -131,7 +131,7 @@ volume=16
 
 
 <region>
-sample=DCClar_stac_F5_v1_rr1_sum.flac
+sample=DCClar_stac_F5_v1_rr1_sum.mp3
 lokey=88
 hikey=89
 pitch_keycenter=89
@@ -141,7 +141,7 @@ volume=16
 
 
 <region>
-sample=DCClar_stac_A#2_v2_rr1_sum.flac
+sample=DCClar_stac_A#2_v2_rr1_sum.mp3
 lokey=56
 hikey=59
 pitch_keycenter=58
@@ -151,7 +151,7 @@ volume=8
 
 
 <region>
-sample=DCClar_stac_A#3_v2_rr1_sum.flac
+sample=DCClar_stac_A#3_v2_rr1_sum.mp3
 lokey=68
 hikey=71
 pitch_keycenter=70
@@ -161,7 +161,7 @@ volume=8
 
 
 <region>
-sample=DCClar_stac_A#4_v2_rr1_sum.flac
+sample=DCClar_stac_A#4_v2_rr1_sum.mp3
 lokey=80
 hikey=83
 pitch_keycenter=82
@@ -171,7 +171,7 @@ volume=8
 
 
 <region>
-sample=DCClar_stac_D2_v2_rr1_sum.flac
+sample=DCClar_stac_D2_v2_rr1_sum.mp3
 lokey=50
 hikey=51
 pitch_keycenter=50
@@ -181,7 +181,7 @@ volume=8
 
 
 <region>
-sample=DCClar_stac_D3_v2_rr1_sum.flac
+sample=DCClar_stac_D3_v2_rr1_sum.mp3
 lokey=60
 hikey=63
 pitch_keycenter=62
@@ -191,7 +191,7 @@ volume=8
 
 
 <region>
-sample=DCClar_stac_D4_v2_rr1_sum.flac
+sample=DCClar_stac_D4_v2_rr1_sum.mp3
 lokey=72
 hikey=75
 pitch_keycenter=74
@@ -201,7 +201,7 @@ volume=8
 
 
 <region>
-sample=DCClar_stac_D5_v2_rr1_sum.flac
+sample=DCClar_stac_D5_v2_rr1_sum.mp3
 lokey=84
 hikey=87
 pitch_keycenter=86
@@ -211,7 +211,7 @@ volume=12
 
 
 <region>
-sample=DCClar_stac_F2_v2_rr1_sum.flac
+sample=DCClar_stac_F2_v2_rr1_sum.mp3
 lokey=52
 hikey=55
 pitch_keycenter=53
@@ -221,7 +221,7 @@ volume=8
 
 
 <region>
-sample=DCClar_stac_F3_v2_rr1_sum.flac
+sample=DCClar_stac_F3_v2_rr1_sum.mp3
 lokey=64
 hikey=67
 pitch_keycenter=65
@@ -231,7 +231,7 @@ volume=8
 
 
 <region>
-sample=DCClar_stac_F4_v2_rr1_sum.flac
+sample=DCClar_stac_F4_v2_rr1_sum.mp3
 lokey=76
 hikey=79
 pitch_keycenter=77
@@ -241,7 +241,7 @@ volume=8
 
 
 <region>
-sample=DCClar_stac_F5_v2_rr1_sum.flac
+sample=DCClar_stac_F5_v2_rr1_sum.mp3
 lokey=88
 hikey=89
 pitch_keycenter=89
@@ -251,7 +251,7 @@ volume=8
 
 
 <region>
-sample=DCClar_stac_A#2_v3_rr1_sum.flac
+sample=DCClar_stac_A#2_v3_rr1_sum.mp3
 lokey=56
 hikey=59
 pitch_keycenter=58
@@ -261,7 +261,7 @@ volume=2
 
 
 <region>
-sample=DCClar_stac_A#3_v3_rr1_sum.flac
+sample=DCClar_stac_A#3_v3_rr1_sum.mp3
 lokey=68
 hikey=71
 pitch_keycenter=70
@@ -271,7 +271,7 @@ volume=2
 
 
 <region>
-sample=DCClar_stac_A#4_v3_rr1_sum.flac
+sample=DCClar_stac_A#4_v3_rr1_sum.mp3
 lokey=80
 hikey=83
 pitch_keycenter=82
@@ -281,7 +281,7 @@ volume=2
 
 
 <region>
-sample=DCClar_stac_D2_v3_rr1_sum.flac
+sample=DCClar_stac_D2_v3_rr1_sum.mp3
 lokey=50
 hikey=51
 pitch_keycenter=50
@@ -291,7 +291,7 @@ volume=2
 
 
 <region>
-sample=DCClar_stac_D3_v3_rr1_sum.flac
+sample=DCClar_stac_D3_v3_rr1_sum.mp3
 lokey=60
 hikey=63
 pitch_keycenter=62
@@ -301,7 +301,7 @@ volume=2
 
 
 <region>
-sample=DCClar_stac_D4_v3_rr1_sum.flac
+sample=DCClar_stac_D4_v3_rr1_sum.mp3
 lokey=72
 hikey=75
 pitch_keycenter=74
@@ -311,7 +311,7 @@ volume=2
 
 
 <region>
-sample=DCClar_stac_D5_v3_rr1_sum.flac
+sample=DCClar_stac_D5_v3_rr1_sum.mp3
 lokey=84
 hikey=87
 pitch_keycenter=86
@@ -321,7 +321,7 @@ volume=4
 
 
 <region>
-sample=DCClar_stac_F2_v3_rr1_sum.flac
+sample=DCClar_stac_F2_v3_rr1_sum.mp3
 lokey=52
 hikey=55
 pitch_keycenter=53
@@ -331,7 +331,7 @@ volume=2
 
 
 <region>
-sample=DCClar_stac_F3_v3_rr1_sum.flac
+sample=DCClar_stac_F3_v3_rr1_sum.mp3
 lokey=64
 hikey=67
 pitch_keycenter=65
@@ -341,7 +341,7 @@ volume=2
 
 
 <region>
-sample=DCClar_stac_F4_v3_rr1_sum.flac
+sample=DCClar_stac_F4_v3_rr1_sum.mp3
 lokey=76
 hikey=79
 pitch_keycenter=77
@@ -351,7 +351,7 @@ volume=2
 
 
 <region>
-sample=DCClar_stac_F5_v3_rr1_sum.flac
+sample=DCClar_stac_F5_v3_rr1_sum.mp3
 lokey=88
 hikey=89
 pitch_keycenter=89
@@ -376,7 +376,7 @@ group_label=gr_2
 
 
 <region>
-sample=DCClar_stac_A#2_v1_rr2_sum.flac
+sample=DCClar_stac_A#2_v1_rr2_sum.mp3
 lokey=56
 hikey=59
 pitch_keycenter=58
@@ -386,7 +386,7 @@ volume=16
 
 
 <region>
-sample=DCClar_stac_A#3_v1_rr2_sum.flac
+sample=DCClar_stac_A#3_v1_rr2_sum.mp3
 lokey=68
 hikey=71
 pitch_keycenter=70
@@ -396,7 +396,7 @@ volume=16
 
 
 <region>
-sample=DCClar_stac_A#4_v1_rr2_sum.flac
+sample=DCClar_stac_A#4_v1_rr2_sum.mp3
 lokey=80
 hikey=83
 pitch_keycenter=82
@@ -406,7 +406,7 @@ volume=16
 
 
 <region>
-sample=DCClar_stac_D2_v1_rr2_sum.flac
+sample=DCClar_stac_D2_v1_rr2_sum.mp3
 lokey=50
 hikey=51
 pitch_keycenter=50
@@ -416,7 +416,7 @@ volume=16
 
 
 <region>
-sample=DCClar_stac_D3_v1_rr2_sum.flac
+sample=DCClar_stac_D3_v1_rr2_sum.mp3
 lokey=60
 hikey=63
 pitch_keycenter=62
@@ -426,7 +426,7 @@ volume=16
 
 
 <region>
-sample=DCClar_stac_D4_v1_rr2_sum.flac
+sample=DCClar_stac_D4_v1_rr2_sum.mp3
 lokey=72
 hikey=75
 pitch_keycenter=74
@@ -436,7 +436,7 @@ volume=16
 
 
 <region>
-sample=DCClar_stac_F2_v1_rr2_sum.flac
+sample=DCClar_stac_F2_v1_rr2_sum.mp3
 lokey=52
 hikey=55
 pitch_keycenter=53
@@ -446,7 +446,7 @@ volume=16
 
 
 <region>
-sample=DCClar_stac_F3_v1_rr2_sum.flac
+sample=DCClar_stac_F3_v1_rr2_sum.mp3
 lokey=64
 hikey=67
 pitch_keycenter=65
@@ -456,7 +456,7 @@ volume=16
 
 
 <region>
-sample=DCClar_stac_F4_v1_rr2_sum.flac
+sample=DCClar_stac_F4_v1_rr2_sum.mp3
 lokey=76
 hikey=79
 pitch_keycenter=77
@@ -466,7 +466,7 @@ volume=16
 
 
 <region>
-sample=DCClar_stac_F5_v1_rr2_sum.flac
+sample=DCClar_stac_F5_v1_rr2_sum.mp3
 lokey=88
 hikey=89
 pitch_keycenter=89
@@ -476,7 +476,7 @@ volume=16
 
 
 <region>
-sample=DCClar_stac_A#2_v2_rr2_sum.flac
+sample=DCClar_stac_A#2_v2_rr2_sum.mp3
 lokey=56
 hikey=59
 pitch_keycenter=58
@@ -486,7 +486,7 @@ volume=8
 
 
 <region>
-sample=DCClar_stac_A#3_v2_rr2_sum.flac
+sample=DCClar_stac_A#3_v2_rr2_sum.mp3
 lokey=68
 hikey=71
 pitch_keycenter=70
@@ -496,7 +496,7 @@ volume=8
 
 
 <region>
-sample=DCClar_stac_A#4_v2_rr2_sum.flac
+sample=DCClar_stac_A#4_v2_rr2_sum.mp3
 lokey=80
 hikey=83
 pitch_keycenter=82
@@ -506,7 +506,7 @@ volume=8
 
 
 <region>
-sample=DCClar_stac_D2_v2_rr2_sum.flac
+sample=DCClar_stac_D2_v2_rr2_sum.mp3
 lokey=50
 hikey=51
 pitch_keycenter=50
@@ -516,7 +516,7 @@ volume=8
 
 
 <region>
-sample=DCClar_stac_D3_v2_rr2_sum.flac
+sample=DCClar_stac_D3_v2_rr2_sum.mp3
 lokey=60
 hikey=63
 pitch_keycenter=62
@@ -526,7 +526,7 @@ volume=8
 
 
 <region>
-sample=DCClar_stac_D4_v2_rr2_sum.flac
+sample=DCClar_stac_D4_v2_rr2_sum.mp3
 lokey=72
 hikey=75
 pitch_keycenter=74
@@ -536,7 +536,7 @@ volume=8
 
 
 <region>
-sample=DCClar_stac_D5_v2_rr2_sum.flac
+sample=DCClar_stac_D5_v2_rr2_sum.mp3
 lokey=84
 hikey=87
 pitch_keycenter=86
@@ -546,7 +546,7 @@ volume=12
 
 
 <region>
-sample=DCClar_stac_F2_v2_rr2_sum.flac
+sample=DCClar_stac_F2_v2_rr2_sum.mp3
 lokey=52
 hikey=55
 pitch_keycenter=53
@@ -556,7 +556,7 @@ volume=8
 
 
 <region>
-sample=DCClar_stac_F3_v2_rr2_sum.flac
+sample=DCClar_stac_F3_v2_rr2_sum.mp3
 lokey=64
 hikey=67
 pitch_keycenter=65
@@ -566,7 +566,7 @@ volume=8
 
 
 <region>
-sample=DCClar_stac_F4_v2_rr2_sum.flac
+sample=DCClar_stac_F4_v2_rr2_sum.mp3
 lokey=76
 hikey=79
 pitch_keycenter=77
@@ -576,7 +576,7 @@ volume=8
 
 
 <region>
-sample=DCClar_stac_F5_v2_rr2_sum.flac
+sample=DCClar_stac_F5_v2_rr2_sum.mp3
 lokey=88
 hikey=89
 pitch_keycenter=89
@@ -586,7 +586,7 @@ volume=8
 
 
 <region>
-sample=DCClar_stac_A#2_v3_rr2_sum.flac
+sample=DCClar_stac_A#2_v3_rr2_sum.mp3
 lokey=56
 hikey=59
 pitch_keycenter=58
@@ -596,7 +596,7 @@ volume=2
 
 
 <region>
-sample=DCClar_stac_A#3_v3_rr2_sum.flac
+sample=DCClar_stac_A#3_v3_rr2_sum.mp3
 lokey=68
 hikey=71
 pitch_keycenter=70
@@ -606,7 +606,7 @@ volume=2
 
 
 <region>
-sample=DCClar_stac_A#4_v3_rr2_sum.flac
+sample=DCClar_stac_A#4_v3_rr2_sum.mp3
 lokey=80
 hikey=83
 pitch_keycenter=82
@@ -616,7 +616,7 @@ volume=2
 
 
 <region>
-sample=DCClar_stac_D2_v3_rr2_sum.flac
+sample=DCClar_stac_D2_v3_rr2_sum.mp3
 lokey=50
 hikey=51
 pitch_keycenter=50
@@ -626,7 +626,7 @@ volume=2
 
 
 <region>
-sample=DCClar_stac_D3_v3_rr2_sum.flac
+sample=DCClar_stac_D3_v3_rr2_sum.mp3
 lokey=60
 hikey=63
 pitch_keycenter=62
@@ -636,7 +636,7 @@ volume=2
 
 
 <region>
-sample=DCClar_stac_D4_v3_rr2_sum.flac
+sample=DCClar_stac_D4_v3_rr2_sum.mp3
 lokey=72
 hikey=75
 pitch_keycenter=74
@@ -646,7 +646,7 @@ volume=2
 
 
 <region>
-sample=DCClar_stac_D5_v3_rr2_sum.flac
+sample=DCClar_stac_D5_v3_rr2_sum.mp3
 lokey=84
 hikey=87
 pitch_keycenter=86
@@ -656,7 +656,7 @@ volume=4
 
 
 <region>
-sample=DCClar_stac_F2_v3_rr2_sum.flac
+sample=DCClar_stac_F2_v3_rr2_sum.mp3
 lokey=52
 hikey=55
 pitch_keycenter=53
@@ -666,7 +666,7 @@ volume=2
 
 
 <region>
-sample=DCClar_stac_F3_v3_rr2_sum.flac
+sample=DCClar_stac_F3_v3_rr2_sum.mp3
 lokey=64
 hikey=67
 pitch_keycenter=65
@@ -676,7 +676,7 @@ volume=2
 
 
 <region>
-sample=DCClar_stac_F4_v3_rr2_sum.flac
+sample=DCClar_stac_F4_v3_rr2_sum.mp3
 lokey=76
 hikey=79
 pitch_keycenter=77
@@ -686,7 +686,7 @@ volume=2
 
 
 <region>
-sample=DCClar_stac_F5_v3_rr2_sum.flac
+sample=DCClar_stac_F5_v3_rr2_sum.mp3
 lokey=88
 hikey=89
 pitch_keycenter=89

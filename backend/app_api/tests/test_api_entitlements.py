@@ -102,7 +102,7 @@ class ApiEntitlementsTests(unittest.TestCase):
         self.assertEqual(payload["source_provider"], "admin_grant")
         self.assertEqual(payload["source_subscription_id"], "free-default")
         self.assertEqual(payload["product_code"], "")
-        self.assertEqual(payload["limits"]["ai_prompts_daily"], 30)
+        self.assertEqual(payload["limits"]["ai_prompts_daily"], 200)
 
     def test_uses_legacy_tier_fallback_and_preserves_product_code(self):
         self.repo.put_entitlement(

@@ -1,0 +1,95 @@
+# Testing And Debugging Playbook
+
+Owner: Engineering  
+Status: Draft  
+Last reviewed: 2026-06-05  
+Update trigger: Update this when test commands, QA flows, diagnostics, logging,
+crash reporting, integration tests, or release gates change.
+
+## Purpose
+
+This page tells a developer which checks to run and where to look when a change
+breaks app behavior.
+
+## Fast Local Checks
+
+Run analysis:
+
+```bash
+dart analyze
+```
+
+Run unit/widget tests:
+
+```bash
+flutter test
+```
+
+Run integration suite:
+
+```bash
+./tool/run_integration_suite.sh
+```
+
+Run docs freshness before commit or PR:
+
+```bash
+dart run tool/check_docs_freshness.dart --staged
+dart run tool/check_docs_freshness.dart --base origin/main
+```
+
+## Backend Tests
+
+Backend tests live under:
+
+- `backend/app_api/tests/`
+
+Use targeted tests while iterating and the wider suite before deploy. Start with
+tests matching the handler or common module you changed.
+
+## Useful Debug Entry Points
+
+- Analytics: `docs/ANALYTICS.md`
+- Remote operations: `docs/REMOTE_OPERATIONS.md`
+- Auth QA: `docs/BETA_AUTH_QA_CHECKLIST.md`
+- Integration tests: `docs/INTEGRATION_TESTS.md`
+- AI chat cookbook: `lib/ai/README_CHATBAR_COOKBOOK.md`
+- Audio export analyzer: `tool/audio_export_analyze.dart`
+- Local AI debug config: `tool/local_ai_debug.example.json`
+
+## Audio Debugging
+
+When debugging audio, identify which layer failed:
+
+1. Flutter UI state and command construction.
+2. Dart plugin API call.
+3. Native method-channel handling.
+4. Native engine operation.
+5. File output, event reporting, or playback route.
+
+Keep real-time audio constraints in mind. A freeze may come from a blocking
+operation on the native audio path, not from Flutter UI code.
+
+## Auth Debugging
+
+Auth failures usually involve one of:
+
+- platform SDK payload creation
+- app API token validation
+- secure token storage
+- backend environment variables or secrets
+- social-provider console configuration
+- stale app version using an older payload contract
+
+Check client logs, app API logs, and the matching backend auth tests.
+
+## Release Debugging
+
+Release-only failures often come from:
+
+- unexpected iOS JUCE archive selection in the podspec linker settings
+- wrong FFmpeg variant
+- missing store/provider console setup
+- signing, entitlement, or permission mismatch
+- backend deploy mismatch with the app build
+- release build optimizer removing or changing native assets

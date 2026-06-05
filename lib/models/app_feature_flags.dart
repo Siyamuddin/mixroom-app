@@ -9,6 +9,7 @@ class AppFeatureFlagKeys {
   static const String subscriptionEnforcementEnabled =
       'subscription_enforcement_enabled';
   static const String iapPurchasesEnabled = 'iap_purchases_enabled';
+  static const String cloudProjectsEnabled = 'cloud_projects_enabled';
 }
 
 class AppFeatureFlags {
@@ -26,6 +27,8 @@ class AppFeatureFlags {
         AppFeatureFlagKeys.subscriptionEnforcementEnabled:
             AppApiConfig.enforceSubscriptions,
         AppFeatureFlagKeys.iapPurchasesEnabled: IapConfig.purchasesEnabled,
+        AppFeatureFlagKeys.cloudProjectsEnabled:
+            AppApiConfig.cloudProjectsEnabled,
       },
       updatedAt: null,
       source: 'local',
@@ -44,7 +47,7 @@ class AppFeatureFlags {
         final key = entry.key.toString();
         final value = entry.value;
         if (value is bool) {
-          nextFlags[key] = value;
+          nextFlags[key] = _localOverrideFor(key) ?? value;
         }
       }
     }
@@ -72,6 +75,33 @@ class AppFeatureFlags {
   bool get iapPurchasesEnabled =>
       flags[AppFeatureFlagKeys.iapPurchasesEnabled] ??
       IapConfig.purchasesEnabled;
+
+  bool get cloudProjectsEnabled =>
+      flags[AppFeatureFlagKeys.cloudProjectsEnabled] ??
+      AppApiConfig.cloudProjectsEnabled;
+
+  static bool? _localOverrideFor(String key) {
+    switch (key) {
+      case AppFeatureFlagKeys.accountPlanBillingEnabled:
+        return AppApiConfig.hasAccountPlanBillingOverride
+            ? AppApiConfig.accountPlanBillingEnabled
+            : null;
+      case AppFeatureFlagKeys.subscriptionEnforcementEnabled:
+        return AppApiConfig.hasEnforceSubscriptionsOverride
+            ? AppApiConfig.enforceSubscriptions
+            : null;
+      case AppFeatureFlagKeys.iapPurchasesEnabled:
+        return IapConfig.hasPurchasesEnabledOverride
+            ? IapConfig.purchasesEnabled
+            : null;
+      case AppFeatureFlagKeys.cloudProjectsEnabled:
+        return AppApiConfig.hasCloudProjectsOverride
+            ? AppApiConfig.cloudProjectsEnabled
+            : null;
+      default:
+        return null;
+    }
+  }
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{

@@ -10,6 +10,10 @@
 #import <FlutterMacOS/FlutterMacOS.h>
 #endif
 
+#if TARGET_OS_OSX
+extern void mixroomScheduleOttPluginEditorAutotest(void);
+#endif
+
 @class JuceAudioEnginePlugin;
 
 @interface JucePluginEventStreamHandler : NSObject <FlutterStreamHandler>
@@ -37,6 +41,24 @@ static dispatch_queue_t MixroomPromptAnalysisQueue(void) {
             );
         queue = dispatch_queue_create(
             "com.mixroom.juce_audio_engine.prompt_analysis",
+            attr
+        );
+    });
+    return queue;
+}
+
+static dispatch_queue_t MixroomMidiClipLoadQueue(void) {
+    static dispatch_queue_t queue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        dispatch_queue_attr_t attr =
+            dispatch_queue_attr_make_with_qos_class(
+                DISPATCH_QUEUE_SERIAL,
+                QOS_CLASS_USER_INITIATED,
+                0
+            );
+        queue = dispatch_queue_create(
+            "com.mixroom.juce_audio_engine.midi_clip_load",
             attr
         );
     });
@@ -320,6 +342,13 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
                                              selector:@selector(handlePluginLoadedNotification:)
                                                  name:@"MixroomHostedPluginEditorAutomationNotification"
                                                object:nil];
+#if TARGET_OS_OSX
+    NSString *ottAutotest =
+        [[[NSProcessInfo processInfo] environment] objectForKey:@"MIXROOM_AUTOTEST_OTT"];
+    if ([ottAutotest isEqualToString:@"1"]) {
+        mixroomScheduleOttPluginEditorAutotest();
+    }
+#endif
     // [JuceBridge initialiseEngineObjC];
 }
 
@@ -531,14 +560,32 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSInteger clip = [args[@"clip"] integerValue];
         NSInteger rowId = [args[@"rowId"] integerValue];
         if (args[@"row"] != nil) rowId = [args[@"row"] integerValue];
-        NSString *instrumentId = args[@"instrumentId"] ?: @"mixroom.basic_synth";
-        NSString *instrumentName = args[@"instrumentName"] ?: @"Basic Synth";
-        NSArray *notes = args[@"notes"] ?: @[];
-        NSDictionary *params = args[@"params"] ?: @{};
+        NSString *instrumentId = [args[@"instrumentId"] ?: @"mixroom.basic_synth" copy];
+        NSString *instrumentName = [args[@"instrumentName"] ?: @"Basic Synth" copy];
+        NSArray *notes = [args[@"notes"] ?: @[] copy];
+        NSDictionary *params = [args[@"params"] ?: @{} copy];
         double sourceTempoBpm = [args[@"sourceTempoBpm"] doubleValue];
         double startSec = [args[@"startSec"] doubleValue];
         double lengthSec = [args[@"lengthSec"] doubleValue];
         double inFileOffsetSec = [args[@"inFileOffsetSec"] doubleValue];
+#if TARGET_OS_OSX
+        FlutterResult loadResult = [result copy];
+        dispatch_async(MixroomMidiClipLoadQueue(), ^{
+            BOOL ok = [JuceBridge loadMidiClipObjC:clip
+                                             rowId:rowId
+                                      instrumentId:instrumentId
+                                    instrumentName:instrumentName
+                                             notes:notes
+                                            params:params
+                                    sourceTempoBpm:sourceTempoBpm
+                                          startSec:startSec
+                                         lengthSec:lengthSec
+                                   inFileOffsetSec:inFileOffsetSec];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                loadResult(@(ok));
+            });
+        });
+#else
         BOOL ok = [JuceBridge loadMidiClipObjC:clip
                                          rowId:rowId
                                   instrumentId:instrumentId
@@ -550,6 +597,7 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
                                      lengthSec:lengthSec
                                inFileOffsetSec:inFileOffsetSec];
         result(@(ok));
+#endif
     } else if ([call.method isEqualToString:@"updateMidiClipEvents"]) {
         NSInteger clip = [args[@"clip"] integerValue];
         NSString *instrumentId = args[@"instrumentId"] ?: @"mixroom.basic_synth";

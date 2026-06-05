@@ -28,6 +28,7 @@ class AdminBillingApiTests(unittest.TestCase):
                 "account_plan_billing_enabled": True,
                 "subscription_enforcement_enabled": True,
                 "iap_purchases_enabled": True,
+                "cloud_projects_enabled": True,
             },
             "configurable": True,
         }
@@ -120,7 +121,8 @@ class AdminBillingApiTests(unittest.TestCase):
                     '{"flags":{'
                     '"account_plan_billing_enabled":true,'
                     '"subscription_enforcement_enabled":true,'
-                    '"iap_purchases_enabled":true'
+                    '"iap_purchases_enabled":true,'
+                    '"cloud_projects_enabled":true'
                     "}}"
                 ),
             },

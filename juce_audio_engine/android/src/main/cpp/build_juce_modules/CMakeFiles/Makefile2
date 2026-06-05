@@ -63,106 +63,269 @@ CMAKE_BINARY_DIR = /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/
 # Directory level rules for the build root directory
 
 # The main recursive "all" target.
-all: CMakeFiles/JuceModules.dir/all
-all: _deps/oboe-build/all
+all: CMakeFiles/sheenbidi.dir/all
+all: CMakeFiles/cpu-features.dir/all
+all: CMakeFiles/juce_audio_engine.dir/all
+all: juce/modules/juce_audio_devices/native/oboe/all
+all: harfbuzz/all
 .PHONY : all
 
 # The main recursive "codegen" target.
-codegen: CMakeFiles/JuceModules.dir/codegen
-codegen: _deps/oboe-build/codegen
+codegen: CMakeFiles/sheenbidi.dir/codegen
+codegen: CMakeFiles/cpu-features.dir/codegen
+codegen: CMakeFiles/juce_audio_engine.dir/codegen
+codegen: juce/modules/juce_audio_devices/native/oboe/codegen
+codegen: harfbuzz/codegen
 .PHONY : codegen
 
 # The main recursive "preinstall" target.
-preinstall: _deps/oboe-build/preinstall
+preinstall: juce/modules/juce_audio_devices/native/oboe/preinstall
+preinstall: harfbuzz/preinstall
 .PHONY : preinstall
 
 # The main recursive "clean" target.
-clean: CMakeFiles/JuceModules.dir/clean
-clean: _deps/oboe-build/clean
+clean: CMakeFiles/sheenbidi.dir/clean
+clean: CMakeFiles/cpu-features.dir/clean
+clean: CMakeFiles/juce_audio_engine.dir/clean
+clean: juce/modules/juce_audio_devices/native/oboe/clean
+clean: harfbuzz/clean
 .PHONY : clean
 
 #=============================================================================
-# Directory level rules for directory _deps/oboe-build
+# Directory level rules for directory harfbuzz
 
 # Recursive "all" directory target.
-_deps/oboe-build/all: _deps/oboe-build/CMakeFiles/oboe.dir/all
-.PHONY : _deps/oboe-build/all
+harfbuzz/all: harfbuzz/CMakeFiles/harfbuzz.dir/all
+harfbuzz/all: harfbuzz/CMakeFiles/harfbuzz-subset.dir/all
+.PHONY : harfbuzz/all
 
 # Recursive "codegen" directory target.
-_deps/oboe-build/codegen: _deps/oboe-build/CMakeFiles/oboe.dir/codegen
-.PHONY : _deps/oboe-build/codegen
+harfbuzz/codegen: harfbuzz/CMakeFiles/harfbuzz.dir/codegen
+harfbuzz/codegen: harfbuzz/CMakeFiles/harfbuzz-subset.dir/codegen
+.PHONY : harfbuzz/codegen
 
 # Recursive "preinstall" directory target.
-_deps/oboe-build/preinstall:
-.PHONY : _deps/oboe-build/preinstall
+harfbuzz/preinstall:
+.PHONY : harfbuzz/preinstall
 
 # Recursive "clean" directory target.
-_deps/oboe-build/clean: _deps/oboe-build/CMakeFiles/oboe.dir/clean
-.PHONY : _deps/oboe-build/clean
+harfbuzz/clean: harfbuzz/CMakeFiles/harfbuzz.dir/clean
+harfbuzz/clean: harfbuzz/CMakeFiles/harfbuzz-subset.dir/clean
+.PHONY : harfbuzz/clean
 
 #=============================================================================
-# Target rules for target CMakeFiles/JuceModules.dir
+# Directory level rules for directory juce/modules/juce_audio_devices/native/oboe
+
+# Recursive "all" directory target.
+juce/modules/juce_audio_devices/native/oboe/all: juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/all
+.PHONY : juce/modules/juce_audio_devices/native/oboe/all
+
+# Recursive "codegen" directory target.
+juce/modules/juce_audio_devices/native/oboe/codegen: juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/codegen
+.PHONY : juce/modules/juce_audio_devices/native/oboe/codegen
+
+# Recursive "preinstall" directory target.
+juce/modules/juce_audio_devices/native/oboe/preinstall:
+.PHONY : juce/modules/juce_audio_devices/native/oboe/preinstall
+
+# Recursive "clean" directory target.
+juce/modules/juce_audio_devices/native/oboe/clean: juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/clean
+.PHONY : juce/modules/juce_audio_devices/native/oboe/clean
+
+#=============================================================================
+# Target rules for target CMakeFiles/sheenbidi.dir
 
 # All Build rule for target.
-CMakeFiles/JuceModules.dir/all: _deps/oboe-build/CMakeFiles/oboe.dir/all
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/depend
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=1,2,3,4,5,6,7,8,9,10,11,12,13 "Built target JuceModules"
-.PHONY : CMakeFiles/JuceModules.dir/all
+CMakeFiles/sheenbidi.dir/all:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100 "Built target sheenbidi"
+.PHONY : CMakeFiles/sheenbidi.dir/all
 
 # Build rule for subdir invocation for target.
-CMakeFiles/JuceModules.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles 76
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/JuceModules.dir/all
+CMakeFiles/sheenbidi.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles 23
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/sheenbidi.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles 0
-.PHONY : CMakeFiles/JuceModules.dir/rule
+.PHONY : CMakeFiles/sheenbidi.dir/rule
 
 # Convenience name for target.
-JuceModules: CMakeFiles/JuceModules.dir/rule
-.PHONY : JuceModules
+sheenbidi: CMakeFiles/sheenbidi.dir/rule
+.PHONY : sheenbidi
 
 # codegen rule for target.
-CMakeFiles/JuceModules.dir/codegen:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=1,2,3,4,5,6,7,8,9,10,11,12,13 "Finished codegen for target JuceModules"
-.PHONY : CMakeFiles/JuceModules.dir/codegen
+CMakeFiles/sheenbidi.dir/codegen:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/codegen
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100 "Finished codegen for target sheenbidi"
+.PHONY : CMakeFiles/sheenbidi.dir/codegen
 
 # clean rule for target.
-CMakeFiles/JuceModules.dir/clean:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/clean
-.PHONY : CMakeFiles/JuceModules.dir/clean
+CMakeFiles/sheenbidi.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/clean
+.PHONY : CMakeFiles/sheenbidi.dir/clean
 
 #=============================================================================
-# Target rules for target _deps/oboe-build/CMakeFiles/oboe.dir
+# Target rules for target CMakeFiles/cpu-features.dir
 
 # All Build rule for target.
-_deps/oboe-build/CMakeFiles/oboe.dir/all:
-	$(MAKE) $(MAKESILENT) -f _deps/oboe-build/CMakeFiles/oboe.dir/build.make _deps/oboe-build/CMakeFiles/oboe.dir/depend
-	$(MAKE) $(MAKESILENT) -f _deps/oboe-build/CMakeFiles/oboe.dir/build.make _deps/oboe-build/CMakeFiles/oboe.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76 "Built target oboe"
-.PHONY : _deps/oboe-build/CMakeFiles/oboe.dir/all
+CMakeFiles/cpu-features.dir/all:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/cpu-features.dir/build.make CMakeFiles/cpu-features.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/cpu-features.dir/build.make CMakeFiles/cpu-features.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=1 "Built target cpu-features"
+.PHONY : CMakeFiles/cpu-features.dir/all
 
 # Build rule for subdir invocation for target.
-_deps/oboe-build/CMakeFiles/oboe.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles 63
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 _deps/oboe-build/CMakeFiles/oboe.dir/all
+CMakeFiles/cpu-features.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles 1
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/cpu-features.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles 0
-.PHONY : _deps/oboe-build/CMakeFiles/oboe.dir/rule
+.PHONY : CMakeFiles/cpu-features.dir/rule
 
 # Convenience name for target.
-oboe: _deps/oboe-build/CMakeFiles/oboe.dir/rule
+cpu-features: CMakeFiles/cpu-features.dir/rule
+.PHONY : cpu-features
+
+# codegen rule for target.
+CMakeFiles/cpu-features.dir/codegen:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/cpu-features.dir/build.make CMakeFiles/cpu-features.dir/codegen
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=1 "Finished codegen for target cpu-features"
+.PHONY : CMakeFiles/cpu-features.dir/codegen
+
+# clean rule for target.
+CMakeFiles/cpu-features.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/cpu-features.dir/build.make CMakeFiles/cpu-features.dir/clean
+.PHONY : CMakeFiles/cpu-features.dir/clean
+
+#=============================================================================
+# Target rules for target CMakeFiles/juce_audio_engine.dir
+
+# All Build rule for target.
+CMakeFiles/juce_audio_engine.dir/all: CMakeFiles/sheenbidi.dir/all
+CMakeFiles/juce_audio_engine.dir/all: CMakeFiles/cpu-features.dir/all
+CMakeFiles/juce_audio_engine.dir/all: juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/all
+CMakeFiles/juce_audio_engine.dir/all: harfbuzz/CMakeFiles/harfbuzz.dir/all
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/juce_audio_engine.dir/build.make CMakeFiles/juce_audio_engine.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/juce_audio_engine.dir/build.make CMakeFiles/juce_audio_engine.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=19,20,21,22,23 "Built target juce_audio_engine"
+.PHONY : CMakeFiles/juce_audio_engine.dir/all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/juce_audio_engine.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles 85
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/juce_audio_engine.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles 0
+.PHONY : CMakeFiles/juce_audio_engine.dir/rule
+
+# Convenience name for target.
+juce_audio_engine: CMakeFiles/juce_audio_engine.dir/rule
+.PHONY : juce_audio_engine
+
+# codegen rule for target.
+CMakeFiles/juce_audio_engine.dir/codegen:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/juce_audio_engine.dir/build.make CMakeFiles/juce_audio_engine.dir/codegen
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=19,20,21,22,23 "Finished codegen for target juce_audio_engine"
+.PHONY : CMakeFiles/juce_audio_engine.dir/codegen
+
+# clean rule for target.
+CMakeFiles/juce_audio_engine.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/juce_audio_engine.dir/build.make CMakeFiles/juce_audio_engine.dir/clean
+.PHONY : CMakeFiles/juce_audio_engine.dir/clean
+
+#=============================================================================
+# Target rules for target juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir
+
+# All Build rule for target.
+juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/all:
+	$(MAKE) $(MAKESILENT) -f juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/build.make juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/depend
+	$(MAKE) $(MAKESILENT) -f juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/build.make juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77 "Built target oboe"
+.PHONY : juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/all
+
+# Build rule for subdir invocation for target.
+juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles 54
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles 0
+.PHONY : juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/rule
+
+# Convenience name for target.
+oboe: juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/rule
 .PHONY : oboe
 
 # codegen rule for target.
-_deps/oboe-build/CMakeFiles/oboe.dir/codegen:
-	$(MAKE) $(MAKESILENT) -f _deps/oboe-build/CMakeFiles/oboe.dir/build.make _deps/oboe-build/CMakeFiles/oboe.dir/codegen
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76 "Finished codegen for target oboe"
-.PHONY : _deps/oboe-build/CMakeFiles/oboe.dir/codegen
+juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/codegen:
+	$(MAKE) $(MAKESILENT) -f juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/build.make juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/codegen
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77 "Finished codegen for target oboe"
+.PHONY : juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/codegen
 
 # clean rule for target.
-_deps/oboe-build/CMakeFiles/oboe.dir/clean:
-	$(MAKE) $(MAKESILENT) -f _deps/oboe-build/CMakeFiles/oboe.dir/build.make _deps/oboe-build/CMakeFiles/oboe.dir/clean
-.PHONY : _deps/oboe-build/CMakeFiles/oboe.dir/clean
+juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/clean:
+	$(MAKE) $(MAKESILENT) -f juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/build.make juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/clean
+.PHONY : juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/clean
+
+#=============================================================================
+# Target rules for target harfbuzz/CMakeFiles/harfbuzz.dir
+
+# All Build rule for target.
+harfbuzz/CMakeFiles/harfbuzz.dir/all:
+	$(MAKE) $(MAKESILENT) -f harfbuzz/CMakeFiles/harfbuzz.dir/build.make harfbuzz/CMakeFiles/harfbuzz.dir/depend
+	$(MAKE) $(MAKESILENT) -f harfbuzz/CMakeFiles/harfbuzz.dir/build.make harfbuzz/CMakeFiles/harfbuzz.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=2,3 "Built target harfbuzz"
+.PHONY : harfbuzz/CMakeFiles/harfbuzz.dir/all
+
+# Build rule for subdir invocation for target.
+harfbuzz/CMakeFiles/harfbuzz.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 harfbuzz/CMakeFiles/harfbuzz.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles 0
+.PHONY : harfbuzz/CMakeFiles/harfbuzz.dir/rule
+
+# Convenience name for target.
+harfbuzz: harfbuzz/CMakeFiles/harfbuzz.dir/rule
+.PHONY : harfbuzz
+
+# codegen rule for target.
+harfbuzz/CMakeFiles/harfbuzz.dir/codegen:
+	$(MAKE) $(MAKESILENT) -f harfbuzz/CMakeFiles/harfbuzz.dir/build.make harfbuzz/CMakeFiles/harfbuzz.dir/codegen
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=2,3 "Finished codegen for target harfbuzz"
+.PHONY : harfbuzz/CMakeFiles/harfbuzz.dir/codegen
+
+# clean rule for target.
+harfbuzz/CMakeFiles/harfbuzz.dir/clean:
+	$(MAKE) $(MAKESILENT) -f harfbuzz/CMakeFiles/harfbuzz.dir/build.make harfbuzz/CMakeFiles/harfbuzz.dir/clean
+.PHONY : harfbuzz/CMakeFiles/harfbuzz.dir/clean
+
+#=============================================================================
+# Target rules for target harfbuzz/CMakeFiles/harfbuzz-subset.dir
+
+# All Build rule for target.
+harfbuzz/CMakeFiles/harfbuzz-subset.dir/all: harfbuzz/CMakeFiles/harfbuzz.dir/all
+	$(MAKE) $(MAKESILENT) -f harfbuzz/CMakeFiles/harfbuzz-subset.dir/build.make harfbuzz/CMakeFiles/harfbuzz-subset.dir/depend
+	$(MAKE) $(MAKESILENT) -f harfbuzz/CMakeFiles/harfbuzz-subset.dir/build.make harfbuzz/CMakeFiles/harfbuzz-subset.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=4,5,6,7,8,9,10,11,12,13,14,15,16,17,18 "Built target harfbuzz-subset"
+.PHONY : harfbuzz/CMakeFiles/harfbuzz-subset.dir/all
+
+# Build rule for subdir invocation for target.
+harfbuzz/CMakeFiles/harfbuzz-subset.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles 17
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 harfbuzz/CMakeFiles/harfbuzz-subset.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles 0
+.PHONY : harfbuzz/CMakeFiles/harfbuzz-subset.dir/rule
+
+# Convenience name for target.
+harfbuzz-subset: harfbuzz/CMakeFiles/harfbuzz-subset.dir/rule
+.PHONY : harfbuzz-subset
+
+# codegen rule for target.
+harfbuzz/CMakeFiles/harfbuzz-subset.dir/codegen: harfbuzz/CMakeFiles/harfbuzz.dir/all
+	$(MAKE) $(MAKESILENT) -f harfbuzz/CMakeFiles/harfbuzz-subset.dir/build.make harfbuzz/CMakeFiles/harfbuzz-subset.dir/codegen
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=4,5,6,7,8,9,10,11,12,13,14,15,16,17,18 "Finished codegen for target harfbuzz-subset"
+.PHONY : harfbuzz/CMakeFiles/harfbuzz-subset.dir/codegen
+
+# clean rule for target.
+harfbuzz/CMakeFiles/harfbuzz-subset.dir/clean:
+	$(MAKE) $(MAKESILENT) -f harfbuzz/CMakeFiles/harfbuzz-subset.dir/build.make harfbuzz/CMakeFiles/harfbuzz-subset.dir/clean
+.PHONY : harfbuzz/CMakeFiles/harfbuzz-subset.dir/clean
 
 #=============================================================================
 # Special targets to cleanup operation of make.
