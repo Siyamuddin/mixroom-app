@@ -686,12 +686,9 @@ private:
               bufferSize (bufferSizeToUse),
               streamFormat (streamFormatToUse),
               bitDepth (bitDepthToUse),
-              outputSharingMode (numInputChannelsToUse > 0 ? oboe::SharingMode::Exclusive
-                                                           : oboe::SharingMode::Shared),
-              outputAudioApi (numInputChannelsToUse > 0 ? oboe::AudioApi::Unspecified
-                                                        : oboe::AudioApi::OpenSLES),
-              outputPerformanceMode (numInputChannelsToUse > 0 ? oboe::PerformanceMode::LowLatency
-                                                               : oboe::PerformanceMode::None),
+              outputSharingMode (oboe::SharingMode::Shared),
+              outputAudioApi (oboe::AudioApi::AAudio),
+              outputPerformanceMode (oboe::PerformanceMode::LowLatency),
               outputStream (new OboeStream (outputDeviceId,
                                             oboe::Direction::Output,
                                             outputSharingMode,

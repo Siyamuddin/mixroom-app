@@ -460,27 +460,27 @@ CMakeFiles/JuceModules.dir/juce/modules/juce_audio_devices/juce_audio_devices.cp
   /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_basics/midi/juce_MidiDataConcatenator.h \
   /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/juce_Midi_android.cpp \
   /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/juce_HighPerformanceAudioHelpers_android.h \
-  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-src/include/oboe/Oboe.h \
-  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-src/include/oboe/Definitions.h \
-  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-src/include/oboe/ResultWithValue.h \
-  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-src/include/oboe/LatencyTuner.h \
-  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-src/include/oboe/AudioStream.h \
-  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-src/include/oboe/AudioStreamBuilder.h \
-  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-src/include/oboe/AudioStreamBase.h \
-  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-src/include/oboe/AudioStreamCallback.h \
-  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-src/include/oboe/Utilities.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/oboe/include/oboe/Oboe.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/oboe/include/oboe/Definitions.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/oboe/include/oboe/ResultWithValue.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/oboe/include/oboe/LatencyTuner.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/oboe/include/oboe/AudioStream.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/oboe/include/oboe/AudioStreamBuilder.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/oboe/include/oboe/AudioStreamBase.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/oboe/include/oboe/AudioStreamCallback.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/oboe/include/oboe/Utilities.h \
   /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/unistd.h \
   /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/getopt.h \
   /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/ioctl.h \
   /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/sysconf.h \
   /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/bits/fortify/unistd.h \
   /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/include/android/legacy_unistd_inlines.h \
-  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-src/include/oboe/Version.h \
-  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-src/include/oboe/StabilizedCallback.h \
-  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-src/include/oboe/FifoBuffer.h \
-  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-src/include/oboe/FifoControllerBase.h \
-  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-src/include/oboe/OboeExtensions.h \
-  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/_deps/oboe-src/include/oboe/FullDuplexStream.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/oboe/include/oboe/Version.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/oboe/include/oboe/StabilizedCallback.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/oboe/include/oboe/FifoBuffer.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/oboe/include/oboe/FifoControllerBase.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/oboe/include/oboe/OboeExtensions.h \
+  /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/oboe/include/oboe/FullDuplexStream.h \
   /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/juce_Oboe_android.cpp \
   /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/midi_io/juce_MidiDevices.cpp \
   /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/audio_io/juce_AudioDeviceManager.cpp \

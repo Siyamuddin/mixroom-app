@@ -7,6 +7,8 @@ class IapConfig {
     'IAP_ENABLE_PURCHASES',
     defaultValue: false,
   );
+  static const bool hasPurchasesEnabledOverride =
+      bool.hasEnvironment('IAP_ENABLE_PURCHASES');
 
   static const String appleStarterMonthlyProductId = String.fromEnvironment(
     'IAP_APPLE_STARTER_MONTHLY_PRODUCT_ID',

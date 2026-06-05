@@ -30,11 +30,21 @@ class _FakeProjectStateBuilder extends ProjectStateBuilder {
     double masterGain0to3 = 1.0,
     double masterPan0to1 = 0.5,
     Map<int, String> roleOverrides = const {},
+    List<TimelineRow> timelineRows = const <TimelineRow>[],
   }) async {
     final rowStates = List<RowState>.generate(rows, (row) {
       final rowTracks = audioTracks.where((t) => t.rowIndex == row).toList();
       return RowState(
         rowIndex: row,
+        rowId: row < timelineRows.length ? timelineRows[row].rowId : row,
+        rowName: row < timelineRows.length ? timelineRows[row].name : '',
+        laneKind: row < timelineRows.length
+            ? timelineRows[row].kind.wireName
+            : 'audio',
+        instrumentId:
+            row < timelineRows.length ? timelineRows[row].instrumentId : '',
+        instrumentName:
+            row < timelineRows.length ? timelineRows[row].instrumentName : '',
         clips: const <ClipState>[],
         approxRms: rowTracks.isEmpty ? 0.0 : 0.2,
         approxCrest: rowTracks.isEmpty ? 0.0 : 1.4,
@@ -109,6 +119,8 @@ CloudLlmService _mockCloudLlmService({
   return CloudLlmService(
     apiKey: 'sk-test',
     model: 'gpt-4.1-mini',
+    proxyApiBaseUrl: 'https://llm.test',
+    authTokenProvider: () async => 'test-token',
     httpClient: client,
   );
 }

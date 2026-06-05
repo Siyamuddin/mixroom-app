@@ -252,7 +252,7 @@ PAYMENT_CREDENTIAL_SECRET_PREFIX = os.environ.get(
 
 DEFAULT_CHECKOUT_URL = os.environ.get(
     "DEFAULT_CHECKOUT_URL",
-    "https://www.mixroom.ai/subscribe",
+    "https://www.mixroom.ai/#pricing",
 )
 
 POSTHOG_API_KEY = os.environ.get("POSTHOG_API_KEY", "").strip()

@@ -100,6 +100,30 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             payload["requested_email"] = admin_email
             return _finalize(json_response(200, payload))
 
+        if method == "POST" and path.endswith("/v1/internal/admin/users/create-username-account"):
+            try:
+                body = parse_json_body(event)
+            except RequestBodyError as exc:
+                return _finalize(
+                    json_response(exc.status_code, {"error": exc.message}),
+                    error="request_body_invalid",
+                )
+
+            payload = repo.create_username_account(
+                username=str(body.get("username") or ""),
+                display_name=str(
+                    body.get("display_name")
+                    or body.get("displayName")
+                    or body.get("name")
+                    or ""
+                ),
+                password=str(body.get("password") or ""),
+                email=str(body.get("email") or ""),
+                created_by_user_id=admin_user_id,
+                created_by_email=admin_email,
+            )
+            return _finalize(json_response(200, payload))
+
         if method == "POST" and path.endswith("/v1/internal/admin/users/delete"):
             try:
                 body = parse_json_body(event)

@@ -44,7 +44,7 @@ group_label=gr_1
 
 
 <region>
-sample=TB_hit_F5_v3_rr1.flac
+sample=TB_hit_F5_v3_rr1.mp3
 lokey=75
 hikey=79
 pitch_keycenter=77
@@ -54,7 +54,7 @@ volume=16
 
 
 <region>
-sample=TB_hit_C4_v4_rr1.flac
+sample=TB_hit_C4_v4_rr1.mp3
 lokey=60
 hikey=63
 pitch_keycenter=60
@@ -64,7 +64,7 @@ volume=6
 
 
 <region>
-sample=TB_hit_C5_v4_rr1.flac
+sample=TB_hit_C5_v4_rr1.mp3
 lokey=70
 hikey=74
 pitch_keycenter=72
@@ -74,7 +74,7 @@ volume=6
 
 
 <region>
-sample=TB_hit_G4_v4_rr1.flac
+sample=TB_hit_G4_v4_rr1.mp3
 lokey=64
 hikey=69
 pitch_keycenter=67

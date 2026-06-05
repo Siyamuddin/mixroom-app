@@ -24,6 +24,8 @@ class SubscriptionLimits {
     'sfz.vsco.mixroom_dry_drum_kit',
     'sfz.vsco.upright_piano',
     'mixroom.basic_synth',
+    'mixroom.sampler',
+    'mixroom.granularizer',
     'mixroom.bass_mono',
     'mixroom.mellow_sub',
   };

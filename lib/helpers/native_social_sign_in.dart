@@ -23,6 +23,8 @@ class NativeSocialSignInClient {
 
   static bool _googleInitialized = false;
   static bool _kakaoInitialized = false;
+  static const MethodChannel _macosNativeSocialChannel =
+      MethodChannel('mixroom/native_social');
 
   static Future<NativeSocialSignInPayload> signInWithGoogle() async {
     if (!NativeSocialAuthConfig.hasGoogleServerClientId) {
@@ -64,9 +66,10 @@ class NativeSocialSignInClient {
   }
 
   static Future<NativeSocialSignInPayload> signInWithApple() async {
-    if (defaultTargetPlatform != TargetPlatform.iOS) {
+    if (defaultTargetPlatform != TargetPlatform.iOS &&
+        defaultTargetPlatform != TargetPlatform.macOS) {
       throw const _NativeSocialSignInException(
-        'Apple sign-in is only supported on iPhone and iPad in this build.',
+        'Apple sign-in is only supported on Apple platforms in this build.',
       );
     }
 
@@ -122,6 +125,9 @@ class NativeSocialSignInClient {
   }
 
   static Future<NativeSocialSignInPayload> signInWithKakao() async {
+    if (defaultTargetPlatform == TargetPlatform.macOS) {
+      return _signInWithKakaoMacOS();
+    }
     await _ensureKakaoInitialized();
 
     try {
@@ -184,6 +190,9 @@ class NativeSocialSignInClient {
   static Future<void> _ensureGoogleInitialized() async {
     if (_googleInitialized) return;
     await GoogleSignIn.instance.initialize(
+      clientId: NativeSocialAuthConfig.hasGoogleClientId
+          ? NativeSocialAuthConfig.effectiveGoogleClientId
+          : null,
       serverClientId: NativeSocialAuthConfig.hasGoogleServerClientId
           ? NativeSocialAuthConfig.effectiveGoogleServerClientId
           : null,
@@ -217,6 +226,48 @@ class NativeSocialSignInClient {
         return UserApi.instance.loginWithKakaoAccount();
       }
       rethrow;
+    }
+  }
+
+  static Future<NativeSocialSignInPayload> _signInWithKakaoMacOS() async {
+    if (!NativeSocialAuthConfig.hasKakaoNativeAppKey) {
+      throw const _NativeSocialSignInException(
+        'Kakao sign-in is not configured in this build.',
+      );
+    }
+    try {
+      final payload = await _macosNativeSocialChannel
+          .invokeMapMethod<String, dynamic>(
+              'signInWithKakao', <String, dynamic>{
+        'nativeAppKey': NativeSocialAuthConfig.effectiveKakaoNativeAppKey,
+      });
+      final accessToken = (payload?['access_token'] ?? '').toString().trim();
+      if (accessToken.isEmpty) {
+        throw const _NativeSocialSignInException(
+          'Kakao sign-in did not return an access token.',
+        );
+      }
+      return NativeSocialSignInPayload(
+        provider: AuthProviderType.kakao,
+        body: <String, dynamic>{
+          'provider': AuthProviderType.kakao.value,
+          'access_token': accessToken,
+        },
+      );
+    } on PlatformException catch (e) {
+      final message = (e.message ?? '').trim();
+      if (e.code == 'USER_CANCELLED' || message.contains('cancelled')) {
+        throw const _NativeSocialSignInException(
+          'Social sign-in was cancelled.',
+        );
+      }
+      throw _NativeSocialSignInException(
+        message.isEmpty ? 'Kakao sign-in could not be completed.' : message,
+      );
+    } on MissingPluginException {
+      throw const _NativeSocialSignInException(
+        'Kakao sign-in is not available in this desktop build.',
+      );
     }
   }
 

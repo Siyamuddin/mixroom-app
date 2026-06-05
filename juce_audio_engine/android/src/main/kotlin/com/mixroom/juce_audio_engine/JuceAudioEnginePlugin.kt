@@ -553,19 +553,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
       return true
     }
 
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-      val communicationDevice =
-        try {
-          audioManager.communicationDevice
-        } catch (_: SecurityException) {
-          null
-        } catch (_: IllegalStateException) {
-          null
-        }
-      if (communicationDevice != null) {
-        return true
-      }
-    } else if (audioManager.isBluetoothScoOn) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && audioManager.isBluetoothScoOn) {
       return true
     }
 
@@ -588,17 +576,9 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     val outputName = JuceBridge.getCurrentOutputDeviceNameJNI().trim()
-    // Some Android devices keep duplex inputs reported as active even when the
-    // output route is already valid. Treating that alone as a broken playback
-    // route forces a synchronous close/reopen on every play tap.
-    val shouldReopenPlaybackRoute = hadRoutingAnomaly || outputName.isEmpty()
+    val shouldReopenPlaybackRoute =
+      hadRoutingAnomaly || outputName.isEmpty() || hasLingeringInputRoute
     if (!shouldReopenPlaybackRoute) {
-      if (hasLingeringInputRoute) {
-        Log.i(
-          "JuceAudioEngine",
-          "Skipping playback route reopen despite active inputs: $reason output=$outputName",
-        )
-      }
       return true
     }
 
@@ -677,6 +657,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           result.success(JuceBridge.getTrackDurationJNI(args.intValue("track")))
         }
         "play" -> {
+          preparePlaybackRoute("play")
           JuceBridge.playJNI()
           result.success(null)
         }

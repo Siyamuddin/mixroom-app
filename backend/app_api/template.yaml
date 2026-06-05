@@ -35,7 +35,7 @@ Parameters:
     Default: 'gpt-4.1-mini'
   AiChatDefaultTemperature:
     Type: String
-    Default: '0.2'
+    Default: '0.35'
   VideoEditorDefaultTemperature:
     Type: String
     Default: '0.1'
@@ -1866,6 +1866,12 @@ Resources:
             RestApiId: !Ref BillingApi
             Path: /v1/internal/admin/users
             Method: get
+        AdminUsersCreateUsernameAccount:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/users/create-username-account
+            Method: post
         AdminUsersDelete:
           Type: Api
           Properties:

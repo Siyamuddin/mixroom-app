@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+dart run tool/check_docs_freshness.dart --staged
+

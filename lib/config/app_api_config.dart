@@ -19,11 +19,22 @@ class AppApiConfig {
     'SUBSCRIPTION_ENFORCE',
     defaultValue: false,
   );
+  static const bool hasEnforceSubscriptionsOverride =
+      bool.hasEnvironment('SUBSCRIPTION_ENFORCE');
 
   static const bool accountPlanBillingEnabled = bool.fromEnvironment(
     'ACCOUNT_PLAN_BILLING_ENABLED',
     defaultValue: false,
   );
+  static const bool hasAccountPlanBillingOverride =
+      bool.hasEnvironment('ACCOUNT_PLAN_BILLING_ENABLED');
+
+  static const bool cloudProjectsEnabled = bool.fromEnvironment(
+    'CLOUD_PROJECTS_ENABLED',
+    defaultValue: false,
+  );
+  static const bool hasCloudProjectsOverride =
+      bool.hasEnvironment('CLOUD_PROJECTS_ENABLED');
 
   static const int requestTimeoutSeconds = int.fromEnvironment(
     'SUBSCRIPTION_REQUEST_TIMEOUT_SECONDS',

@@ -7,7 +7,7 @@ ampeg_release=0.45
 volume=0
 
 <region>
-sample=BDrumNewhit_v2_rr1_Sum.flac
+sample=BDrumNewhit_v2_rr1_Sum.mp3
 lokey=36
 hikey=36
 pitch_keycenter=36
@@ -16,7 +16,7 @@ hivel=127
 volume=6
 
 <region>
-sample=Snare2-HitSN_v3_rr1_Sum.flac
+sample=Snare2-HitSN_v3_rr1_Sum.mp3
 lokey=38
 hikey=38
 pitch_keycenter=38
@@ -25,7 +25,7 @@ hivel=127
 volume=4
 
 <region>
-sample=Snare2-HitNS_v3_rr1_Sum.flac
+sample=Snare2-HitNS_v3_rr1_Sum.mp3
 lokey=40
 hikey=40
 pitch_keycenter=40
@@ -34,7 +34,7 @@ hivel=127
 volume=3
 
 <region>
-sample=Tamb1-Shake_v1_rr1_Sum.flac
+sample=Tamb1-Shake_v1_rr1_Sum.mp3
 lokey=42
 hikey=42
 pitch_keycenter=42
@@ -43,7 +43,7 @@ hivel=127
 volume=5
 
 <region>
-sample=Tamb1-Hit_v1_rr1_Sum.flac
+sample=Tamb1-Hit_v1_rr1_Sum.mp3
 lokey=44
 hikey=44
 pitch_keycenter=44
@@ -52,7 +52,7 @@ hivel=127
 volume=4
 
 <region>
-sample=LogDrumLo_MedM_v1_rr1_Sum.flac
+sample=LogDrumLo_MedM_v1_rr1_Sum.mp3
 lokey=45
 hikey=45
 pitch_keycenter=45
@@ -61,7 +61,7 @@ hivel=127
 volume=4
 
 <region>
-sample=LogDrumHi_MedM_v1_rr1_Sum.flac
+sample=LogDrumHi_MedM_v1_rr1_Sum.mp3
 lokey=47
 hikey=47
 pitch_keycenter=47
@@ -70,7 +70,7 @@ hivel=127
 volume=4
 
 <region>
-sample=cymbal-crash1_pp_rr1.flac
+sample=cymbal-crash1_pp_rr1.mp3
 lokey=49
 hikey=49
 pitch_keycenter=49
@@ -79,7 +79,7 @@ hivel=127
 volume=2
 
 <region>
-sample=susCymb1-hit_pp_rr1.flac
+sample=susCymb1-hit_pp_rr1.mp3
 lokey=51
 hikey=51
 pitch_keycenter=51

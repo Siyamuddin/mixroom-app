@@ -548,6 +548,15 @@ bool JuceEngine::restoreRecordingPlaybackSetup(const juce::String &reason)
     setup.useDefaultInputChannels = false;
     setup.inputChannels.clear();
 
+#if JUCE_ANDROID
+    if (auto *device = deviceManager.getCurrentAudioDevice())
+    {
+        const int stableBufferSize = resolveStableAndroidBufferSize(device, setup.bufferSize);
+        if (stableBufferSize > 0)
+            setup.bufferSize = stableBufferSize;
+    }
+#endif
+
     deviceManager.removeChangeListener(this);
     deviceManager.closeAudioDevice();
     const juce::String error = deviceManager.setAudioDeviceSetup(setup, true);
@@ -667,6 +676,15 @@ bool JuceEngine::hardResetPlaybackOnlyRoute(const juce::String &reason)
 
     setup.useDefaultInputChannels = false;
     setup.inputChannels.clear();
+
+#if JUCE_ANDROID
+    if (auto *device = deviceManager.getCurrentAudioDevice())
+    {
+        const int stableBufferSize = resolveStableAndroidBufferSize(device, setup.bufferSize);
+        if (stableBufferSize > 0)
+            setup.bufferSize = stableBufferSize;
+    }
+#endif
 
     deviceManager.removeChangeListener(this);
     deviceManager.closeAudioDevice();

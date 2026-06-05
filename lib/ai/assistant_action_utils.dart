@@ -324,6 +324,38 @@ class AssistantActionUtils {
       return beatSpan * msPerBeat;
     }
 
+    final millisecondSpan = toActionDouble(
+      data['length_ms'] ??
+          data['span_ms'] ??
+          data['duration_ms'] ??
+          target['length_ms'] ??
+          target['span_ms'] ??
+          target['duration_ms'],
+    );
+    if (millisecondSpan != null &&
+        millisecondSpan.isFinite &&
+        millisecondSpan > 0.0) {
+      return millisecondSpan;
+    }
+
+    final secondSpan = toActionDouble(
+      data['length_seconds'] ??
+          data['span_seconds'] ??
+          data['duration_seconds'] ??
+          target['length_seconds'] ??
+          target['span_seconds'] ??
+          target['duration_seconds'] ??
+          data['length_sec'] ??
+          data['span_sec'] ??
+          data['duration_sec'] ??
+          target['length_sec'] ??
+          target['span_sec'] ??
+          target['duration_sec'],
+    );
+    if (secondSpan != null && secondSpan.isFinite && secondSpan > 0.0) {
+      return secondSpan * 1000.0;
+    }
+
     return null;
   }
 
@@ -425,6 +457,7 @@ class AssistantActionUtils {
     Map<String, dynamic> data, {
     Map<String, dynamic> target = const <String, dynamic>{},
     int defaultBeatsPerBar = 4,
+    double bpm = 120.0,
   }) {
     final beatsPerBar =
         resolveBeatsPerBar(data, target, fallback: defaultBeatsPerBar)
@@ -445,6 +478,30 @@ class AssistantActionUtils {
     );
     if (lengthBeats != null && lengthBeats.isFinite && lengthBeats > 0.0) {
       return lengthBeats;
+    }
+    final lengthMs = toActionDouble(
+      data['length_ms'] ??
+          target['length_ms'] ??
+          data['duration_ms'] ??
+          target['duration_ms'],
+    );
+    if (lengthMs != null && lengthMs.isFinite && lengthMs > 0.0) {
+      return lengthMs / (60000.0 / bpm.clamp(1.0, 400.0));
+    }
+    final lengthSeconds = toActionDouble(
+      data['length_seconds'] ??
+          target['length_seconds'] ??
+          data['duration_seconds'] ??
+          target['duration_seconds'] ??
+          data['length_sec'] ??
+          target['length_sec'] ??
+          data['duration_sec'] ??
+          target['duration_sec'],
+    );
+    if (lengthSeconds != null &&
+        lengthSeconds.isFinite &&
+        lengthSeconds > 0.0) {
+      return lengthSeconds * bpm.clamp(1.0, 400.0) / 60.0;
     }
     return null;
   }
@@ -475,6 +532,7 @@ class AssistantActionUtils {
     required Map<String, dynamic> data,
     Map<String, dynamic> target = const <String, dynamic>{},
     String noteIdPrefix = 'ai_gen',
+    double bpm = 120.0,
   }) {
     if (sourceNotes.isEmpty) return const <MidiNote>[];
 
@@ -492,9 +550,9 @@ class AssistantActionUtils {
       return const <MidiNote>[];
     }
 
-    final targetEndBeat =
-        resolveMidiTargetLengthBeatsFromAction(data, target: target) ??
-            sourceEndBeat;
+    final targetEndBeat = resolveMidiTargetLengthBeatsFromAction(data,
+            target: target, bpm: bpm) ??
+        sourceEndBeat;
     if (!targetEndBeat.isFinite || targetEndBeat <= 0.0) {
       return const <MidiNote>[];
     }

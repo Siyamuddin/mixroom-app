@@ -638,6 +638,88 @@
                 Select a user to review details and actions.
               </div>
             </article>
+
+            <article class="panel user-create-panel">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-label" data-i18n="panel.createUsernameAccount.label">Quick Account</p>
+                  <h2 data-i18n="panel.createUsernameAccount.title">Create username account</h2>
+                </div>
+                <p class="panel-meta" data-i18n="panel.createUsernameAccount.meta">
+                  Optional email is auto-verified.
+                </p>
+              </div>
+              <section
+                id="create-username-account-feedback"
+                class="status-panel hidden"
+                aria-live="polite"
+              ></section>
+              <form id="create-username-account-form" class="form-stack create-account-form">
+                <div class="form-grid create-account-grid">
+                  <label class="search-input-wrap" for="create-username-account-username">
+                    <span class="search-label" data-i18n="createAccount.username">Username</span>
+                    <input
+                      id="create-username-account-username"
+                      class="text-input"
+                      type="text"
+                      name="username"
+                      placeholder="student_1"
+                      data-i18n-placeholder="createAccount.usernamePlaceholder"
+                      autocomplete="off"
+                      required
+                    />
+                  </label>
+                  <label class="search-input-wrap" for="create-username-account-name">
+                    <span class="search-label" data-i18n="createAccount.name">Name</span>
+                    <input
+                      id="create-username-account-name"
+                      class="text-input"
+                      type="text"
+                      name="displayName"
+                      placeholder="Student One"
+                      data-i18n-placeholder="createAccount.namePlaceholder"
+                      autocomplete="off"
+                      required
+                    />
+                  </label>
+                  <label class="search-input-wrap" for="create-username-account-email">
+                    <span class="search-label" data-i18n="createAccount.email">Email, optional</span>
+                    <input
+                      id="create-username-account-email"
+                      class="text-input"
+                      type="email"
+                      name="email"
+                      placeholder="student@example.com"
+                      data-i18n-placeholder="createAccount.emailPlaceholder"
+                      autocomplete="off"
+                    />
+                  </label>
+                  <label class="search-input-wrap" for="create-username-account-password">
+                    <span class="search-label" data-i18n="createAccount.password">Password</span>
+                    <input
+                      id="create-username-account-password"
+                      class="text-input"
+                      type="text"
+                      name="password"
+                      placeholder="Temporary password"
+                      data-i18n-placeholder="createAccount.passwordPlaceholder"
+                      autocomplete="new-password"
+                      required
+                    />
+                  </label>
+                </div>
+                <div class="search-actions">
+                  <button
+                    id="create-username-account-button"
+                    class="button button-primary"
+                    type="submit"
+                    data-i18n="createAccount.button"
+                  >
+                    Create account
+                  </button>
+                </div>
+              </form>
+            </article>
           </section>
           </section>
 
@@ -871,6 +953,10 @@
                     <label class="checkbox-row">
                       <input id="feature-flag-iap-purchases" type="checkbox" />
                       <span>Enable in-app purchase checkout</span>
+                    </label>
+                    <label class="checkbox-row">
+                      <input id="feature-flag-cloud-projects" type="checkbox" />
+                      <span>Enable cloud projects and sync</span>
                     </label>
                     <p id="feature-flags-editor-note" class="panel-meta hidden">
                       Production rollout control. Review before applying.

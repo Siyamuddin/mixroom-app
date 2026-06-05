@@ -1873,6 +1873,7 @@ class AssistantActionTimelineReducer {
       return AssistantActionUtils.resolveMidiTargetLengthBeatsFromAction(
         data,
         target: target,
+        bpm: state.projectTempoBpm,
       );
     }
 
@@ -2056,6 +2057,7 @@ class AssistantActionTimelineReducer {
         data: data,
         target: target,
         noteIdPrefix: 'ai_style',
+        bpm: state.projectTempoBpm,
       );
       notes = maybeExtendGeneratedNotes(notes);
     }

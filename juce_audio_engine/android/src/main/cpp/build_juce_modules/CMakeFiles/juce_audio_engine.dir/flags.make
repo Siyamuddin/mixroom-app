@@ -4,7 +4,7 @@
 # compile CXX with /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang++
 CXX_DEFINES = -DJUCE_ANDROID=1 -DJUCE_GUI_BASICS_INCLUDE_ANDROID=1 -DJUCE_USE_ANDROID_OBOE=1 -Djuce_audio_engine_EXPORTS
 
-CXX_INCLUDES = -I/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp -I/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules -I/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures -I/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/harfbuzz/src -I/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/SheenBidi/Headers
+CXX_INCLUDES = -I/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/oboe/include -I/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp -I/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules -I/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures -I/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/harfbuzz/src -I/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/juce/modules/sheenbidi/Headers
 
 CXX_FLAGS = -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security   -O3 -DNDEBUG  -std=gnu++17 -fPIC -pthread
 

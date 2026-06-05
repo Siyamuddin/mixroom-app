@@ -11,6 +11,7 @@ const String kMixroomShellBackgroundAsset =
     'assets/app_shell/shell_background.webp';
 const String kMixroomShellBrandMarkAsset = 'assets/app_shell/brand_mark.png';
 const String kMixroomShellWordmarkAsset = 'assets/app_shell/wordmark.png';
+const String kMixroomShortWhiteLogoAsset = 'assets/short_white_splash.png';
 const String kMixroomShellHomeAsset = 'assets/app_shell/nav_home.svg';
 const String kMixroomShellHomeActiveAsset =
     'assets/app_shell/nav_home_active.svg';
@@ -39,7 +40,8 @@ const String kMixroomShellAccountEditCheckAsset =
 
 const double kMixroomMainDockHeight = 80;
 const double kMixroomMainDockOverlapInset = 98;
-const double kMixroomDesktopRailWidth = 188;
+const double kMixroomDesktopRailWidth = 80;
+const double kMixroomDesktopTitleBarHeight = 34;
 
 const double _kMixroomBrandMarkAspectRatio = 2616 / 1644;
 const double _kMixroomWordmarkAspectRatio = 4096 / 591;
@@ -205,6 +207,41 @@ double mixroomShellDockBottomInset(BuildContext context) {
 
 bool get mixroomUsesDesktopRailNavigation =>
     !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
+
+class MixroomDesktopTitleBar extends StatelessWidget {
+  const MixroomDesktopTitleBar({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: kMixroomDesktopTitleBarHeight,
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  const Color(0xFF070C12).withValues(alpha: 0.96),
+                  const Color(0xFF070C12).withValues(alpha: 0.90),
+                ],
+              ),
+              border: Border(
+                bottom: BorderSide(
+                  color: Colors.white.withValues(alpha: 0.075),
+                  width: 0.8,
+                ),
+              ),
+            ),
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class MixroomShellBackground extends StatelessWidget {
   const MixroomShellBackground({super.key});
@@ -927,99 +964,113 @@ class MixroomMainSideRail extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: kMixroomDesktopRailWidth,
-      child: MixroomShellSurface(
-        radius: 34,
-        padding: const EdgeInsets.fromLTRB(10, 14, 10, 12),
-        color: const Color.fromRGBO(244, 244, 244, 0.14),
-        strong: true,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(0, 2, 0, 4),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const MixroomShellBrandMark(width: 38, height: 38),
-                  const SizedBox(height: 10),
-                  const MixroomShellWordmark(
-                    width: 132,
-                    height: 19,
-                    alignment: Alignment.center,
-                  ),
-                ],
-              ),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: const Color(0xFF080E15).withValues(alpha: 0.96),
+          borderRadius: const BorderRadius.only(
+            topRight: Radius.circular(22),
+            bottomRight: Radius.circular(22),
+          ),
+          border: Border(
+            right: BorderSide(
+              color: Colors.white.withValues(alpha: 0.075),
+              width: 0.8,
             ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _MixroomShellRailButton(
-                      label: L10n.translate(context, 'Home'),
-                      active: selectedTab == MixroomMainTab.home,
-                      assetPath: _iconForTab(
-                        MixroomMainTab.home,
-                        selectedTab == MixroomMainTab.home,
-                      ),
-                      onTap: () => onTabSelected(MixroomMainTab.home),
-                    ),
-                    const SizedBox(height: 8),
-                    _MixroomShellRailButton(
-                      label: L10n.translate(context, 'Platform'),
-                      active: selectedTab == MixroomMainTab.platform,
-                      assetPath: _iconForTab(
-                        MixroomMainTab.platform,
-                        selectedTab == MixroomMainTab.platform,
-                      ),
-                      onTap: () => onTabSelected(MixroomMainTab.platform),
-                    ),
-                    const SizedBox(height: 8),
-                    _MixroomShellRailButton(
-                      label: L10n.translate(context, 'Projects'),
-                      active: selectedTab == MixroomMainTab.projects,
-                      assetPath: _iconForTab(
-                        MixroomMainTab.projects,
-                        selectedTab == MixroomMainTab.projects,
-                      ),
-                      onTap: () => onTabSelected(MixroomMainTab.projects),
-                    ),
-                    const SizedBox(height: 8),
-                    _MixroomShellRailButton(
-                      label: L10n.translate(context, 'Account'),
-                      active: selectedTab == MixroomMainTab.account,
-                      assetPath: _iconForTab(
-                        MixroomMainTab.account,
-                        selectedTab == MixroomMainTab.account,
-                      ),
-                      onTap: () => onTabSelected(MixroomMainTab.account),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            _MixroomShellRailButton(
-              label: L10n.translate(context, 'New Project'),
-              active: true,
-              icon: const Icon(
-                Icons.add_rounded,
-                color: Color(0xFFF4F4F4),
-                size: 22,
-              ),
-              emphasize: true,
-              onTap: onAddTap,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.34),
+              blurRadius: 24,
+              offset: const Offset(8, 0),
             ),
           ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 22, 10, 12),
+          child: Column(
+            children: [
+              Container(
+                width: 43,
+                height: 43,
+                alignment: Alignment.center,
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF111A25),
+                  borderRadius: BorderRadius.circular(15),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.14),
+                  ),
+                ),
+                child: Image.asset(
+                  kMixroomShortWhiteLogoAsset,
+                  fit: BoxFit.contain,
+                  filterQuality: FilterQuality.high,
+                  isAntiAlias: true,
+                  cacheWidth: 96,
+                ),
+              ),
+              const SizedBox(height: 24),
+              _MixroomDesktopRailIconButton(
+                label: L10n.translate(context, 'Home'),
+                active: selectedTab == MixroomMainTab.home,
+                assetPath: _iconForTab(
+                  MixroomMainTab.home,
+                  selectedTab == MixroomMainTab.home,
+                ),
+                onTap: () => onTabSelected(MixroomMainTab.home),
+              ),
+              const SizedBox(height: 14),
+              _MixroomDesktopRailIconButton(
+                label: L10n.translate(context, 'Platform'),
+                active: selectedTab == MixroomMainTab.platform,
+                assetPath: _iconForTab(
+                  MixroomMainTab.platform,
+                  selectedTab == MixroomMainTab.platform,
+                ),
+                onTap: () => onTabSelected(MixroomMainTab.platform),
+              ),
+              const SizedBox(height: 14),
+              _MixroomDesktopRailIconButton(
+                label: L10n.translate(context, 'Projects'),
+                active: selectedTab == MixroomMainTab.projects,
+                assetPath: _iconForTab(
+                  MixroomMainTab.projects,
+                  selectedTab == MixroomMainTab.projects,
+                ),
+                onTap: () => onTabSelected(MixroomMainTab.projects),
+              ),
+              const SizedBox(height: 14),
+              _MixroomDesktopRailIconButton(
+                label: L10n.translate(context, 'Account'),
+                active: selectedTab == MixroomMainTab.account,
+                assetPath: _iconForTab(
+                  MixroomMainTab.account,
+                  selectedTab == MixroomMainTab.account,
+                ),
+                onTap: () => onTabSelected(MixroomMainTab.account),
+              ),
+              const Spacer(),
+              _MixroomDesktopRailIconButton(
+                label: L10n.translate(context, 'New Project'),
+                active: true,
+                emphasize: true,
+                icon: const Icon(
+                  Icons.add_rounded,
+                  color: Color(0xFFF4F4F4),
+                  size: 28,
+                ),
+                onTap: onAddTap,
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _MixroomShellRailButton extends StatelessWidget {
-  const _MixroomShellRailButton({
+class _MixroomDesktopRailIconButton extends StatefulWidget {
+  const _MixroomDesktopRailIconButton({
     required this.label,
     required this.active,
     required this.onTap,
@@ -1036,116 +1087,103 @@ class _MixroomShellRailButton extends StatelessWidget {
   final bool emphasize;
 
   @override
-  Widget build(BuildContext context) {
-    final topFill = emphasize
-        ? const Color.fromRGBO(45, 157, 255, 0.52)
-        : active
-            ? const Color.fromRGBO(106, 202, 255, 0.20)
-            : const Color.fromRGBO(255, 255, 255, 0.09);
-    final bottomFill = emphasize
-        ? const Color.fromRGBO(20, 98, 176, 0.82)
-        : active
-            ? const Color.fromRGBO(13, 28, 49, 0.72)
-            : const Color.fromRGBO(8, 14, 24, 0.68);
-    final borderColor = emphasize
-        ? const Color(0xFF8CD8FF).withValues(alpha: 0.38)
-        : Colors.white.withValues(alpha: active ? 0.18 : 0.09);
+  State<_MixroomDesktopRailIconButton> createState() =>
+      _MixroomDesktopRailIconButtonState();
+}
 
-    return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(24),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(24),
-        splashFactory: InkRipple.splashFactory,
-        overlayColor: WidgetStateProperty.resolveWith<Color?>((states) {
-          if (states.contains(WidgetState.pressed)) {
-            return Colors.white.withValues(alpha: 0.12);
-          }
-          if (states.contains(WidgetState.hovered)) {
-            return Colors.white.withValues(alpha: 0.06);
-          }
-          return Colors.transparent;
+class _MixroomDesktopRailIconButtonState
+    extends State<_MixroomDesktopRailIconButton> {
+  bool _hovered = false;
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = widget.active;
+    final emphasize = widget.emphasize;
+    final activeColor = emphasize
+        ? const Color(0xFF0A84FF)
+        : const Color(0xFF132132).withValues(alpha: 0.98);
+    final idleColor =
+        _hovered ? Colors.white.withValues(alpha: 0.075) : Colors.transparent;
+    return Tooltip(
+      message: widget.label,
+      waitDuration: const Duration(milliseconds: 450),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() {
+          _hovered = false;
+          _pressed = false;
         }),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(24),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: Container(
-              height: 50,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [topFill, bottomFill],
-                ),
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: borderColor),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: active ? 0.24 : 0.18),
-                    blurRadius: active ? 18 : 14,
-                    offset: const Offset(0, 8),
-                  ),
-                  if (active || emphasize)
-                    BoxShadow(
-                      color: const Color(0xFF2D8CFF).withValues(alpha: 0.10),
-                      blurRadius: 22,
-                      offset: const Offset(0, 6),
-                    ),
-                ],
-              ),
+        child: GestureDetector(
+          onTap: widget.onTap,
+          onTapDown: (_) => setState(() => _pressed = true),
+          onTapCancel: () => setState(() => _pressed = false),
+          onTapUp: (_) => setState(() => _pressed = false),
+          child: AnimatedScale(
+            duration: const Duration(milliseconds: 140),
+            curve: Curves.easeOutCubic,
+            scale: _pressed ? 0.96 : (_hovered ? 1.04 : 1.0),
+            child: SizedBox(
+              width: 52,
+              height: 52,
               child: Stack(
+                alignment: Alignment.center,
                 children: [
-                  Positioned.fill(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(24),
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [
-                            Colors.white.withValues(
-                              alpha: active || emphasize ? 0.06 : 0.03,
-                            ),
-                            Colors.transparent,
-                          ],
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 170),
+                    curve: Curves.easeOutCubic,
+                    width: emphasize ? 48 : 49,
+                    height: emphasize ? 46 : 48,
+                    decoration: BoxDecoration(
+                      color: active ? activeColor : idleColor,
+                      borderRadius: BorderRadius.circular(emphasize ? 14 : 15),
+                      border: Border.all(
+                        color: active || _hovered
+                            ? Colors.white.withValues(alpha: 0.16)
+                            : Colors.transparent,
+                      ),
+                      boxShadow: emphasize
+                          ? [
+                              BoxShadow(
+                                color: const Color(0xFF0A84FF)
+                                    .withValues(alpha: 0.34),
+                                blurRadius: 20,
+                                offset: const Offset(0, 8),
+                              ),
+                            ]
+                          : null,
+                    ),
+                  ),
+                  if (active && !emphasize)
+                    Positioned(
+                      left: 4,
+                      child: Container(
+                        width: 3,
+                        height: 24,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF48B8FF),
+                          borderRadius: BorderRadius.circular(3),
                         ),
                       ),
                     ),
-                  ),
-                  Row(
-                    children: [
-                      SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: icon ??
-                            SvgPicture.asset(
-                              assetPath!,
-                              width: 18,
-                              height: 18,
+                  SizedBox(
+                    width: emphasize ? 28 : 24,
+                    height: emphasize ? 28 : 24,
+                    child: Center(
+                      child: widget.icon ??
+                          SvgPicture.asset(
+                            widget.assetPath!,
+                            width: 23,
+                            height: 23,
+                            colorFilter: ColorFilter.mode(
+                              Colors.white.withValues(
+                                alpha: active || _hovered ? 0.95 : 0.72,
+                              ),
+                              BlendMode.srcIn,
                             ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontFamily: 'Pretendard',
-                            color: const Color(0xFFF4F4F4),
-                            fontSize: 13,
-                            fontWeight: active || emphasize
-                                ? FontWeight.w700
-                                : FontWeight.w600,
-                            letterSpacing: active || emphasize ? -0.08 : -0.04,
                           ),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ],
               ),

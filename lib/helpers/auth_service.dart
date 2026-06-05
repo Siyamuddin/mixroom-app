@@ -629,6 +629,7 @@ class AuthService extends ChangeNotifier {
       final platformLabel = switch (defaultTargetPlatform) {
         TargetPlatform.iOS => 'iOS',
         TargetPlatform.android => 'Android',
+        TargetPlatform.macOS => 'macOS',
         _ => 'this',
       };
       throw StateError(

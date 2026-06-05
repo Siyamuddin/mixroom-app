@@ -94,6 +94,7 @@ class EntitlementService extends ChangeNotifier {
   bool get isAccountPlanBillingEnabled =>
       _appFeatureFlags.accountPlanBillingEnabled;
   bool get areIapPurchasesEnabled => _appFeatureFlags.iapPurchasesEnabled;
+  bool get areCloudProjectsEnabled => _appFeatureFlags.cloudProjectsEnabled;
 
   String? get storeAccountToken {
     final raw = _auth?.signedInUser?.userId.trim() ?? '';

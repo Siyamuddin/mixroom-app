@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import hashlib
+import secrets
 from typing import Any, Dict
 from uuid import uuid4
 
@@ -40,6 +41,15 @@ from .models import (
     subscription_effective_status,
     free_entitlement,
 )
+from .native_auth import (
+    _hash_password,
+    _looks_like_email,
+    _new_user_id,
+    _normalize_email,
+    _validate_password_policy,
+)
+from .repository import UsernameClaimConflictError
+from .users import normalize_username, validate_username
 try:
     from .repository import BillingRepository
 except ModuleNotFoundError:  # pragma: no cover - local dev/test fallback
@@ -241,6 +251,144 @@ class AdminUserRepository:
                 "auth_sessions": bool(config.AUTH_SESSIONS_TABLE),
                 "cognito_users": self._cognito is not None,
             },
+        }
+
+    def create_username_account(
+        self,
+        *,
+        username: str,
+        display_name: str,
+        password: str,
+        email: str = "",
+        created_by_user_id: str,
+        created_by_email: str,
+    ) -> Dict[str, Any]:
+        if self._billing_repo is None:
+            raise RuntimeError("Billing repository is not available.")
+
+        safe_username = normalize_username(username)
+        username_error = validate_username(safe_username)
+        if username_error:
+            raise ValueError(username_error)
+        safe_display_name = _safe_str(display_name)
+        if not safe_display_name:
+            raise ValueError("Name is required.")
+        if len(safe_display_name) > 80:
+            raise ValueError("Name must be 80 characters or fewer.")
+        safe_password = str(password or "")
+        if not safe_password:
+            raise ValueError("Password is required.")
+        _validate_password_policy(safe_password)
+
+        safe_email = _normalize_email(email)
+        if safe_email and not _looks_like_email(safe_email):
+            raise ValueError("Email must be valid when provided.")
+        if safe_email and self._billing_repo.get_auth_account_by_email(safe_email):
+            raise ValueError("An account with this email already exists.")
+        if self._billing_repo.get_user_profile_by_username(safe_username or ""):
+            raise ValueError("That username is already taken.")
+
+        now = _utc_now_iso()
+        user_id = _new_user_id()
+        password_salt = secrets.token_hex(16)
+        account = {
+            "user_id": user_id,
+            "email": safe_email,
+            "email_lc": safe_email or None,
+            "auth_provider": "email",
+            "email_verified": True,
+            "email_verification_source": "admin_provisioned"
+            if safe_email
+            else "admin_provisioned_no_email",
+            "password_salt": password_salt,
+            "password_hash": _hash_password(password=safe_password, salt=password_salt),
+            "password_iterations": 210000,
+            "verification_code_hash": "",
+            "verification_expires_at": "",
+            "verification_sent_at": "",
+            "password_reset_code_hash": "",
+            "password_reset_expires_at": "",
+            "created_at": now,
+            "updated_at": now,
+            "admin_provisioned": True,
+            "admin_provisioned_at": now,
+            "admin_provisioned_by_user_id": _safe_str(created_by_user_id),
+            "admin_provisioned_by_email": _safe_str(created_by_email).lower(),
+        }
+        profile = {
+            "user_id": user_id,
+            "email": safe_email,
+            "email_lc": safe_email or None,
+            "display_name": safe_display_name,
+            "email_verified": True,
+            "cognito_username": "",
+            "auth_provider": "email",
+            "username": safe_username,
+            "username_lc": safe_username,
+            "given_name": None,
+            "family_name": None,
+            "birthdate": None,
+            "music_profile": None,
+            "avatar_url": None,
+            "bio": None,
+            "profile_status": "active",
+            "onboarding_state": "signup_complete",
+            "accepted_terms_version": "admin_provisioned",
+            "accepted_privacy_version": "admin_provisioned",
+            "accepted_at": now,
+            "newsletter_opt_in": False,
+            "newsletter_opt_in_at": None,
+            "telemetry_enabled": True,
+            "telemetry_enabled_at": now,
+            "locale_code": None,
+            "created_at": now,
+            "updated_at": now,
+            "last_seen_at": now,
+            "bootstrap_source": "admin_username_account",
+            "schema_version": 5,
+            "admin_provisioned": True,
+            "admin_provisioned_at": now,
+            "admin_provisioned_by_user_id": _safe_str(created_by_user_id),
+            "admin_provisioned_by_email": _safe_str(created_by_email).lower(),
+        }
+        if not safe_email:
+            account.pop("email_lc", None)
+            profile.pop("email_lc", None)
+
+        try:
+            self._billing_repo.put_auth_account(account)
+            self._billing_repo.upsert_user_profile(profile)
+            if not self._billing_repo.get_entitlement(user_id):
+                self._billing_repo.put_entitlement(
+                    free_entitlement(user_id=user_id).to_dict()
+                )
+        except UsernameClaimConflictError as exc:
+            self._billing_repo.delete_auth_account(user_id)
+            self._billing_repo.delete_user_profile(user_id)
+            raise ValueError("That username is already taken.") from exc
+        except Exception:
+            self._billing_repo.delete_auth_account(user_id)
+            self._billing_repo.delete_user_profile(user_id)
+            raise
+
+        warnings: list[str] = []
+        entitlement = self._get_entitlement(user_id, warnings)
+        user_record = self._build_user_record(
+            user_id,
+            app_profile=profile,
+            auth_account=account,
+            cognito_profile={},
+            warnings=warnings,
+            entitlement=entitlement,
+            subscriptions=[],
+        )
+        return {
+            "created": True,
+            "user_id": user_id,
+            "username": safe_username,
+            "email": safe_email,
+            "user": user_record,
+            "warnings": warnings,
         }
 
     def grant_prompt_allowance(

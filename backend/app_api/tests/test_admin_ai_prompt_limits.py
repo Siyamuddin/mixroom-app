@@ -58,14 +58,14 @@ class _FakeRepo:
         self.get_calls = 0
         self.update_calls = []
         self.get_payload = {
-            "free_daily_prompt_limit": 30,
-            "free_weekly_prompt_limit": 120,
+            "free_daily_prompt_limit": 200,
+            "free_weekly_prompt_limit": 600,
             "source": "default",
             "configurable": True,
         }
         self.update_payload = {
-            "free_daily_prompt_limit": 30,
-            "free_weekly_prompt_limit": 120,
+            "free_daily_prompt_limit": 200,
+            "free_weekly_prompt_limit": 600,
             "source": "remote",
             "configurable": True,
             "updated_by_email": "admin@example.com",
@@ -156,7 +156,7 @@ class AdminAiPromptLimitsHandlerTests(unittest.TestCase):
 
         self.assertEqual(result["statusCode"], 200)
         self.assertIn('"requested_email": "admin@example.com"', result["body"])
-        self.assertIn('"free_daily_prompt_limit": 30', result["body"])
+        self.assertIn('"free_daily_prompt_limit": 200', result["body"])
         self.assertIn('"can_edit": false', result["body"])
 
     def test_updates_prompt_limits(self):
@@ -168,14 +168,14 @@ class AdminAiPromptLimitsHandlerTests(unittest.TestCase):
             {
                 "rawPath": "/v1/internal/admin/settings/ai-prompt-limits",
                 "requestContext": {"http": {"method": "PUT"}},
-                "body": '{"free_daily_prompt_limit":30,"free_weekly_prompt_limit":120}',
+                "body": '{"free_daily_prompt_limit":200,"free_weekly_prompt_limit":600}',
             },
             object(),
         )
 
         self.assertEqual(result["statusCode"], 200)
-        self.assertEqual(repo.update_calls[0]["free_daily_prompt_limit"], 30)
-        self.assertEqual(repo.update_calls[0]["free_weekly_prompt_limit"], 120)
+        self.assertEqual(repo.update_calls[0]["free_daily_prompt_limit"], 200)
+        self.assertEqual(repo.update_calls[0]["free_weekly_prompt_limit"], 600)
         self.assertEqual(repo.update_calls[0]["updated_by_email"], "andrew@mixroom.ai")
 
     def test_update_requires_ai_editor_email(self):
@@ -186,7 +186,7 @@ class AdminAiPromptLimitsHandlerTests(unittest.TestCase):
             {
                 "rawPath": "/v1/internal/admin/settings/ai-prompt-limits",
                 "requestContext": {"http": {"method": "PUT"}},
-                "body": '{"free_daily_prompt_limit":30,"free_weekly_prompt_limit":120}',
+                "body": '{"free_daily_prompt_limit":200,"free_weekly_prompt_limit":600}',
             },
             object(),
         )

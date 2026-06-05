@@ -578,9 +578,12 @@ class _SignedInShellState extends State<SignedInShell> {
 
   Future<void> _createMusicProject() async {
     if (_creatingProject) return;
-    final projectLimit = SubscriptionLimits.localProjectLimitFor(
-      context.read<EntitlementService>().entitlement,
-    );
+    final entitlementService = context.read<EntitlementService>();
+    final projectLimit = entitlementService.isEnforcementEnabled
+        ? SubscriptionLimits.localProjectLimitFor(
+            entitlementService.entitlement,
+          )
+        : SubscriptionLimits.paidLocalProjects;
     if (!await ProjectManager.canCreateNew(maxProjects: projectLimit)) {
       if (!mounted) return;
       if (projectLimit == SubscriptionLimits.freeLocalProjects) {
@@ -691,7 +694,12 @@ class _SignedInShellState extends State<SignedInShell> {
                   SafeArea(
                     right: false,
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(10, 12, 10, 18),
+                      padding: const EdgeInsets.fromLTRB(
+                        0,
+                        kMixroomDesktopTitleBarHeight,
+                        0,
+                        0,
+                      ),
                       child: MixroomMainSideRail(
                         selectedTab: _selectedTab,
                         onTabSelected: _setTab,
@@ -704,7 +712,10 @@ class _SignedInShellState extends State<SignedInShell> {
                       children: [
                         Positioned.fill(
                           child: Padding(
-                            padding: const EdgeInsets.only(right: 28),
+                            padding: const EdgeInsets.only(
+                              top: kMixroomDesktopTitleBarHeight,
+                              right: 28,
+                            ),
                             child: _buildPage(_selectedTab),
                           ),
                         ),
@@ -749,6 +760,13 @@ class _SignedInShellState extends State<SignedInShell> {
                   ),
                 ],
               ),
+            ),
+          if (useDesktopRail)
+            const Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              child: MixroomDesktopTitleBar(),
             )
           else ...[
             Positioned.fill(child: _buildPage(_selectedTab)),

@@ -194,6 +194,8 @@ public:
             cachedSampledDefinition != nullptr &&
             !cachedSampledDefinition->regions.empty();
         const double attackSec = juce::jmax(0.001, cachedPreset.attackMs / 1000.0);
+        const double decaySec = juce::jmax(0.001, cachedPreset.decayMs / 1000.0);
+        const double sustainLevel = juce::jlimit(0.05, 1.0, cachedPreset.sustainLevel);
         const double releaseSec = juce::jmax(0.02, cachedPreset.releaseMs / 1000.0);
         const float driveGain =
             sampledMode
@@ -295,13 +297,13 @@ public:
                             const double ageRealSec = ageSourceSec / safeRatio;
                             const double noteLengthRealSec = noteLengthSourceSec / safeRatio;
 
-                            double env = 0.0;
-                            if (ageRealSec < noteAttackSec)
-                                env = ageRealSec / noteAttackSec;
-                            else if (ageRealSec < noteLengthRealSec)
-                                env = 1.0;
-                            else
-                                env = 1.0 - ((ageRealSec - noteLengthRealSec) / noteReleaseSec);
+                            const double env = envelopeLevel(
+                                ageRealSec,
+                                noteLengthRealSec,
+                                noteAttackSec,
+                                decaySec,
+                                sustainLevel,
+                                noteReleaseSec);
 
                             if (env <= 0.0)
                                 continue;
@@ -413,9 +415,11 @@ public:
                 double env = 0.0;
                 if (!voice.releasing)
                 {
-                    env = (voice.ageSec < voiceAttackSec)
-                              ? (voice.ageSec / voiceAttackSec)
-                              : 1.0;
+                    env = envelopeHoldLevel(
+                        voice.ageSec,
+                        voiceAttackSec,
+                        decaySec,
+                        sustainLevel);
                 }
                 else
                 {
@@ -580,6 +584,8 @@ private:
         double pitchDropSemitones = 0.0;
         double noise = 0.02;
         double padDetuneOffset = 0.008;
+        double decayMs = 120.0;
+        double sustainLevel = 0.86;
     };
 
     struct DecodedSamplePcm
@@ -674,6 +680,45 @@ private:
         x ^= x >> 16;
         const double n01 = (double)(x & 0x00ffffffu) / (double)0x01000000u;
         return (n01 * 2.0) - 1.0;
+    }
+
+    static double envelopeHoldLevel(
+        double ageSec,
+        double attackSec,
+        double decaySec,
+        double sustainLevel)
+    {
+        attackSec = juce::jmax(0.001, attackSec);
+        decaySec = juce::jmax(0.001, decaySec);
+        sustainLevel = juce::jlimit(0.05, 1.0, sustainLevel);
+        if (ageSec < attackSec)
+            return juce::jlimit(0.0, 1.0, ageSec / attackSec);
+
+        const double decayAge = ageSec - attackSec;
+        if (decayAge < decaySec)
+        {
+            const double t = decayAge / decaySec;
+            return 1.0 + ((sustainLevel - 1.0) * t);
+        }
+        return sustainLevel;
+    }
+
+    static double envelopeLevel(
+        double ageSec,
+        double holdSec,
+        double attackSec,
+        double decaySec,
+        double sustainLevel,
+        double releaseSec)
+    {
+        if (ageSec < holdSec)
+            return envelopeHoldLevel(ageSec, attackSec, decaySec, sustainLevel);
+
+        releaseSec = juce::jmax(0.02, releaseSec);
+        const double releaseAge = ageSec - holdSec;
+        const double releaseStart =
+            envelopeHoldLevel(holdSec, attackSec, decaySec, sustainLevel);
+        return releaseStart * (1.0 - (releaseAge / releaseSec));
     }
 
     static double wrapPhase(double phase)
@@ -1465,6 +1510,10 @@ private:
             preset.cutoffHz = juce::jlimit(200.0, 16000.0, readParam(params, "cutoffHz", preset.cutoffHz));
         if (params.contains(juce::Identifier("attackMs")))
             preset.attackMs = juce::jlimit(0.0, 1000.0, readParam(params, "attackMs", preset.attackMs));
+        if (params.contains(juce::Identifier("decayMs")))
+            preset.decayMs = juce::jlimit(0.0, 2000.0, readParam(params, "decayMs", preset.decayMs));
+        if (params.contains(juce::Identifier("sustainLevel")))
+            preset.sustainLevel = juce::jlimit(0.05, 1.0, readParam(params, "sustainLevel", preset.sustainLevel));
         if (params.contains(juce::Identifier("releaseMs")))
             preset.releaseMs = juce::jlimit(20.0, 2400.0, readParam(params, "releaseMs", preset.releaseMs));
         if (params.contains(juce::Identifier("drive")))
@@ -1808,6 +1857,9 @@ private:
             cachedPreset.family == InstrumentFamily::sampled &&
             cachedSampledDefinition != nullptr &&
             !cachedSampledDefinition->regions.empty();
+        const double attackSec = juce::jmax(0.001, cachedPreset.attackMs / 1000.0);
+        const double decaySec = juce::jmax(0.001, cachedPreset.decayMs / 1000.0);
+        const double sustainLevel = juce::jlimit(0.05, 1.0, cachedPreset.sustainLevel);
 
         for (const auto &event : pending)
         {
@@ -1861,7 +1913,16 @@ private:
 
                 it->releasing = true;
                 it->releaseAgeSec = 0.0;
-                it->releaseStartLevel = 1.0;
+                const double voiceAttackSec =
+                    (sampledMode && it->sampledSource != nullptr &&
+                     !cachedSampledAttackOverride)
+                        ? juce::jmax(0.001, it->sampledAttackSec)
+                        : attackSec;
+                it->releaseStartLevel = envelopeHoldLevel(
+                    it->ageSec,
+                    voiceAttackSec,
+                    decaySec,
+                    sustainLevel);
                 break;
             }
         }

@@ -1,6 +1,6 @@
 # Mixroom Starter Kit v1
 
-Last updated: 2026-04-02
+Last updated: 2026-05-29
 
 This pack is a curated bundle of third-party audio files assembled by Mixroom
 for open beta testing. The bundled files in this pack were sourced from
@@ -10,7 +10,7 @@ Pack summary:
 
 - Pack ID: `starter_kit_v1`
 - Audio files: `135`
-- Formats: `117 FLAC`, `18 MP3`
+- Formats: `135 MP3`
 - Local path: `assets/sample_packs/starter_kit_v1/`
 
 ## Source Groups
@@ -58,20 +58,20 @@ Pack summary:
      the Virtuosity Drums source material. Keep the original download/archive
      record outside the repo.
    - Files in this pack:
-     - `Loops/Trap Drum Loop-08(115).flac`
-     - `Loops/Trap Drum Loop-11(130).flac`
-     - `Loops/Trap Drum Loop-12(130).flac`
-     - `Loops/Trap Drum Loop-13(130).flac`
-     - `Loops/Trap Drum Loop-14(130).flac`
-     - `Loops/Trap Drum Loop-17(130).flac`
-     - `Loops/Trap Drum Loop-18(130).flac`
-     - `Loops/Trap Drum Loop-25(130).flac`
-     - `Loops/Trap Drum Loop-26(130).flac`
-     - `Loops/Trap Drum Loop-28(130).flac`
-     - `Loops/Trap Drum Loop-35(98).flac`
-     - `Loops/Trap Drum Loop-38(98).flac`
-     - `Loops/Trap Drum Loop-39(98).flac`
-     - `Loops/Trap Drum Loop-40(98).flac`
+     - `Loops/Trap Drum Loop-08(115).mp3`
+     - `Loops/Trap Drum Loop-11(130).mp3`
+     - `Loops/Trap Drum Loop-12(130).mp3`
+     - `Loops/Trap Drum Loop-13(130).mp3`
+     - `Loops/Trap Drum Loop-14(130).mp3`
+     - `Loops/Trap Drum Loop-17(130).mp3`
+     - `Loops/Trap Drum Loop-18(130).mp3`
+     - `Loops/Trap Drum Loop-25(130).mp3`
+     - `Loops/Trap Drum Loop-26(130).mp3`
+     - `Loops/Trap Drum Loop-28(130).mp3`
+     - `Loops/Trap Drum Loop-35(98).mp3`
+     - `Loops/Trap Drum Loop-38(98).mp3`
+     - `Loops/Trap Drum Loop-39(98).mp3`
+     - `Loops/Trap Drum Loop-40(98).mp3`
 
 5. VSCO 2 Community Edition
    - Source page: https://versilian-studios.com/vsco-community/
@@ -85,5 +85,5 @@ Pack summary:
   license text outside the repo for release review.
 - If any file in this pack turns out not to be clearly redistributable under
   CC0/public-domain terms, remove it from the beta pack immediately.
-- If this pack is revised, create a new folder/version such as
-  `starter_kit_v2/` instead of mutating the v1 legal record in place.
+- If source material changes, create a new folder/version such as
+  `starter_kit_v2/`; format-only repacks may update this v1 record in place.

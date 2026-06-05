@@ -31,7 +31,7 @@ volume=0
 
 
 <region>
-sample=piccolo_Asharp4_staccato1.flac
+sample=piccolo_Asharp4_staccato1.mp3
 lokey=70
 hikey=74
 pitch_keycenter=70
@@ -41,7 +41,7 @@ volume=10
 
 
 <region>
-sample=piccolo_Asharp5_staccato1.flac
+sample=piccolo_Asharp5_staccato1.mp3
 lokey=81
 hikey=86
 pitch_keycenter=82
@@ -51,7 +51,7 @@ volume=10
 
 
 <region>
-sample=piccolo_Asharp6_staccato1.flac
+sample=piccolo_Asharp6_staccato1.mp3
 lokey=93
 hikey=94
 pitch_keycenter=94
@@ -61,7 +61,7 @@ volume=10
 
 
 <region>
-sample=piccolo_G5_staccato1.flac
+sample=piccolo_G5_staccato1.mp3
 lokey=75
 hikey=80
 pitch_keycenter=79
@@ -71,7 +71,7 @@ volume=10
 
 
 <region>
-sample=piccolo_G6_staccato1.flac
+sample=piccolo_G6_staccato1.mp3
 lokey=87
 hikey=92
 pitch_keycenter=91

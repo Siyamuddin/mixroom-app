@@ -114,10 +114,24 @@ CMakeFiles/juce_audio_engine.dir/NativeEffects.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/juce_audio_engine.dir/NativeEffects.cpp.s"
 	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang++ --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/NativeEffects.cpp -o CMakeFiles/juce_audio_engine.dir/NativeEffects.cpp.s
 
+CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.o: CMakeFiles/juce_audio_engine.dir/flags.make
+CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/InstrumentRenderers.cpp
+CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.o: CMakeFiles/juce_audio_engine.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.o"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang++ --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.o -MF CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.o.d -o CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/InstrumentRenderers.cpp
+
+CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.i"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang++ --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/InstrumentRenderers.cpp > CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.i
+
+CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.s"
+	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang++ --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/InstrumentRenderers.cpp -o CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.s
+
 CMakeFiles/juce_audio_engine.dir/JuceLogBridge.cpp.o: CMakeFiles/juce_audio_engine.dir/flags.make
 CMakeFiles/juce_audio_engine.dir/JuceLogBridge.cpp.o: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/JuceLogBridge.cpp
 CMakeFiles/juce_audio_engine.dir/JuceLogBridge.cpp.o: CMakeFiles/juce_audio_engine.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building CXX object CMakeFiles/juce_audio_engine.dir/JuceLogBridge.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/juce_audio_engine.dir/JuceLogBridge.cpp.o"
 	/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang++ --target=aarch64-none-linux-android29 --sysroot=/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/juce_audio_engine.dir/JuceLogBridge.cpp.o -MF CMakeFiles/juce_audio_engine.dir/JuceLogBridge.cpp.o.d -o CMakeFiles/juce_audio_engine.dir/JuceLogBridge.cpp.o -c /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/JuceLogBridge.cpp
 
 CMakeFiles/juce_audio_engine.dir/JuceLogBridge.cpp.i: cmake_force
@@ -133,6 +147,7 @@ juce_audio_engine_OBJECTS = \
 "CMakeFiles/juce_audio_engine.dir/JuceBridge.cpp.o" \
 "CMakeFiles/juce_audio_engine.dir/JuceEngine.cpp.o" \
 "CMakeFiles/juce_audio_engine.dir/NativeEffects.cpp.o" \
+"CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.o" \
 "CMakeFiles/juce_audio_engine.dir/JuceLogBridge.cpp.o"
 
 # External object files for target juce_audio_engine
@@ -141,16 +156,18 @@ juce_audio_engine_EXTERNAL_OBJECTS =
 libjuce_audio_engine.so: CMakeFiles/juce_audio_engine.dir/JuceBridge.cpp.o
 libjuce_audio_engine.so: CMakeFiles/juce_audio_engine.dir/JuceEngine.cpp.o
 libjuce_audio_engine.so: CMakeFiles/juce_audio_engine.dir/NativeEffects.cpp.o
+libjuce_audio_engine.so: CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.o
 libjuce_audio_engine.so: CMakeFiles/juce_audio_engine.dir/JuceLogBridge.cpp.o
 libjuce_audio_engine.so: CMakeFiles/juce_audio_engine.dir/build.make
 libjuce_audio_engine.so: CMakeFiles/juce_audio_engine.dir/compiler_depend.ts
 libjuce_audio_engine.so: /Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/libJuceModules.a
+libjuce_audio_engine.so: juce/modules/juce_audio_devices/native/oboe/liboboe.a
 libjuce_audio_engine.so: libcpu-features.a
 libjuce_audio_engine.so: libsheenbidi.a
 libjuce_audio_engine.so: harfbuzz/libharfbuzz.a
 libjuce_audio_engine.so: /Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot/usr/lib/aarch64-linux-android/29/liblog.so
 libjuce_audio_engine.so: CMakeFiles/juce_audio_engine.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Linking CXX shared library libjuce_audio_engine.so"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/Users/andrewhyungulee/Mixroom/mixroom-app/juce_audio_engine/android/src/main/cpp/build_juce_modules/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Linking CXX shared library libjuce_audio_engine.so"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/juce_audio_engine.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.

@@ -230,7 +230,7 @@ void main() {
             'operation': 'insert_audio_clips',
             'items': [
               {
-                'library_path': 'Starter Kit v1/Processed Drums/Kick-01.flac',
+                'library_path': 'Starter Kit v1/Processed Drums/Kick-01.mp3',
                 'row_index': 0,
                 'start_measure': 1,
                 'repeat_count': 4,
@@ -259,17 +259,17 @@ void main() {
             'operation': 'insert_audio_clips',
             'items': [
               {
-                'library_path': 'Starter Kit v1/Processed Drums/Kick-01.flac',
+                'library_path': 'Starter Kit v1/Processed Drums/Kick-01.mp3',
                 'row_index': 0,
                 'repeat_count': 4,
               },
               {
-                'library_path': 'Starter Kit v1/Processed Drums/Snare-01.flac',
+                'library_path': 'Starter Kit v1/Processed Drums/Snare-01.mp3',
                 'row_index': 1,
                 'repeat_count': 4,
               },
               {
-                'library_path': 'Starter Kit v1/Processed Drums/Crash-01.flac',
+                'library_path': 'Starter Kit v1/Processed Drums/Crash-01.mp3',
                 'row_index': 2,
                 'repeat_count': 3,
               },
@@ -306,7 +306,7 @@ void main() {
             'operation': 'insert_audio_clips',
             'items': [
               {
-                'library_path': 'Starter Kit v1/Processed Drums/Hat-01.flac',
+                'library_path': 'Starter Kit v1/Processed Drums/Hat-01.mp3',
                 'row_index': 0,
                 'start_measure': 1,
                 'length_measures': 2,
@@ -334,7 +334,7 @@ void main() {
             'operation': 'insert_audio_clips',
             'items': [
               {
-                'library_path': 'Starter Kit v1/Processed Drums/Kick-01.flac',
+                'library_path': 'Starter Kit v1/Processed Drums/Kick-01.mp3',
                 'row_index': 0,
                 'start_measure': 1,
                 'repeat_count': 8,
@@ -342,7 +342,7 @@ void main() {
                 'length_measures': 8,
               },
               {
-                'library_path': 'Starter Kit v1/Processed Drums/Snare-01.flac',
+                'library_path': 'Starter Kit v1/Processed Drums/Snare-01.mp3',
                 'row_index': 1,
                 'start_measure': 1,
                 'repeat_count': 8,
@@ -350,7 +350,7 @@ void main() {
                 'length_measures': 8,
               },
               {
-                'library_path': 'Starter Kit v1/Processed Drums/Hi-Hat-01.flac',
+                'library_path': 'Starter Kit v1/Processed Drums/Hi-Hat-01.mp3',
                 'row_index': 2,
                 'start_measure': 1,
                 'repeat_count': 8,
@@ -372,9 +372,9 @@ void main() {
         () {
       final initial = TimelineActionState.empty(
         clips: <TimelineClip>[
-          _audioClip(id: 'k0', row: 0, startMs: 0.0, label: 'Kick-01.flac'),
-          _audioClip(id: 's0', row: 1, startMs: 500.0, label: 'Snare-01.flac'),
-          _audioClip(id: 's1', row: 1, startMs: 1500.0, label: 'Snare-01.flac'),
+          _audioClip(id: 'k0', row: 0, startMs: 0.0, label: 'Kick-01.mp3'),
+          _audioClip(id: 's0', row: 1, startMs: 500.0, label: 'Snare-01.mp3'),
+          _audioClip(id: 's1', row: 1, startMs: 1500.0, label: 'Snare-01.mp3'),
         ],
         selectedClipIndices: const <int>[1, 2],
         primarySelectedClipIndex: 1,
@@ -388,7 +388,7 @@ void main() {
             'operation': 'replace_audio_clips',
             'items': [
               {
-                'library_path': 'Starter Kit v1/Processed Drums/Snare-02.flac',
+                'library_path': 'Starter Kit v1/Processed Drums/Snare-02.mp3',
                 'target': <String, dynamic>{
                   'row_index': 1,
                   'label_contains': 'snare',
@@ -400,9 +400,9 @@ void main() {
       );
 
       expect(next.clips.length, 3);
-      expect(next.clips[0].label, 'Kick-01.flac');
-      expect(next.clips[1].label, 'Snare-02.flac');
-      expect(next.clips[2].label, 'Snare-02.flac');
+      expect(next.clips[0].label, 'Kick-01.mp3');
+      expect(next.clips[1].label, 'Snare-02.mp3');
+      expect(next.clips[2].label, 'Snare-02.mp3');
       expect(next.clips[1].startMs, closeTo(500.0, 0.001));
       expect(next.clips[2].startMs, closeTo(1500.0, 0.001));
     });
@@ -1371,6 +1371,51 @@ void main() {
           .map((n) => n.startBeat + n.lengthBeats)
           .fold<double>(0.0, math.max);
       expect(lastEnd, closeTo(32.0, 1e-6));
+    });
+
+    test(
+        'duration_seconds preserve_existing_notes repeats midi phrase to target',
+        () {
+      final initial = TimelineActionState.empty(
+        projectTempoBpm: 120,
+        clips: <TimelineClip>[
+          _midiClip(
+            id: 'm0',
+            row: 1,
+            notes: <MidiNote>[
+              MidiNote(
+                id: 'n0',
+                pitch: 60,
+                startBeat: 0.0,
+                lengthBeats: 4.0,
+                velocity: 0.8,
+              ),
+            ],
+          ),
+        ],
+        selectedClipIndices: const <int>[0],
+        primarySelectedClipIndex: 0,
+        selectedRowIndex: 1,
+      );
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('midi_compose', <String, dynamic>{
+            'operation': 'replace_notes',
+            'target': <String, dynamic>{'prefer_selected': true},
+            'preserve_existing_notes': true,
+            'duration_seconds': 60,
+          }),
+        ],
+      );
+
+      final midiClip = next.clips.singleWhere((clip) => clip.isMidi);
+      final lastEnd = midiClip.midiNotes
+          .map((n) => n.startBeat + n.lengthBeats)
+          .fold<double>(0.0, math.max);
+      expect(lastEnd, closeTo(120.0, 1e-6));
+      expect(midiClip.midiNotes.length, 30);
     });
 
     test('style-driven append_notes can add a topline over the same clip span',

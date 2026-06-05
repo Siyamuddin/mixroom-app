@@ -160,6 +160,11 @@ class ProjectState {
 
 class RowState {
   final int rowIndex;
+  final int rowId;
+  final String rowName;
+  final String laneKind;
+  final String instrumentId;
+  final String instrumentName;
   final List<ClipState> clips;
 
   /// Lightweight audio features (from waveform)
@@ -225,6 +230,11 @@ class RowState {
 
   RowState({
     required this.rowIndex,
+    this.rowId = -1,
+    this.rowName = '',
+    this.laneKind = 'audio',
+    this.instrumentId = '',
+    this.instrumentName = '',
     required this.clips,
     required this.approxRms,
     required this.approxCrest,
@@ -242,6 +252,13 @@ class RowState {
 
   Map<String, dynamic> toJson() => {
         'row': rowIndex,
+        'row_id': rowId,
+        'row_name': rowName,
+        'lane_kind': laneKind,
+        if (laneKind == 'instrument') ...{
+          'instrument_id': instrumentId,
+          'instrument_name': instrumentName,
+        },
         'clips': clips.map((c) => c.toJson()).toList(),
         'features': {'approx_rms': approxRms, 'approx_crest': approxCrest},
         'role_probs': roleProbs,
@@ -257,6 +274,11 @@ class RowState {
 
   Map<String, dynamic> toMagnitudeResolverJson() => {
         'row': rowIndex,
+        'lane_kind': laneKind,
+        if (laneKind == 'instrument') ...{
+          'instrument_id': instrumentId,
+          'instrument_name': instrumentName,
+        },
         'features': {'approx_rms': approxRms, 'approx_crest': approxCrest},
         'role_probs': roleProbs,
         'audio_stats': audioStats,

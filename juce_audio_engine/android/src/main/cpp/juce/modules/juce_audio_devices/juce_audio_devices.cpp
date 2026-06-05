@@ -200,7 +200,7 @@
 namespace juce
 {
     using RealtimeThreadFactory = pthread_t (*) (void* (*) (void*), void*);
-    static RealtimeThreadFactory getAndroidRealtimeThreadFactory();
+    RealtimeThreadFactory getAndroidRealtimeThreadFactory();
 } // namespace juce
 
 #include "native/juce_Audio_android.cpp"
@@ -239,7 +239,7 @@ namespace juce
 // No audio library, so no way to create realtime threads.
   namespace juce
   {
-      static RealtimeThreadFactory getAndroidRealtimeThreadFactory() { return nullptr; }
+      RealtimeThreadFactory getAndroidRealtimeThreadFactory() { return nullptr; }
   }
  #endif
 

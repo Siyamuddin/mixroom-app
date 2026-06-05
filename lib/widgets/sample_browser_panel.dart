@@ -67,6 +67,12 @@ class SampleBrowserPanel extends StatefulWidget {
 }
 
 class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
+  static const Color _kPanelText = Color(0xFFF4F4F4);
+  static const Color _kPanelMutedText = Color(0xB8F4F4F4);
+  static const Color _kPanelBorder = Color.fromRGBO(255, 255, 255, 0.12);
+  static const Color _kPanelFill = Color.fromRGBO(244, 244, 244, 0.08);
+  static const Color _kPanelFillStrong = Color.fromRGBO(244, 244, 244, 0.14);
+  static const Color _kPanelAccent = Color(0xFF78D9FF);
   static const Duration _kFolderHoldDelay = Duration(milliseconds: 180);
   static const double _kFolderHoldMoveTolerance = 14.0;
   static const int _kPreviewWaveformBars = 128;
@@ -94,8 +100,12 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   final Set<String> _durationLoading = <String>{};
   final Map<String, List<double>> _waveformByFile = <String, List<double>>{};
   final Set<String> _waveformLoading = <String>{};
+  final FocusNode _treeFocusNode = FocusNode(debugLabel: 'sample_browser_tree');
+  final ScrollController _treeScrollController = ScrollController();
+  final Map<String, GlobalKey> _treeRowKeys = <String, GlobalKey>{};
 
   String? _selectedRoot;
+  String? _selectedTreePath;
   String? _previewFocusPath;
   List<String> _rootFoldersSnapshot = const <String>[];
   bool _dragOutsideNotified = false;
@@ -108,6 +118,10 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
     super.initState();
     _rootFoldersSnapshot = List<String>.from(widget.rootFolders);
     _syncSelectedRoot();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_treeFocusNode.canRequestFocus) return;
+      _treeFocusNode.requestFocus();
+    });
   }
 
   @override
@@ -138,6 +152,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   @override
   void dispose() {
     _folderHoldTimer?.cancel();
+    _treeFocusNode.dispose();
+    _treeScrollController.dispose();
     super.dispose();
   }
 
@@ -174,6 +190,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
     if (widget.rootFolders.isEmpty) {
       setState(() {
         _selectedRoot = null;
+        _selectedTreePath = null;
       });
       return;
     }
@@ -183,6 +200,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
     final nextRoot = widget.rootFolders.first;
     setState(() {
       _selectedRoot = nextRoot;
+      _selectedTreePath = null;
       _expandedDirs.add(nextRoot);
     });
     _ensureDirectoryLoaded(nextRoot);
@@ -300,8 +318,10 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   void _selectRoot(String rootPath) {
     setState(() {
       _selectedRoot = rootPath;
+      _selectedTreePath = null;
       _expandedDirs.add(rootPath);
     });
+    _requestTreeFocus();
     _ensureDirectoryLoaded(rootPath);
   }
 
@@ -311,6 +331,168 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
       _previewFocusPath = filePath;
     });
     _ensureWaveformForFile(filePath);
+  }
+
+  void _requestTreeFocus() {
+    if (!_treeFocusNode.canRequestFocus) return;
+    _treeFocusNode.requestFocus();
+  }
+
+  GlobalKey _keyForTreePath(String path) {
+    return _treeRowKeys.putIfAbsent(path, GlobalKey.new);
+  }
+
+  void _pruneTreeRowKeys(List<_TreeLine> lines) {
+    final visiblePaths = lines.map((line) => line.path).toSet();
+    _treeRowKeys.removeWhere((path, _) => !visiblePaths.contains(path));
+  }
+
+  void _ensureSelectedRowVisible(String path) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final context = _treeRowKeys[path]?.currentContext;
+      if (context == null) return;
+      Scrollable.ensureVisible(
+        context,
+        alignment: 0.35,
+        duration: const Duration(milliseconds: 90),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
+  void _selectTreeLine(
+    _TreeLine line, {
+    bool auditionFile = false,
+    bool ensureVisible = false,
+  }) {
+    final changed = _selectedTreePath != line.path;
+    if (changed) {
+      setState(() {
+        _selectedTreePath = line.path;
+      });
+    }
+    if (ensureVisible) {
+      _ensureSelectedRowVisible(line.path);
+    }
+    if (!line.isDirectory) {
+      _setPreviewFocusPath(line.path);
+      if (auditionFile && changed) {
+        unawaited(widget.onAuditionTap(line.path));
+      }
+    }
+  }
+
+  bool _isAncestorPath(String ancestor, String child) {
+    final normalizedAncestor = p.normalize(ancestor);
+    final normalizedChild = p.normalize(child);
+    if (normalizedAncestor == normalizedChild) return false;
+    final parent = p.dirname(normalizedChild);
+    if (parent == normalizedChild) return false;
+    return parent == normalizedAncestor ||
+        _isAncestorPath(normalizedAncestor, parent);
+  }
+
+  String? _nearestVisibleParentPath(String path, List<_TreeLine> lines) {
+    var parent = p.dirname(path);
+    final root = _selectedRoot;
+    while (parent.isNotEmpty && parent != path && parent != root) {
+      final visible = lines.any((line) => line.path == parent);
+      if (visible) return parent;
+      path = parent;
+      parent = p.dirname(path);
+    }
+    return null;
+  }
+
+  _TreeLine? _lineForPath(List<_TreeLine> lines, String? path) {
+    if (path == null) return null;
+    for (final line in lines) {
+      if (line.path == path) return line;
+    }
+    return null;
+  }
+
+  KeyEventResult _handleTreeKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+
+    final key = event.logicalKey;
+    if (key != LogicalKeyboardKey.arrowUp &&
+        key != LogicalKeyboardKey.arrowDown &&
+        key != LogicalKeyboardKey.arrowLeft &&
+        key != LogicalKeyboardKey.arrowRight) {
+      return KeyEventResult.ignored;
+    }
+
+    final lines = _buildTreeLines();
+    if (lines.isEmpty) return KeyEventResult.handled;
+
+    final selectedLine = _lineForPath(lines, _selectedTreePath) ??
+        _lineForPath(lines, widget.auditioningPath) ??
+        _lineForPath(lines, _previewFocusPath);
+    final selectedIndex =
+        selectedLine == null ? -1 : lines.indexOf(selectedLine);
+
+    if (key == LogicalKeyboardKey.arrowUp ||
+        key == LogicalKeyboardKey.arrowDown) {
+      final delta = key == LogicalKeyboardKey.arrowUp ? -1 : 1;
+      final nextIndex = selectedIndex < 0
+          ? (delta > 0 ? 0 : lines.length - 1)
+          : (selectedIndex + delta).clamp(0, lines.length - 1);
+      _selectTreeLine(
+        lines[nextIndex],
+        auditionFile: true,
+        ensureVisible: true,
+      );
+      return KeyEventResult.handled;
+    }
+
+    if (selectedLine == null) {
+      _selectTreeLine(
+        lines.first,
+        auditionFile: true,
+        ensureVisible: true,
+      );
+      return KeyEventResult.handled;
+    }
+
+    if (key == LogicalKeyboardKey.arrowRight) {
+      if (selectedLine.isDirectory &&
+          !_expandedDirs.contains(selectedLine.path)) {
+        setState(() {
+          _expandedDirs.add(selectedLine.path);
+        });
+        unawaited(_ensureDirectoryLoaded(selectedLine.path));
+      }
+      return KeyEventResult.handled;
+    }
+
+    final collapses = <String>{};
+    if (selectedLine.isDirectory && _expandedDirs.contains(selectedLine.path)) {
+      collapses.add(selectedLine.path);
+    } else {
+      final parent = _nearestVisibleParentPath(selectedLine.path, lines);
+      if (parent != null) collapses.add(parent);
+    }
+    if (selectedLine.isDirectory) {
+      collapses.addAll(
+        _expandedDirs.where((dir) => _isAncestorPath(selectedLine.path, dir)),
+      );
+    }
+
+    final parentPath = _nearestVisibleParentPath(selectedLine.path, lines);
+    setState(() {
+      _expandedDirs.removeAll(collapses);
+      if (parentPath != null) {
+        _selectedTreePath = parentPath;
+      }
+    });
+    if (parentPath != null) {
+      _ensureSelectedRowVisible(parentPath);
+    }
+    return KeyEventResult.handled;
   }
 
   Future<void> _ensureWaveformForFile(String filePath) async {
@@ -524,9 +706,13 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                   fontSize: 11.2,
                 ),
               ),
-              selectedColor: const Color(0xFFA48E76).withOpacity(0.5),
-              backgroundColor: Colors.white.withOpacity(0.08),
-              side: BorderSide(color: Colors.white.withOpacity(0.16)),
+              selectedColor: _kPanelFillStrong,
+              backgroundColor: _kPanelFill,
+              side: BorderSide(
+                color: selected
+                    ? _kPanelAccent.withOpacity(0.34)
+                    : Colors.white.withOpacity(0.16),
+              ),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(999),
               ),
@@ -546,7 +732,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
     if (overlay == null) return;
     final selected = await showMenu<String>(
       context: context,
-      color: const Color(0xFF7D7973),
+      color: const Color(0xFF2F3A45),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       position: RelativeRect.fromLTRB(
         globalPosition.dx,
@@ -642,73 +828,97 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
     final isExpanded = _expandedDirs.contains(line.path);
     final isLoading = _loadingDirs.contains(line.path);
     final hasError = _dirErrors.containsKey(line.path);
+    final isSelected = _selectedTreePath == line.path;
     final title = _displayNameForPath(line.path);
-    return InkWell(
-      onTap: () => _toggleDir(line.path),
-      splashColor: Colors.white.withOpacity(0.085),
-      highlightColor: Colors.white.withOpacity(0.03),
-      hoverColor: Colors.white.withOpacity(0.02),
-      focusColor: Colors.white.withOpacity(0.03),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 4),
-        child: Row(
-          children: [
-            SizedBox(width: indent),
-            Container(
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.06),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              alignment: Alignment.center,
-              child: Icon(
-                isExpanded ? Icons.folder_open : Icons.folder_outlined,
-                color: hasError ? Colors.orangeAccent : const Color(0xFFF7F0E8),
-                size: 15,
-              ),
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.96),
-                  fontSize: 12.7,
-                  fontWeight: FontWeight.w600,
-                ),
+    return KeyedSubtree(
+      key: _keyForTreePath(line.path),
+      child: InkWell(
+        onTap: () {
+          _requestTreeFocus();
+          _selectTreeLine(line);
+          _toggleDir(line.path);
+        },
+        splashColor: Colors.white.withOpacity(0.085),
+        highlightColor: Colors.white.withOpacity(0.03),
+        hoverColor: Colors.white.withOpacity(0.02),
+        focusColor: Colors.white.withOpacity(0.03),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 4),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? Colors.white.withOpacity(0.105)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isSelected
+                    ? Colors.white.withOpacity(0.26)
+                    : Colors.transparent,
               ),
             ),
-            if (hasError)
-              Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: Icon(
-                  Icons.error_outline,
-                  color: Colors.orangeAccent.withOpacity(0.9),
-                  size: 14,
+            child: Row(
+              children: [
+                SizedBox(width: indent),
+                Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.06),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(
+                    isExpanded ? Icons.folder_open : Icons.folder_outlined,
+                    color: hasError
+                        ? Colors.orangeAccent
+                        : const Color(0xFFF7F0E8),
+                    size: 15,
+                  ),
                 ),
-              ),
-            if (isLoading)
-              SizedBox(
-                width: 10,
-                height: 10,
-                child: CircularProgressIndicator(
-                  strokeWidth: 1.3,
-                  color: Colors.white.withOpacity(0.75),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.96),
+                      fontSize: 12.7,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
-              )
-            else
-              Icon(
-                isExpanded
-                    ? Icons.keyboard_arrow_down
-                    : Icons.keyboard_arrow_right,
-                color: Colors.white54,
-                size: 17,
-              ),
-            const SizedBox(width: 4),
-          ],
+                if (hasError)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: Icon(
+                      Icons.error_outline,
+                      color: Colors.orangeAccent.withOpacity(0.9),
+                      size: 14,
+                    ),
+                  ),
+                if (isLoading)
+                  SizedBox(
+                    width: 10,
+                    height: 10,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.3,
+                      color: Colors.white.withOpacity(0.75),
+                    ),
+                  )
+                else
+                  Icon(
+                    isExpanded
+                        ? Icons.keyboard_arrow_down
+                        : Icons.keyboard_arrow_right,
+                    color: Colors.white54,
+                    size: 17,
+                  ),
+                const SizedBox(width: 4),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -719,6 +929,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
     final filePath = line.path;
     final fileName = _displayNameForPath(filePath);
     final isAuditioning = widget.auditioningPath == filePath;
+    final isSelected = _selectedTreePath == filePath;
 
     final tile = LayoutBuilder(
       builder: (context, constraints) {
@@ -727,7 +938,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () {
-            _setPreviewFocusPath(filePath);
+            _requestTreeFocus();
+            _selectTreeLine(line);
             widget.onAuditionTap(filePath);
           },
           child: Padding(
@@ -736,13 +948,17 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
               duration: const Duration(milliseconds: 130),
               decoration: BoxDecoration(
                 color: isAuditioning
-                    ? const Color(0x33C89C67)
-                    : Colors.white.withOpacity(0.035),
+                    ? _kPanelAccent.withOpacity(0.15)
+                    : isSelected
+                        ? Colors.white.withOpacity(0.105)
+                        : Colors.white.withOpacity(0.035),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: isAuditioning
-                      ? const Color(0x99EFB67D)
-                      : Colors.white.withOpacity(0.04),
+                      ? _kPanelAccent.withOpacity(0.50)
+                      : isSelected
+                          ? Colors.white.withOpacity(0.26)
+                          : Colors.white.withOpacity(0.04),
                 ),
               ),
               child: Row(
@@ -753,9 +969,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                         ? Icons.stop_circle
                         : Icons.play_circle_outline,
                     size: 16,
-                    color: isAuditioning
-                        ? const Color(0xFFFFD1A6)
-                        : Colors.white70,
+                    color: isAuditioning ? _kPanelAccent : Colors.white70,
                   ),
                   const SizedBox(width: 5),
                   Expanded(
@@ -806,66 +1020,69 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
       },
     );
 
-    return LongPressDraggable<SampleDragData>(
-      data: SampleDragData(
-        filePath: filePath,
-        label: p.basenameWithoutExtension(fileName),
-        duration: _durationByFile[filePath],
-      ),
-      dragAnchorStrategy: (draggable, context, position) =>
-          const Offset(42, 48),
-      delay: const Duration(milliseconds: 135),
-      onDragStarted: () {
-        _dragOutsideNotified = false;
-        widget.onDragActivityChanged?.call(true);
-      },
-      onDragUpdate: (details) {
-        if (_dragOutsideNotified || widget.onDragOutsidePanel == null) return;
-        final box = context.findRenderObject() as RenderBox?;
-        if (box == null || !box.hasSize) return;
-        final local = box.globalToLocal(details.globalPosition);
-        final bounds = Rect.fromLTWH(0, 0, box.size.width, box.size.height);
-        if (!bounds.contains(local)) {
-          _dragOutsideNotified = true;
-          widget.onDragOutsidePanel?.call();
-        }
-      },
-      onDragEnd: (_) {
-        _dragOutsideNotified = false;
-        widget.onDragActivityChanged?.call(false);
-      },
-      feedback: Material(
-        color: Colors.transparent,
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 220),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: const Color(0xFF7C7872).withOpacity(0.96),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: Colors.white24),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.music_note, color: Colors.white, size: 16),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  fileName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white, fontSize: 12),
+    return KeyedSubtree(
+      key: _keyForTreePath(line.path),
+      child: LongPressDraggable<SampleDragData>(
+        data: SampleDragData(
+          filePath: filePath,
+          label: p.basenameWithoutExtension(fileName),
+          duration: _durationByFile[filePath],
+        ),
+        dragAnchorStrategy: (draggable, context, position) =>
+            const Offset(42, 48),
+        delay: const Duration(milliseconds: 135),
+        onDragStarted: () {
+          _dragOutsideNotified = false;
+          widget.onDragActivityChanged?.call(true);
+        },
+        onDragUpdate: (details) {
+          if (_dragOutsideNotified || widget.onDragOutsidePanel == null) return;
+          final box = context.findRenderObject() as RenderBox?;
+          if (box == null || !box.hasSize) return;
+          final local = box.globalToLocal(details.globalPosition);
+          final bounds = Rect.fromLTWH(0, 0, box.size.width, box.size.height);
+          if (!bounds.contains(local)) {
+            _dragOutsideNotified = true;
+            widget.onDragOutsidePanel?.call();
+          }
+        },
+        onDragEnd: (_) {
+          _dragOutsideNotified = false;
+          widget.onDragActivityChanged?.call(false);
+        },
+        feedback: Material(
+          color: Colors.transparent,
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 220),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF7C7872).withOpacity(0.96),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.white24),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.music_note, color: Colors.white, size: 16),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    fileName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-      ),
-      childWhenDragging: Opacity(
-        opacity: 0.38,
+        childWhenDragging: Opacity(
+          opacity: 0.38,
+          child: tile,
+        ),
         child: tile,
       ),
-      child: tile,
     );
   }
 
@@ -959,7 +1176,9 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
       );
     }
 
+    _pruneTreeRowKeys(lines);
     return ListView.builder(
+      controller: _treeScrollController,
       padding: const EdgeInsets.fromLTRB(0, 2, 0, 4),
       itemCount: lines.length,
       itemBuilder: (context, index) {
@@ -993,14 +1212,14 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           colors: <Color>[
-            Color(0xB39A948A),
-            Color(0xA06B747D),
+            Color.fromRGBO(87, 96, 106, 0.78),
+            Color.fromRGBO(49, 58, 68, 0.78),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withOpacity(0.16)),
+        border: Border.all(color: _kPanelBorder),
       ),
       child: StreamBuilder<Duration?>(
         stream: widget.previewDurationStream,
@@ -1061,7 +1280,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                color: Colors.white70,
+                                color: _kPanelMutedText,
                                 fontSize: 10.5,
                                 fontWeight: FontWeight.w600,
                               ),
@@ -1071,7 +1290,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                           Text(
                             '${_formatPreviewClock(pos)} / ${_formatPreviewClock(total)}',
                             style: const TextStyle(
-                                color: Colors.white60, fontSize: 10.5),
+                                color: _kPanelMutedText, fontSize: 10.5),
                           ),
                         ],
                       ),
@@ -1089,140 +1308,150 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   @override
   Widget build(BuildContext context) {
     final selectedRoot = _selectedRoot;
-    return Material(
-      color: Colors.transparent,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(24),
-        child: Container(
-          clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: <Color>[
-                Color(0xBC9B8E7E),
-                Color(0xB088837E),
-                Color(0xB86B7780),
-              ],
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-            ),
+    return Focus(
+      focusNode: _treeFocusNode,
+      onKeyEvent: _handleTreeKeyEvent,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTapDown: (_) => _requestTreeFocus(),
+        child: Material(
+          color: Colors.transparent,
+          child: ClipRRect(
             borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.35),
-                blurRadius: 28,
-                offset: const Offset(0, -10),
-              ),
-            ],
-          ),
-          foregroundDecoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: Colors.white.withOpacity(0.14)),
-          ),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              IgnorePointer(
-                child: BackdropFilter(
-                  filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                  child: const SizedBox.expand(),
-                ),
-              ),
-              Material(
-                type: MaterialType.transparency,
-                child: Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 8, 8, 2),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              L10n.translate(context, 'File Browser'),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 15,
-                              ),
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: L10n.translate(context, 'How to use'),
-                            onPressed: _showUsageInfo,
-                            padding: EdgeInsets.zero,
-                            visualDensity: const VisualDensity(
-                                horizontal: -2, vertical: -2),
-                            constraints: const BoxConstraints.tightFor(
-                                width: 36, height: 34),
-                            icon: const Icon(Icons.info_outline,
-                                color: Colors.white70, size: 19),
-                          ),
-                          IconButton(
-                            tooltip: L10n.translate(context, 'Add folder'),
-                            onPressed: widget.onAddFolder,
-                            padding: EdgeInsets.zero,
-                            visualDensity: const VisualDensity(
-                                horizontal: -2, vertical: -2),
-                            constraints: const BoxConstraints.tightFor(
-                                width: 36, height: 34),
-                            icon: const Icon(Icons.create_new_folder_outlined,
-                                color: Colors.white70, size: 19),
-                          ),
-                          if (selectedRoot != null)
-                            IconButton(
-                              tooltip:
-                                  L10n.translate(context, 'Refresh folder'),
-                              onPressed: () => _ensureDirectoryLoaded(
-                                  selectedRoot,
-                                  force: true),
-                              padding: EdgeInsets.zero,
-                              visualDensity: const VisualDensity(
-                                  horizontal: -2, vertical: -2),
-                              constraints: const BoxConstraints.tightFor(
-                                  width: 36, height: 34),
-                              icon: const Icon(Icons.refresh,
-                                  color: Colors.white70, size: 19),
-                            ),
-                          if (selectedRoot != null)
-                            IconButton(
-                              tooltip: widget.expanded
-                                  ? L10n.translate(context, 'Collapse panel')
-                                  : L10n.translate(context, 'Expand panel'),
-                              onPressed: () =>
-                                  widget.onExpandedChanged(!widget.expanded),
-                              padding: EdgeInsets.zero,
-                              visualDensity: const VisualDensity(
-                                  horizontal: -2, vertical: -2),
-                              constraints: const BoxConstraints.tightFor(
-                                  width: 36, height: 34),
-                              icon: Icon(
-                                widget.expanded
-                                    ? Icons.fullscreen_exit_outlined
-                                    : Icons.fullscreen_outlined,
-                                color: Colors.white70,
-                                size: 19,
-                              ),
-                            ),
-                          IconButton(
-                            tooltip: L10n.translate(context, 'Close'),
-                            onPressed: widget.onClose,
-                            padding: EdgeInsets.zero,
-                            visualDensity: const VisualDensity(
-                                horizontal: -2, vertical: -2),
-                            constraints: const BoxConstraints.tightFor(
-                                width: 36, height: 34),
-                            icon: const Icon(Icons.close,
-                                color: Colors.white70, size: 19),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (widget.rootFolders.isNotEmpty) _buildRootSelector(),
-                    Expanded(child: _buildTree()),
-                    _buildPreviewStrip(),
+            child: Container(
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: <Color>[
+                    Color.fromRGBO(87, 96, 106, 0.96),
+                    Color.fromRGBO(49, 58, 68, 0.96),
                   ],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
                 ),
+                borderRadius: BorderRadius.circular(24),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.35),
+                    blurRadius: 28,
+                    offset: const Offset(0, -10),
+                  ),
+                ],
               ),
-            ],
+              foregroundDecoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: _kPanelBorder),
+              ),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  IgnorePointer(
+                    child: BackdropFilter(
+                      filter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                      child: const SizedBox.expand(),
+                    ),
+                  ),
+                  Material(
+                    type: MaterialType.transparency,
+                    child: Column(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(14, 8, 8, 2),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  L10n.translate(context, 'File Browser'),
+                                  style: const TextStyle(
+                                    color: _kPanelText,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: L10n.translate(context, 'How to use'),
+                                onPressed: _showUsageInfo,
+                                padding: EdgeInsets.zero,
+                                visualDensity: const VisualDensity(
+                                    horizontal: -2, vertical: -2),
+                                constraints: const BoxConstraints.tightFor(
+                                    width: 36, height: 34),
+                                icon: const Icon(Icons.info_outline,
+                                    color: Colors.white70, size: 19),
+                              ),
+                              IconButton(
+                                tooltip: L10n.translate(context, 'Add folder'),
+                                onPressed: widget.onAddFolder,
+                                padding: EdgeInsets.zero,
+                                visualDensity: const VisualDensity(
+                                    horizontal: -2, vertical: -2),
+                                constraints: const BoxConstraints.tightFor(
+                                    width: 36, height: 34),
+                                icon: const Icon(
+                                    Icons.create_new_folder_outlined,
+                                    color: Colors.white70,
+                                    size: 19),
+                              ),
+                              if (selectedRoot != null)
+                                IconButton(
+                                  tooltip:
+                                      L10n.translate(context, 'Refresh folder'),
+                                  onPressed: () => _ensureDirectoryLoaded(
+                                      selectedRoot,
+                                      force: true),
+                                  padding: EdgeInsets.zero,
+                                  visualDensity: const VisualDensity(
+                                      horizontal: -2, vertical: -2),
+                                  constraints: const BoxConstraints.tightFor(
+                                      width: 36, height: 34),
+                                  icon: const Icon(Icons.refresh,
+                                      color: Colors.white70, size: 19),
+                                ),
+                              if (selectedRoot != null)
+                                IconButton(
+                                  tooltip: widget.expanded
+                                      ? L10n.translate(
+                                          context, 'Collapse panel')
+                                      : L10n.translate(context, 'Expand panel'),
+                                  onPressed: () => widget
+                                      .onExpandedChanged(!widget.expanded),
+                                  padding: EdgeInsets.zero,
+                                  visualDensity: const VisualDensity(
+                                      horizontal: -2, vertical: -2),
+                                  constraints: const BoxConstraints.tightFor(
+                                      width: 36, height: 34),
+                                  icon: Icon(
+                                    widget.expanded
+                                        ? Icons.fullscreen_exit_outlined
+                                        : Icons.fullscreen_outlined,
+                                    color: Colors.white70,
+                                    size: 19,
+                                  ),
+                                ),
+                              IconButton(
+                                tooltip: L10n.translate(context, 'Close'),
+                                onPressed: widget.onClose,
+                                padding: EdgeInsets.zero,
+                                visualDensity: const VisualDensity(
+                                    horizontal: -2, vertical: -2),
+                                constraints: const BoxConstraints.tightFor(
+                                    width: 36, height: 34),
+                                icon: const Icon(Icons.close,
+                                    color: Colors.white70, size: 19),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (widget.rootFolders.isNotEmpty) _buildRootSelector(),
+                        Expanded(child: _buildTree()),
+                        _buildPreviewStrip(),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),

@@ -31,7 +31,7 @@ volume=0
 
 
 <region>
-sample=glock_medium_C5.flac
+sample=glock_medium_C5.mp3
 lokey=70
 hikey=75
 pitch_keycenter=72
@@ -41,7 +41,7 @@ volume=8
 
 
 <region>
-sample=glock_medium_C6.flac
+sample=glock_medium_C6.mp3
 lokey=82
 hikey=87
 pitch_keycenter=84
@@ -51,7 +51,7 @@ volume=8
 
 
 <region>
-sample=glock_medium_C7.flac
+sample=glock_medium_C7.mp3
 lokey=94
 hikey=96
 pitch_keycenter=96
@@ -61,7 +61,7 @@ volume=8
 
 
 <region>
-sample=glock_medium_G4.flac
+sample=glock_medium_G4.mp3
 lokey=67
 hikey=69
 pitch_keycenter=67
@@ -71,7 +71,7 @@ volume=8
 
 
 <region>
-sample=glock_medium_G5.flac
+sample=glock_medium_G5.mp3
 lokey=76
 hikey=81
 pitch_keycenter=79
@@ -81,7 +81,7 @@ volume=8
 
 
 <region>
-sample=glock_medium_G6.flac
+sample=glock_medium_G6.mp3
 lokey=88
 hikey=93
 pitch_keycenter=91

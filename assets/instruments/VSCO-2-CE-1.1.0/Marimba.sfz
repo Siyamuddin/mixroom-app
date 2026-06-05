@@ -31,7 +31,7 @@ volume=0
 
 
 <region>
-sample=Marimba_hit_Outrigger_B2_loud_01.flac
+sample=Marimba_hit_Outrigger_B2_loud_01.mp3
 lokey=57
 hikey=61
 pitch_keycenter=59
@@ -41,7 +41,7 @@ volume=6
 
 
 <region>
-sample=Marimba_hit_Outrigger_B4_loud_01.flac
+sample=Marimba_hit_Outrigger_B4_loud_01.mp3
 lokey=81
 hikey=85
 pitch_keycenter=83
@@ -51,7 +51,7 @@ volume=6
 
 
 <region>
-sample=Marimba_hit_Outrigger_C2_loud_01.flac
+sample=Marimba_hit_Outrigger_C2_loud_01.mp3
 lokey=45
 hikey=51
 pitch_keycenter=48
@@ -61,7 +61,7 @@ volume=6
 
 
 <region>
-sample=Marimba_hit_Outrigger_C4_loud_01.flac
+sample=Marimba_hit_Outrigger_C4_loud_01.mp3
 lokey=69
 hikey=75
 pitch_keycenter=72
@@ -71,7 +71,7 @@ volume=6
 
 
 <region>
-sample=Marimba_hit_Outrigger_C6_loud_01.flac
+sample=Marimba_hit_Outrigger_C6_loud_01.mp3
 lokey=93
 hikey=96
 pitch_keycenter=96
@@ -81,7 +81,7 @@ volume=6
 
 
 <region>
-sample=Marimba_hit_Outrigger_F1_loud_01.flac
+sample=Marimba_hit_Outrigger_F1_loud_01.mp3
 lokey=41
 hikey=44
 pitch_keycenter=41
@@ -91,7 +91,7 @@ volume=6
 
 
 <region>
-sample=Marimba_hit_Outrigger_F3_loud_01.flac
+sample=Marimba_hit_Outrigger_F3_loud_01.mp3
 lokey=62
 hikey=68
 pitch_keycenter=65
@@ -101,7 +101,7 @@ volume=6
 
 
 <region>
-sample=Marimba_hit_Outrigger_F5_loud_01.flac
+sample=Marimba_hit_Outrigger_F5_loud_01.mp3
 lokey=86
 hikey=92
 pitch_keycenter=89
@@ -111,7 +111,7 @@ volume=6
 
 
 <region>
-sample=Marimba_hit_Outrigger_G2_loud_01.flac
+sample=Marimba_hit_Outrigger_G2_loud_01.mp3
 lokey=52
 hikey=56
 pitch_keycenter=55
@@ -121,7 +121,7 @@ volume=6
 
 
 <region>
-sample=Marimba_hit_Outrigger_G4_loud_01.flac
+sample=Marimba_hit_Outrigger_G4_loud_01.mp3
 lokey=76
 hikey=80
 pitch_keycenter=79

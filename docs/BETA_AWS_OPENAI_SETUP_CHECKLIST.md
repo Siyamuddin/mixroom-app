@@ -15,10 +15,24 @@ Do not use EC2 for this beta path unless you later need a persistent platform ba
 ## 1. OpenAI dashboard
 
 - Create a new OpenAI API key for beta server use.
+- Set the key permission level to `Restricted`.
+  - Grant only the write/read scopes required for the deployed Responses API
+    path and model access.
+  - Set unrelated endpoints such as Assistants, fine-tuning, files, batches,
+    and administration endpoints to `None` unless a live feature explicitly
+    needs them.
 - Confirm the OpenAI project has access to the model you want to use.
   - The production model is owned by the proxy deployment config via `OpenAiModel`.
 - Do not put this key in the app.
 - After AWS is confirmed working, revoke any previously exposed key.
+
+OpenAI documents API key permission levels as `All`, `Restricted`, and
+`Read Only`, with `Restricted` allowing endpoint-level permissions:
+https://help.openai.com/en/articles/8867743-assign-api-key-permissions
+
+OpenAI also recommends routing requests through a backend instead of shipping
+keys in mobile apps:
+https://help.openai.com/articles/5112595-best-practices-for-api-key-safety
 
 No special OpenAI-side rotation setting is required.
 Rotation is:
@@ -156,6 +170,8 @@ Before beta:
 
 - Proxy deployed and used by production builds
 - OpenAI key only in SSM Parameter Store or another backend-only secret store
+- OpenAI key uses `Restricted` permissions and has been smoke-tested through
+  the deployed proxy
 - Old exposed key revoked
 - Cognito sign-in / sign-out validated on iOS and Android
 - Chat request succeeds with authenticated bearer token

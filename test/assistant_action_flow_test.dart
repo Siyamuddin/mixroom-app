@@ -101,6 +101,7 @@ class _FakeProjectStateBuilder extends ProjectStateBuilder {
     double masterGain0to3 = 1.0,
     double masterPan0to1 = 0.5,
     Map<int, String> roleOverrides = const {},
+    List<TimelineRow> timelineRows = const <TimelineRow>[],
   }) async {
     final rowStates = List<RowState>.generate(rows, (row) {
       final rowTracks = audioTracks.where((t) => t.rowIndex == row).toList();
@@ -119,6 +120,15 @@ class _FakeProjectStateBuilder extends ProjectStateBuilder {
 
       return RowState(
         rowIndex: row,
+        rowId: row < timelineRows.length ? timelineRows[row].rowId : row,
+        rowName: row < timelineRows.length ? timelineRows[row].name : '',
+        laneKind: row < timelineRows.length
+            ? timelineRows[row].kind.wireName
+            : 'audio',
+        instrumentId:
+            row < timelineRows.length ? timelineRows[row].instrumentId : '',
+        instrumentName:
+            row < timelineRows.length ? timelineRows[row].instrumentName : '',
         clips: clips,
         approxRms: rowTracks.isEmpty ? 0.0 : (rowApproxRms[row] ?? 0.2),
         approxCrest: rowTracks.isEmpty ? 0.0 : (rowApproxCrest[row] ?? 1.5),
@@ -235,7 +245,7 @@ void main() {
                   'items': [
                     {
                       'library_path':
-                          'Starter Kit v1/Processed Drums/Kick-01.flac',
+                          'Starter Kit v1/Processed Drums/Kick-01.mp3',
                       'row_index': 0,
                       'start_measure': 1,
                     },

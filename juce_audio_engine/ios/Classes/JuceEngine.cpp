@@ -11,6 +11,12 @@ void sanitiseAutomationPoints(std::vector<AutomationPoint> &points, float maxVal
 bool resolveKnownPluginDescription(const juce::KnownPluginList &list,
                                    const juce::String &idOrName,
                                    juce::PluginDescription &outDesc);
+bool resolvePluginDescriptionFromFile(
+    juce::AudioPluginFormatManager &formatManager,
+    const juce::String &fileOrIdentifier,
+    juce::PluginDescription &outDesc,
+    bool requireInstrument,
+    bool requireEffect);
 constexpr auto kBatchGraphUpdate = juce::AudioProcessorGraph::UpdateKind::none;
 
 TimelineClipProcessorBase *asTimelineProcessor(juce::AudioProcessorGraph::Node::Ptr &node)
@@ -227,6 +233,7 @@ public:
             const juce::ScopedLock lock(liveStateLock);
             pendingLiveMidiEvents.clear();
         }
+        activeLiveNotes.clear();
         activeTimelineNotes.clear();
         cachedNotes.clear();
         cachedVersion = 0;
@@ -298,7 +305,9 @@ public:
         refreshCachedState();
 
         juce::MidiBuffer midiBuffer;
-        if (pendingTimelineReset || !hostPlaying || discontinuity)
+        if (pendingTimelineReset ||
+            (hostPlaying && discontinuity) ||
+            (!hostPlaying && activeLiveNotes.empty()))
         {
             sendAllNotesOff(midiBuffer, 0);
             activeTimelineNotes.clear();
@@ -313,6 +322,7 @@ public:
         if (muted.load(std::memory_order_relaxed))
         {
             sendAllNotesOff(midiBuffer, 0);
+            activeLiveNotes.clear();
             activeTimelineNotes.clear();
         }
 
@@ -403,7 +413,7 @@ public:
     }
     juce::AudioProcessorEditor *createEditor() override
     {
-        return instrument != nullptr ? instrument->createEditorIfNeeded() : nullptr;
+        return instrument != nullptr ? instrument->createEditor() : nullptr;
     }
 
     juce::AudioPluginInstance *getHostedInstrumentProcessor() const noexcept
@@ -444,12 +454,26 @@ private:
 
         for (const auto &event : pending)
         {
-            const auto message = event.noteOn
-                ? juce::MidiMessage::noteOn(event.channel, event.pitch,
+            const int channel = juce::jlimit(1, 16, event.channel);
+            const int pitch = juce::jlimit(0, 127, event.pitch);
+            const bool isNoteOn = event.noteOn && event.velocity > 0.0f;
+            const auto message = isNoteOn
+                ? juce::MidiMessage::noteOn(channel, pitch,
                                             juce::jlimit(0.0f, 1.0f, event.velocity))
-                : juce::MidiMessage::noteOff(event.channel, event.pitch);
+                : juce::MidiMessage::noteOff(channel, pitch);
+            const int key = liveNoteKey(channel, pitch);
+            if (isNoteOn)
+                activeLiveNotes.insert(key);
+            else
+                activeLiveNotes.erase(key);
             midiBuffer.addEvent(message, 0);
         }
+    }
+
+    static int liveNoteKey(int channel, int pitch)
+    {
+        return (juce::jlimit(1, 16, channel) << 8) |
+               juce::jlimit(0, 127, pitch);
     }
 
     void sendAllNotesOff(juce::MidiBuffer &midiBuffer, int samplePosition)
@@ -579,6 +603,7 @@ private:
     double cachedSourceTempoBpm = 120.0;
     bool pendingTimelineReset = true;
     std::vector<LiveMidiEvent> pendingLiveMidiEvents;
+    std::unordered_set<int> activeLiveNotes;
     std::unordered_set<int> activeTimelineNotes;
     std::atomic<double> steadyBlockStartSec{std::numeric_limits<double>::quiet_NaN()};
     std::atomic<bool> steadyWasPlaying{false};
@@ -616,6 +641,15 @@ std::unique_ptr<juce::AudioPluginInstance> createInstrumentPluginInstanceFromIde
     {
         matchedExternalInstrument = true;
     }
+    else if (resolvePluginDescriptionFromFile(
+                 pluginFormatManager,
+                 requestedId,
+                 description,
+                 true,
+                 false))
+    {
+        matchedExternalInstrument = true;
+    }
     else if (looksLikeHostedPluginIdentifier(requestedId))
     {
         matchedExternalInstrument = true;
@@ -623,6 +657,10 @@ std::unique_ptr<juce::AudioPluginInstance> createInstrumentPluginInstanceFromIde
 #if JUCE_MAC || JUCE_WINDOWS
         if (requestedId.toLowerCase().endsWith(".vst3"))
             description.pluginFormatName = "VST3";
+#endif
+#if JUCE_MAC
+        if (requestedId.toLowerCase().startsWith("audiounit"))
+            description.pluginFormatName = "AudioUnit";
 #endif
 #if JUCE_IOS
         description.pluginFormatName = "AudioUnit";
@@ -1014,6 +1052,11 @@ bool JuceEngine::prepareRecordingInputs(int desiredInputChannels,
 
 bool JuceEngine::preparePlaybackRoute(const juce::String &reason)
 {
+    {
+        GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
+        ensureMasterOutputRouting();
+    }
+
     auto *dev = deviceManager.getCurrentAudioDevice();
     const bool missingOutputRoute =
         (dev == nullptr) || (dev->getActiveOutputChannels().countNumberOfSetBits() <= 0);
@@ -1746,6 +1789,15 @@ bool JuceEngine::loadMidiClip(int clipId,
 
     rewireTrackChain(clipId, batchUpdate);
     commitClipGraphMutationLocked();
+
+    if (c.playerNode != nullptr &&
+        dynamic_cast<ExternalMidiPluginClipProcessor *>(c.playerNode->getProcessor()) != nullptr)
+    {
+        HostedPluginEditorMetadata metadata;
+        metadata.scope = HostedPluginEditorScopeKind::midiClip;
+        metadata.clipId = clipId;
+        prewarmPluginEditorWindowForNode(c.playerNode->nodeID, "Instrument", metadata);
+    }
     return true;
 }
 
@@ -1995,6 +2047,13 @@ bool JuceEngine::setMidiClipPluginStateBase64(int clipId,
 
     applyHostedMidiProcessorState(clip.playerNode->getProcessor(), state);
     clip.midiPluginState = std::move(state);
+    if (dynamic_cast<ExternalMidiPluginClipProcessor *>(clip.playerNode->getProcessor()) != nullptr)
+    {
+        HostedPluginEditorMetadata metadata;
+        metadata.scope = HostedPluginEditorScopeKind::midiClip;
+        metadata.clipId = clipId;
+        prewarmPluginEditorWindowForNode(clip.playerNode->nodeID, "Instrument", metadata);
+    }
     return true;
 }
 
@@ -2945,9 +3004,25 @@ std::unique_ptr<juce::AudioProcessor> createEffectProcessorFromIdentifier(
 
     juce::PluginDescription description;
     const bool resolved = resolveKnownPluginDescription(pluginList, requestedId, description);
-    if (!resolved)
+    const bool resolvedFromFile =
+        !resolved &&
+        resolvePluginDescriptionFromFile(
+            pluginFormatManager,
+            requestedId,
+            description,
+            false,
+            false);
+    if (!resolved && !resolvedFromFile)
     {
         description.fileOrIdentifier = requestedId;
+#if JUCE_MAC || JUCE_WINDOWS
+        if (requestedId.toLowerCase().endsWith(".vst3"))
+            description.pluginFormatName = "VST3";
+#endif
+#if JUCE_MAC
+        if (requestedId.toLowerCase().startsWith("audiounit"))
+            description.pluginFormatName = "AudioUnit";
+#endif
 #if JUCE_IOS
         description.pluginFormatName = "AudioUnit";
 #endif
@@ -5235,10 +5310,17 @@ void JuceEngine::ensureMasterOutputRouting()
 
 namespace
 {
+bool isPluginIdentifierAbsolutePath(const juce::String &value)
+{
+    const auto trimmed = value.trim();
+    return trimmed.isNotEmpty() && juce::File::isAbsolutePath(trimmed);
+}
+
 bool resolveKnownPluginDescription(const juce::KnownPluginList &list,
                                    const juce::String &idOrName,
                                    juce::PluginDescription &outDesc)
 {
+    const bool requestedIsFile = isPluginIdentifierAbsolutePath(idOrName);
     const auto types = list.getTypes();
     for (const auto &pd : types)
     {
@@ -5247,6 +5329,18 @@ bool resolveKnownPluginDescription(const juce::KnownPluginList &list,
             outDesc = pd;
             return true;
         }
+        if (requestedIsFile &&
+            isPluginIdentifierAbsolutePath(pd.fileOrIdentifier))
+        {
+            const juce::File knownFile(pd.fileOrIdentifier);
+            const juce::File requestedFile(idOrName);
+            if (knownFile.exists() && requestedFile.exists() &&
+                knownFile == requestedFile)
+            {
+                outDesc = pd;
+                return true;
+            }
+        }
     }
 
     for (const auto &pd : types)
@@ -5254,6 +5348,49 @@ bool resolveKnownPluginDescription(const juce::KnownPluginList &list,
         if (pd.name == idOrName)
         {
             outDesc = pd;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool resolvePluginDescriptionFromFile(
+    juce::AudioPluginFormatManager &formatManager,
+    const juce::String &fileOrIdentifier,
+    juce::PluginDescription &outDesc,
+    bool requireInstrument,
+    bool requireEffect)
+{
+    const auto requested = fileOrIdentifier.trim();
+    if (requested.isEmpty())
+        return false;
+    if (!isPluginIdentifierAbsolutePath(requested))
+        return false;
+
+    const juce::File pluginFile(requested);
+    if (!pluginFile.exists())
+        return false;
+
+    for (int i = 0; i < formatManager.getNumFormats(); ++i)
+    {
+        auto *format = formatManager.getFormat(i);
+        if (format == nullptr ||
+            !format->fileMightContainThisPluginType(requested))
+        {
+            continue;
+        }
+
+        juce::OwnedArray<juce::PluginDescription> descriptions;
+        format->findAllTypesForFile(descriptions, requested);
+        for (auto *description : descriptions)
+        {
+            if (description == nullptr)
+                continue;
+            if (requireInstrument && !description->isInstrument)
+                continue;
+            if (requireEffect && description->isInstrument)
+                continue;
+            outDesc = *description;
             return true;
         }
     }
@@ -5345,12 +5482,29 @@ bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath)
         juceLogToFlutter("insertTrackEffect: empty external plugin identifier");
         return false;
     }
+    scanPluginsIfNeeded();
 
     juce::PluginDescription desc;
     const bool resolved = resolveKnownPluginDescription(pluginList, requestedId, desc);
-    if (!resolved)
+    const bool resolvedFromFile =
+        !resolved &&
+        resolvePluginDescriptionFromFile(
+            pluginFormatManager,
+            requestedId,
+            desc,
+            false,
+            true);
+    if (!resolved && !resolvedFromFile)
     {
         desc.fileOrIdentifier = requestedId;
+#if JUCE_MAC || JUCE_WINDOWS
+        if (requestedId.toLowerCase().endsWith(".vst3"))
+            desc.pluginFormatName = "VST3";
+#endif
+#if JUCE_MAC
+        if (requestedId.toLowerCase().startsWith("audiounit"))
+            desc.pluginFormatName = "AudioUnit";
+#endif
 #if JUCE_IOS
         // AU identifiers usually use "AudioUnit:..." and should resolve through AU format.
         desc.pluginFormatName = "AudioUnit";
@@ -5390,8 +5544,15 @@ bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath)
 
     rows[(size_t)trackRow].fxChain.add(pluginNode->nodeID);
     rows[(size_t)trackRow].fxIds.add(requestedId);
+    const int insertedEffectIndex = rows[(size_t)trackRow].fxChain.size() - 1;
     rewireTrackBusFxChain(trackRow, kBatchGraphUpdate);
     graph.rebuild();
+
+    HostedPluginEditorMetadata metadata;
+    metadata.scope = HostedPluginEditorScopeKind::trackEffect;
+    metadata.row = trackRow;
+    metadata.effectIndex = insertedEffectIndex;
+    prewarmPluginEditorWindowForNode(pluginNode->nodeID, "Track FX", metadata);
     return true;
 }
 
@@ -5620,21 +5781,30 @@ bool JuceEngine::setTrackEffectStateBase64(int trackRow,
         return false;
 
     node->getProcessor()->setStateInformation(state.getData(), (int)state.getSize());
+    if (dynamic_cast<juce::AudioPluginInstance *>(node->getProcessor()) != nullptr)
+    {
+        HostedPluginEditorMetadata metadata;
+        metadata.scope = HostedPluginEditorScopeKind::trackEffect;
+        metadata.row = trackRow;
+        metadata.effectIndex = effectIndex;
+        prewarmPluginEditorWindowForNode(chain.getReference(effectIndex), "Track FX", metadata);
+    }
     return true;
 }
 
 bool JuceEngine::openPluginEditorWindowForNode(
     juce::AudioProcessorGraph::NodeID nodeID,
     const juce::String &titlePrefix,
-    HostedPluginEditorMetadata metadata)
+    HostedPluginEditorMetadata metadata,
+    bool showInitially)
 {
 #if JUCE_MAC
     const std::string key = juce::String((juce::int64)nodeID.uid).toStdString();
     if (auto found = hostedPluginEditorWindows.find(key);
         found != hostedPluginEditorWindows.end() && found->second != nullptr)
     {
-        found->second->setVisible(true);
-        found->second->toFront(true);
+        if (showInitially)
+            found->second->presentFromHost();
         return true;
     }
 
@@ -5660,7 +5830,7 @@ bool JuceEngine::openPluginEditorWindowForNode(
         !editorOwnerProcessor->hasEditor())
         return false;
 
-    auto *editor = editorOwnerProcessor->createEditorIfNeeded();
+    auto *editor = editorOwnerProcessor->createEditor();
     if (editor == nullptr)
         return false;
 
@@ -5673,23 +5843,39 @@ bool JuceEngine::openPluginEditorWindowForNode(
         editor,
         processor,
         metadata,
-        [this, key]()
-        {
-            juce::MessageManager::callAsync(
-                [this, key]()
-                {
-                    auto found = hostedPluginEditorWindows.find(key);
-                    if (found == hostedPluginEditorWindows.end())
-                        return;
-                    if (found->second != nullptr)
-                        found->second->setVisible(false);
-                    hostedPluginEditorWindows.erase(key);
-                });
-        });
+        showInitially,
+        []() {});
     return true;
 #else
-    juce::ignoreUnused(nodeID, titlePrefix, metadata);
+    juce::ignoreUnused(nodeID, titlePrefix, metadata, showInitially);
     return false;
+#endif
+}
+
+void JuceEngine::prewarmPluginEditorWindowForNode(
+    juce::AudioProcessorGraph::NodeID nodeID,
+    const juce::String &titlePrefix,
+    HostedPluginEditorMetadata metadata)
+{
+#if JUCE_MAC
+    const int sequence = pluginEditorPrewarmSequence.fetch_add(1, std::memory_order_relaxed);
+    const int delayMs = 120 + ((sequence % 8) * 80);
+    juce::Timer::callAfterDelay(
+        delayMs,
+        [this, nodeID, titlePrefix, metadata]()
+        {
+            const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+
+            const std::string key = juce::String((juce::int64)nodeID.uid).toStdString();
+            if (hostedPluginEditorWindows.find(key) != hostedPluginEditorWindows.end())
+                return;
+            if (graph.getNodeForId(nodeID) == nullptr)
+                return;
+
+            openPluginEditorWindowForNode(nodeID, titlePrefix, metadata, false);
+        });
+#else
+    juce::ignoreUnused(nodeID, titlePrefix, metadata);
 #endif
 }
 
@@ -5701,15 +5887,32 @@ void JuceEngine::closePluginEditorWindowForNode(
     auto found = hostedPluginEditorWindows.find(key);
     if (found == hostedPluginEditorWindows.end() || found->second == nullptr)
         return;
-    juce::Component::SafePointer<HostedPluginEditorWindow> safeWindow(
-        found->second.get());
-    juce::MessageManager::callAsync(
-        [safeWindow]() mutable
-        {
-            if (safeWindow == nullptr)
-                return;
-            safeWindow->requestCloseFromHost();
-        });
+    auto destroyWindow = [this, key]() mutable
+    {
+        auto found = hostedPluginEditorWindows.find(key);
+        if (found == hostedPluginEditorWindows.end() || found->second == nullptr)
+            return;
+
+        found->second->requestDestroyFromHost();
+        hostedPluginEditorWindows.erase(found);
+    };
+    if (auto *mm = juce::MessageManager::getInstance();
+        mm != nullptr && mm->isThisTheMessageThread())
+    {
+        destroyWindow();
+    }
+    else
+    {
+        juce::MessageManager::callAsync(
+            [this, key]() mutable
+            {
+                auto found = hostedPluginEditorWindows.find(key);
+                if (found == hostedPluginEditorWindows.end() || found->second == nullptr)
+                    return;
+                found->second->requestDestroyFromHost();
+                hostedPluginEditorWindows.erase(found);
+            });
+    }
 #else
     juce::ignoreUnused(nodeID);
 #endif
@@ -5745,6 +5948,59 @@ void JuceEngine::closeAllHostedPluginEditorWindows()
                 window->requestCloseFromHost();
             }
         });
+#endif
+}
+
+void JuceEngine::requestHostedPluginEditorCloseForOwner(void *ownerHandle)
+{
+#if JUCE_MAC
+    if (ownerHandle == nullptr)
+        return;
+
+    juce::MessageManager::callAsync(
+        [this, ownerHandle]()
+        {
+            for (auto &entry : hostedPluginEditorWindows)
+            {
+                if (entry.second == nullptr || entry.second.get() != ownerHandle)
+                    continue;
+
+                juce::Component::SafePointer<HostedPluginEditorWindow> safeWindow(
+                    entry.second.get());
+                if (safeWindow != nullptr)
+                    safeWindow->requestCloseFromHost();
+                return;
+            }
+        });
+#else
+    juce::ignoreUnused(ownerHandle);
+#endif
+}
+
+void JuceEngine::setHostedPluginEditorDetachedForOwner(void *ownerHandle,
+                                                       bool detached)
+{
+#if JUCE_MAC
+    if (ownerHandle == nullptr)
+        return;
+
+    juce::MessageManager::callAsync(
+        [this, ownerHandle, detached]()
+        {
+            for (auto &entry : hostedPluginEditorWindows)
+            {
+                if (entry.second == nullptr || entry.second.get() != ownerHandle)
+                    continue;
+
+                juce::Component::SafePointer<HostedPluginEditorWindow> safeWindow(
+                    entry.second.get());
+                if (safeWindow != nullptr)
+                    safeWindow->setDetached(detached);
+                return;
+            }
+        });
+#else
+    juce::ignoreUnused(ownerHandle, detached);
 #endif
 }
 
@@ -6413,12 +6669,29 @@ bool JuceEngine::insertMasterEffect(const juce::String &pluginPath)
         juceLogToFlutter("insertMasterEffect: empty external plugin identifier");
         return false;
     }
+    scanPluginsIfNeeded();
 
     juce::PluginDescription desc;
     const bool resolved = resolveKnownPluginDescription(pluginList, requestedId, desc);
-    if (!resolved)
+    const bool resolvedFromFile =
+        !resolved &&
+        resolvePluginDescriptionFromFile(
+            pluginFormatManager,
+            requestedId,
+            desc,
+            false,
+            true);
+    if (!resolved && !resolvedFromFile)
     {
         desc.fileOrIdentifier = requestedId;
+#if JUCE_MAC || JUCE_WINDOWS
+        if (requestedId.toLowerCase().endsWith(".vst3"))
+            desc.pluginFormatName = "VST3";
+#endif
+#if JUCE_MAC
+        if (requestedId.toLowerCase().startsWith("audiounit"))
+            desc.pluginFormatName = "AudioUnit";
+#endif
 #if JUCE_IOS
         desc.pluginFormatName = "AudioUnit";
 #endif
@@ -6457,8 +6730,14 @@ bool JuceEngine::insertMasterEffect(const juce::String &pluginPath)
 
     masterEffectChain->add(pluginNode->nodeID);
     masterEffectIds.add(requestedId);
+    const int insertedEffectIndex = masterEffectChain->size() - 1;
     rewireMasterFxChain(kBatchGraphUpdate);
     graph.rebuild();
+
+    HostedPluginEditorMetadata metadata;
+    metadata.scope = HostedPluginEditorScopeKind::masterEffect;
+    metadata.effectIndex = insertedEffectIndex;
+    prewarmPluginEditorWindowForNode(pluginNode->nodeID, "Master FX", metadata);
     return true;
 }
 
@@ -6646,6 +6925,13 @@ bool JuceEngine::setMasterEffectStateBase64(int effectIndex,
         return false;
 
     node->getProcessor()->setStateInformation(state.getData(), (int)state.getSize());
+    if (dynamic_cast<juce::AudioPluginInstance *>(node->getProcessor()) != nullptr)
+    {
+        HostedPluginEditorMetadata metadata;
+        metadata.scope = HostedPluginEditorScopeKind::masterEffect;
+        metadata.effectIndex = effectIndex;
+        prewarmPluginEditorWindowForNode(masterEffectChain->getReference(effectIndex), "Master FX", metadata);
+    }
     return true;
 }
 

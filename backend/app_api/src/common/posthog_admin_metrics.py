@@ -212,24 +212,45 @@ class PosthogAdminMetricsClient:
             self._set_cached(cache_key, payload)
             return copy.deepcopy(payload)
 
+        try:
+            active_users = self._live_presence_active_user_count(headers)
+        except Exception as exc:
+            payload = {
+                "source": "posthog",
+                "status": "error",
+                "active_users": 0,
+                "window_minutes": _LIVE_PRESENCE_WINDOW_MINUTES,
+                "updated_at": _utc_now_iso(),
+                "note": str(exc),
+            }
+            self._set_cached(cache_key, payload)
+            return copy.deepcopy(payload)
+
         payload = {
             "source": "posthog",
             "status": "live",
-            "active_users": self._query_scalar(
-                headers,
-                (
-                    "SELECT count(DISTINCT person_id) AS value "
-                    "FROM events "
-                    f"WHERE event = '{_ACTIVE_USER_EVENT}' "
-                    "AND person_id IS NOT NULL "
-                    f"AND timestamp >= now() - INTERVAL {_LIVE_PRESENCE_WINDOW_MINUTES} MINUTE"
-                ),
-            ),
+            "active_users": active_users,
             "window_minutes": _LIVE_PRESENCE_WINDOW_MINUTES,
             "updated_at": _utc_now_iso(),
         }
         self._set_cached(cache_key, payload)
         return copy.deepcopy(payload)
+
+    def _live_presence_active_user_count(self, headers: Dict[str, str]) -> int:
+        live_presence_timeout = max(3, min(6, config.HTTP_TIMEOUT_SECONDS))
+        rows = self._query_rows(
+            headers,
+            (
+                "SELECT DISTINCT person_id AS person_id "
+                "FROM events "
+                f"WHERE event = '{_ACTIVE_USER_EVENT}' "
+                "AND person_id IS NOT NULL "
+                f"AND timestamp >= now() - INTERVAL {_LIVE_PRESENCE_WINDOW_MINUTES} MINUTE "
+                "LIMIT 1000"
+            ),
+            timeout_seconds=live_presence_timeout,
+        )
+        return len(rows)
 
     def fetch_ai_observability(
         self,
@@ -718,7 +739,13 @@ class PosthogAdminMetricsClient:
             "LIMIT 12"
         )
 
-    def _post_query(self, headers: Dict[str, str], query: str) -> Dict[str, Any]:
+    def _post_query(
+        self,
+        headers: Dict[str, str],
+        query: str,
+        *,
+        timeout_seconds: int | None = None,
+    ) -> Dict[str, Any]:
         host = config.POSTHOG_APP_HOST.rstrip("/")
         url = f"{host}/api/projects/{config.POSTHOG_PROJECT_ID}/query/"
         request = urllib.request.Request(
@@ -738,7 +765,7 @@ class PosthogAdminMetricsClient:
         try:
             with urllib.request.urlopen(
                 request,
-                timeout=config.HTTP_TIMEOUT_SECONDS,
+                timeout=timeout_seconds or config.HTTP_TIMEOUT_SECONDS,
             ) as response:
                 raw = response.read()
         except urllib.error.HTTPError as exc:
@@ -770,8 +797,14 @@ class PosthogAdminMetricsClient:
             return _safe_float(first_value)
         return _safe_int(first_value)
 
-    def _query_rows(self, headers: Dict[str, str], query: str) -> List[Dict[str, Any]]:
-        payload = self._post_query(headers, query)
+    def _query_rows(
+        self,
+        headers: Dict[str, str],
+        query: str,
+        *,
+        timeout_seconds: int | None = None,
+    ) -> List[Dict[str, Any]]:
+        payload = self._post_query(headers, query, timeout_seconds=timeout_seconds)
         results = payload.get("results")
         if not isinstance(results, list):
             return []

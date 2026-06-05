@@ -16,6 +16,7 @@ _ALLOWED_FLAGS = frozenset(
         "account_plan_billing_enabled",
         "subscription_enforcement_enabled",
         "iap_purchases_enabled",
+        "cloud_projects_enabled",
     }
 )
 

@@ -3,6 +3,7 @@ import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
   private let finderDropChannelName = "mixroom/finder_drop"
+  private let titleBarDragRegionHeight: CGFloat = 34
   private var finderDropChannel: FlutterMethodChannel?
   private var pendingFinderDropPayloads: [[String: Any]] = []
   private let supportedAudioExtensions: Set<String> = [
@@ -29,26 +30,33 @@ class MainFlutterWindow: NSWindow {
     frame.size.height = max(frame.size.height, 820)
     self.setFrame(frame, display: true)
     self.center()
+    self.title = ""
     self.titleVisibility = .hidden
     self.titlebarAppearsTransparent = true
     self.isMovableByWindowBackground = true
     self.styleMask.insert(.fullSizeContentView)
-
-    let toolbar = NSToolbar(identifier: NSToolbar.Identifier("mixroom.window.toolbar"))
-    toolbar.showsBaselineSeparator = false
-    toolbar.allowsUserCustomization = false
-    toolbar.autosavesConfiguration = false
-    self.toolbar = toolbar
-
-    if #available(macOS 11.0, *) {
-      self.toolbarStyle = .unifiedCompact
-    }
 
     RegisterGeneratedPlugins(registry: flutterViewController)
 
     super.awakeFromNib()
     registerForDraggedTypes([.fileURL])
     bindFinderDropChannelIfNeeded(flutterViewController: flutterViewController)
+  }
+
+  override func sendEvent(_ event: NSEvent) {
+    switch event.type {
+    case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+      let previousMovableByBackground = self.isMovableByWindowBackground
+      self.isMovableByWindowBackground = isInTitleBarDragRegion(event.locationInWindow)
+      super.sendEvent(event)
+      self.isMovableByWindowBackground = previousMovableByBackground
+    default:
+      super.sendEvent(event)
+    }
+  }
+
+  private func isInTitleBarDragRegion(_ location: NSPoint) -> Bool {
+    location.y >= max(0, self.frame.height - titleBarDragRegionHeight)
   }
 
   func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {

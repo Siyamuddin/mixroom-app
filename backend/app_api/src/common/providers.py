@@ -185,6 +185,8 @@ def _verify_paddle_signature(
 
 def checkout_url(provider: str, session_id: str) -> str:
     base = config.DEFAULT_CHECKOUT_URL.rstrip("/")
+    if "#" in base:
+        return base
     return f"{base}/{provider}/{session_id}"
 
 

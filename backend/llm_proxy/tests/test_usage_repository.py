@@ -99,8 +99,8 @@ class UsageRepositoryTests(unittest.TestCase):
 
         self.assertEqual(context["subscription_tier"], "free")
         self.assertNotIn("limit_overrides", context)
-        self.assertEqual(limits["daily_prompts"], 30)
-        self.assertEqual(limits["weekly_prompts"], 120)
+        self.assertEqual(limits["daily_prompts"], 200)
+        self.assertEqual(limits["weekly_prompts"], 600)
 
     def test_load_user_context_uses_explicit_limit_overrides(self) -> None:
         repo = object.__new__(AiUsageRepository)

@@ -1659,6 +1659,8 @@ public:
             cachedSampledDefinition != nullptr &&
             !cachedSampledDefinition->regions.empty();
         const double attackSec = juce::jmax(0.001, cachedPreset.attackMs / 1000.0);
+        const double decaySec = juce::jmax(0.001, cachedPreset.decayMs / 1000.0);
+        const double sustainLevel = juce::jlimit(0.05, 1.0, cachedPreset.sustainLevel);
         const double releaseSec = juce::jmax(0.02, cachedPreset.releaseMs / 1000.0);
         const float driveGain =
             sampledMode
@@ -1710,7 +1712,7 @@ public:
                             : 0.0;
                     std::vector<size_t> blockNoteIndices;
                     std::vector<int> blockNotePitches;
-                    std::vector<const SampledRegion *> timelineRegions;
+                    std::vector<SampledRegion> timelineRegions;
                     blockNoteIndices.reserve(cachedNotes.size());
                     blockNotePitches.reserve(cachedNotes.size());
                     if (sampledMode)
@@ -1739,13 +1741,26 @@ public:
                                 : nullptr;
                         if (sampledMode && sampledRegion == nullptr)
                             continue;
+                        if (sampledMode)
+                        {
+                            const int lowKey = juce::jlimit(0, 127, (int)std::round(cachedPreset.sampleLowKey));
+                            const int highKey = juce::jlimit(lowKey, 127, (int)std::round(cachedPreset.sampleHighKey));
+                            if (notePitchBase < lowKey || notePitchBase > highKey)
+                                continue;
+                        }
+                        SampledRegion effectiveRegion;
+                        if (sampledRegion != nullptr)
+                            effectiveRegion = samplerRegionForPreset(
+                                *sampledRegion,
+                                cachedPreset,
+                                notePitchBase);
 
                         double noteReleaseSec = releaseSec;
                         if (sampledRegion != nullptr &&
                             !cachedSampledReleaseOverride)
                         {
                             noteReleaseSec =
-                                juce::jmax(0.02, sampledRegion->releaseSec);
+                                juce::jmax(0.02, effectiveRegion.releaseSec);
                         }
 
                         const double noteStartSourceSec =
@@ -1756,11 +1771,11 @@ public:
                             (double)notePitchBase +
                             pitchOffsetSemitones +
                             tempoPitchOffsetSemitones;
-                        if (sampledRegion != nullptr && sampledRegion->oneShot)
+                        if (sampledRegion != nullptr && effectiveRegion.oneShot)
                         {
                             const double oneShotDurationSec =
                                 sampledPlayableDurationSec(
-                                    *sampledRegion,
+                                    effectiveRegion,
                                     notePitchWithOffsets,
                                     sr);
                             noteLengthSourceSec = juce::jmax(
@@ -1780,7 +1795,7 @@ public:
                         blockNoteIndices.push_back(noteIndex);
                         blockNotePitches.push_back(notePitchBase);
                         if (sampledMode)
-                            timelineRegions.push_back(sampledRegion);
+                            timelineRegions.push_back(effectiveRegion);
                     }
 
                     for (int i = 0; i < framesToRender; ++i)
@@ -1795,7 +1810,7 @@ public:
                             const size_t noteIndex = blockNoteIndices[activeIndex];
                             const auto &note = cachedNotes[noteIndex];
                             const SampledRegion *sampledRegion =
-                                sampledMode ? timelineRegions[activeIndex] : nullptr;
+                                sampledMode ? &timelineRegions[activeIndex] : nullptr;
                             const int sampledPitch = blockNotePitches[activeIndex];
 
                             double noteAttackSec = attackSec;
@@ -1836,16 +1851,13 @@ public:
                             const double ageRealSec = ageSourceSec / safeRatio;
                             const double noteLengthRealSec = noteLengthSourceSec / safeRatio;
 
-                            double env = 0.0;
-                            if (ageRealSec < noteAttackSec)
-                                env = ageRealSec / noteAttackSec;
-                            else if (sampledRegion != nullptr &&
-                                     sampledRegion->oneShot)
-                                env = 1.0;
-                            else if (ageRealSec < noteLengthRealSec)
-                                env = 1.0;
-                            else
-                                env = 1.0 - ((ageRealSec - noteLengthRealSec) / noteReleaseSec);
+                            const double env = envelopeLevel(
+                                ageRealSec,
+                                noteLengthRealSec,
+                                noteAttackSec,
+                                decaySec,
+                                sustainLevel,
+                                noteReleaseSec);
 
                             if (env <= 0.0)
                                 continue;
@@ -1861,13 +1873,26 @@ public:
                             {
                                 float sampleL = 0.0f;
                                 float sampleR = 0.0f;
-                                if (!renderSampledStereo(
-                                        *sampledRegion,
-                                        notePitch,
-                                        ageRealSec,
-                                        sr,
-                                        sampleL,
-                                        sampleR))
+                                const bool rendered =
+                                    cachedPreset.granularMode >= 0.5
+                                        ? renderGranularStereo(
+                                              *sampledRegion,
+                                              cachedPreset,
+                                              notePitch,
+                                              ageRealSec,
+                                              sr,
+                                              (int)(note.pitch * 997 + (int)note.startBeat * 7919),
+                                              sampleL,
+                                              sampleR)
+                                        : renderSampledStereo(
+                                              *sampledRegion,
+                                              cachedPreset,
+                                              notePitch,
+                                              ageRealSec,
+                                              sr,
+                                              sampleL,
+                                              sampleR);
+                                if (!rendered)
                                 {
                                     continue;
                                 }
@@ -1955,9 +1980,11 @@ public:
                 double env = 0.0;
                 if (!voice.releasing)
                 {
-                    env = (voice.ageSec < voiceAttackSec)
-                              ? (voice.ageSec / voiceAttackSec)
-                              : 1.0;
+                    env = envelopeHoldLevel(
+                        voice.ageSec,
+                        voiceAttackSec,
+                        decaySec,
+                        sustainLevel);
                 }
                 else
                 {
@@ -1996,13 +2023,26 @@ public:
                     const double sampledNotePitch =
                         (double)voice.sampledMidiPitch +
                         (double)pitchSemitones.load(std::memory_order_relaxed);
-                    if (!renderSampledStereo(
-                            liveRegion,
-                            sampledNotePitch,
-                            voice.ageSec,
-                            sr,
-                            sampleL,
-                            sampleR))
+                    const bool rendered =
+                        cachedPreset.granularMode >= 0.5
+                            ? renderGranularStereo(
+                                  liveRegion,
+                                  cachedPreset,
+                                  sampledNotePitch,
+                                  voice.ageSec,
+                                  sr,
+                                  voice.seedBase,
+                                  sampleL,
+                                  sampleR)
+                            : renderSampledStereo(
+                                  liveRegion,
+                                  cachedPreset,
+                                  sampledNotePitch,
+                                  voice.ageSec,
+                                  sr,
+                                  sampleL,
+                                  sampleR);
+                    if (!rendered)
                     {
                         voice.releasing = true;
                         voice.releaseAgeSec = voiceReleaseSec;
@@ -2132,6 +2172,34 @@ private:
         double pitchDropSemitones = 0.0;
         double noise = 0.02;
         double padDetuneOffset = 0.008;
+        double decayMs = 120.0;
+        double sustainLevel = 0.86;
+        double sampleStartNorm = 0.0;
+        double sampleEndNorm = 1.0;
+        double reverseSample = 0.0;
+        double normalizeSample = 0.0;
+        double samplePlayMode = 0.0;
+        double rootNote = 60.0;
+        double sampleLowKey = 0.0;
+        double sampleHighKey = 127.0;
+        double sliceMode = 0.0;
+        double sliceCount = 8.0;
+        double timeStretchMode = 0.0;
+        double sampleFilterCutoffHz = 20000.0;
+        double granularMode = 0.0;
+        double grainAttackMs = 18.0;
+        double grainHoldMs = 42.0;
+        double grainSpacingPct = 100.0;
+        double waveSpacingPct = 100.0;
+        double grainPan = 0.34;
+        double grainLfoDepthPct = 0.0;
+        double grainLfoSpeedHz = 0.8;
+        double grainRandomPct = 0.0;
+        double grainTransientMode = 0.0;
+        double grainTransientHoldMs = 80.0;
+        double grainLoop = 1.0;
+        double grainPositionHold = 0.0;
+        double grainKeyMode = 0.0;
     };
 
     struct DecodedSamplePcm
@@ -2139,6 +2207,7 @@ private:
         int sampleRate = 48000;
         std::vector<float> left;
         std::vector<float> right;
+        float peak = 1.0f;
 
         int frameCount() const
         {
@@ -2241,6 +2310,45 @@ private:
         x ^= x >> 16;
         const double n01 = (double)(x & 0x00ffffffu) / (double)0x01000000u;
         return (n01 * 2.0) - 1.0;
+    }
+
+    static double envelopeHoldLevel(
+        double ageSec,
+        double attackSec,
+        double decaySec,
+        double sustainLevel)
+    {
+        attackSec = juce::jmax(0.001, attackSec);
+        decaySec = juce::jmax(0.001, decaySec);
+        sustainLevel = juce::jlimit(0.05, 1.0, sustainLevel);
+        if (ageSec < attackSec)
+            return juce::jlimit(0.0, 1.0, ageSec / attackSec);
+
+        const double decayAge = ageSec - attackSec;
+        if (decayAge < decaySec)
+        {
+            const double t = decayAge / decaySec;
+            return 1.0 + ((sustainLevel - 1.0) * t);
+        }
+        return sustainLevel;
+    }
+
+    static double envelopeLevel(
+        double ageSec,
+        double holdSec,
+        double attackSec,
+        double decaySec,
+        double sustainLevel,
+        double releaseSec)
+    {
+        if (ageSec < holdSec)
+            return envelopeHoldLevel(ageSec, attackSec, decaySec, sustainLevel);
+
+        releaseSec = juce::jmax(0.02, releaseSec);
+        const double releaseAge = ageSec - holdSec;
+        const double releaseStart =
+            envelopeHoldLevel(holdSec, attackSec, decaySec, sustainLevel);
+        return releaseStart * (1.0 - (releaseAge / releaseSec));
     }
 
     static double wrapPhase(double phase)
@@ -2715,6 +2823,13 @@ private:
         {
             decoded->right = decoded->left;
         }
+        float peak = 0.0f;
+        for (int i = 0; i < frameCount; ++i)
+        {
+            peak = juce::jmax(peak, std::abs(decoded->left[(size_t)i]));
+            peak = juce::jmax(peak, std::abs(decoded->right[(size_t)i]));
+        }
+        decoded->peak = juce::jlimit(0.001f, 1.0f, peak);
 
         {
             const juce::ScopedLock lock(cache.lock);
@@ -3059,6 +3174,52 @@ private:
                ((double)pcm.sampleRate / outputSampleRate);
     }
 
+    static SampledRegion samplerRegionForPreset(
+        const SampledRegion &source,
+        const InstrumentPreset &preset,
+        int midiPitch)
+    {
+        SampledRegion region = source;
+        if (region.sample == nullptr)
+            return region;
+
+        const int frameCount = region.sample->frameCount();
+        if (frameCount < 2)
+            return region;
+
+        const int baseStart =
+            juce::jlimit(0, frameCount - 1, source.sampleStartFrame);
+        const int baseEnd = sampledRegionFrameLimit(source, *region.sample);
+        const int baseFrames = juce::jmax(2, baseEnd - baseStart);
+        const double startNorm = juce::jlimit(0.0, 0.98, preset.sampleStartNorm);
+        const double endNorm =
+            juce::jlimit(startNorm + 0.02, 1.0, preset.sampleEndNorm);
+
+        int startFrame = baseStart + (int)std::round(startNorm * (double)(baseFrames - 1));
+        int endFrame = baseStart + (int)std::round(endNorm * (double)baseFrames);
+        endFrame = juce::jlimit(startFrame + 1, baseEnd, endFrame);
+
+        if (preset.sliceMode >= 0.5)
+        {
+            const int slices = juce::jlimit(2, 32, (int)std::round(preset.sliceCount));
+            const int root = juce::jlimit(0, 127, (int)std::round(preset.rootNote));
+            const int sliceIndex = juce::jlimit(0, slices - 1, midiPitch - root);
+            const int trimFrames = juce::jmax(2, endFrame - startFrame);
+            const int sliceStart = startFrame + (int)std::floor((double)trimFrames * (double)sliceIndex / (double)slices);
+            const int sliceEnd = startFrame + (int)std::floor((double)trimFrames * (double)(sliceIndex + 1) / (double)slices);
+            startFrame = juce::jlimit(startFrame, endFrame - 1, sliceStart);
+            endFrame = juce::jlimit(startFrame + 1, endFrame, sliceEnd);
+        }
+
+        region.sampleStartFrame = startFrame;
+        region.sampleEndFrameExclusive = endFrame;
+        region.keyCenter = juce::jlimit(0, 127, (int)std::round(preset.rootNote));
+        if (preset.timeStretchMode >= 0.5)
+            region.pitchKeytrack = 0.0;
+        region.oneShot = preset.samplePlayMode >= 0.5;
+        return region;
+    }
+
     static double sampledPlayableDurationSec(const SampledRegion &region,
                                              double notePitch,
                                              double outputSampleRate)
@@ -3085,6 +3246,7 @@ private:
     static bool renderSampledStereo(
         const std::shared_ptr<const DecodedSamplePcm> &sample,
         const SampledRegion &region,
+        const InstrumentPreset &preset,
         double notePitch,
         double ageSec,
         double outputSampleRate,
@@ -3119,20 +3281,54 @@ private:
             samplePos >= (double)(endFrame - 1))
             return false;
 
-        const int index = (int)std::floor(samplePos);
-        const int nextIndex = juce::jmin(index + 1, endFrame - 1);
-        const double frac = samplePos - (double)index;
+        double readPos = samplePos;
+        if (preset.reverseSample >= 0.5)
+            readPos = (double)(endFrame - 1) - (samplePos - (double)startFrame);
+
+        const int index = juce::jlimit(startFrame, endFrame - 1, (int)std::floor(readPos));
+        const int nextIndex =
+            preset.reverseSample >= 0.5
+                ? juce::jmax(index - 1, startFrame)
+                : juce::jmin(index + 1, endFrame - 1);
+        const double frac = readPos - (double)index;
 
         const float l0 = pcm.left[(size_t)index];
         const float l1 = pcm.left[(size_t)nextIndex];
         const float r0 = pcm.right[(size_t)index];
         const float r1 = pcm.right[(size_t)nextIndex];
-        outL = juce::jlimit(-1.0f, 1.0f, (float)(l0 + (l1 - l0) * frac));
-        outR = juce::jlimit(-1.0f, 1.0f, (float)(r0 + (r1 - r0) * frac));
+        float l = (float)(l0 + (l1 - l0) * frac);
+        float r = (float)(r0 + (r1 - r0) * frac);
+
+        if (preset.sampleFilterCutoffHz < 19500.0)
+        {
+            const int prevIndex = juce::jmax(index - 1, startFrame);
+            const int nextSmoothIndex = juce::jmin(index + 1, endFrame - 1);
+            const float alpha = (float)juce::jlimit(
+                0.0,
+                1.0,
+                preset.sampleFilterCutoffHz / 20000.0);
+            const float smoothL =
+                (pcm.left[(size_t)prevIndex] + l + pcm.left[(size_t)nextSmoothIndex]) / 3.0f;
+            const float smoothR =
+                (pcm.right[(size_t)prevIndex] + r + pcm.right[(size_t)nextSmoothIndex]) / 3.0f;
+            l = smoothL + ((l - smoothL) * alpha);
+            r = smoothR + ((r - smoothR) * alpha);
+        }
+
+        if (preset.normalizeSample >= 0.5)
+        {
+            const float normGain = 1.0f / juce::jlimit(0.001f, 1.0f, pcm.peak);
+            l *= normGain;
+            r *= normGain;
+        }
+
+        outL = juce::jlimit(-1.0f, 1.0f, l);
+        outR = juce::jlimit(-1.0f, 1.0f, r);
         return true;
     }
 
     static bool renderSampledStereo(const SampledRegion &region,
+                                    const InstrumentPreset &preset,
                                     double notePitch,
                                     double ageSec,
                                     double outputSampleRate,
@@ -3142,11 +3338,161 @@ private:
         return renderSampledStereo(
             region.sample,
             region,
+            preset,
             notePitch,
             ageSec,
             outputSampleRate,
             outL,
             outR);
+    }
+
+    static bool renderGranularStereo(const SampledRegion &region,
+                                     const InstrumentPreset &preset,
+                                     double notePitch,
+                                     double noteAgeSec,
+                                     double outputSampleRate,
+                                     int grainSeed,
+                                     float &outL,
+                                     float &outR)
+    {
+        outL = 0.0f;
+        outR = 0.0f;
+        if (region.sample == nullptr || outputSampleRate <= 0.0 || noteAgeSec < 0.0)
+            return false;
+
+        const auto &pcm = *region.sample;
+        const int frameCount = pcm.frameCount();
+        if (frameCount < 4)
+            return false;
+
+        const int startFrame = juce::jlimit(0, frameCount - 1, region.sampleStartFrame);
+        const int endFrame = sampledRegionFrameLimit(region, pcm);
+        const int trimFrames = endFrame - startFrame;
+        if (trimFrames < 4)
+            return false;
+
+        const double grainHoldSec = juce::jlimit(0.002, 0.5, preset.grainHoldMs / 1000.0);
+        const double grainAttackSec = juce::jlimit(0.0, grainHoldSec * 0.5, preset.grainAttackMs / 1000.0);
+        const double grainSpacingSec = juce::jmax(
+            1.0 / outputSampleRate,
+            grainHoldSec * juce::jlimit(1.0, 400.0, preset.grainSpacingPct) / 100.0);
+        const int grainIndex = (int)std::floor(noteAgeSec / grainSpacingSec);
+        const double grainStartSec = (double)grainIndex * grainSpacingSec;
+        const double grainAgeSec = noteAgeSec - grainStartSec;
+        if (grainAgeSec < 0.0 || grainAgeSec >= grainHoldSec)
+            return true;
+
+        double grainEnv = 1.0;
+        if (grainAttackSec > 0.0)
+        {
+            const double fadeIn = juce::jlimit(0.0, 1.0, grainAgeSec / grainAttackSec);
+            const double fadeOut = juce::jlimit(0.0, 1.0, (grainHoldSec - grainAgeSec) / grainAttackSec);
+            grainEnv = std::sin(juce::MathConstants<double>::halfPi * juce::jmin(fadeIn, fadeOut));
+        }
+
+        const int keyMode = juce::jlimit(0, 3, (int)std::round(preset.grainKeyMode));
+        const double playbackRate =
+            keyMode == 0
+                ? std::pow(2.0, (notePitch - preset.rootNote) / 12.0) *
+                      ((double)pcm.sampleRate / outputSampleRate)
+                : ((double)pcm.sampleRate / outputSampleRate);
+        if (!std::isfinite(playbackRate) || playbackRate <= 0.0)
+            return false;
+
+        double keyOffsetFrames = 0.0;
+        if (keyMode == 1)
+        {
+            keyOffsetFrames =
+                juce::jlimit(0.0, 1.0, (notePitch - preset.rootNote) / 24.0) *
+                (double)trimFrames;
+        }
+        else if (keyMode >= 2)
+        {
+            const int steps = juce::jmax(1, (int)std::round(preset.sliceCount) - 1);
+            keyOffsetFrames =
+                juce::jlimit(0.0, (double)steps, notePitch - preset.rootNote) /
+                (double)steps * (double)trimFrames;
+        }
+
+        const double randomSigned = hashNoise(grainSeed + grainIndex * 1973);
+        const double randomFrames =
+            randomSigned * (double)trimFrames *
+            (juce::jlimit(0.0, 100.0, preset.grainRandomPct) / 100.0) * 0.18;
+        const double lfoFrames =
+            (double)trimFrames *
+            (juce::jlimit(0.0, 100.0, preset.grainLfoDepthPct) / 100.0) *
+            0.5 *
+            std::sin(juce::MathConstants<double>::twoPi *
+                     juce::jlimit(0.0, 20.0, preset.grainLfoSpeedHz) *
+                     noteAgeSec);
+        const double transientFrames =
+            preset.grainTransientMode >= 0.5
+                ? (preset.grainTransientHoldMs / 1000.0) * (double)pcm.sampleRate
+                : 0.0;
+        const double waveAdvanceFrames =
+            preset.grainPositionHold >= 0.5
+                ? 0.0
+                : (double)grainIndex * grainHoldSec * outputSampleRate *
+                      juce::jlimit(-400.0, 400.0, preset.waveSpacingPct) / 100.0;
+        double sourcePos =
+            (double)startFrame + keyOffsetFrames + transientFrames + waveAdvanceFrames +
+            randomFrames + lfoFrames + grainAgeSec * outputSampleRate * playbackRate;
+
+        if (preset.grainLoop >= 0.5)
+        {
+            sourcePos = (double)startFrame + std::fmod(sourcePos - (double)startFrame, (double)trimFrames);
+            if (sourcePos < (double)startFrame)
+                sourcePos += (double)trimFrames;
+        }
+        else if (sourcePos < (double)startFrame || sourcePos >= (double)(endFrame - 1))
+        {
+            return false;
+        }
+
+        double readPos = sourcePos;
+        if (preset.reverseSample >= 0.5)
+            readPos = (double)(endFrame - 1) - (sourcePos - (double)startFrame);
+
+        const int index = juce::jlimit(startFrame, endFrame - 1, (int)std::floor(readPos));
+        const int nextIndex =
+            preset.reverseSample >= 0.5
+                ? juce::jmax(index - 1, startFrame)
+                : juce::jmin(index + 1, endFrame - 1);
+        const double frac = juce::jlimit(0.0, 1.0, readPos - (double)index);
+        float l = (float)(pcm.left[(size_t)index] +
+                          (pcm.left[(size_t)nextIndex] - pcm.left[(size_t)index]) * frac);
+        float r = (float)(pcm.right[(size_t)index] +
+                          (pcm.right[(size_t)nextIndex] - pcm.right[(size_t)index]) * frac);
+
+        if (preset.sampleFilterCutoffHz < 19500.0)
+        {
+            const int prevIndex = juce::jmax(index - 1, startFrame);
+            const int nextSmoothIndex = juce::jmin(index + 1, endFrame - 1);
+            const float alpha = (float)juce::jlimit(0.0, 1.0, preset.sampleFilterCutoffHz / 20000.0);
+            const float smoothL =
+                (pcm.left[(size_t)prevIndex] + l + pcm.left[(size_t)nextSmoothIndex]) / 3.0f;
+            const float smoothR =
+                (pcm.right[(size_t)prevIndex] + r + pcm.right[(size_t)nextSmoothIndex]) / 3.0f;
+            l = smoothL + ((l - smoothL) * alpha);
+            r = smoothR + ((r - smoothR) * alpha);
+        }
+
+        if (preset.normalizeSample >= 0.5)
+        {
+            const float normGain = 1.0f / juce::jlimit(0.001f, 1.0f, pcm.peak);
+            l *= normGain;
+            r *= normGain;
+        }
+
+        const double pan = juce::jlimit(
+            -0.95,
+            0.95,
+            preset.grainPan * ((grainIndex & 1) == 0 ? -1.0 : 1.0));
+        const float leftGain = (float)std::sqrt(0.5 * (1.0 - pan));
+        const float rightGain = (float)std::sqrt(0.5 * (1.0 + pan));
+        outL = juce::jlimit(-1.0f, 1.0f, l * (float)grainEnv * leftGain);
+        outR = juce::jlimit(-1.0f, 1.0f, r * (float)grainEnv * rightGain);
+        return true;
     }
 
     static const std::unordered_map<std::string, InstrumentPreset> &presetMap()
@@ -3230,8 +3576,64 @@ private:
             preset.cutoffHz = juce::jlimit(200.0, 16000.0, readParam(params, "cutoffHz", preset.cutoffHz));
         if (params.contains(juce::Identifier("attackMs")))
             preset.attackMs = juce::jlimit(0.0, 1000.0, readParam(params, "attackMs", preset.attackMs));
+        if (params.contains(juce::Identifier("decayMs")))
+            preset.decayMs = juce::jlimit(0.0, 2000.0, readParam(params, "decayMs", preset.decayMs));
+        if (params.contains(juce::Identifier("sustainLevel")))
+            preset.sustainLevel = juce::jlimit(0.05, 1.0, readParam(params, "sustainLevel", preset.sustainLevel));
         if (params.contains(juce::Identifier("releaseMs")))
             preset.releaseMs = juce::jlimit(20.0, 2400.0, readParam(params, "releaseMs", preset.releaseMs));
+        if (params.contains(juce::Identifier("sampleStartNorm")))
+            preset.sampleStartNorm = juce::jlimit(0.0, 0.98, readParam(params, "sampleStartNorm", preset.sampleStartNorm));
+        if (params.contains(juce::Identifier("sampleEndNorm")))
+            preset.sampleEndNorm = juce::jlimit(0.02, 1.0, readParam(params, "sampleEndNorm", preset.sampleEndNorm));
+        if (params.contains(juce::Identifier("reverseSample")))
+            preset.reverseSample = juce::jlimit(0.0, 1.0, readParam(params, "reverseSample", preset.reverseSample));
+        if (params.contains(juce::Identifier("normalizeSample")))
+            preset.normalizeSample = juce::jlimit(0.0, 1.0, readParam(params, "normalizeSample", preset.normalizeSample));
+        if (params.contains(juce::Identifier("samplePlayMode")))
+            preset.samplePlayMode = juce::jlimit(0.0, 1.0, readParam(params, "samplePlayMode", preset.samplePlayMode));
+        if (params.contains(juce::Identifier("rootNote")))
+            preset.rootNote = juce::jlimit(0.0, 127.0, readParam(params, "rootNote", preset.rootNote));
+        if (params.contains(juce::Identifier("sampleLowKey")))
+            preset.sampleLowKey = juce::jlimit(0.0, 127.0, readParam(params, "sampleLowKey", preset.sampleLowKey));
+        if (params.contains(juce::Identifier("sampleHighKey")))
+            preset.sampleHighKey = juce::jlimit(0.0, 127.0, readParam(params, "sampleHighKey", preset.sampleHighKey));
+        if (params.contains(juce::Identifier("sliceMode")))
+            preset.sliceMode = juce::jlimit(0.0, 1.0, readParam(params, "sliceMode", preset.sliceMode));
+        if (params.contains(juce::Identifier("sliceCount")))
+            preset.sliceCount = juce::jlimit(2.0, 32.0, readParam(params, "sliceCount", preset.sliceCount));
+        if (params.contains(juce::Identifier("timeStretchMode")))
+            preset.timeStretchMode = juce::jlimit(0.0, 1.0, readParam(params, "timeStretchMode", preset.timeStretchMode));
+        if (params.contains(juce::Identifier("sampleFilterCutoffHz")))
+            preset.sampleFilterCutoffHz = juce::jlimit(80.0, 20000.0, readParam(params, "sampleFilterCutoffHz", preset.sampleFilterCutoffHz));
+        if (params.contains(juce::Identifier("granularMode")))
+            preset.granularMode = juce::jlimit(0.0, 1.0, readParam(params, "granularMode", preset.granularMode));
+        if (params.contains(juce::Identifier("grainAttackMs")))
+            preset.grainAttackMs = juce::jlimit(0.0, 250.0, readParam(params, "grainAttackMs", preset.grainAttackMs));
+        if (params.contains(juce::Identifier("grainHoldMs")))
+            preset.grainHoldMs = juce::jlimit(2.0, 500.0, readParam(params, "grainHoldMs", preset.grainHoldMs));
+        if (params.contains(juce::Identifier("grainSpacingPct")))
+            preset.grainSpacingPct = juce::jlimit(1.0, 400.0, readParam(params, "grainSpacingPct", preset.grainSpacingPct));
+        if (params.contains(juce::Identifier("waveSpacingPct")))
+            preset.waveSpacingPct = juce::jlimit(-400.0, 400.0, readParam(params, "waveSpacingPct", preset.waveSpacingPct));
+        if (params.contains(juce::Identifier("grainPan")))
+            preset.grainPan = juce::jlimit(-1.0, 1.0, readParam(params, "grainPan", preset.grainPan));
+        if (params.contains(juce::Identifier("grainLfoDepthPct")))
+            preset.grainLfoDepthPct = juce::jlimit(0.0, 100.0, readParam(params, "grainLfoDepthPct", preset.grainLfoDepthPct));
+        if (params.contains(juce::Identifier("grainLfoSpeedHz")))
+            preset.grainLfoSpeedHz = juce::jlimit(0.0, 20.0, readParam(params, "grainLfoSpeedHz", preset.grainLfoSpeedHz));
+        if (params.contains(juce::Identifier("grainRandomPct")))
+            preset.grainRandomPct = juce::jlimit(0.0, 100.0, readParam(params, "grainRandomPct", preset.grainRandomPct));
+        if (params.contains(juce::Identifier("grainTransientMode")))
+            preset.grainTransientMode = juce::jlimit(0.0, 2.0, readParam(params, "grainTransientMode", preset.grainTransientMode));
+        if (params.contains(juce::Identifier("grainTransientHoldMs")))
+            preset.grainTransientHoldMs = juce::jlimit(2.0, 500.0, readParam(params, "grainTransientHoldMs", preset.grainTransientHoldMs));
+        if (params.contains(juce::Identifier("grainLoop")))
+            preset.grainLoop = juce::jlimit(0.0, 1.0, readParam(params, "grainLoop", preset.grainLoop));
+        if (params.contains(juce::Identifier("grainPositionHold")))
+            preset.grainPositionHold = juce::jlimit(0.0, 1.0, readParam(params, "grainPositionHold", preset.grainPositionHold));
+        if (params.contains(juce::Identifier("grainKeyMode")))
+            preset.grainKeyMode = juce::jlimit(0.0, 3.0, readParam(params, "grainKeyMode", preset.grainKeyMode));
         if (params.contains(juce::Identifier("drive")))
             preset.drive = juce::jlimit(0.0, 1.0, readParam(params, "drive", preset.drive));
         if (params.contains(juce::Identifier("outputGain")))
@@ -3592,6 +3994,9 @@ private:
             cachedPreset.family == InstrumentFamily::sampled &&
             cachedSampledDefinition != nullptr &&
             !cachedSampledDefinition->regions.empty();
+        const double attackSec = juce::jmax(0.001, cachedPreset.attackMs / 1000.0);
+        const double decaySec = juce::jmax(0.001, cachedPreset.decayMs / 1000.0);
+        const double sustainLevel = juce::jlimit(0.05, 1.0, cachedPreset.sustainLevel);
 
         for (const auto &event : pending)
         {
@@ -3611,6 +4016,10 @@ private:
                 {
                     const int sampledPitch =
                         sampledMidiPitchForInstrument(cachedInstrumentId, voice.pitch);
+                    const int lowKey = juce::jlimit(0, 127, (int)std::round(cachedPreset.sampleLowKey));
+                    const int highKey = juce::jlimit(lowKey, 127, (int)std::round(cachedPreset.sampleHighKey));
+                    if (sampledPitch < lowKey || sampledPitch > highKey)
+                        continue;
                     const int midiVelocity = juce::jlimit(
                         0,
                         127,
@@ -3622,20 +4031,22 @@ private:
                         liveSampleSequenceCounter++);
                     if (region == nullptr || region->sample == nullptr)
                         continue;
+                    const SampledRegion effectiveRegion =
+                        samplerRegionForPreset(*region, cachedPreset, sampledPitch);
 
                     voice.sampledMidiPitch = sampledPitch;
-                    voice.sampledSource = region->sample;
-                    voice.sampledKeyCenter = region->keyCenter;
-                    voice.sampledGainLinear = region->gainLinear;
-                    voice.sampledAttackSec = region->attackSec;
-                    voice.sampledReleaseSec = region->releaseSec;
-                    voice.sampledPitchKeytrack = region->pitchKeytrack;
+                    voice.sampledSource = effectiveRegion.sample;
+                    voice.sampledKeyCenter = effectiveRegion.keyCenter;
+                    voice.sampledGainLinear = effectiveRegion.gainLinear;
+                    voice.sampledAttackSec = effectiveRegion.attackSec;
+                    voice.sampledReleaseSec = effectiveRegion.releaseSec;
+                    voice.sampledPitchKeytrack = effectiveRegion.pitchKeytrack;
                     voice.sampledPitchOffsetSemitones =
-                        region->pitchOffsetSemitones;
-                    voice.sampledStartFrame = region->sampleStartFrame;
+                        effectiveRegion.pitchOffsetSemitones;
+                    voice.sampledStartFrame = effectiveRegion.sampleStartFrame;
                     voice.sampledEndFrameExclusive =
-                        region->sampleEndFrameExclusive;
-                    voice.sampledOneShot = region->oneShot;
+                        effectiveRegion.sampleEndFrameExclusive;
+                    voice.sampledOneShot = effectiveRegion.oneShot;
                 }
 
                 activeLiveNotes.push_back(voice);
@@ -3658,7 +4069,16 @@ private:
 
                 it->releasing = true;
                 it->releaseAgeSec = 0.0;
-                it->releaseStartLevel = 1.0;
+                const double voiceAttackSec =
+                    (sampledMode && it->sampledSource != nullptr &&
+                     !cachedSampledAttackOverride)
+                        ? juce::jmax(0.001, it->sampledAttackSec)
+                        : attackSec;
+                it->releaseStartLevel = envelopeHoldLevel(
+                    it->ageSec,
+                    voiceAttackSec,
+                    decaySec,
+                    sustainLevel);
                 break;
             }
         }
@@ -4422,6 +4842,7 @@ public:
     void audioDeviceAboutToStart(juce::AudioIODevice *device) override
     {
         sampleRate = device->getCurrentSampleRate();
+        graphRenderBlockSize = juce::jmax(1, device->getCurrentBufferSizeSamples());
         msPerBeat = 60000.0 / bpm;
         clickPhaseInc = juce::MathConstants<double>::twoPi * clickFrequency / sampleRate;
         engine.clearOutputSafetyState();
@@ -4457,28 +4878,43 @@ public:
         const bool blockWasPlaying = engine.isTransportPlaying();
         engine.setBlockPlayingState(blockWasPlaying);
 
-        // set block transport start time for all processors (clips, automation)
-        engine.setBlockTransportStartFromCurrent();
-        engine.applyTrackEffectAutomationAtCurrentBlockStart();
         engine.dispatchQueuedLiveMidiInputEventsForAudioThread();
 
         // ===============================
         // 3️⃣ RENDER GRAPH (OUTPUT ONLY)
         // ===============================
-        player.audioDeviceIOCallbackWithContext(
-            nullptr,
-            0,
-            outputChannelData,
-            numOutputChannels,
-            numSamples,
-            context);
+        const int renderBlockSize = juce::jmax(1, graphRenderBlockSize);
+        const int playerOutputChannels = juce::jmin(numOutputChannels, (int)chunkOutputPointers.size());
+        jassert(playerOutputChannels == numOutputChannels);
 
-        engine.advanceTransportBySamples(numSamples);
+        for (int offset = 0; offset < numSamples;)
+        {
+            const int chunkSamples = juce::jmin(renderBlockSize, numSamples - offset);
+
+            for (int ch = 0; ch < playerOutputChannels; ++ch)
+                chunkOutputPointers[(size_t)ch] = outputChannelData[ch] != nullptr
+                                                      ? outputChannelData[ch] + offset
+                                                      : nullptr;
+
+            engine.setBlockTransportStartFromCurrent();
+            engine.applyTrackEffectAutomationAtCurrentBlockStart();
+
+            player.audioDeviceIOCallbackWithContext(
+                nullptr,
+                0,
+                chunkOutputPointers.data(),
+                playerOutputChannels,
+                chunkSamples,
+                context);
+
+            engine.advanceTransportBySamples(chunkSamples);
+            offset += chunkSamples;
+        }
 
         if (!enabled || !isPlaying)
         {
-            engine.updateMasterMeterFromOutput(outputChannelData, numOutputChannels, numSamples);
             engine.applyOutputSafetyGuard(outputChannelData, numOutputChannels, numSamples);
+            engine.updateMasterMeterFromOutput(outputChannelData, numOutputChannels, numSamples);
             return;
         }
 
@@ -4544,8 +4980,8 @@ public:
                 outputChannelData[ch][i] += out;
         }
 
-        engine.updateMasterMeterFromOutput(outputChannelData, numOutputChannels, numSamples);
         engine.applyOutputSafetyGuard(outputChannelData, numOutputChannels, numSamples);
+        engine.updateMasterMeterFromOutput(outputChannelData, numOutputChannels, numSamples);
     }
 
     void setupClickFilter(bool accent)
@@ -4593,6 +5029,8 @@ private:
 
     bool enabled = false;
     bool isPlaying = false;
+    int graphRenderBlockSize = 0;
+    std::array<float *, 64> chunkOutputPointers{};
 
     float volume = 0.5f;
     double bpm = 120.0;

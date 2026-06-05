@@ -116,6 +116,7 @@ class ApiBillingTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 200)
         payload = decode_json_response(response)
         self.assertEqual(payload["provider"], "toss")
+        self.assertEqual(payload["checkout_url"], "https://www.mixroom.ai/#pricing")
         self.assertEqual(self.repo.queued_projection_ids, [])
         event = next(iter(self.repo.billing_events.values()))
         self.assertEqual(event["event_type"], "checkout_session_created")
@@ -1277,6 +1278,17 @@ class ApiBillingTests(unittest.TestCase):
         )
 
     def test_billing_me_omits_toss_one_time_management_links(self):
+        self.repo.upsert_subscription(
+            {
+                "subscription_id": "toss-payment:order-1",
+                "user_id": "user-1",
+                "provider": "toss",
+                "plan_code": "studio",
+                "status": "active",
+                "product_code": "studio_monthly",
+                "one_time_checkout_url": "/payment/checkout?order_id=order-1",
+            }
+        )
         self.repo.put_entitlement(
             {
                 "user_id": "user-1",
@@ -1306,6 +1318,7 @@ class ApiBillingTests(unittest.TestCase):
         self.assertEqual(payload["cancel_subscription_url"], "")
         self.assertEqual(payload["invoices_url"], "")
         self.assertEqual(payload["provider_management"]["reason"], "toss_one_time_payment")
+        self.assertEqual(payload["one_time_checkout_url"], "/payment/checkout?order_id=order-1")
 
     def test_billing_me_reports_toss_recurring_management_configured(self):
         self.repo.upsert_subscription(
@@ -1450,6 +1463,7 @@ class ApiBillingTests(unittest.TestCase):
                 "billing_amount": 149000,
                 "billing_currency": "KRW",
                 "management_channel": "web",
+                "one_time_checkout_url": "/payment/checkout?order_id=order-1",
             }
         )
 
@@ -1470,6 +1484,7 @@ class ApiBillingTests(unittest.TestCase):
         self.assertEqual(item["cancel_subscription_url"], "")
         self.assertFalse(item["manageable"])
         self.assertEqual(item["provider_management"]["reason"], "toss_one_time_payment")
+        self.assertEqual(item["one_time_checkout_url"], "/payment/checkout?order_id=order-1")
 
     def test_billing_subscriptions_marks_toss_recurring_management_configured(self):
         self.repo.upsert_subscription(

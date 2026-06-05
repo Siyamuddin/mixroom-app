@@ -1807,6 +1807,7 @@ def _handle_billing_me(user_id: str) -> Dict[str, Any]:
         or ""
     ).strip()
     subscription_id = str(entitlement.get("source_subscription_id") or "").strip()
+    subscription = repo.get_subscription(subscription_id) if subscription_id else {}
     provider_links = build_management_links(
         provider=provider,
         customer_id=customer_id,
@@ -1814,7 +1815,6 @@ def _handle_billing_me(user_id: str) -> Dict[str, Any]:
     )
     normalized_provider = provider.strip().lower()
     if normalized_provider == "toss":
-        subscription = repo.get_subscription(subscription_id) if subscription_id else {}
         if not _subscription_has_toss_billing_key(subscription if isinstance(subscription, dict) else {}):
             provider_links = {"configured": False, "links": {}, "reason": "toss_one_time_payment"}
         else:
@@ -1858,6 +1858,11 @@ def _handle_billing_me(user_id: str) -> Dict[str, Any]:
                 or customer_link.get("email")
                 or ""
             ),
+            "one_time_checkout_url": str(
+                (subscription if isinstance(subscription, dict) else {}).get("one_time_checkout_url")
+                or (subscription if isinstance(subscription, dict) else {}).get("checkout_url")
+                or ""
+            ).strip(),
             "payment_method": _safe_payment_method_display(entitlement),
             "customer_key": customer_id,
             "subscription_id": subscription_id,
@@ -2018,6 +2023,13 @@ def _billing_subscription_item(subscription: Dict[str, Any]) -> Dict[str, Any]:
     payment_method = _safe_payment_method_display(subscription)
     amount = subscription.get("billing_amount")
     currency = str(subscription.get("billing_currency") or "").strip().upper()
+    one_time_checkout_url = str(
+        subscription.get("one_time_checkout_url")
+        or subscription.get("oneTimeCheckoutUrl")
+        or subscription.get("checkout_url")
+        or subscription.get("checkoutUrl")
+        or ""
+    ).strip()
     item = {
         "subscription_id": str(subscription.get("subscription_id") or ""),
         "provider": str(subscription.get("provider") or ""),
@@ -2039,6 +2051,7 @@ def _billing_subscription_item(subscription: Dict[str, Any]) -> Dict[str, Any]:
         "price_formatted": _price_formatted(amount, currency),
         "billing_cycle": _billing_cycle_for_product_code(subscription),
         "billing_email": str(subscription.get("customer_email") or ""),
+        "one_time_checkout_url": one_time_checkout_url,
         "payment_method": payment_method,
         "card": payment_method,
         "customer_key": str(subscription.get("customer_id") or ""),

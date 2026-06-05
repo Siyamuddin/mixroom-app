@@ -87,7 +87,7 @@ rebuild_cache/fast: rebuild_cache
 
 # Special rule for the target list_install_components
 list_install_components:
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --cyan "Available install components are: \"Unspecified\""
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --cyan "Available install components are: \"Unspecified\" \"pkgconfig\""
 .PHONY : list_install_components
 
 # Special rule for the target list_install_components
@@ -162,17 +162,43 @@ depend:
 .PHONY : depend
 
 #=============================================================================
-# Target rules for targets named JuceModules
+# Target rules for targets named sheenbidi
 
 # Build rule for target.
-JuceModules: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 JuceModules
-.PHONY : JuceModules
+sheenbidi: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 sheenbidi
+.PHONY : sheenbidi
 
 # fast build rule for target.
-JuceModules/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/build
-.PHONY : JuceModules/fast
+sheenbidi/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/build
+.PHONY : sheenbidi/fast
+
+#=============================================================================
+# Target rules for targets named cpu-features
+
+# Build rule for target.
+cpu-features: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 cpu-features
+.PHONY : cpu-features
+
+# fast build rule for target.
+cpu-features/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/cpu-features.dir/build.make CMakeFiles/cpu-features.dir/build
+.PHONY : cpu-features/fast
+
+#=============================================================================
+# Target rules for targets named juce_audio_engine
+
+# Build rule for target.
+juce_audio_engine: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 juce_audio_engine
+.PHONY : juce_audio_engine
+
+# fast build rule for target.
+juce_audio_engine/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/juce_audio_engine.dir/build.make CMakeFiles/juce_audio_engine.dir/build
+.PHONY : juce_audio_engine/fast
 
 #=============================================================================
 # Target rules for targets named oboe
@@ -184,296 +210,778 @@ oboe: cmake_check_build_system
 
 # fast build rule for target.
 oboe/fast:
-	$(MAKE) $(MAKESILENT) -f _deps/oboe-build/CMakeFiles/oboe.dir/build.make _deps/oboe-build/CMakeFiles/oboe.dir/build
+	$(MAKE) $(MAKESILENT) -f juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/build.make juce/modules/juce_audio_devices/native/oboe/CMakeFiles/oboe.dir/build
 .PHONY : oboe/fast
 
-juce/modules/juce_audio_basics/juce_audio_basics.o: juce/modules/juce_audio_basics/juce_audio_basics.cpp.o
-.PHONY : juce/modules/juce_audio_basics/juce_audio_basics.o
+#=============================================================================
+# Target rules for targets named harfbuzz
+
+# Build rule for target.
+harfbuzz: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 harfbuzz
+.PHONY : harfbuzz
+
+# fast build rule for target.
+harfbuzz/fast:
+	$(MAKE) $(MAKESILENT) -f harfbuzz/CMakeFiles/harfbuzz.dir/build.make harfbuzz/CMakeFiles/harfbuzz.dir/build
+.PHONY : harfbuzz/fast
+
+#=============================================================================
+# Target rules for targets named harfbuzz-subset
+
+# Build rule for target.
+harfbuzz-subset: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 harfbuzz-subset
+.PHONY : harfbuzz-subset
+
+# fast build rule for target.
+harfbuzz-subset/fast:
+	$(MAKE) $(MAKESILENT) -f harfbuzz/CMakeFiles/harfbuzz-subset.dir/build.make harfbuzz/CMakeFiles/harfbuzz-subset.dir/build
+.PHONY : harfbuzz-subset/fast
+
+InstrumentRenderers.o: InstrumentRenderers.cpp.o
+.PHONY : InstrumentRenderers.o
 
 # target to build an object file
-juce/modules/juce_audio_basics/juce_audio_basics.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_audio_basics/juce_audio_basics.cpp.o
-.PHONY : juce/modules/juce_audio_basics/juce_audio_basics.cpp.o
+InstrumentRenderers.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/juce_audio_engine.dir/build.make CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.o
+.PHONY : InstrumentRenderers.cpp.o
 
-juce/modules/juce_audio_basics/juce_audio_basics.i: juce/modules/juce_audio_basics/juce_audio_basics.cpp.i
-.PHONY : juce/modules/juce_audio_basics/juce_audio_basics.i
+InstrumentRenderers.i: InstrumentRenderers.cpp.i
+.PHONY : InstrumentRenderers.i
 
 # target to preprocess a source file
-juce/modules/juce_audio_basics/juce_audio_basics.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_audio_basics/juce_audio_basics.cpp.i
-.PHONY : juce/modules/juce_audio_basics/juce_audio_basics.cpp.i
+InstrumentRenderers.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/juce_audio_engine.dir/build.make CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.i
+.PHONY : InstrumentRenderers.cpp.i
 
-juce/modules/juce_audio_basics/juce_audio_basics.s: juce/modules/juce_audio_basics/juce_audio_basics.cpp.s
-.PHONY : juce/modules/juce_audio_basics/juce_audio_basics.s
+InstrumentRenderers.s: InstrumentRenderers.cpp.s
+.PHONY : InstrumentRenderers.s
 
 # target to generate assembly for a file
-juce/modules/juce_audio_basics/juce_audio_basics.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_audio_basics/juce_audio_basics.cpp.s
-.PHONY : juce/modules/juce_audio_basics/juce_audio_basics.cpp.s
+InstrumentRenderers.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/juce_audio_engine.dir/build.make CMakeFiles/juce_audio_engine.dir/InstrumentRenderers.cpp.s
+.PHONY : InstrumentRenderers.cpp.s
 
-juce/modules/juce_audio_devices/juce_audio_devices.o: juce/modules/juce_audio_devices/juce_audio_devices.cpp.o
-.PHONY : juce/modules/juce_audio_devices/juce_audio_devices.o
+JuceBridge.o: JuceBridge.cpp.o
+.PHONY : JuceBridge.o
 
 # target to build an object file
-juce/modules/juce_audio_devices/juce_audio_devices.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_audio_devices/juce_audio_devices.cpp.o
-.PHONY : juce/modules/juce_audio_devices/juce_audio_devices.cpp.o
+JuceBridge.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/juce_audio_engine.dir/build.make CMakeFiles/juce_audio_engine.dir/JuceBridge.cpp.o
+.PHONY : JuceBridge.cpp.o
 
-juce/modules/juce_audio_devices/juce_audio_devices.i: juce/modules/juce_audio_devices/juce_audio_devices.cpp.i
-.PHONY : juce/modules/juce_audio_devices/juce_audio_devices.i
+JuceBridge.i: JuceBridge.cpp.i
+.PHONY : JuceBridge.i
 
 # target to preprocess a source file
-juce/modules/juce_audio_devices/juce_audio_devices.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_audio_devices/juce_audio_devices.cpp.i
-.PHONY : juce/modules/juce_audio_devices/juce_audio_devices.cpp.i
+JuceBridge.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/juce_audio_engine.dir/build.make CMakeFiles/juce_audio_engine.dir/JuceBridge.cpp.i
+.PHONY : JuceBridge.cpp.i
 
-juce/modules/juce_audio_devices/juce_audio_devices.s: juce/modules/juce_audio_devices/juce_audio_devices.cpp.s
-.PHONY : juce/modules/juce_audio_devices/juce_audio_devices.s
+JuceBridge.s: JuceBridge.cpp.s
+.PHONY : JuceBridge.s
 
 # target to generate assembly for a file
-juce/modules/juce_audio_devices/juce_audio_devices.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_audio_devices/juce_audio_devices.cpp.s
-.PHONY : juce/modules/juce_audio_devices/juce_audio_devices.cpp.s
+JuceBridge.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/juce_audio_engine.dir/build.make CMakeFiles/juce_audio_engine.dir/JuceBridge.cpp.s
+.PHONY : JuceBridge.cpp.s
 
-juce/modules/juce_audio_formats/juce_audio_formats.o: juce/modules/juce_audio_formats/juce_audio_formats.cpp.o
-.PHONY : juce/modules/juce_audio_formats/juce_audio_formats.o
+JuceEngine.o: JuceEngine.cpp.o
+.PHONY : JuceEngine.o
 
 # target to build an object file
-juce/modules/juce_audio_formats/juce_audio_formats.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_audio_formats/juce_audio_formats.cpp.o
-.PHONY : juce/modules/juce_audio_formats/juce_audio_formats.cpp.o
+JuceEngine.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/juce_audio_engine.dir/build.make CMakeFiles/juce_audio_engine.dir/JuceEngine.cpp.o
+.PHONY : JuceEngine.cpp.o
 
-juce/modules/juce_audio_formats/juce_audio_formats.i: juce/modules/juce_audio_formats/juce_audio_formats.cpp.i
-.PHONY : juce/modules/juce_audio_formats/juce_audio_formats.i
+JuceEngine.i: JuceEngine.cpp.i
+.PHONY : JuceEngine.i
 
 # target to preprocess a source file
-juce/modules/juce_audio_formats/juce_audio_formats.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_audio_formats/juce_audio_formats.cpp.i
-.PHONY : juce/modules/juce_audio_formats/juce_audio_formats.cpp.i
+JuceEngine.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/juce_audio_engine.dir/build.make CMakeFiles/juce_audio_engine.dir/JuceEngine.cpp.i
+.PHONY : JuceEngine.cpp.i
 
-juce/modules/juce_audio_formats/juce_audio_formats.s: juce/modules/juce_audio_formats/juce_audio_formats.cpp.s
-.PHONY : juce/modules/juce_audio_formats/juce_audio_formats.s
+JuceEngine.s: JuceEngine.cpp.s
+.PHONY : JuceEngine.s
 
 # target to generate assembly for a file
-juce/modules/juce_audio_formats/juce_audio_formats.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_audio_formats/juce_audio_formats.cpp.s
-.PHONY : juce/modules/juce_audio_formats/juce_audio_formats.cpp.s
+JuceEngine.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/juce_audio_engine.dir/build.make CMakeFiles/juce_audio_engine.dir/JuceEngine.cpp.s
+.PHONY : JuceEngine.cpp.s
 
-juce/modules/juce_audio_processors/juce_audio_processors.o: juce/modules/juce_audio_processors/juce_audio_processors.cpp.o
-.PHONY : juce/modules/juce_audio_processors/juce_audio_processors.o
+JuceLogBridge.o: JuceLogBridge.cpp.o
+.PHONY : JuceLogBridge.o
 
 # target to build an object file
-juce/modules/juce_audio_processors/juce_audio_processors.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_audio_processors/juce_audio_processors.cpp.o
-.PHONY : juce/modules/juce_audio_processors/juce_audio_processors.cpp.o
+JuceLogBridge.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/juce_audio_engine.dir/build.make CMakeFiles/juce_audio_engine.dir/JuceLogBridge.cpp.o
+.PHONY : JuceLogBridge.cpp.o
 
-juce/modules/juce_audio_processors/juce_audio_processors.i: juce/modules/juce_audio_processors/juce_audio_processors.cpp.i
-.PHONY : juce/modules/juce_audio_processors/juce_audio_processors.i
+JuceLogBridge.i: JuceLogBridge.cpp.i
+.PHONY : JuceLogBridge.i
 
 # target to preprocess a source file
-juce/modules/juce_audio_processors/juce_audio_processors.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_audio_processors/juce_audio_processors.cpp.i
-.PHONY : juce/modules/juce_audio_processors/juce_audio_processors.cpp.i
+JuceLogBridge.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/juce_audio_engine.dir/build.make CMakeFiles/juce_audio_engine.dir/JuceLogBridge.cpp.i
+.PHONY : JuceLogBridge.cpp.i
 
-juce/modules/juce_audio_processors/juce_audio_processors.s: juce/modules/juce_audio_processors/juce_audio_processors.cpp.s
-.PHONY : juce/modules/juce_audio_processors/juce_audio_processors.s
+JuceLogBridge.s: JuceLogBridge.cpp.s
+.PHONY : JuceLogBridge.s
 
 # target to generate assembly for a file
-juce/modules/juce_audio_processors/juce_audio_processors.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_audio_processors/juce_audio_processors.cpp.s
-.PHONY : juce/modules/juce_audio_processors/juce_audio_processors.cpp.s
+JuceLogBridge.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/juce_audio_engine.dir/build.make CMakeFiles/juce_audio_engine.dir/JuceLogBridge.cpp.s
+.PHONY : JuceLogBridge.cpp.s
 
-juce/modules/juce_audio_utils/juce_audio_utils.o: juce/modules/juce_audio_utils/juce_audio_utils.cpp.o
-.PHONY : juce/modules/juce_audio_utils/juce_audio_utils.o
+NativeEffects.o: NativeEffects.cpp.o
+.PHONY : NativeEffects.o
 
 # target to build an object file
-juce/modules/juce_audio_utils/juce_audio_utils.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_audio_utils/juce_audio_utils.cpp.o
-.PHONY : juce/modules/juce_audio_utils/juce_audio_utils.cpp.o
+NativeEffects.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/juce_audio_engine.dir/build.make CMakeFiles/juce_audio_engine.dir/NativeEffects.cpp.o
+.PHONY : NativeEffects.cpp.o
 
-juce/modules/juce_audio_utils/juce_audio_utils.i: juce/modules/juce_audio_utils/juce_audio_utils.cpp.i
-.PHONY : juce/modules/juce_audio_utils/juce_audio_utils.i
+NativeEffects.i: NativeEffects.cpp.i
+.PHONY : NativeEffects.i
 
 # target to preprocess a source file
-juce/modules/juce_audio_utils/juce_audio_utils.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_audio_utils/juce_audio_utils.cpp.i
-.PHONY : juce/modules/juce_audio_utils/juce_audio_utils.cpp.i
+NativeEffects.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/juce_audio_engine.dir/build.make CMakeFiles/juce_audio_engine.dir/NativeEffects.cpp.i
+.PHONY : NativeEffects.cpp.i
 
-juce/modules/juce_audio_utils/juce_audio_utils.s: juce/modules/juce_audio_utils/juce_audio_utils.cpp.s
-.PHONY : juce/modules/juce_audio_utils/juce_audio_utils.s
+NativeEffects.s: NativeEffects.cpp.s
+.PHONY : NativeEffects.s
 
 # target to generate assembly for a file
-juce/modules/juce_audio_utils/juce_audio_utils.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_audio_utils/juce_audio_utils.cpp.s
-.PHONY : juce/modules/juce_audio_utils/juce_audio_utils.cpp.s
+NativeEffects.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/juce_audio_engine.dir/build.make CMakeFiles/juce_audio_engine.dir/NativeEffects.cpp.s
+.PHONY : NativeEffects.cpp.s
 
-juce/modules/juce_core/juce_core.o: juce/modules/juce_core/juce_core.cpp.o
-.PHONY : juce/modules/juce_core/juce_core.o
+Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.o: Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.c.o
+.PHONY : Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.o
 
 # target to build an object file
-juce/modules/juce_core/juce_core.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_core/juce_core.cpp.o
-.PHONY : juce/modules/juce_core/juce_core.cpp.o
+Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/cpu-features.dir/build.make CMakeFiles/cpu-features.dir/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.c.o
+.PHONY : Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.c.o
 
-juce/modules/juce_core/juce_core.i: juce/modules/juce_core/juce_core.cpp.i
-.PHONY : juce/modules/juce_core/juce_core.i
+Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.i: Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.c.i
+.PHONY : Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.i
 
 # target to preprocess a source file
-juce/modules/juce_core/juce_core.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_core/juce_core.cpp.i
-.PHONY : juce/modules/juce_core/juce_core.cpp.i
+Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/cpu-features.dir/build.make CMakeFiles/cpu-features.dir/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.c.i
+.PHONY : Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.c.i
 
-juce/modules/juce_core/juce_core.s: juce/modules/juce_core/juce_core.cpp.s
-.PHONY : juce/modules/juce_core/juce_core.s
+Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.s: Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.c.s
+.PHONY : Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.s
 
 # target to generate assembly for a file
-juce/modules/juce_core/juce_core.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_core/juce_core.cpp.s
-.PHONY : juce/modules/juce_core/juce_core.cpp.s
+Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/cpu-features.dir/build.make CMakeFiles/cpu-features.dir/Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.c.s
+.PHONY : Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.c.s
 
-juce/modules/juce_data_structures/juce_data_structures.o: juce/modules/juce_data_structures/juce_data_structures.cpp.o
-.PHONY : juce/modules/juce_data_structures/juce_data_structures.o
+juce/modules/sheenbidi/Source/BidiChain.o: juce/modules/sheenbidi/Source/BidiChain.c.o
+.PHONY : juce/modules/sheenbidi/Source/BidiChain.o
 
 # target to build an object file
-juce/modules/juce_data_structures/juce_data_structures.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_data_structures/juce_data_structures.cpp.o
-.PHONY : juce/modules/juce_data_structures/juce_data_structures.cpp.o
+juce/modules/sheenbidi/Source/BidiChain.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiChain.c.o
+.PHONY : juce/modules/sheenbidi/Source/BidiChain.c.o
 
-juce/modules/juce_data_structures/juce_data_structures.i: juce/modules/juce_data_structures/juce_data_structures.cpp.i
-.PHONY : juce/modules/juce_data_structures/juce_data_structures.i
+juce/modules/sheenbidi/Source/BidiChain.i: juce/modules/sheenbidi/Source/BidiChain.c.i
+.PHONY : juce/modules/sheenbidi/Source/BidiChain.i
 
 # target to preprocess a source file
-juce/modules/juce_data_structures/juce_data_structures.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_data_structures/juce_data_structures.cpp.i
-.PHONY : juce/modules/juce_data_structures/juce_data_structures.cpp.i
+juce/modules/sheenbidi/Source/BidiChain.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiChain.c.i
+.PHONY : juce/modules/sheenbidi/Source/BidiChain.c.i
 
-juce/modules/juce_data_structures/juce_data_structures.s: juce/modules/juce_data_structures/juce_data_structures.cpp.s
-.PHONY : juce/modules/juce_data_structures/juce_data_structures.s
+juce/modules/sheenbidi/Source/BidiChain.s: juce/modules/sheenbidi/Source/BidiChain.c.s
+.PHONY : juce/modules/sheenbidi/Source/BidiChain.s
 
 # target to generate assembly for a file
-juce/modules/juce_data_structures/juce_data_structures.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_data_structures/juce_data_structures.cpp.s
-.PHONY : juce/modules/juce_data_structures/juce_data_structures.cpp.s
+juce/modules/sheenbidi/Source/BidiChain.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiChain.c.s
+.PHONY : juce/modules/sheenbidi/Source/BidiChain.c.s
 
-juce/modules/juce_dsp/juce_dsp.o: juce/modules/juce_dsp/juce_dsp.cpp.o
-.PHONY : juce/modules/juce_dsp/juce_dsp.o
+juce/modules/sheenbidi/Source/BidiTypeLookup.o: juce/modules/sheenbidi/Source/BidiTypeLookup.c.o
+.PHONY : juce/modules/sheenbidi/Source/BidiTypeLookup.o
 
 # target to build an object file
-juce/modules/juce_dsp/juce_dsp.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_dsp/juce_dsp.cpp.o
-.PHONY : juce/modules/juce_dsp/juce_dsp.cpp.o
+juce/modules/sheenbidi/Source/BidiTypeLookup.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiTypeLookup.c.o
+.PHONY : juce/modules/sheenbidi/Source/BidiTypeLookup.c.o
 
-juce/modules/juce_dsp/juce_dsp.i: juce/modules/juce_dsp/juce_dsp.cpp.i
-.PHONY : juce/modules/juce_dsp/juce_dsp.i
+juce/modules/sheenbidi/Source/BidiTypeLookup.i: juce/modules/sheenbidi/Source/BidiTypeLookup.c.i
+.PHONY : juce/modules/sheenbidi/Source/BidiTypeLookup.i
 
 # target to preprocess a source file
-juce/modules/juce_dsp/juce_dsp.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_dsp/juce_dsp.cpp.i
-.PHONY : juce/modules/juce_dsp/juce_dsp.cpp.i
+juce/modules/sheenbidi/Source/BidiTypeLookup.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiTypeLookup.c.i
+.PHONY : juce/modules/sheenbidi/Source/BidiTypeLookup.c.i
 
-juce/modules/juce_dsp/juce_dsp.s: juce/modules/juce_dsp/juce_dsp.cpp.s
-.PHONY : juce/modules/juce_dsp/juce_dsp.s
+juce/modules/sheenbidi/Source/BidiTypeLookup.s: juce/modules/sheenbidi/Source/BidiTypeLookup.c.s
+.PHONY : juce/modules/sheenbidi/Source/BidiTypeLookup.s
 
 # target to generate assembly for a file
-juce/modules/juce_dsp/juce_dsp.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_dsp/juce_dsp.cpp.s
-.PHONY : juce/modules/juce_dsp/juce_dsp.cpp.s
+juce/modules/sheenbidi/Source/BidiTypeLookup.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BidiTypeLookup.c.s
+.PHONY : juce/modules/sheenbidi/Source/BidiTypeLookup.c.s
 
-juce/modules/juce_events/juce_events.o: juce/modules/juce_events/juce_events.cpp.o
-.PHONY : juce/modules/juce_events/juce_events.o
+juce/modules/sheenbidi/Source/BracketQueue.o: juce/modules/sheenbidi/Source/BracketQueue.c.o
+.PHONY : juce/modules/sheenbidi/Source/BracketQueue.o
 
 # target to build an object file
-juce/modules/juce_events/juce_events.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_events/juce_events.cpp.o
-.PHONY : juce/modules/juce_events/juce_events.cpp.o
+juce/modules/sheenbidi/Source/BracketQueue.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BracketQueue.c.o
+.PHONY : juce/modules/sheenbidi/Source/BracketQueue.c.o
 
-juce/modules/juce_events/juce_events.i: juce/modules/juce_events/juce_events.cpp.i
-.PHONY : juce/modules/juce_events/juce_events.i
+juce/modules/sheenbidi/Source/BracketQueue.i: juce/modules/sheenbidi/Source/BracketQueue.c.i
+.PHONY : juce/modules/sheenbidi/Source/BracketQueue.i
 
 # target to preprocess a source file
-juce/modules/juce_events/juce_events.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_events/juce_events.cpp.i
-.PHONY : juce/modules/juce_events/juce_events.cpp.i
+juce/modules/sheenbidi/Source/BracketQueue.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BracketQueue.c.i
+.PHONY : juce/modules/sheenbidi/Source/BracketQueue.c.i
 
-juce/modules/juce_events/juce_events.s: juce/modules/juce_events/juce_events.cpp.s
-.PHONY : juce/modules/juce_events/juce_events.s
+juce/modules/sheenbidi/Source/BracketQueue.s: juce/modules/sheenbidi/Source/BracketQueue.c.s
+.PHONY : juce/modules/sheenbidi/Source/BracketQueue.s
 
 # target to generate assembly for a file
-juce/modules/juce_events/juce_events.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_events/juce_events.cpp.s
-.PHONY : juce/modules/juce_events/juce_events.cpp.s
+juce/modules/sheenbidi/Source/BracketQueue.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/BracketQueue.c.s
+.PHONY : juce/modules/sheenbidi/Source/BracketQueue.c.s
 
-juce/modules/juce_graphics/juce_graphics.o: juce/modules/juce_graphics/juce_graphics.cpp.o
-.PHONY : juce/modules/juce_graphics/juce_graphics.o
+juce/modules/sheenbidi/Source/GeneralCategoryLookup.o: juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.o
+.PHONY : juce/modules/sheenbidi/Source/GeneralCategoryLookup.o
 
 # target to build an object file
-juce/modules/juce_graphics/juce_graphics.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_graphics/juce_graphics.cpp.o
-.PHONY : juce/modules/juce_graphics/juce_graphics.cpp.o
+juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.o
+.PHONY : juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.o
 
-juce/modules/juce_graphics/juce_graphics.i: juce/modules/juce_graphics/juce_graphics.cpp.i
-.PHONY : juce/modules/juce_graphics/juce_graphics.i
+juce/modules/sheenbidi/Source/GeneralCategoryLookup.i: juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.i
+.PHONY : juce/modules/sheenbidi/Source/GeneralCategoryLookup.i
 
 # target to preprocess a source file
-juce/modules/juce_graphics/juce_graphics.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_graphics/juce_graphics.cpp.i
-.PHONY : juce/modules/juce_graphics/juce_graphics.cpp.i
+juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.i
+.PHONY : juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.i
 
-juce/modules/juce_graphics/juce_graphics.s: juce/modules/juce_graphics/juce_graphics.cpp.s
-.PHONY : juce/modules/juce_graphics/juce_graphics.s
+juce/modules/sheenbidi/Source/GeneralCategoryLookup.s: juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.s
+.PHONY : juce/modules/sheenbidi/Source/GeneralCategoryLookup.s
 
 # target to generate assembly for a file
-juce/modules/juce_graphics/juce_graphics.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_graphics/juce_graphics.cpp.s
-.PHONY : juce/modules/juce_graphics/juce_graphics.cpp.s
+juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.s
+.PHONY : juce/modules/sheenbidi/Source/GeneralCategoryLookup.c.s
 
-juce/modules/juce_gui_basics/juce_gui_basics.o: juce/modules/juce_gui_basics/juce_gui_basics.cpp.o
-.PHONY : juce/modules/juce_gui_basics/juce_gui_basics.o
+juce/modules/sheenbidi/Source/IsolatingRun.o: juce/modules/sheenbidi/Source/IsolatingRun.c.o
+.PHONY : juce/modules/sheenbidi/Source/IsolatingRun.o
 
 # target to build an object file
-juce/modules/juce_gui_basics/juce_gui_basics.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_gui_basics/juce_gui_basics.cpp.o
-.PHONY : juce/modules/juce_gui_basics/juce_gui_basics.cpp.o
+juce/modules/sheenbidi/Source/IsolatingRun.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/IsolatingRun.c.o
+.PHONY : juce/modules/sheenbidi/Source/IsolatingRun.c.o
 
-juce/modules/juce_gui_basics/juce_gui_basics.i: juce/modules/juce_gui_basics/juce_gui_basics.cpp.i
-.PHONY : juce/modules/juce_gui_basics/juce_gui_basics.i
+juce/modules/sheenbidi/Source/IsolatingRun.i: juce/modules/sheenbidi/Source/IsolatingRun.c.i
+.PHONY : juce/modules/sheenbidi/Source/IsolatingRun.i
 
 # target to preprocess a source file
-juce/modules/juce_gui_basics/juce_gui_basics.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_gui_basics/juce_gui_basics.cpp.i
-.PHONY : juce/modules/juce_gui_basics/juce_gui_basics.cpp.i
+juce/modules/sheenbidi/Source/IsolatingRun.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/IsolatingRun.c.i
+.PHONY : juce/modules/sheenbidi/Source/IsolatingRun.c.i
 
-juce/modules/juce_gui_basics/juce_gui_basics.s: juce/modules/juce_gui_basics/juce_gui_basics.cpp.s
-.PHONY : juce/modules/juce_gui_basics/juce_gui_basics.s
+juce/modules/sheenbidi/Source/IsolatingRun.s: juce/modules/sheenbidi/Source/IsolatingRun.c.s
+.PHONY : juce/modules/sheenbidi/Source/IsolatingRun.s
 
 # target to generate assembly for a file
-juce/modules/juce_gui_basics/juce_gui_basics.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_gui_basics/juce_gui_basics.cpp.s
-.PHONY : juce/modules/juce_gui_basics/juce_gui_basics.cpp.s
+juce/modules/sheenbidi/Source/IsolatingRun.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/IsolatingRun.c.s
+.PHONY : juce/modules/sheenbidi/Source/IsolatingRun.c.s
 
-juce/modules/juce_gui_extra/juce_gui_extra.o: juce/modules/juce_gui_extra/juce_gui_extra.cpp.o
-.PHONY : juce/modules/juce_gui_extra/juce_gui_extra.o
+juce/modules/sheenbidi/Source/LevelRun.o: juce/modules/sheenbidi/Source/LevelRun.c.o
+.PHONY : juce/modules/sheenbidi/Source/LevelRun.o
 
 # target to build an object file
-juce/modules/juce_gui_extra/juce_gui_extra.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_gui_extra/juce_gui_extra.cpp.o
-.PHONY : juce/modules/juce_gui_extra/juce_gui_extra.cpp.o
+juce/modules/sheenbidi/Source/LevelRun.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/LevelRun.c.o
+.PHONY : juce/modules/sheenbidi/Source/LevelRun.c.o
 
-juce/modules/juce_gui_extra/juce_gui_extra.i: juce/modules/juce_gui_extra/juce_gui_extra.cpp.i
-.PHONY : juce/modules/juce_gui_extra/juce_gui_extra.i
+juce/modules/sheenbidi/Source/LevelRun.i: juce/modules/sheenbidi/Source/LevelRun.c.i
+.PHONY : juce/modules/sheenbidi/Source/LevelRun.i
 
 # target to preprocess a source file
-juce/modules/juce_gui_extra/juce_gui_extra.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_gui_extra/juce_gui_extra.cpp.i
-.PHONY : juce/modules/juce_gui_extra/juce_gui_extra.cpp.i
+juce/modules/sheenbidi/Source/LevelRun.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/LevelRun.c.i
+.PHONY : juce/modules/sheenbidi/Source/LevelRun.c.i
 
-juce/modules/juce_gui_extra/juce_gui_extra.s: juce/modules/juce_gui_extra/juce_gui_extra.cpp.s
-.PHONY : juce/modules/juce_gui_extra/juce_gui_extra.s
+juce/modules/sheenbidi/Source/LevelRun.s: juce/modules/sheenbidi/Source/LevelRun.c.s
+.PHONY : juce/modules/sheenbidi/Source/LevelRun.s
 
 # target to generate assembly for a file
-juce/modules/juce_gui_extra/juce_gui_extra.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/JuceModules.dir/build.make CMakeFiles/JuceModules.dir/juce/modules/juce_gui_extra/juce_gui_extra.cpp.s
-.PHONY : juce/modules/juce_gui_extra/juce_gui_extra.cpp.s
+juce/modules/sheenbidi/Source/LevelRun.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/LevelRun.c.s
+.PHONY : juce/modules/sheenbidi/Source/LevelRun.c.s
+
+juce/modules/sheenbidi/Source/Memory.o: juce/modules/sheenbidi/Source/Memory.c.o
+.PHONY : juce/modules/sheenbidi/Source/Memory.o
+
+# target to build an object file
+juce/modules/sheenbidi/Source/Memory.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Memory.c.o
+.PHONY : juce/modules/sheenbidi/Source/Memory.c.o
+
+juce/modules/sheenbidi/Source/Memory.i: juce/modules/sheenbidi/Source/Memory.c.i
+.PHONY : juce/modules/sheenbidi/Source/Memory.i
+
+# target to preprocess a source file
+juce/modules/sheenbidi/Source/Memory.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Memory.c.i
+.PHONY : juce/modules/sheenbidi/Source/Memory.c.i
+
+juce/modules/sheenbidi/Source/Memory.s: juce/modules/sheenbidi/Source/Memory.c.s
+.PHONY : juce/modules/sheenbidi/Source/Memory.s
+
+# target to generate assembly for a file
+juce/modules/sheenbidi/Source/Memory.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Memory.c.s
+.PHONY : juce/modules/sheenbidi/Source/Memory.c.s
+
+juce/modules/sheenbidi/Source/Object.o: juce/modules/sheenbidi/Source/Object.c.o
+.PHONY : juce/modules/sheenbidi/Source/Object.o
+
+# target to build an object file
+juce/modules/sheenbidi/Source/Object.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Object.c.o
+.PHONY : juce/modules/sheenbidi/Source/Object.c.o
+
+juce/modules/sheenbidi/Source/Object.i: juce/modules/sheenbidi/Source/Object.c.i
+.PHONY : juce/modules/sheenbidi/Source/Object.i
+
+# target to preprocess a source file
+juce/modules/sheenbidi/Source/Object.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Object.c.i
+.PHONY : juce/modules/sheenbidi/Source/Object.c.i
+
+juce/modules/sheenbidi/Source/Object.s: juce/modules/sheenbidi/Source/Object.c.s
+.PHONY : juce/modules/sheenbidi/Source/Object.s
+
+# target to generate assembly for a file
+juce/modules/sheenbidi/Source/Object.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Object.c.s
+.PHONY : juce/modules/sheenbidi/Source/Object.c.s
+
+juce/modules/sheenbidi/Source/Once.o: juce/modules/sheenbidi/Source/Once.c.o
+.PHONY : juce/modules/sheenbidi/Source/Once.o
+
+# target to build an object file
+juce/modules/sheenbidi/Source/Once.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Once.c.o
+.PHONY : juce/modules/sheenbidi/Source/Once.c.o
+
+juce/modules/sheenbidi/Source/Once.i: juce/modules/sheenbidi/Source/Once.c.i
+.PHONY : juce/modules/sheenbidi/Source/Once.i
+
+# target to preprocess a source file
+juce/modules/sheenbidi/Source/Once.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Once.c.i
+.PHONY : juce/modules/sheenbidi/Source/Once.c.i
+
+juce/modules/sheenbidi/Source/Once.s: juce/modules/sheenbidi/Source/Once.c.s
+.PHONY : juce/modules/sheenbidi/Source/Once.s
+
+# target to generate assembly for a file
+juce/modules/sheenbidi/Source/Once.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/Once.c.s
+.PHONY : juce/modules/sheenbidi/Source/Once.c.s
+
+juce/modules/sheenbidi/Source/PairingLookup.o: juce/modules/sheenbidi/Source/PairingLookup.c.o
+.PHONY : juce/modules/sheenbidi/Source/PairingLookup.o
+
+# target to build an object file
+juce/modules/sheenbidi/Source/PairingLookup.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/PairingLookup.c.o
+.PHONY : juce/modules/sheenbidi/Source/PairingLookup.c.o
+
+juce/modules/sheenbidi/Source/PairingLookup.i: juce/modules/sheenbidi/Source/PairingLookup.c.i
+.PHONY : juce/modules/sheenbidi/Source/PairingLookup.i
+
+# target to preprocess a source file
+juce/modules/sheenbidi/Source/PairingLookup.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/PairingLookup.c.i
+.PHONY : juce/modules/sheenbidi/Source/PairingLookup.c.i
+
+juce/modules/sheenbidi/Source/PairingLookup.s: juce/modules/sheenbidi/Source/PairingLookup.c.s
+.PHONY : juce/modules/sheenbidi/Source/PairingLookup.s
+
+# target to generate assembly for a file
+juce/modules/sheenbidi/Source/PairingLookup.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/PairingLookup.c.s
+.PHONY : juce/modules/sheenbidi/Source/PairingLookup.c.s
+
+juce/modules/sheenbidi/Source/RunQueue.o: juce/modules/sheenbidi/Source/RunQueue.c.o
+.PHONY : juce/modules/sheenbidi/Source/RunQueue.o
+
+# target to build an object file
+juce/modules/sheenbidi/Source/RunQueue.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/RunQueue.c.o
+.PHONY : juce/modules/sheenbidi/Source/RunQueue.c.o
+
+juce/modules/sheenbidi/Source/RunQueue.i: juce/modules/sheenbidi/Source/RunQueue.c.i
+.PHONY : juce/modules/sheenbidi/Source/RunQueue.i
+
+# target to preprocess a source file
+juce/modules/sheenbidi/Source/RunQueue.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/RunQueue.c.i
+.PHONY : juce/modules/sheenbidi/Source/RunQueue.c.i
+
+juce/modules/sheenbidi/Source/RunQueue.s: juce/modules/sheenbidi/Source/RunQueue.c.s
+.PHONY : juce/modules/sheenbidi/Source/RunQueue.s
+
+# target to generate assembly for a file
+juce/modules/sheenbidi/Source/RunQueue.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/RunQueue.c.s
+.PHONY : juce/modules/sheenbidi/Source/RunQueue.c.s
+
+juce/modules/sheenbidi/Source/SBAlgorithm.o: juce/modules/sheenbidi/Source/SBAlgorithm.c.o
+.PHONY : juce/modules/sheenbidi/Source/SBAlgorithm.o
+
+# target to build an object file
+juce/modules/sheenbidi/Source/SBAlgorithm.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAlgorithm.c.o
+.PHONY : juce/modules/sheenbidi/Source/SBAlgorithm.c.o
+
+juce/modules/sheenbidi/Source/SBAlgorithm.i: juce/modules/sheenbidi/Source/SBAlgorithm.c.i
+.PHONY : juce/modules/sheenbidi/Source/SBAlgorithm.i
+
+# target to preprocess a source file
+juce/modules/sheenbidi/Source/SBAlgorithm.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAlgorithm.c.i
+.PHONY : juce/modules/sheenbidi/Source/SBAlgorithm.c.i
+
+juce/modules/sheenbidi/Source/SBAlgorithm.s: juce/modules/sheenbidi/Source/SBAlgorithm.c.s
+.PHONY : juce/modules/sheenbidi/Source/SBAlgorithm.s
+
+# target to generate assembly for a file
+juce/modules/sheenbidi/Source/SBAlgorithm.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAlgorithm.c.s
+.PHONY : juce/modules/sheenbidi/Source/SBAlgorithm.c.s
+
+juce/modules/sheenbidi/Source/SBAllocator.o: juce/modules/sheenbidi/Source/SBAllocator.c.o
+.PHONY : juce/modules/sheenbidi/Source/SBAllocator.o
+
+# target to build an object file
+juce/modules/sheenbidi/Source/SBAllocator.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAllocator.c.o
+.PHONY : juce/modules/sheenbidi/Source/SBAllocator.c.o
+
+juce/modules/sheenbidi/Source/SBAllocator.i: juce/modules/sheenbidi/Source/SBAllocator.c.i
+.PHONY : juce/modules/sheenbidi/Source/SBAllocator.i
+
+# target to preprocess a source file
+juce/modules/sheenbidi/Source/SBAllocator.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAllocator.c.i
+.PHONY : juce/modules/sheenbidi/Source/SBAllocator.c.i
+
+juce/modules/sheenbidi/Source/SBAllocator.s: juce/modules/sheenbidi/Source/SBAllocator.c.s
+.PHONY : juce/modules/sheenbidi/Source/SBAllocator.s
+
+# target to generate assembly for a file
+juce/modules/sheenbidi/Source/SBAllocator.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBAllocator.c.s
+.PHONY : juce/modules/sheenbidi/Source/SBAllocator.c.s
+
+juce/modules/sheenbidi/Source/SBBase.o: juce/modules/sheenbidi/Source/SBBase.c.o
+.PHONY : juce/modules/sheenbidi/Source/SBBase.o
+
+# target to build an object file
+juce/modules/sheenbidi/Source/SBBase.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBBase.c.o
+.PHONY : juce/modules/sheenbidi/Source/SBBase.c.o
+
+juce/modules/sheenbidi/Source/SBBase.i: juce/modules/sheenbidi/Source/SBBase.c.i
+.PHONY : juce/modules/sheenbidi/Source/SBBase.i
+
+# target to preprocess a source file
+juce/modules/sheenbidi/Source/SBBase.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBBase.c.i
+.PHONY : juce/modules/sheenbidi/Source/SBBase.c.i
+
+juce/modules/sheenbidi/Source/SBBase.s: juce/modules/sheenbidi/Source/SBBase.c.s
+.PHONY : juce/modules/sheenbidi/Source/SBBase.s
+
+# target to generate assembly for a file
+juce/modules/sheenbidi/Source/SBBase.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBBase.c.s
+.PHONY : juce/modules/sheenbidi/Source/SBBase.c.s
+
+juce/modules/sheenbidi/Source/SBCodepoint.o: juce/modules/sheenbidi/Source/SBCodepoint.c.o
+.PHONY : juce/modules/sheenbidi/Source/SBCodepoint.o
+
+# target to build an object file
+juce/modules/sheenbidi/Source/SBCodepoint.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepoint.c.o
+.PHONY : juce/modules/sheenbidi/Source/SBCodepoint.c.o
+
+juce/modules/sheenbidi/Source/SBCodepoint.i: juce/modules/sheenbidi/Source/SBCodepoint.c.i
+.PHONY : juce/modules/sheenbidi/Source/SBCodepoint.i
+
+# target to preprocess a source file
+juce/modules/sheenbidi/Source/SBCodepoint.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepoint.c.i
+.PHONY : juce/modules/sheenbidi/Source/SBCodepoint.c.i
+
+juce/modules/sheenbidi/Source/SBCodepoint.s: juce/modules/sheenbidi/Source/SBCodepoint.c.s
+.PHONY : juce/modules/sheenbidi/Source/SBCodepoint.s
+
+# target to generate assembly for a file
+juce/modules/sheenbidi/Source/SBCodepoint.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepoint.c.s
+.PHONY : juce/modules/sheenbidi/Source/SBCodepoint.c.s
+
+juce/modules/sheenbidi/Source/SBCodepointSequence.o: juce/modules/sheenbidi/Source/SBCodepointSequence.c.o
+.PHONY : juce/modules/sheenbidi/Source/SBCodepointSequence.o
+
+# target to build an object file
+juce/modules/sheenbidi/Source/SBCodepointSequence.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepointSequence.c.o
+.PHONY : juce/modules/sheenbidi/Source/SBCodepointSequence.c.o
+
+juce/modules/sheenbidi/Source/SBCodepointSequence.i: juce/modules/sheenbidi/Source/SBCodepointSequence.c.i
+.PHONY : juce/modules/sheenbidi/Source/SBCodepointSequence.i
+
+# target to preprocess a source file
+juce/modules/sheenbidi/Source/SBCodepointSequence.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepointSequence.c.i
+.PHONY : juce/modules/sheenbidi/Source/SBCodepointSequence.c.i
+
+juce/modules/sheenbidi/Source/SBCodepointSequence.s: juce/modules/sheenbidi/Source/SBCodepointSequence.c.s
+.PHONY : juce/modules/sheenbidi/Source/SBCodepointSequence.s
+
+# target to generate assembly for a file
+juce/modules/sheenbidi/Source/SBCodepointSequence.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBCodepointSequence.c.s
+.PHONY : juce/modules/sheenbidi/Source/SBCodepointSequence.c.s
+
+juce/modules/sheenbidi/Source/SBLine.o: juce/modules/sheenbidi/Source/SBLine.c.o
+.PHONY : juce/modules/sheenbidi/Source/SBLine.o
+
+# target to build an object file
+juce/modules/sheenbidi/Source/SBLine.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLine.c.o
+.PHONY : juce/modules/sheenbidi/Source/SBLine.c.o
+
+juce/modules/sheenbidi/Source/SBLine.i: juce/modules/sheenbidi/Source/SBLine.c.i
+.PHONY : juce/modules/sheenbidi/Source/SBLine.i
+
+# target to preprocess a source file
+juce/modules/sheenbidi/Source/SBLine.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLine.c.i
+.PHONY : juce/modules/sheenbidi/Source/SBLine.c.i
+
+juce/modules/sheenbidi/Source/SBLine.s: juce/modules/sheenbidi/Source/SBLine.c.s
+.PHONY : juce/modules/sheenbidi/Source/SBLine.s
+
+# target to generate assembly for a file
+juce/modules/sheenbidi/Source/SBLine.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLine.c.s
+.PHONY : juce/modules/sheenbidi/Source/SBLine.c.s
+
+juce/modules/sheenbidi/Source/SBLog.o: juce/modules/sheenbidi/Source/SBLog.c.o
+.PHONY : juce/modules/sheenbidi/Source/SBLog.o
+
+# target to build an object file
+juce/modules/sheenbidi/Source/SBLog.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLog.c.o
+.PHONY : juce/modules/sheenbidi/Source/SBLog.c.o
+
+juce/modules/sheenbidi/Source/SBLog.i: juce/modules/sheenbidi/Source/SBLog.c.i
+.PHONY : juce/modules/sheenbidi/Source/SBLog.i
+
+# target to preprocess a source file
+juce/modules/sheenbidi/Source/SBLog.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLog.c.i
+.PHONY : juce/modules/sheenbidi/Source/SBLog.c.i
+
+juce/modules/sheenbidi/Source/SBLog.s: juce/modules/sheenbidi/Source/SBLog.c.s
+.PHONY : juce/modules/sheenbidi/Source/SBLog.s
+
+# target to generate assembly for a file
+juce/modules/sheenbidi/Source/SBLog.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBLog.c.s
+.PHONY : juce/modules/sheenbidi/Source/SBLog.c.s
+
+juce/modules/sheenbidi/Source/SBMirrorLocator.o: juce/modules/sheenbidi/Source/SBMirrorLocator.c.o
+.PHONY : juce/modules/sheenbidi/Source/SBMirrorLocator.o
+
+# target to build an object file
+juce/modules/sheenbidi/Source/SBMirrorLocator.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBMirrorLocator.c.o
+.PHONY : juce/modules/sheenbidi/Source/SBMirrorLocator.c.o
+
+juce/modules/sheenbidi/Source/SBMirrorLocator.i: juce/modules/sheenbidi/Source/SBMirrorLocator.c.i
+.PHONY : juce/modules/sheenbidi/Source/SBMirrorLocator.i
+
+# target to preprocess a source file
+juce/modules/sheenbidi/Source/SBMirrorLocator.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBMirrorLocator.c.i
+.PHONY : juce/modules/sheenbidi/Source/SBMirrorLocator.c.i
+
+juce/modules/sheenbidi/Source/SBMirrorLocator.s: juce/modules/sheenbidi/Source/SBMirrorLocator.c.s
+.PHONY : juce/modules/sheenbidi/Source/SBMirrorLocator.s
+
+# target to generate assembly for a file
+juce/modules/sheenbidi/Source/SBMirrorLocator.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBMirrorLocator.c.s
+.PHONY : juce/modules/sheenbidi/Source/SBMirrorLocator.c.s
+
+juce/modules/sheenbidi/Source/SBParagraph.o: juce/modules/sheenbidi/Source/SBParagraph.c.o
+.PHONY : juce/modules/sheenbidi/Source/SBParagraph.o
+
+# target to build an object file
+juce/modules/sheenbidi/Source/SBParagraph.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBParagraph.c.o
+.PHONY : juce/modules/sheenbidi/Source/SBParagraph.c.o
+
+juce/modules/sheenbidi/Source/SBParagraph.i: juce/modules/sheenbidi/Source/SBParagraph.c.i
+.PHONY : juce/modules/sheenbidi/Source/SBParagraph.i
+
+# target to preprocess a source file
+juce/modules/sheenbidi/Source/SBParagraph.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBParagraph.c.i
+.PHONY : juce/modules/sheenbidi/Source/SBParagraph.c.i
+
+juce/modules/sheenbidi/Source/SBParagraph.s: juce/modules/sheenbidi/Source/SBParagraph.c.s
+.PHONY : juce/modules/sheenbidi/Source/SBParagraph.s
+
+# target to generate assembly for a file
+juce/modules/sheenbidi/Source/SBParagraph.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBParagraph.c.s
+.PHONY : juce/modules/sheenbidi/Source/SBParagraph.c.s
+
+juce/modules/sheenbidi/Source/SBScriptLocator.o: juce/modules/sheenbidi/Source/SBScriptLocator.c.o
+.PHONY : juce/modules/sheenbidi/Source/SBScriptLocator.o
+
+# target to build an object file
+juce/modules/sheenbidi/Source/SBScriptLocator.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBScriptLocator.c.o
+.PHONY : juce/modules/sheenbidi/Source/SBScriptLocator.c.o
+
+juce/modules/sheenbidi/Source/SBScriptLocator.i: juce/modules/sheenbidi/Source/SBScriptLocator.c.i
+.PHONY : juce/modules/sheenbidi/Source/SBScriptLocator.i
+
+# target to preprocess a source file
+juce/modules/sheenbidi/Source/SBScriptLocator.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBScriptLocator.c.i
+.PHONY : juce/modules/sheenbidi/Source/SBScriptLocator.c.i
+
+juce/modules/sheenbidi/Source/SBScriptLocator.s: juce/modules/sheenbidi/Source/SBScriptLocator.c.s
+.PHONY : juce/modules/sheenbidi/Source/SBScriptLocator.s
+
+# target to generate assembly for a file
+juce/modules/sheenbidi/Source/SBScriptLocator.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SBScriptLocator.c.s
+.PHONY : juce/modules/sheenbidi/Source/SBScriptLocator.c.s
+
+juce/modules/sheenbidi/Source/ScriptLookup.o: juce/modules/sheenbidi/Source/ScriptLookup.c.o
+.PHONY : juce/modules/sheenbidi/Source/ScriptLookup.o
+
+# target to build an object file
+juce/modules/sheenbidi/Source/ScriptLookup.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptLookup.c.o
+.PHONY : juce/modules/sheenbidi/Source/ScriptLookup.c.o
+
+juce/modules/sheenbidi/Source/ScriptLookup.i: juce/modules/sheenbidi/Source/ScriptLookup.c.i
+.PHONY : juce/modules/sheenbidi/Source/ScriptLookup.i
+
+# target to preprocess a source file
+juce/modules/sheenbidi/Source/ScriptLookup.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptLookup.c.i
+.PHONY : juce/modules/sheenbidi/Source/ScriptLookup.c.i
+
+juce/modules/sheenbidi/Source/ScriptLookup.s: juce/modules/sheenbidi/Source/ScriptLookup.c.s
+.PHONY : juce/modules/sheenbidi/Source/ScriptLookup.s
+
+# target to generate assembly for a file
+juce/modules/sheenbidi/Source/ScriptLookup.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptLookup.c.s
+.PHONY : juce/modules/sheenbidi/Source/ScriptLookup.c.s
+
+juce/modules/sheenbidi/Source/ScriptStack.o: juce/modules/sheenbidi/Source/ScriptStack.c.o
+.PHONY : juce/modules/sheenbidi/Source/ScriptStack.o
+
+# target to build an object file
+juce/modules/sheenbidi/Source/ScriptStack.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptStack.c.o
+.PHONY : juce/modules/sheenbidi/Source/ScriptStack.c.o
+
+juce/modules/sheenbidi/Source/ScriptStack.i: juce/modules/sheenbidi/Source/ScriptStack.c.i
+.PHONY : juce/modules/sheenbidi/Source/ScriptStack.i
+
+# target to preprocess a source file
+juce/modules/sheenbidi/Source/ScriptStack.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptStack.c.i
+.PHONY : juce/modules/sheenbidi/Source/ScriptStack.c.i
+
+juce/modules/sheenbidi/Source/ScriptStack.s: juce/modules/sheenbidi/Source/ScriptStack.c.s
+.PHONY : juce/modules/sheenbidi/Source/ScriptStack.s
+
+# target to generate assembly for a file
+juce/modules/sheenbidi/Source/ScriptStack.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/ScriptStack.c.s
+.PHONY : juce/modules/sheenbidi/Source/ScriptStack.c.s
+
+juce/modules/sheenbidi/Source/SheenBidi.o: juce/modules/sheenbidi/Source/SheenBidi.c.o
+.PHONY : juce/modules/sheenbidi/Source/SheenBidi.o
+
+# target to build an object file
+juce/modules/sheenbidi/Source/SheenBidi.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SheenBidi.c.o
+.PHONY : juce/modules/sheenbidi/Source/SheenBidi.c.o
+
+juce/modules/sheenbidi/Source/SheenBidi.i: juce/modules/sheenbidi/Source/SheenBidi.c.i
+.PHONY : juce/modules/sheenbidi/Source/SheenBidi.i
+
+# target to preprocess a source file
+juce/modules/sheenbidi/Source/SheenBidi.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SheenBidi.c.i
+.PHONY : juce/modules/sheenbidi/Source/SheenBidi.c.i
+
+juce/modules/sheenbidi/Source/SheenBidi.s: juce/modules/sheenbidi/Source/SheenBidi.c.s
+.PHONY : juce/modules/sheenbidi/Source/SheenBidi.s
+
+# target to generate assembly for a file
+juce/modules/sheenbidi/Source/SheenBidi.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/SheenBidi.c.s
+.PHONY : juce/modules/sheenbidi/Source/SheenBidi.c.s
+
+juce/modules/sheenbidi/Source/StatusStack.o: juce/modules/sheenbidi/Source/StatusStack.c.o
+.PHONY : juce/modules/sheenbidi/Source/StatusStack.o
+
+# target to build an object file
+juce/modules/sheenbidi/Source/StatusStack.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/StatusStack.c.o
+.PHONY : juce/modules/sheenbidi/Source/StatusStack.c.o
+
+juce/modules/sheenbidi/Source/StatusStack.i: juce/modules/sheenbidi/Source/StatusStack.c.i
+.PHONY : juce/modules/sheenbidi/Source/StatusStack.i
+
+# target to preprocess a source file
+juce/modules/sheenbidi/Source/StatusStack.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/StatusStack.c.i
+.PHONY : juce/modules/sheenbidi/Source/StatusStack.c.i
+
+juce/modules/sheenbidi/Source/StatusStack.s: juce/modules/sheenbidi/Source/StatusStack.c.s
+.PHONY : juce/modules/sheenbidi/Source/StatusStack.s
+
+# target to generate assembly for a file
+juce/modules/sheenbidi/Source/StatusStack.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/sheenbidi.dir/build.make CMakeFiles/sheenbidi.dir/juce/modules/sheenbidi/Source/StatusStack.c.s
+.PHONY : juce/modules/sheenbidi/Source/StatusStack.c.s
 
 # Help Target
 help:
@@ -487,44 +995,105 @@ help:
 	@echo "... install/strip"
 	@echo "... list_install_components"
 	@echo "... rebuild_cache"
-	@echo "... JuceModules"
+	@echo "... cpu-features"
+	@echo "... harfbuzz"
+	@echo "... harfbuzz-subset"
+	@echo "... juce_audio_engine"
 	@echo "... oboe"
-	@echo "... juce/modules/juce_audio_basics/juce_audio_basics.o"
-	@echo "... juce/modules/juce_audio_basics/juce_audio_basics.i"
-	@echo "... juce/modules/juce_audio_basics/juce_audio_basics.s"
-	@echo "... juce/modules/juce_audio_devices/juce_audio_devices.o"
-	@echo "... juce/modules/juce_audio_devices/juce_audio_devices.i"
-	@echo "... juce/modules/juce_audio_devices/juce_audio_devices.s"
-	@echo "... juce/modules/juce_audio_formats/juce_audio_formats.o"
-	@echo "... juce/modules/juce_audio_formats/juce_audio_formats.i"
-	@echo "... juce/modules/juce_audio_formats/juce_audio_formats.s"
-	@echo "... juce/modules/juce_audio_processors/juce_audio_processors.o"
-	@echo "... juce/modules/juce_audio_processors/juce_audio_processors.i"
-	@echo "... juce/modules/juce_audio_processors/juce_audio_processors.s"
-	@echo "... juce/modules/juce_audio_utils/juce_audio_utils.o"
-	@echo "... juce/modules/juce_audio_utils/juce_audio_utils.i"
-	@echo "... juce/modules/juce_audio_utils/juce_audio_utils.s"
-	@echo "... juce/modules/juce_core/juce_core.o"
-	@echo "... juce/modules/juce_core/juce_core.i"
-	@echo "... juce/modules/juce_core/juce_core.s"
-	@echo "... juce/modules/juce_data_structures/juce_data_structures.o"
-	@echo "... juce/modules/juce_data_structures/juce_data_structures.i"
-	@echo "... juce/modules/juce_data_structures/juce_data_structures.s"
-	@echo "... juce/modules/juce_dsp/juce_dsp.o"
-	@echo "... juce/modules/juce_dsp/juce_dsp.i"
-	@echo "... juce/modules/juce_dsp/juce_dsp.s"
-	@echo "... juce/modules/juce_events/juce_events.o"
-	@echo "... juce/modules/juce_events/juce_events.i"
-	@echo "... juce/modules/juce_events/juce_events.s"
-	@echo "... juce/modules/juce_graphics/juce_graphics.o"
-	@echo "... juce/modules/juce_graphics/juce_graphics.i"
-	@echo "... juce/modules/juce_graphics/juce_graphics.s"
-	@echo "... juce/modules/juce_gui_basics/juce_gui_basics.o"
-	@echo "... juce/modules/juce_gui_basics/juce_gui_basics.i"
-	@echo "... juce/modules/juce_gui_basics/juce_gui_basics.s"
-	@echo "... juce/modules/juce_gui_extra/juce_gui_extra.o"
-	@echo "... juce/modules/juce_gui_extra/juce_gui_extra.i"
-	@echo "... juce/modules/juce_gui_extra/juce_gui_extra.s"
+	@echo "... sheenbidi"
+	@echo "... InstrumentRenderers.o"
+	@echo "... InstrumentRenderers.i"
+	@echo "... InstrumentRenderers.s"
+	@echo "... JuceBridge.o"
+	@echo "... JuceBridge.i"
+	@echo "... JuceBridge.s"
+	@echo "... JuceEngine.o"
+	@echo "... JuceEngine.i"
+	@echo "... JuceEngine.s"
+	@echo "... JuceLogBridge.o"
+	@echo "... JuceLogBridge.i"
+	@echo "... JuceLogBridge.s"
+	@echo "... NativeEffects.o"
+	@echo "... NativeEffects.i"
+	@echo "... NativeEffects.s"
+	@echo "... Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.o"
+	@echo "... Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.i"
+	@echo "... Users/andrewhyungulee/Library/Android/sdk/ndk/25.1.8937393/sources/android/cpufeatures/cpu-features.s"
+	@echo "... juce/modules/sheenbidi/Source/BidiChain.o"
+	@echo "... juce/modules/sheenbidi/Source/BidiChain.i"
+	@echo "... juce/modules/sheenbidi/Source/BidiChain.s"
+	@echo "... juce/modules/sheenbidi/Source/BidiTypeLookup.o"
+	@echo "... juce/modules/sheenbidi/Source/BidiTypeLookup.i"
+	@echo "... juce/modules/sheenbidi/Source/BidiTypeLookup.s"
+	@echo "... juce/modules/sheenbidi/Source/BracketQueue.o"
+	@echo "... juce/modules/sheenbidi/Source/BracketQueue.i"
+	@echo "... juce/modules/sheenbidi/Source/BracketQueue.s"
+	@echo "... juce/modules/sheenbidi/Source/GeneralCategoryLookup.o"
+	@echo "... juce/modules/sheenbidi/Source/GeneralCategoryLookup.i"
+	@echo "... juce/modules/sheenbidi/Source/GeneralCategoryLookup.s"
+	@echo "... juce/modules/sheenbidi/Source/IsolatingRun.o"
+	@echo "... juce/modules/sheenbidi/Source/IsolatingRun.i"
+	@echo "... juce/modules/sheenbidi/Source/IsolatingRun.s"
+	@echo "... juce/modules/sheenbidi/Source/LevelRun.o"
+	@echo "... juce/modules/sheenbidi/Source/LevelRun.i"
+	@echo "... juce/modules/sheenbidi/Source/LevelRun.s"
+	@echo "... juce/modules/sheenbidi/Source/Memory.o"
+	@echo "... juce/modules/sheenbidi/Source/Memory.i"
+	@echo "... juce/modules/sheenbidi/Source/Memory.s"
+	@echo "... juce/modules/sheenbidi/Source/Object.o"
+	@echo "... juce/modules/sheenbidi/Source/Object.i"
+	@echo "... juce/modules/sheenbidi/Source/Object.s"
+	@echo "... juce/modules/sheenbidi/Source/Once.o"
+	@echo "... juce/modules/sheenbidi/Source/Once.i"
+	@echo "... juce/modules/sheenbidi/Source/Once.s"
+	@echo "... juce/modules/sheenbidi/Source/PairingLookup.o"
+	@echo "... juce/modules/sheenbidi/Source/PairingLookup.i"
+	@echo "... juce/modules/sheenbidi/Source/PairingLookup.s"
+	@echo "... juce/modules/sheenbidi/Source/RunQueue.o"
+	@echo "... juce/modules/sheenbidi/Source/RunQueue.i"
+	@echo "... juce/modules/sheenbidi/Source/RunQueue.s"
+	@echo "... juce/modules/sheenbidi/Source/SBAlgorithm.o"
+	@echo "... juce/modules/sheenbidi/Source/SBAlgorithm.i"
+	@echo "... juce/modules/sheenbidi/Source/SBAlgorithm.s"
+	@echo "... juce/modules/sheenbidi/Source/SBAllocator.o"
+	@echo "... juce/modules/sheenbidi/Source/SBAllocator.i"
+	@echo "... juce/modules/sheenbidi/Source/SBAllocator.s"
+	@echo "... juce/modules/sheenbidi/Source/SBBase.o"
+	@echo "... juce/modules/sheenbidi/Source/SBBase.i"
+	@echo "... juce/modules/sheenbidi/Source/SBBase.s"
+	@echo "... juce/modules/sheenbidi/Source/SBCodepoint.o"
+	@echo "... juce/modules/sheenbidi/Source/SBCodepoint.i"
+	@echo "... juce/modules/sheenbidi/Source/SBCodepoint.s"
+	@echo "... juce/modules/sheenbidi/Source/SBCodepointSequence.o"
+	@echo "... juce/modules/sheenbidi/Source/SBCodepointSequence.i"
+	@echo "... juce/modules/sheenbidi/Source/SBCodepointSequence.s"
+	@echo "... juce/modules/sheenbidi/Source/SBLine.o"
+	@echo "... juce/modules/sheenbidi/Source/SBLine.i"
+	@echo "... juce/modules/sheenbidi/Source/SBLine.s"
+	@echo "... juce/modules/sheenbidi/Source/SBLog.o"
+	@echo "... juce/modules/sheenbidi/Source/SBLog.i"
+	@echo "... juce/modules/sheenbidi/Source/SBLog.s"
+	@echo "... juce/modules/sheenbidi/Source/SBMirrorLocator.o"
+	@echo "... juce/modules/sheenbidi/Source/SBMirrorLocator.i"
+	@echo "... juce/modules/sheenbidi/Source/SBMirrorLocator.s"
+	@echo "... juce/modules/sheenbidi/Source/SBParagraph.o"
+	@echo "... juce/modules/sheenbidi/Source/SBParagraph.i"
+	@echo "... juce/modules/sheenbidi/Source/SBParagraph.s"
+	@echo "... juce/modules/sheenbidi/Source/SBScriptLocator.o"
+	@echo "... juce/modules/sheenbidi/Source/SBScriptLocator.i"
+	@echo "... juce/modules/sheenbidi/Source/SBScriptLocator.s"
+	@echo "... juce/modules/sheenbidi/Source/ScriptLookup.o"
+	@echo "... juce/modules/sheenbidi/Source/ScriptLookup.i"
+	@echo "... juce/modules/sheenbidi/Source/ScriptLookup.s"
+	@echo "... juce/modules/sheenbidi/Source/ScriptStack.o"
+	@echo "... juce/modules/sheenbidi/Source/ScriptStack.i"
+	@echo "... juce/modules/sheenbidi/Source/ScriptStack.s"
+	@echo "... juce/modules/sheenbidi/Source/SheenBidi.o"
+	@echo "... juce/modules/sheenbidi/Source/SheenBidi.i"
+	@echo "... juce/modules/sheenbidi/Source/SheenBidi.s"
+	@echo "... juce/modules/sheenbidi/Source/StatusStack.o"
+	@echo "... juce/modules/sheenbidi/Source/StatusStack.i"
+	@echo "... juce/modules/sheenbidi/Source/StatusStack.s"
 .PHONY : help
 
 

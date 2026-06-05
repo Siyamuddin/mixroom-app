@@ -53,6 +53,56 @@ set(SRC_FILES
 # Manually add NDK's cpu-features (JUCE core uses it)
 add_library(cpu-features STATIC ${ANDROID_NDK}/sources/android/cpufeatures/cpu-features.c)
 
+set(JUCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/juce")
+
+set(JUCE_SOURCES
+    ${JUCE_ROOT}/modules/juce_core/juce_core.cpp
+    ${JUCE_ROOT}/modules/juce_events/juce_events.cpp
+    ${JUCE_ROOT}/modules/juce_data_structures/juce_data_structures.cpp
+    ${JUCE_ROOT}/modules/juce_audio_basics/juce_audio_basics.cpp
+    ${JUCE_ROOT}/modules/juce_audio_devices/juce_audio_devices.cpp
+    ${JUCE_ROOT}/modules/juce_audio_formats/juce_audio_formats.cpp
+    ${JUCE_ROOT}/modules/juce_audio_processors/juce_audio_processors.cpp
+    ${JUCE_ROOT}/modules/juce_audio_utils/juce_audio_utils.cpp
+    ${JUCE_ROOT}/modules/juce_gui_basics/juce_gui_basics.cpp
+    ${JUCE_ROOT}/modules/juce_gui_extra/juce_gui_extra.cpp
+    ${JUCE_ROOT}/modules/juce_graphics/juce_graphics.cpp
+    ${JUCE_ROOT}/modules/juce_dsp/juce_dsp.cpp
+)
+
+add_library(JuceModules STATIC ${JUCE_SOURCES})
+target_include_directories(JuceModules PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${JUCE_ROOT}/modules
+    ${ANDROID_NDK}/sources/android/cpufeatures
+    ${CMAKE_CURRENT_SOURCE_DIR}/juce/modules/juce_audio_devices/native/oboe/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/juce/modules/sheenbidi/Headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/harfbuzz/src
+)
+target_compile_definitions(JuceModules PUBLIC
+    JUCE_ANDROID=1
+    JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1
+    JUCE_GUI_BASICS_INCLUDE_ANDROID=1
+    JUCE_USE_ANDROID_OBOE=1
+    JUCE_USE_ANDROID_OPENSLES=0
+    JUCE_USE_ANDROID_OBSOLETE_OPENSLES=0
+    JUCE_USE_OBSOLETE_ANDROID_OPENSLES=0
+    JUCE_PLUGINHOST_VST=0
+    JUCE_USE_HARFBUZZ=0
+    JUCE_MODULE_AVAILABLE_juce_audio_devices=1
+)
+target_link_libraries(JuceModules PRIVATE
+    oboe
+    cpu-features
+    sheenbidi
+    harfbuzz
+    ${log-lib}
+    log
+    android
+    m
+    atomic
+)
+
 # Create the shared plugin library
 add_library(juce_audio_engine SHARED ${SRC_FILES})
 
@@ -64,8 +114,7 @@ target_link_options(juce_audio_engine PRIVATE
 
 # Link all libraries
 target_link_libraries(juce_audio_engine
-    ${CMAKE_CURRENT_SOURCE_DIR}/libJuceModules.a
-
+    JuceModules
     oboe
     cpu-features
     sheenbidi

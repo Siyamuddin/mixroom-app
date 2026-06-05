@@ -281,6 +281,10 @@ class ApiResponsesTests(unittest.TestCase):
             provider.request_body["instructions"],
         )
         self.assertIn(
+            "Do not imitate or transcribe named copyrighted works",
+            provider.request_body["instructions"],
+        )
+        self.assertIn(
             "across languages, default to a polite neutral professional register",
             provider.request_body["instructions"],
         )
@@ -704,8 +708,8 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertEqual(len(self.fake_usage_repo.reserve_calls), 1)
         reserve_call = self.fake_usage_repo.reserve_calls[0]
         self.assertEqual(reserve_call["reserved_prompts"], 1)
-        self.assertEqual(reserve_call["daily_prompt_limit"], 30)
-        self.assertEqual(reserve_call["weekly_prompt_limit"], 120)
+        self.assertEqual(reserve_call["daily_prompt_limit"], 200)
+        self.assertEqual(reserve_call["weekly_prompt_limit"], 600)
         self.assertEqual(self.fake_usage_repo.log_calls[-1]["status"], "rate_limited")
         payload = json.loads(result["body"])
         self.assertEqual(payload["error"], "prompt_rate_limit_hit")
@@ -838,6 +842,91 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertEqual(self.fake_usage_repo.log_calls[-1]["provider_response_id"], "resp_123")
         payload = json.loads(result["body"])
         self.assertEqual(payload["prompt_rate_limit"]["daily"]["limit"], 100)
+
+    def test_handler_keeps_valid_actions_when_sibling_action_is_invalid(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_partial_actions",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "mix_model_request",
+                        "arguments": {
+                            "mode": "execute",
+                            "assistant_message": "Applied the usable mix change.",
+                            "actions": [
+                                {
+                                    "goal": {
+                                        "type": "mix_request",
+                                        "intents": [
+                                            {
+                                                "kind": "gain",
+                                                "direction": "up",
+                                                "confidence": 0.9,
+                                            }
+                                        ],
+                                        "target": {
+                                            "row_index": 0,
+                                            "scope": "row",
+                                            "confidence": 0.95,
+                                        },
+                                        "intensity": 0.35,
+                                    }
+                                },
+                                {
+                                    "goal": {
+                                        "type": "mix_request",
+                                        "intents": [
+                                            {
+                                                "kind": "not_a_real_intent",
+                                                "direction": "up",
+                                                "confidence": 0.5,
+                                            }
+                                        ],
+                                        "target": {
+                                            "row_index": 1,
+                                            "scope": "row",
+                                            "confidence": 0.75,
+                                        },
+                                    }
+                                },
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 320,
+                    "output_tokens": 180,
+                    "total_tokens": 500,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "ai_feature": "assistant_chat",
+                    "input": [{"role": "user", "content": "raise the vocal"}],
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "mix_model_request")
+        self.assertNotIn("soft_error", payload)
+        self.assertEqual(len(output["arguments"]["actions"]), 1)
+        self.assertEqual(
+            output["arguments"]["actions"][0]["goal"]["intents"][0]["kind"],
+            "gain",
+        )
+        self.assertEqual(len(self.fake_usage_repo.finalize_calls), 1)
+        self.assertEqual(len(self.fake_usage_repo.release_calls), 0)
 
     def test_handler_repairs_wrapped_master_clipper_tool_output(self) -> None:
         provider = _FakeProvider(
@@ -1467,7 +1556,7 @@ class ApiResponsesTests(unittest.TestCase):
                                         "operation": "insert_sample",
                                         "items": [
                                             {
-                                                "library_path": "Starter Kit v1/Processed Drums/Kick-01.flac",
+                                                "library_path": "Starter Kit v1/Processed Drums/Kick-01.mp3",
                                                 "row_index": 0,
                                                 "start_measure": 1,
                                             }
@@ -1532,7 +1621,7 @@ class ApiResponsesTests(unittest.TestCase):
                                         "operation": "insert_sample",
                                         "items": [
                                             {
-                                                "library_path": "Starter Kit v1/Processed Drums/Kick-01.flac",
+                                                "library_path": "Starter Kit v1/Processed Drums/Kick-01.mp3",
                                                 "row_index": 0,
                                                 "start_measure": 1,
                                             }
@@ -1579,7 +1668,7 @@ class ApiResponsesTests(unittest.TestCase):
         item = action["data"]["items"][0]
         self.assertEqual(
             item["library_path"],
-            "Starter Kit v1/Processed Drums/Kick-01.flac",
+            "Starter Kit v1/Processed Drums/Kick-01.mp3",
         )
         self.assertEqual(item["row_index"], 0)
         self.assertEqual(item["start_measure"], 1.0)
@@ -1608,7 +1697,7 @@ class ApiResponsesTests(unittest.TestCase):
                                         "operation": "replace_audio_clips",
                                         "items": [
                                             {
-                                                "library_path": "Starter Kit v1/Processed Drums/Clap-01.flac",
+                                                "library_path": "Starter Kit v1/Processed Drums/Clap-01.mp3",
                                                 "clip_index": 2,
                                             }
                                         ],
@@ -1654,7 +1743,7 @@ class ApiResponsesTests(unittest.TestCase):
         item = action["data"]["items"][0]
         self.assertEqual(
             item["library_path"],
-            "Starter Kit v1/Processed Drums/Clap-01.flac",
+            "Starter Kit v1/Processed Drums/Clap-01.mp3",
         )
         self.assertEqual(item["clip_index"], 2)
 

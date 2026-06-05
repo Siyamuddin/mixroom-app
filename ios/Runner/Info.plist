@@ -86,6 +86,8 @@
 		<true/>
 		<key>NSMicrophoneUsageDescription</key>
 		<string>We need access to the microphone for audio processing.</string>
+		<key>NSLocationWhenInUseUsageDescription</key>
+		<string>Mixroom uses location access only to read location metadata from media you choose to import.</string>
 		<key>NSCameraUsageDescription</key>
 		<string>We use camera access only when you explicitly choose media capture or import features.</string>
 		<key>NSPhotoLibraryUsageDescription</key>
