@@ -11,9 +11,12 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cmath>
 #include <exception>
+#include <limits>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <string>
@@ -323,6 +326,331 @@ juce::Array<mixroom::instruments::MidiRenderNote> ParseMidiRenderNotes(
   }
 
   return out;
+}
+
+struct PitchLabRange {
+  double start_ms = 0.0;
+  double end_ms = 0.0;
+};
+
+struct PitchLabSegment {
+  double original_start_ms = 0.0;
+  double original_end_ms = 0.0;
+  double target_start_ms = 0.0;
+  double target_end_ms = 0.0;
+  double semitones = 0.0;
+};
+
+double EncodableMapDouble(const flutter::EncodableMap& map, const char* key,
+                          double fallback = 0.0) {
+  auto it = map.find(flutter::EncodableValue(key));
+  if (it == map.end()) return fallback;
+  double value = fallback;
+  if (!EncodableToDouble(it->second, &value)) return fallback;
+  return std::isfinite(value) ? value : fallback;
+}
+
+std::vector<PitchLabRange> ParsePitchLabRanges(
+    const flutter::EncodableValue* raw_ranges) {
+  std::vector<PitchLabRange> out;
+  if (raw_ranges == nullptr) return out;
+  const auto* list = std::get_if<flutter::EncodableList>(raw_ranges);
+  if (list == nullptr) return out;
+  out.reserve(list->size());
+
+  for (const auto& entry : *list) {
+    const auto* map = std::get_if<flutter::EncodableMap>(&entry);
+    if (map == nullptr) continue;
+    PitchLabRange range;
+    range.start_ms = EncodableMapDouble(*map, "startMs", 0.0);
+    range.end_ms = EncodableMapDouble(*map, "endMs", 0.0);
+    if (!std::isfinite(range.start_ms) || !std::isfinite(range.end_ms)) {
+      continue;
+    }
+    if (range.end_ms < range.start_ms) std::swap(range.start_ms, range.end_ms);
+    if (range.end_ms > range.start_ms + 1.0) out.push_back(range);
+  }
+
+  return out;
+}
+
+std::vector<PitchLabSegment> ParsePitchLabSegments(
+    const flutter::EncodableValue* raw_segments) {
+  std::vector<PitchLabSegment> out;
+  if (raw_segments == nullptr) return out;
+  const auto* list = std::get_if<flutter::EncodableList>(raw_segments);
+  if (list == nullptr) return out;
+  out.reserve(std::min<size_t>(list->size(), 256));
+
+  size_t count = 0;
+  for (const auto& entry : *list) {
+    if (count++ >= 256) break;
+    const auto* map = std::get_if<flutter::EncodableMap>(&entry);
+    if (map == nullptr) continue;
+    PitchLabSegment segment;
+    segment.original_start_ms =
+        EncodableMapDouble(*map, "originalStartMs", 0.0);
+    segment.original_end_ms = EncodableMapDouble(*map, "originalEndMs", 0.0);
+    segment.target_start_ms = EncodableMapDouble(*map, "targetStartMs", 0.0);
+    segment.target_end_ms = EncodableMapDouble(*map, "targetEndMs", 0.0);
+    segment.semitones = juce::jlimit(
+        -48.0, 48.0, EncodableMapDouble(*map, "semitones", 0.0));
+    if (std::isfinite(segment.original_start_ms) &&
+        std::isfinite(segment.original_end_ms) &&
+        std::isfinite(segment.target_start_ms) &&
+        std::isfinite(segment.target_end_ms) &&
+        segment.original_end_ms > segment.original_start_ms + 1.0 &&
+        segment.target_end_ms > segment.target_start_ms + 1.0) {
+      out.push_back(segment);
+    }
+  }
+
+  return out;
+}
+
+double PitchLabLocalMsToFileSec(double local_ms, double trim_start_ms,
+                                double trim_end_ms,
+                                double source_timeline_duration_ms) {
+  const double active_source_ms = juce::jmax(1.0, trim_end_ms - trim_start_ms);
+  const double timeline_ms = juce::jmax(1.0, source_timeline_duration_ms);
+  return (trim_start_ms + juce::jlimit(0.0, timeline_ms, local_ms) *
+                              (active_source_ms / timeline_ms)) /
+         1000.0;
+}
+
+float PitchLabReadInterpolated(const juce::AudioBuffer<float>& buffer,
+                               int channel, double source_pos) {
+  const int n = buffer.getNumSamples();
+  if (n <= 0) return 0.0f;
+  const int ch = juce::jlimit(0, buffer.getNumChannels() - 1, channel);
+  const double clamped = juce::jlimit(0.0, static_cast<double>(n - 1), source_pos);
+  const int i0 = static_cast<int>(std::floor(clamped));
+  const int i1 = juce::jmin(n - 1, i0 + 1);
+  const float frac = static_cast<float>(clamped - static_cast<double>(i0));
+  const float a = buffer.getSample(ch, i0);
+  return a + (buffer.getSample(ch, i1) - a) * frac;
+}
+
+void PitchLabApplyPitchCompensation(juce::AudioBuffer<float>& buffer,
+                                    double sample_rate, double semitones) {
+  if (buffer.getNumSamples() <= 0 || std::abs(semitones) < 0.01) return;
+  const int passes =
+      juce::jlimit(1, 8, static_cast<int>(std::ceil(std::abs(semitones) / 12.0)));
+  const float semitones_per_pass =
+      static_cast<float>(semitones / static_cast<double>(passes));
+  juce::MidiBuffer midi;
+  for (int i = 0; i < passes; ++i) {
+    PitchShiftAudioProcessor shifter;
+    shifter.prepareToPlay(sample_rate, juce::jmax(512, buffer.getNumSamples()));
+    if (auto* mix = shifter.parameters.getRawParameterValue("mix")) {
+      mix->store(100.0f, std::memory_order_relaxed);
+    }
+    if (auto* semitones_param =
+            shifter.parameters.getRawParameterValue("semitones")) {
+      semitones_param->store(juce::jlimit(-12.0f, 12.0f, semitones_per_pass),
+                             std::memory_order_relaxed);
+    }
+    midi.clear();
+    shifter.processBlock(buffer, midi);
+  }
+}
+
+void PitchLabStreamSourceRange(juce::AudioFormatReader& reader,
+                               juce::AudioBuffer<float>& output,
+                               juce::int64 source_start, int source_count,
+                               int target_start, int target_count) {
+  if (source_count <= 1 || target_count <= 0) return;
+  constexpr int block_size = 4096;
+  const int source_channels = juce::jmax(1, static_cast<int>(reader.numChannels));
+  const double source_span = static_cast<double>(juce::jmax(1, source_count - 1));
+  const double denom = static_cast<double>(juce::jmax(1, target_count - 1));
+
+  for (int target_offset = 0; target_offset < target_count;
+       target_offset += block_size) {
+    const int block_count = juce::jmin(block_size, target_count - target_offset);
+    const double block_source_start =
+        (static_cast<double>(target_offset) / denom) * source_span;
+    const double block_source_end =
+        (static_cast<double>(target_offset + block_count - 1) / denom) *
+        source_span;
+    const int read_offset = juce::jlimit(
+        0, source_count - 1, static_cast<int>(std::floor(block_source_start)));
+    const int read_end = juce::jlimit(
+        read_offset + 1, source_count + 1,
+        static_cast<int>(std::ceil(block_source_end)) + 2);
+    const int read_count = juce::jmax(1, read_end - read_offset);
+    juce::AudioBuffer<float> scratch(source_channels, read_count);
+    scratch.clear();
+    reader.read(&scratch, 0, read_count, source_start + read_offset, true,
+                true);
+
+    for (int i = 0; i < block_count; ++i) {
+      const double source_pos =
+          ((static_cast<double>(target_offset + i) / denom) * source_span) -
+          static_cast<double>(read_offset);
+      for (int ch = 0; ch < 2; ++ch) {
+        output.addSample(
+            ch, target_start + target_offset + i,
+            PitchLabReadInterpolated(scratch, source_channels == 1 ? 0 : ch,
+                                     source_pos));
+      }
+    }
+  }
+}
+
+void PitchLabMixSourceRange(juce::AudioFormatReader& reader,
+                            juce::AudioBuffer<float>& output,
+                            double output_sample_rate, double source_start_sec,
+                            double source_end_sec, double target_start_ms,
+                            double target_end_ms, double pitch_semitones) {
+  if (source_end_sec <= source_start_sec + 0.0005 ||
+      target_end_ms <= target_start_ms + 0.5) {
+    return;
+  }
+  const juce::int64 source_start = juce::jlimit<juce::int64>(
+      0, reader.lengthInSamples,
+      static_cast<juce::int64>(std::floor(source_start_sec * reader.sampleRate)));
+  const juce::int64 source_end = juce::jlimit<juce::int64>(
+      0, reader.lengthInSamples,
+      static_cast<juce::int64>(std::ceil(source_end_sec * reader.sampleRate)));
+  const juce::int64 source_count64 =
+      std::max<juce::int64>(0, source_end - source_start);
+  if (source_count64 <= 1 ||
+      source_count64 > static_cast<juce::int64>(std::numeric_limits<int>::max()) - 8) {
+    return;
+  }
+  const int source_count = static_cast<int>(source_count64);
+  const int target_start = juce::jlimit(
+      0, output.getNumSamples(),
+      static_cast<int>(std::floor(target_start_ms * output_sample_rate / 1000.0)));
+  const int target_end = juce::jlimit(
+      0, output.getNumSamples(),
+      static_cast<int>(std::ceil(target_end_ms * output_sample_rate / 1000.0)));
+  const int target_count = juce::jmax(0, target_end - target_start);
+  if (target_count <= 0) return;
+
+  const double source_duration_sec = juce::jmax(0.001, source_end_sec - source_start_sec);
+  const double target_duration_sec =
+      juce::jmax(0.001, (target_end_ms - target_start_ms) / 1000.0);
+  const double resample_speed = source_duration_sec / target_duration_sec;
+  const double stretch_pitch_drift = 12.0 * (std::log(resample_speed) / std::log(2.0));
+  if (std::abs(pitch_semitones) < 0.01 &&
+      std::abs(stretch_pitch_drift) < 0.03) {
+    PitchLabStreamSourceRange(reader, output, source_start, source_count,
+                              target_start, target_count);
+    return;
+  }
+
+  juce::AudioBuffer<float> source(juce::jmax(1, static_cast<int>(reader.numChannels)),
+                                  source_count + 2);
+  source.clear();
+  reader.read(&source, 0, source_count, source_start, true, true);
+
+  juce::AudioBuffer<float> rendered(2, target_count);
+  rendered.clear();
+  const double source_span = static_cast<double>(juce::jmax(1, source_count - 1));
+  const double denom = static_cast<double>(juce::jmax(1, target_count - 1));
+  for (int i = 0; i < target_count; ++i) {
+    const double source_pos = (static_cast<double>(i) / denom) * source_span;
+    for (int ch = 0; ch < 2; ++ch) {
+      rendered.setSample(
+          ch, i,
+          PitchLabReadInterpolated(source, source.getNumChannels() == 1 ? 0 : ch,
+                                   source_pos));
+    }
+  }
+
+  PitchLabApplyPitchCompensation(
+      rendered, output_sample_rate,
+      juce::jlimit(-96.0, 96.0, pitch_semitones - stretch_pitch_drift));
+  for (int ch = 0; ch < 2; ++ch) {
+    output.addFrom(ch, target_start, rendered, ch, 0, target_count);
+  }
+}
+
+juce::String RenderPitchLabAudioNative(
+    const juce::File& source_file, const juce::File& out_file,
+    double trim_start_ms, double trim_end_ms,
+    double source_timeline_duration_ms, double output_duration_ms,
+    std::vector<PitchLabRange> suppressed_ranges,
+    const std::vector<PitchLabSegment>& segments) {
+  juce::AudioFormatManager format_manager;
+  format_manager.registerBasicFormats();
+  std::unique_ptr<juce::AudioFormatReader> reader(
+      format_manager.createReaderFor(source_file));
+  if (!reader) return {};
+  if (trim_end_ms <= trim_start_ms) {
+    trim_end_ms = static_cast<double>(reader->lengthInSamples) * 1000.0 /
+                  juce::jmax(1.0, reader->sampleRate);
+  }
+
+  const double output_sample_rate = 48000.0;
+  const int output_samples = juce::jlimit(
+      1, static_cast<int>(output_sample_rate * 60.0 * 12.0),
+      static_cast<int>(std::ceil(output_duration_ms * output_sample_rate / 1000.0)));
+  juce::AudioBuffer<float> output(2, output_samples);
+  output.clear();
+  std::sort(suppressed_ranges.begin(), suppressed_ranges.end(),
+            [](const PitchLabRange& a, const PitchLabRange& b) {
+              return a.start_ms < b.start_ms;
+            });
+
+  double cursor_ms = 0.0;
+  for (const auto& range : suppressed_ranges) {
+    const double start_ms =
+        juce::jlimit(0.0, source_timeline_duration_ms, range.start_ms);
+    const double end_ms =
+        juce::jlimit(0.0, source_timeline_duration_ms, range.end_ms);
+    if (start_ms > cursor_ms + 4.0) {
+      PitchLabMixSourceRange(
+          *reader, output, output_sample_rate,
+          PitchLabLocalMsToFileSec(cursor_ms, trim_start_ms, trim_end_ms,
+                                   source_timeline_duration_ms),
+          PitchLabLocalMsToFileSec(start_ms, trim_start_ms, trim_end_ms,
+                                   source_timeline_duration_ms),
+          cursor_ms, start_ms, 0.0);
+    }
+    cursor_ms = juce::jmax(cursor_ms, end_ms);
+  }
+  if (cursor_ms < source_timeline_duration_ms - 4.0) {
+    PitchLabMixSourceRange(
+        *reader, output, output_sample_rate,
+        PitchLabLocalMsToFileSec(cursor_ms, trim_start_ms, trim_end_ms,
+                                 source_timeline_duration_ms),
+        PitchLabLocalMsToFileSec(source_timeline_duration_ms, trim_start_ms,
+                                 trim_end_ms, source_timeline_duration_ms),
+        cursor_ms, source_timeline_duration_ms, 0.0);
+  }
+
+  for (const auto& segment : segments) {
+    PitchLabMixSourceRange(
+        *reader, output, output_sample_rate,
+        PitchLabLocalMsToFileSec(segment.original_start_ms, trim_start_ms,
+                                 trim_end_ms, source_timeline_duration_ms),
+        PitchLabLocalMsToFileSec(segment.original_end_ms, trim_start_ms,
+                                 trim_end_ms, source_timeline_duration_ms),
+        segment.target_start_ms, segment.target_end_ms, segment.semitones);
+  }
+
+  for (int ch = 0; ch < output.getNumChannels(); ++ch) {
+    auto* samples = output.getWritePointer(ch);
+    for (int i = 0; i < output.getNumSamples(); ++i) {
+      samples[i] = std::tanh(samples[i] * 0.98f);
+    }
+  }
+
+  out_file.deleteFile();
+  std::unique_ptr<juce::FileOutputStream> stream(out_file.createOutputStream());
+  if (!stream) return {};
+  juce::WavAudioFormat wav;
+  std::unique_ptr<juce::AudioFormatWriter> writer(
+      wav.createWriterFor(stream.get(), output_sample_rate, 2, 24, {}, 0));
+  if (!writer) return {};
+  stream.release();
+  if (!writer->writeFromAudioSampleBuffer(output, 0, output.getNumSamples())) {
+    return {};
+  }
+  return out_file.getFullPathName();
 }
 
 std::vector<AutomationPoint> ParseAutomationPoints(
@@ -851,6 +1179,20 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       const std::string rendered =
           mixroom::instruments::renderInstrumentClipToWav(request).toStdString();
       result->Success(flutter::EncodableValue(rendered));
+      return;
+    }
+
+    if (method_call.method_name() == "renderPitchLabAudio") {
+      const juce::String rendered = RenderPitchLabAudioNative(
+          juce::File(ToJuceString(FindString(args, "sourcePath"))),
+          juce::File(ToJuceString(FindString(args, "outPath"))),
+          FindDouble(args, "trimStartMs", 0.0),
+          FindDouble(args, "trimEndMs", 0.0),
+          FindDouble(args, "sourceTimelineDurationMs", 0.0),
+          FindDouble(args, "outputDurationMs", 0.0),
+          ParsePitchLabRanges(FindValue(args, "suppressedRanges")),
+          ParsePitchLabSegments(FindValue(args, "segments")));
+      result->Success(flutter::EncodableValue(rendered.toStdString()));
       return;
     }
 
@@ -1697,6 +2039,27 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       const int point_count = FindInt(args, "pointCount", 192);
       const auto values = CallOnMessageThreadSync([effect, point_count] {
         return JuceEngine::get().getMasterShaperPreview(effect, point_count);
+      });
+      result->Success(flutter::EncodableValue(FloatVectorToEncodableList(values)));
+      return;
+    }
+
+    if (method_call.method_name() == "getRowTransientShaperVisual") {
+      const int row = FindInt(args, "row", 0);
+      const int effect = FindInt(args, "effect", 0);
+      const int point_count = FindInt(args, "pointCount", 192);
+      const auto values = CallOnMessageThreadSync([row, effect, point_count] {
+        return JuceEngine::get().getRowTransientShaperVisual(row, effect, point_count);
+      });
+      result->Success(flutter::EncodableValue(FloatVectorToEncodableList(values)));
+      return;
+    }
+
+    if (method_call.method_name() == "getMasterTransientShaperVisual") {
+      const int effect = FindInt(args, "effect", 0);
+      const int point_count = FindInt(args, "pointCount", 192);
+      const auto values = CallOnMessageThreadSync([effect, point_count] {
+        return JuceEngine::get().getMasterTransientShaperVisual(effect, point_count);
       });
       result->Success(flutter::EncodableValue(FloatVectorToEncodableList(values)));
       return;

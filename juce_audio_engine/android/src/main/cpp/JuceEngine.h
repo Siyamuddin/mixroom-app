@@ -4463,6 +4463,10 @@ public:
     std::vector<float> getMasterStereoScope(int effectIndex, int pointCount);
     std::vector<float> getRowShaperPreview(int row, int effectIndex, int pointCount);
     std::vector<float> getMasterShaperPreview(int effectIndex, int pointCount);
+    std::vector<float> getRowDynamicSoftenerFrame(int row, int effectIndex);
+    std::vector<float> getMasterDynamicSoftenerFrame(int effectIndex);
+    std::vector<float> getRowTransientShaperVisual(int row, int effectIndex, int pointCount);
+    std::vector<float> getMasterTransientShaperVisual(int effectIndex, int pointCount);
     void handleIncomingMidiMessage(juce::MidiInput *source,
                                    const juce::MidiMessage &message) override;
     void changeListenerCallback(juce::ChangeBroadcaster *source) override;

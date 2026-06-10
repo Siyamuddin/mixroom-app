@@ -240,6 +240,10 @@ object JuceBridge {
     @JvmStatic external fun getMasterStereoScopeJNI(effectIndex: Int, pointCount: Int): DoubleArray
     @JvmStatic external fun getRowShaperPreviewJNI(row: Int, effectIndex: Int, pointCount: Int): DoubleArray
     @JvmStatic external fun getMasterShaperPreviewJNI(effectIndex: Int, pointCount: Int): DoubleArray
+    @JvmStatic external fun getRowDynamicSoftenerFrameJNI(row: Int, effectIndex: Int): DoubleArray
+    @JvmStatic external fun getMasterDynamicSoftenerFrameJNI(effectIndex: Int): DoubleArray
+    @JvmStatic external fun getRowTransientShaperVisualJNI(row: Int, effectIndex: Int, pointCount: Int): DoubleArray
+    @JvmStatic external fun getMasterTransientShaperVisualJNI(effectIndex: Int, pointCount: Int): DoubleArray
 
     // Export
     @JvmStatic external fun exportMixJNI(
@@ -272,6 +276,17 @@ object JuceBridge {
         bpm: Double,
         notes: List<Map<String, Any>>,
         params: Map<String, Double>,
+    ): String
+
+    @JvmStatic external fun renderPitchLabAudioJNI(
+        sourcePath: String,
+        outPath: String,
+        trimStartMs: Double,
+        trimEndMs: Double,
+        sourceTimelineDurationMs: Double,
+        outputDurationMs: Double,
+        suppressedRanges: List<Map<String, Any>>,
+        segments: List<Map<String, Any>>,
     ): String
 
     // Video lane

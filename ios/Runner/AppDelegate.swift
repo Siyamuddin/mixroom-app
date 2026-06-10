@@ -44,9 +44,9 @@ import AVFAudio
       return true
     }
 
-    // Only .mixroom file imports are handled here. OAuth/AppAuth callbacks
-    // must keep flowing through Flutter/plugin delegates.
-    if !url.path.lowercased().hasSuffix(".mixroom") { return false }
+    // Only Mixroom project bundles and supported audio imports are handled here.
+    // OAuth/AppAuth callbacks must keep flowing through Flutter/plugin delegates.
+    if !isSupportedIncomingFileURL(url) { return false }
 
     // Security scoped (Files/iCloud providers)
     var didStartAccess = false
@@ -59,7 +59,8 @@ import AVFAudio
 
     // Copy into temp so Flutter always has real filesystem access
     let tempDir = FileManager.default.temporaryDirectory
-    let dest = tempDir.appendingPathComponent("incoming_\(UUID().uuidString).mixroom")
+    let ext = url.pathExtension.isEmpty ? "mixroom" : url.pathExtension
+    let dest = tempDir.appendingPathComponent("incoming_\(UUID().uuidString).\(ext)")
 
     do {
       if FileManager.default.fileExists(atPath: dest.path) {
@@ -72,6 +73,14 @@ import AVFAudio
       deliverPath(url.path)
     }
     return true
+  }
+
+  private func isSupportedIncomingFileURL(_ url: URL) -> Bool {
+    let ext = url.pathExtension.lowercased()
+    if ext == "mixroom" { return true }
+    return [
+      "wav", "wave", "mp3", "m4a", "aac", "caf", "aiff", "aif", "flac", "ogg"
+    ].contains(ext)
   }
 
   private func deliverPath(_ path: String) {

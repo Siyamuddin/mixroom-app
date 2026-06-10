@@ -20,6 +20,20 @@
 					<string>com.mixroom.project</string>
 				</array>
 			</dict>
+			<dict>
+				<key>CFBundleTypeName</key>
+				<string>Audio File</string>
+				<key>LSHandlerRank</key>
+				<string>Alternate</string>
+				<key>LSItemContentTypes</key>
+				<array>
+					<string>public.audio</string>
+					<string>public.mp3</string>
+					<string>com.apple.m4a-audio</string>
+					<string>com.microsoft.waveform-audio</string>
+					<string>public.aiff-audio</string>
+				</array>
+			</dict>
 		</array>
 		<key>CFBundleExecutable</key>
 		<string>$(EXECUTABLE_NAME)</string>

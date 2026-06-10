@@ -16,6 +16,7 @@ class DawCaptureDeck extends StatelessWidget {
     required this.selectedClipCount,
     required this.canBounceSelection,
     required this.canFreezeRow,
+    required this.canCleanUpRecording,
     required this.onFullscreenChanged,
     required this.onClose,
     required this.onStartRecording,
@@ -24,6 +25,7 @@ class DawCaptureDeck extends StatelessWidget {
     required this.onOpenExport,
     required this.onBounceSelection,
     required this.onFreezeRow,
+    required this.onCleanUpRecording,
   });
 
   final bool desktop;
@@ -37,6 +39,7 @@ class DawCaptureDeck extends StatelessWidget {
   final int selectedClipCount;
   final bool canBounceSelection;
   final bool canFreezeRow;
+  final bool canCleanUpRecording;
   final ValueChanged<bool> onFullscreenChanged;
   final VoidCallback onClose;
   final Future<void> Function() onStartRecording;
@@ -45,6 +48,7 @@ class DawCaptureDeck extends StatelessWidget {
   final Future<void> Function() onOpenExport;
   final Future<void> Function() onBounceSelection;
   final Future<void> Function() onFreezeRow;
+  final Future<void> Function() onCleanUpRecording;
 
   @override
   Widget build(BuildContext context) {
@@ -114,12 +118,14 @@ class DawCaptureDeck extends StatelessWidget {
               recording: recording,
               canBounceSelection: canBounceSelection,
               canFreezeRow: canFreezeRow,
+              canCleanUpRecording: canCleanUpRecording,
               onStartRecording: onStartRecording,
               onStopRecording: onStopRecording,
               onCaptureMix: onCaptureMix,
               onOpenExport: onOpenExport,
               onBounceSelection: onBounceSelection,
               onFreezeRow: onFreezeRow,
+              onCleanUpRecording: onCleanUpRecording,
             ),
           ),
         ],
@@ -149,12 +155,14 @@ class DawCaptureDeck extends StatelessWidget {
             recording: recording,
             canBounceSelection: canBounceSelection,
             canFreezeRow: canFreezeRow,
+            canCleanUpRecording: canCleanUpRecording,
             onStartRecording: onStartRecording,
             onStopRecording: onStopRecording,
             onCaptureMix: onCaptureMix,
             onOpenExport: onOpenExport,
             onBounceSelection: onBounceSelection,
             onFreezeRow: onFreezeRow,
+            onCleanUpRecording: onCleanUpRecording,
           ),
         ],
       ),
@@ -414,24 +422,28 @@ class _ActionColumn extends StatelessWidget {
     required this.recording,
     required this.canBounceSelection,
     required this.canFreezeRow,
+    required this.canCleanUpRecording,
     required this.onStartRecording,
     required this.onStopRecording,
     required this.onCaptureMix,
     required this.onOpenExport,
     required this.onBounceSelection,
     required this.onFreezeRow,
+    required this.onCleanUpRecording,
   });
 
   final bool busy;
   final bool recording;
   final bool canBounceSelection;
   final bool canFreezeRow;
+  final bool canCleanUpRecording;
   final Future<void> Function() onStartRecording;
   final Future<void> Function() onStopRecording;
   final Future<void> Function() onCaptureMix;
   final Future<void> Function() onOpenExport;
   final Future<void> Function() onBounceSelection;
   final Future<void> Function() onFreezeRow;
+  final Future<void> Function() onCleanUpRecording;
 
   @override
   Widget build(BuildContext context) {
@@ -464,6 +476,15 @@ class _ActionColumn extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         _DeckActionButton(
+          key: const ValueKey('capture_deck_cleanup_button'),
+          icon: Icons.auto_fix_high,
+          label: 'Clean Up Recording',
+          accent: const Color(0xFF6ED3A6),
+          enabled: !busy && !recording && canCleanUpRecording,
+          onPressed: onCleanUpRecording,
+        ),
+        const SizedBox(height: 10),
+        _DeckActionButton(
           key: const ValueKey('capture_deck_bounce_button'),
           icon: Icons.call_merge,
           label: 'Bounce Selected Clips',
@@ -489,24 +510,28 @@ class _CompactActionGrid extends StatelessWidget {
     required this.recording,
     required this.canBounceSelection,
     required this.canFreezeRow,
+    required this.canCleanUpRecording,
     required this.onStartRecording,
     required this.onStopRecording,
     required this.onCaptureMix,
     required this.onOpenExport,
     required this.onBounceSelection,
     required this.onFreezeRow,
+    required this.onCleanUpRecording,
   });
 
   final bool busy;
   final bool recording;
   final bool canBounceSelection;
   final bool canFreezeRow;
+  final bool canCleanUpRecording;
   final Future<void> Function() onStartRecording;
   final Future<void> Function() onStopRecording;
   final Future<void> Function() onCaptureMix;
   final Future<void> Function() onOpenExport;
   final Future<void> Function() onBounceSelection;
   final Future<void> Function() onFreezeRow;
+  final Future<void> Function() onCleanUpRecording;
 
   @override
   Widget build(BuildContext context) {
@@ -535,6 +560,14 @@ class _CompactActionGrid extends StatelessWidget {
           label: 'Export',
           enabled: !busy && !recording,
           onPressed: onOpenExport,
+        ),
+        _DeckMiniButton(
+          key: const ValueKey('capture_deck_cleanup_button'),
+          icon: Icons.auto_fix_high,
+          label: 'Clean',
+          accent: const Color(0xFF6ED3A6),
+          enabled: !busy && !recording && canCleanUpRecording,
+          onPressed: onCleanUpRecording,
         ),
         _DeckMiniButton(
           key: const ValueKey('capture_deck_bounce_button'),

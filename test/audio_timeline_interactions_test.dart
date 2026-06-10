@@ -110,6 +110,11 @@ Offset _laneCenter(WidgetTester tester, {int row = 0}) {
       );
 }
 
+Offset _magnetButtonCenter(WidgetTester tester) {
+  final topLeft = tester.getTopLeft(find.byType(AudioCanvasTimeline));
+  return topLeft + const Offset(21.0, 20.0);
+}
+
 Widget _buildHarness({
   required List<AudioTrack> clips,
   required Future<void> Function(int clipIndex, double newStartMs, int newRow)
@@ -149,6 +154,8 @@ Widget _buildHarness({
   bool hasCopiedClip = false,
   bool Function(int row)? canPasteClipAtRow,
   bool hasCopiedRowEffects = false,
+  void Function(bool magnetEnabled, int quantizeDivisionsPerBar)?
+      onSnapSettingsChanged,
 }) {
   final rows = rowsOverride ??
       <TimelineRow>[
@@ -310,7 +317,7 @@ Widget _buildHarness({
           hasCopiedRowEffects: hasCopiedRowEffects,
           registerRowFxRefresher: null,
           registerRowFxPlaybackRefresher: null,
-          onSnapSettingsChanged: null,
+          onSnapSettingsChanged: onSnapSettingsChanged,
           meters: MeterBus(numRows: rows.length),
           getRowCompressorMeter: (_, __) async => const <double>[0.0, 0.0],
           getRowEqWaveform: (_, __, ___) async => const <double>[0.0, 0.0],
@@ -392,6 +399,94 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(moveCommits, hasLength(1));
+  });
+
+  testWidgets('desktop clip drag snaps to grid when magnet is enabled',
+      (tester) async {
+    final clips = <AudioTrack>[await _buildClip()];
+    final moveCommits = <double>[];
+    final snapStates = <bool>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: clips,
+        onMoveClipCommit: (_, newStartMs, __) async {
+          moveCommits.add(newStartMs);
+        },
+        onSnapSettingsChanged: (enabled, _) {
+          snapStates.add(enabled);
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tapAt(_magnetButtonCenter(tester));
+    await tester.pumpAndSettle();
+    expect(snapStates.last, isTrue);
+
+    final center = _clipCenter(tester);
+    await tester.tapAt(center);
+    await tester.pumpAndSettle();
+
+    final gesture = await tester.createGesture(
+      kind: PointerDeviceKind.mouse,
+      buttons: kPrimaryMouseButton,
+    );
+    await gesture.down(center);
+    await tester.pump();
+    await gesture.moveBy(const Offset(155.0, 0.0));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(moveCommits, hasLength(1));
+    expect(moveCommits.single, closeTo(1500.0, 0.01));
+  });
+
+  testWidgets('desktop alt clip drag overrides enabled snap grid',
+      (tester) async {
+    final clips = <AudioTrack>[await _buildClip()];
+    final moveCommits = <double>[];
+    final snapStates = <bool>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: clips,
+        onMoveClipCommit: (_, newStartMs, __) async {
+          moveCommits.add(newStartMs);
+        },
+        onSnapSettingsChanged: (enabled, _) {
+          snapStates.add(enabled);
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tapAt(_magnetButtonCenter(tester));
+    await tester.pumpAndSettle();
+    expect(snapStates.last, isTrue);
+
+    final center = _clipCenter(tester);
+    await tester.tapAt(center);
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+    final gesture = await tester.createGesture(
+      kind: PointerDeviceKind.mouse,
+      buttons: kPrimaryMouseButton,
+    );
+    await gesture.down(center);
+    await tester.pump();
+    await gesture.moveBy(const Offset(155.0, 0.0));
+    await tester.pump();
+    await gesture.up();
+    await tester.pump();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+    await tester.pumpAndSettle();
+
+    expect(moveCommits, hasLength(1));
+    expect(moveCommits.single, closeTo(1550.0, 0.01));
+    expect(snapStates.last, isTrue);
   });
 
   testWidgets('audio clips cannot be dropped onto instrument lanes',

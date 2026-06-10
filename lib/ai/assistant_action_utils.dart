@@ -1312,6 +1312,14 @@ class AssistantActionUtils {
       case 'align_tempo':
       case 'bpm_align':
         return 'auto_bpm_align';
+      case 'align_onset':
+      case 'onset_align':
+      case 'align_first_sound':
+      case 'first_sound_align':
+      case 'align_volume_start':
+      case 'align_audio_start':
+      case 'align_to_first_sound':
+        return 'align_first_sound';
       default:
         return raw;
     }

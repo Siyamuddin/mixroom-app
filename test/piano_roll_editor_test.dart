@@ -800,8 +800,7 @@ void main() {
         find.byKey(const ValueKey<String>('piano_note_live')), findsOneWidget);
   });
 
-  testWidgets('sequencer tab is disabled behind a coming soon notice',
-      (tester) async {
+  testWidgets('sequencer tab opens and commits step edits', (tester) async {
     List<MidiNote>? committedNotes;
     final clip = await _buildMidiTrack(const <MidiNote>[]);
 
@@ -822,18 +821,19 @@ void main() {
 
     await tester.tap(find.text('Sequencer'));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 420));
+    await tester.pump(const Duration(milliseconds: 220));
 
-    expect(find.text('Sequencer coming soon'), findsOneWidget);
     expect(
       find.byKey(const ValueKey<String>('sequencer_step_36_0')),
-      findsNothing,
-    );
-    expect(committedNotes, isNull);
-    expect(find.text('MIDI'), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey<String>('piano_roll_grid_canvas')),
       findsOneWidget,
     );
+
+    await tester.tap(find.byKey(const ValueKey<String>('sequencer_step_36_0')));
+    await tester.pump(const Duration(milliseconds: 120));
+
+    expect(committedNotes, isNotNull);
+    expect(committedNotes, hasLength(1));
+    expect(committedNotes!.single.pitch, 36);
+    expect(committedNotes!.single.startBeat, 0.0);
   });
 }

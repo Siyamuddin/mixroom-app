@@ -92,6 +92,30 @@ class MixingResult {
   }
 }
 
+class MixApplyReport {
+  final int attempted;
+  final int applied;
+  final List<String> summaries;
+  final List<String> skippedReasons;
+
+  const MixApplyReport({
+    required this.attempted,
+    required this.applied,
+    this.summaries = const <String>[],
+    this.skippedReasons = const <String>[],
+  });
+
+  bool get changed => applied > 0;
+  bool get partial => attempted > 0 && applied > 0 && skippedReasons.isNotEmpty;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'attempted': attempted,
+        'applied': applied,
+        'summaries': summaries,
+        'skipped_reasons': skippedReasons,
+      };
+}
+
 class ChatPipelineResult {
   final String message;
   final MixingResult? mixing;

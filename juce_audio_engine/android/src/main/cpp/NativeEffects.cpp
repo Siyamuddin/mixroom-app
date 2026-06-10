@@ -939,6 +939,161 @@ bool DeesserAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts) c
 }
 #endif
 
+// ============================
+// **** DYNAMIC SOFTENER ****
+// ============================
+
+DynamicSoftenerAudioProcessor::DynamicSoftenerAudioProcessor()
+#ifndef JucePlugin_PreferredChannelConfigurations
+    : AudioProcessor(BusesProperties()
+#if !JucePlugin_IsMidiEffect
+#if !JucePlugin_IsSynth
+                         .withInput("Input", juce::AudioChannelSet::stereo(), true)
+#endif
+                         .withOutput("Output", juce::AudioChannelSet::stereo(), true)
+#endif
+                         ),
+      parameters(*this, nullptr)
+#endif
+{
+    parameters.createAndAddParameter(std::make_unique<juce::AudioParameterChoice>(
+        "mode",
+        "Mode",
+        juce::StringArray{"Gentle", "Focused"},
+        0));
+    parameters.createAndAddParameter(std::make_unique<juce::AudioParameterFloat>(
+        "depth",
+        "Depth",
+        juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+        55.0f,
+        "%"));
+    parameters.createAndAddParameter(std::make_unique<juce::AudioParameterFloat>(
+        "detail",
+        "Focus",
+        juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+        55.0f,
+        "%"));
+    parameters.createAndAddParameter(std::make_unique<juce::AudioParameterFloat>(
+        "attack",
+        "Attack",
+        juce::NormalisableRange<float>(0.1f, 100.0f, 0.1f, 0.35f),
+        5.0f,
+        "ms"));
+    parameters.createAndAddParameter(std::make_unique<juce::AudioParameterFloat>(
+        "release",
+        "Release",
+        juce::NormalisableRange<float>(5.0f, 500.0f, 1.0f, 0.35f),
+        90.0f,
+        "ms"));
+    parameters.createAndAddParameter(std::make_unique<juce::AudioParameterFloat>(
+        "maxCut",
+        "Cut Limit",
+        juce::NormalisableRange<float>(0.0f, 40.0f, 0.1f),
+        18.0f,
+        "dB"));
+    parameters.createAndAddParameter(std::make_unique<juce::AudioParameterFloat>(
+        "wetTrim",
+        "Process Trim",
+        juce::NormalisableRange<float>(-24.0f, 24.0f, 0.1f),
+        0.0f,
+        "dB"));
+    parameters.createAndAddParameter(std::make_unique<juce::AudioParameterFloat>(
+        "mix",
+        "Mix",
+        juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+        100.0f,
+        "%"));
+    parameters.createAndAddParameter(std::make_unique<juce::AudioParameterFloat>(
+        "outGain",
+        "Output",
+        juce::NormalisableRange<float>(-24.0f, 24.0f, 0.1f),
+        0.0f,
+        "dB"));
+    parameters.createAndAddParameter(std::make_unique<juce::AudioParameterBool>(
+        "delta",
+        "Delta",
+        false));
+    parameters.createAndAddParameter(std::make_unique<juce::AudioParameterFloat>(
+        "lowRange",
+        "Low Range",
+        juce::NormalisableRange<float>(20.0f, 2000.0f, 1.0f, 0.35f),
+        20.0f,
+        "Hz"));
+    parameters.createAndAddParameter(std::make_unique<juce::AudioParameterFloat>(
+        "highRange",
+        "High Range",
+        juce::NormalisableRange<float>(1000.0f, 20000.0f, 1.0f, 0.35f),
+        20000.0f,
+        "Hz"));
+    parameters.state = juce::ValueTree("savedParams");
+}
+
+void DynamicSoftenerAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
+{
+    softener.prepare(sampleRate, samplesPerBlock);
+    softener.setParameters(parameters);
+    setLatencySamples(0);
+}
+
+void DynamicSoftenerAudioProcessor::reset()
+{
+    softener.reset();
+}
+
+void DynamicSoftenerAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    for (auto ch = getTotalNumInputChannels(); ch < getTotalNumOutputChannels(); ++ch)
+        buffer.clear(ch, 0, buffer.getNumSamples());
+
+    softener.setParameters(parameters);
+    softener.process(buffer);
+}
+
+void DynamicSoftenerAudioProcessor::processBlockBypassed(juce::AudioBuffer<float> &buffer,
+                                                         juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    for (auto ch = getTotalNumInputChannels(); ch < getTotalNumOutputChannels(); ++ch)
+        buffer.clear(ch, 0, buffer.getNumSamples());
+
+    softener.reset();
+}
+
+void DynamicSoftenerAudioProcessor::getStateInformation(juce::MemoryBlock &destData)
+{
+    std::unique_ptr<juce::XmlElement> outputXml(parameters.state.createXml());
+    copyXmlToBinary(*outputXml, destData);
+}
+
+void DynamicSoftenerAudioProcessor::setStateInformation(const void *data, int sizeInBytes)
+{
+    std::unique_ptr<juce::XmlElement> inputXml(getXmlFromBinary(data, sizeInBytes));
+    if (inputXml != nullptr && inputXml->hasTagName(parameters.state.getType()))
+        parameters.state = juce::ValueTree::fromXml(*inputXml);
+}
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+bool DynamicSoftenerAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts) const
+{
+#if JucePlugin_IsMidiEffect
+    juce::ignoreUnused(layouts);
+    return true;
+#else
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono() &&
+        layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+        return false;
+#if !JucePlugin_IsSynth
+    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
+        return false;
+#endif
+    return true;
+#endif
+}
+#endif
+
 // =====================
 // **** EQ 3-BAND ****
 // =====================
@@ -1315,6 +1470,114 @@ void LimiterAudioProcessor::setStateInformation(const void *data, int sizeInByte
 
 #ifndef JucePlugin_PreferredChannelConfigurations
 bool LimiterAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts) const
+{
+#if JucePlugin_IsMidiEffect
+    juce::ignoreUnused(layouts);
+    return true;
+#else
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono() &&
+        layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+        return false;
+#if !JucePlugin_IsSynth
+    if (layouts.getMainOutputChannelSet() != layouts.getMainInputChannelSet())
+        return false;
+#endif
+    return true;
+#endif
+}
+#endif
+
+// ==========================
+// **** TRANSIENT SHAPER ****
+// ==========================
+
+TransientShaperAudioProcessor::TransientShaperAudioProcessor()
+#ifndef JucePlugin_PreferredChannelConfigurations
+    : AudioProcessor(BusesProperties()
+                         .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                         .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+      parameters(*this, nullptr)
+#endif
+{
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "attack",
+            "Attack",
+            juce::NormalisableRange<float>(-100.0f, 100.0f, 1.0f),
+            0.0f,
+            "%"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "pump",
+            "Pump",
+            juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+            0.0f,
+            "%"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "sustain",
+            "Sustain",
+            juce::NormalisableRange<float>(-100.0f, 100.0f, 1.0f),
+            0.0f,
+            "%"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterFloat>(
+            "speed",
+            "Speed",
+            juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+            65.0f,
+            "%"));
+
+    parameters.createAndAddParameter(
+        std::make_unique<juce::AudioParameterBool>(
+            "clip",
+            "Clip",
+            false));
+
+    parameters.state = juce::ValueTree("savedParams");
+}
+
+void TransientShaperAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
+{
+    shaper.prepare(sampleRate, samplesPerBlock);
+    shaper.setParameters(parameters);
+}
+
+void TransientShaperAudioProcessor::reset()
+{
+    shaper.reset();
+}
+
+void TransientShaperAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &)
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    for (int ch = getTotalNumInputChannels();
+         ch < getTotalNumOutputChannels(); ++ch)
+        buffer.clear(ch, 0, buffer.getNumSamples());
+
+    shaper.setParameters(parameters);
+    shaper.process(buffer);
+}
+
+void TransientShaperAudioProcessor::getStateInformation(juce::MemoryBlock &destData)
+{
+    std::unique_ptr<juce::XmlElement> outputXml(parameters.state.createXml());
+    copyXmlToBinary(*outputXml, destData);
+}
+
+void TransientShaperAudioProcessor::setStateInformation(const void *data, int sizeInBytes)
+{
+    std::unique_ptr<juce::XmlElement> inputXml(getXmlFromBinary(data, sizeInBytes));
+    if (inputXml != nullptr && inputXml->hasTagName(parameters.state.getType()))
+        parameters.state = juce::ValueTree::fromXml(*inputXml);
+}
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+bool TransientShaperAudioProcessor::isBusesLayoutSupported(const BusesLayout &layouts) const
 {
 #if JucePlugin_IsMidiEffect
     juce::ignoreUnused(layouts);

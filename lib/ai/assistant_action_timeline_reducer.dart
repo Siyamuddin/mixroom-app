@@ -589,6 +589,7 @@ class AssistantActionTimelineReducer {
       case 'move':
       case 'tempo_follow':
       case 'auto_bpm_align':
+      case 'align_first_sound':
       case 'tempo_detect_set_project':
       case 'duplicate':
       case 'glue':

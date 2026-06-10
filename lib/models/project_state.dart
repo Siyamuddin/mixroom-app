@@ -165,6 +165,11 @@ class RowState {
   final String laneKind;
   final String instrumentId;
   final String instrumentName;
+  final String roleOverride;
+  final String groupId;
+  final String inputDeviceName;
+  final int inputChannelStart;
+  final int inputChannelCount;
   final List<ClipState> clips;
 
   /// Lightweight audio features (from waveform)
@@ -235,6 +240,11 @@ class RowState {
     this.laneKind = 'audio',
     this.instrumentId = '',
     this.instrumentName = '',
+    String roleOverride = '',
+    this.groupId = '',
+    this.inputDeviceName = '',
+    this.inputChannelStart = 0,
+    this.inputChannelCount = 1,
     required this.clips,
     required this.approxRms,
     required this.approxCrest,
@@ -248,7 +258,7 @@ class RowState {
     required this.effects,
     required this.volumeAutomation,
     required this.hasAudio,
-  });
+  }) : roleOverride = normalizeTrackRoleOverride(roleOverride);
 
   Map<String, dynamic> toJson() => {
         'row': rowIndex,
@@ -259,6 +269,12 @@ class RowState {
           'instrument_id': instrumentId,
           'instrument_name': instrumentName,
         },
+        if (roleOverride.isNotEmpty) 'role_override': roleOverride,
+        if (groupId.trim().isNotEmpty) 'group_id': groupId.trim(),
+        if (inputDeviceName.trim().isNotEmpty)
+          'input_device_name': inputDeviceName.trim(),
+        'input_channel_start': inputChannelStart,
+        'input_channel_count': inputChannelCount,
         'clips': clips.map((c) => c.toJson()).toList(),
         'features': {'approx_rms': approxRms, 'approx_crest': approxCrest},
         'role_probs': roleProbs,
@@ -279,6 +295,8 @@ class RowState {
           'instrument_id': instrumentId,
           'instrument_name': instrumentName,
         },
+        if (roleOverride.isNotEmpty) 'role_override': roleOverride,
+        if (groupId.trim().isNotEmpty) 'group_id': groupId.trim(),
         'features': {'approx_rms': approxRms, 'approx_crest': approxCrest},
         'role_probs': roleProbs,
         'audio_stats': audioStats,

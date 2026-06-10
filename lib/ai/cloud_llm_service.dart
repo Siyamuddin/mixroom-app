@@ -458,6 +458,16 @@ class CloudLlmService {
                               'minimum': 20,
                               'maximum': 999,
                             },
+                            'time_stretch_audio': {
+                              'type': 'boolean',
+                              'description':
+                                  'True when the user asks to make the song/audio faster or slower. False for grid/metronome-only BPM edits.',
+                            },
+                            'preserve_pitch': {
+                              'type': 'boolean',
+                              'description':
+                                  'Use true by default for song-speed changes so pitch stays stable.',
+                            },
                           },
                           'required': ['operation'],
                           'anyOf': [
@@ -468,6 +478,29 @@ class CloudLlmService {
                               'required': ['bpm'],
                             },
                           ],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['audio_enhance'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'operation': {
+                              'type': 'string',
+                              'enum': ['phone_mic_cleanup'],
+                            },
+                            'target': _dawTargetSchema(),
+                          },
+                          'required': ['operation', 'target'],
                           'additionalProperties': true,
                         },
                       },
@@ -620,6 +653,7 @@ class CloudLlmService {
                                 'move',
                                 'tempo_follow',
                                 'auto_bpm_align',
+                                'align_first_sound',
                                 'tempo_detect_set_project',
                                 'duplicate',
                                 'delete',
@@ -635,6 +669,23 @@ class CloudLlmService {
                               'enum': ['start', 'end'],
                             },
                             'new_start_ms': {'type': 'number'},
+                            'target_ms': {'type': 'number'},
+                            'align_to_ms': {'type': 'number'},
+                            'first_sound_target_ms': {'type': 'number'},
+                            'align_to': {
+                              'type': 'string',
+                              'enum': [
+                                'playhead',
+                                'nearest_beat',
+                                'nearest_bar',
+                                'bar',
+                                'beat',
+                                'project_start',
+                                'clip_start',
+                              ],
+                            },
+                            'bar_index': {'type': 'number'},
+                            'beat_index': {'type': 'number'},
                             'paste_start_ms': {'type': 'number'},
                             'delta_ms': {'type': 'number'},
                             'new_start_measure': {'type': 'number'},
@@ -1280,7 +1331,7 @@ class CloudLlmService {
       'input': inputMessages,
       'tools': _directOpenAiToolSchemas(),
       'tool_choice': 'required',
-      'parallel_tool_calls': false,
+      'parallel_tool_calls': true,
       'max_output_tokens': _directOpenAiMaxOutputTokens,
     };
     if (_supportsTemperature) {
@@ -1719,6 +1770,7 @@ class CloudLlmService {
     'midi_compose',
     'stem_separate',
     'role_override',
+    'audio_enhance',
   };
 
   static const Set<String> _allowedClipEditOperations = <String>{
@@ -1731,6 +1783,7 @@ class CloudLlmService {
     'move',
     'tempo_follow',
     'auto_bpm_align',
+    'align_first_sound',
     'tempo_detect_set_project',
     'duplicate',
     'delete',
@@ -1838,6 +1891,12 @@ class CloudLlmService {
       'tempo_follow_project': 'tempo_follow',
       'align_tempo': 'auto_bpm_align',
       'align_to_project_tempo': 'auto_bpm_align',
+      'align_onset': 'align_first_sound',
+      'onset_align': 'align_first_sound',
+      'first_sound_align': 'align_first_sound',
+      'align_volume_start': 'align_first_sound',
+      'align_audio_start': 'align_first_sound',
+      'align_to_first_sound': 'align_first_sound',
       'detect_tempo_set_project': 'tempo_detect_set_project',
     };
     return aliases[token] ?? token;
@@ -2831,6 +2890,8 @@ class CloudLlmService {
         return _allowedStemSeparateOperations.contains(data['operation']);
       case 'role_override':
         return _allowedRoleOverrideOperations.contains(data['operation']);
+      case 'audio_enhance':
+        return data['operation'] == 'phone_mic_cleanup';
     }
     return false;
   }
@@ -3574,6 +3635,41 @@ class CloudLlmService {
         (t) => t.toolName == firstTool.toolName,
       );
       if (!sameToolType) {
+        final dawResults = nonInformationalResults
+            .where((t) => t.toolName == 'daw_assistant_actions')
+            .toList(growable: false);
+        final mixResults = nonInformationalResults
+            .where((t) => t.toolName == 'mix_model_request')
+            .toList(growable: false);
+        final preferredResults =
+            dawResults.isNotEmpty ? dawResults : mixResults;
+        if (preferredResults.isNotEmpty) {
+          final preferredTool = preferredResults.first.toolName!;
+          final preferredArgs = preferredResults
+              .map((t) => t.toolArgs)
+              .whereType<Map<String, dynamic>>()
+              .toList(growable: false);
+          final userFacingText = assistantText ??
+              preferredResults
+                  .map((t) => t.text?.trim() ?? '')
+                  .firstWhere((t) => t.isNotEmpty, orElse: () => '');
+          final mixedMeta = <String, dynamic>{
+            ...responseMeta,
+            'mixed_tool_fallback': true,
+            'mixed_tool_names': nonInformationalResults
+                .map((t) => t.toolName)
+                .whereType<String>()
+                .toList(growable: false),
+          };
+          return LlmResult.tool(
+            preferredTool,
+            preferredArgs.length == 1
+                ? preferredArgs.first
+                : <String, dynamic>{'calls': preferredArgs},
+            text: userFacingText.isEmpty ? null : userFacingText,
+            meta: mixedMeta,
+          );
+        }
         return LlmResult.text(
           _fallbackAssistantText('informational_response'),
           {

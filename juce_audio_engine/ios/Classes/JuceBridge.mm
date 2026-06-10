@@ -1,6 +1,12 @@
 #include <float.h>
+#include <algorithm>
+#include <atomic>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
+#include <memory>
+#include <vector>
 #import "JuceBridge.h"
 #import "JuceEngine.h"
 #include "InstrumentRenderers.h"
@@ -1275,6 +1281,293 @@ NSString *yamnetModelPath()
 
     return nil;
 }
+
+struct PitchLabRange
+{
+    double startMs = 0.0;
+    double endMs = 0.0;
+};
+
+struct PitchLabSegment
+{
+    double originalStartMs = 0.0;
+    double originalEndMs = 0.0;
+    double targetStartMs = 0.0;
+    double targetEndMs = 0.0;
+    double semitones = 0.0;
+};
+
+double pitchLabNumber(NSDictionary *dict, NSString *key, double fallback)
+{
+    id raw = dict[key];
+    if (![raw respondsToSelector:@selector(doubleValue)])
+        return fallback;
+    const double value = [raw doubleValue];
+    return std::isfinite(value) ? value : fallback;
+}
+
+std::vector<PitchLabRange> parsePitchLabRanges(NSArray<NSDictionary *> *ranges)
+{
+    std::vector<PitchLabRange> out;
+    if (ranges == nil)
+        return out;
+    out.reserve((size_t)ranges.count);
+
+    for (id item in ranges)
+    {
+        if (![item isKindOfClass:[NSDictionary class]])
+            continue;
+        NSDictionary *entry = (NSDictionary *)item;
+        PitchLabRange range;
+        range.startMs = pitchLabNumber(entry, @"startMs", 0.0);
+        range.endMs = pitchLabNumber(entry, @"endMs", 0.0);
+        if (!std::isfinite(range.startMs) || !std::isfinite(range.endMs))
+            continue;
+        if (range.endMs < range.startMs)
+            std::swap(range.startMs, range.endMs);
+        if (range.endMs > range.startMs + 1.0)
+            out.push_back(range);
+    }
+
+    return out;
+}
+
+std::vector<PitchLabSegment> parsePitchLabSegments(NSArray<NSDictionary *> *segments)
+{
+    std::vector<PitchLabSegment> out;
+    if (segments == nil)
+        return out;
+    out.reserve((size_t)std::min<NSUInteger>(segments.count, 256));
+
+    NSUInteger index = 0;
+    for (id item in segments)
+    {
+        if (index++ >= 256)
+            break;
+        if (![item isKindOfClass:[NSDictionary class]])
+            continue;
+        NSDictionary *entry = (NSDictionary *)item;
+        PitchLabSegment segment;
+        segment.originalStartMs = pitchLabNumber(entry, @"originalStartMs", 0.0);
+        segment.originalEndMs = pitchLabNumber(entry, @"originalEndMs", 0.0);
+        segment.targetStartMs = pitchLabNumber(entry, @"targetStartMs", 0.0);
+        segment.targetEndMs = pitchLabNumber(entry, @"targetEndMs", 0.0);
+        segment.semitones = juce::jlimit(-48.0, 48.0, pitchLabNumber(entry, @"semitones", 0.0));
+        if (std::isfinite(segment.originalStartMs) &&
+            std::isfinite(segment.originalEndMs) &&
+            std::isfinite(segment.targetStartMs) &&
+            std::isfinite(segment.targetEndMs) &&
+            segment.originalEndMs > segment.originalStartMs + 1.0 &&
+            segment.targetEndMs > segment.targetStartMs + 1.0)
+        {
+            out.push_back(segment);
+        }
+    }
+
+    return out;
+}
+
+double pitchLabLocalMsToFileSec(double localMs, double trimStartMs, double trimEndMs, double sourceTimelineDurationMs)
+{
+    const double activeSourceMs = juce::jmax(1.0, trimEndMs - trimStartMs);
+    const double timelineMs = juce::jmax(1.0, sourceTimelineDurationMs);
+    return (trimStartMs + juce::jlimit(0.0, timelineMs, localMs) * (activeSourceMs / timelineMs)) / 1000.0;
+}
+
+float pitchLabReadInterpolated(const juce::AudioBuffer<float> &buffer, int channel, double sourcePos)
+{
+    const int n = buffer.getNumSamples();
+    if (n <= 0)
+        return 0.0f;
+    const int ch = juce::jlimit(0, buffer.getNumChannels() - 1, channel);
+    const double clamped = juce::jlimit(0.0, (double)(n - 1), sourcePos);
+    const int i0 = (int)std::floor(clamped);
+    const int i1 = juce::jmin(n - 1, i0 + 1);
+    const float frac = (float)(clamped - (double)i0);
+    const float a = buffer.getSample(ch, i0);
+    return a + (buffer.getSample(ch, i1) - a) * frac;
+}
+
+void pitchLabApplyPitchCompensation(juce::AudioBuffer<float> &buffer, double sampleRate, double semitones)
+{
+    if (buffer.getNumSamples() <= 0 || std::abs(semitones) < 0.01)
+        return;
+    const int passes = juce::jlimit(1, 8, (int)std::ceil(std::abs(semitones) / 12.0));
+    const float semitonesPerPass = (float)(semitones / (double)passes);
+    juce::MidiBuffer midi;
+    for (int i = 0; i < passes; ++i)
+    {
+        PitchShiftAudioProcessor shifter;
+        shifter.prepareToPlay(sampleRate, juce::jmax(512, buffer.getNumSamples()));
+        if (auto *mix = shifter.parameters.getRawParameterValue("mix"))
+            mix->store(100.0f, std::memory_order_relaxed);
+        if (auto *semitonesParam = shifter.parameters.getRawParameterValue("semitones"))
+            semitonesParam->store(juce::jlimit(-12.0f, 12.0f, semitonesPerPass), std::memory_order_relaxed);
+        midi.clear();
+        shifter.processBlock(buffer, midi);
+    }
+}
+
+void pitchLabStreamSourceRange(juce::AudioFormatReader &reader,
+                               juce::AudioBuffer<float> &output,
+                               juce::int64 sourceStart,
+                               int sourceCount,
+                               int targetStart,
+                               int targetCount)
+{
+    if (sourceCount <= 1 || targetCount <= 0)
+        return;
+    constexpr int blockSize = 4096;
+    const int sourceChannels = juce::jmax(1, (int)reader.numChannels);
+    const double sourceSpan = (double)juce::jmax(1, sourceCount - 1);
+    const double denom = (double)juce::jmax(1, targetCount - 1);
+
+    for (int targetOffset = 0; targetOffset < targetCount; targetOffset += blockSize)
+    {
+        const int blockCount = juce::jmin(blockSize, targetCount - targetOffset);
+        const double blockSourceStart = ((double)targetOffset / denom) * sourceSpan;
+        const double blockSourceEnd = ((double)(targetOffset + blockCount - 1) / denom) * sourceSpan;
+        const int readOffset = juce::jlimit(0, sourceCount - 1, (int)std::floor(blockSourceStart));
+        const int readEnd = juce::jlimit(readOffset + 1, sourceCount + 1, (int)std::ceil(blockSourceEnd) + 2);
+        const int readCount = juce::jmax(1, readEnd - readOffset);
+        juce::AudioBuffer<float> scratch(sourceChannels, readCount);
+        scratch.clear();
+        reader.read(&scratch, 0, readCount, sourceStart + readOffset, true, true);
+
+        for (int i = 0; i < blockCount; ++i)
+        {
+            const double sourcePos = (((double)(targetOffset + i) / denom) * sourceSpan) - (double)readOffset;
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                output.addSample(ch,
+                                 targetStart + targetOffset + i,
+                                 pitchLabReadInterpolated(scratch, sourceChannels == 1 ? 0 : ch, sourcePos));
+            }
+        }
+    }
+}
+
+void pitchLabMixSourceRange(juce::AudioFormatReader &reader,
+                            juce::AudioBuffer<float> &output,
+                            double outputSampleRate,
+                            double sourceStartSec,
+                            double sourceEndSec,
+                            double targetStartMs,
+                            double targetEndMs,
+                            double pitchSemitones)
+{
+    if (sourceEndSec <= sourceStartSec + 0.0005 || targetEndMs <= targetStartMs + 0.5)
+        return;
+    const juce::int64 sourceStart = juce::jlimit<juce::int64>(0, reader.lengthInSamples, (juce::int64)std::floor(sourceStartSec * reader.sampleRate));
+    const juce::int64 sourceEnd = juce::jlimit<juce::int64>(0, reader.lengthInSamples, (juce::int64)std::ceil(sourceEndSec * reader.sampleRate));
+    const juce::int64 sourceCount64 = std::max<juce::int64>(0, sourceEnd - sourceStart);
+    if (sourceCount64 <= 1 || sourceCount64 > (juce::int64)std::numeric_limits<int>::max() - 8)
+        return;
+    const int sourceCount = (int)sourceCount64;
+    const int targetStart = juce::jlimit(0, output.getNumSamples(), (int)std::floor(targetStartMs * outputSampleRate / 1000.0));
+    const int targetEnd = juce::jlimit(0, output.getNumSamples(), (int)std::ceil(targetEndMs * outputSampleRate / 1000.0));
+    const int targetCount = juce::jmax(0, targetEnd - targetStart);
+    if (targetCount <= 0)
+        return;
+
+    const double sourceDurationSec = juce::jmax(0.001, sourceEndSec - sourceStartSec);
+    const double targetDurationSec = juce::jmax(0.001, (targetEndMs - targetStartMs) / 1000.0);
+    const double resampleSpeed = sourceDurationSec / targetDurationSec;
+    const double stretchPitchDrift = 12.0 * (std::log(resampleSpeed) / std::log(2.0));
+    if (std::abs(pitchSemitones) < 0.01 && std::abs(stretchPitchDrift) < 0.03)
+    {
+        pitchLabStreamSourceRange(reader, output, sourceStart, sourceCount, targetStart, targetCount);
+        return;
+    }
+
+    juce::AudioBuffer<float> source(juce::jmax(1, (int)reader.numChannels), sourceCount + 2);
+    source.clear();
+    reader.read(&source, 0, sourceCount, sourceStart, true, true);
+
+    juce::AudioBuffer<float> rendered(2, targetCount);
+    rendered.clear();
+    const double sourceSpan = (double)juce::jmax(1, sourceCount - 1);
+    const double denom = (double)juce::jmax(1, targetCount - 1);
+    for (int i = 0; i < targetCount; ++i)
+    {
+        const double sourcePos = ((double)i / denom) * sourceSpan;
+        for (int ch = 0; ch < 2; ++ch)
+            rendered.setSample(ch, i, pitchLabReadInterpolated(source, source.getNumChannels() == 1 ? 0 : ch, sourcePos));
+    }
+
+    pitchLabApplyPitchCompensation(rendered, outputSampleRate, juce::jlimit(-96.0, 96.0, pitchSemitones - stretchPitchDrift));
+    for (int ch = 0; ch < 2; ++ch)
+        output.addFrom(ch, targetStart, rendered, ch, 0, targetCount);
+}
+
+juce::String renderPitchLabAudioNative(const juce::File &sourceFile,
+                                       const juce::File &outFile,
+                                       double trimStartMs,
+                                       double trimEndMs,
+                                       double sourceTimelineDurationMs,
+                                       double outputDurationMs,
+                                       std::vector<PitchLabRange> suppressedRanges,
+                                       const std::vector<PitchLabSegment> &segments)
+{
+    juce::AudioFormatManager formatManager;
+    formatManager.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(sourceFile));
+    if (!reader)
+        return {};
+    if (trimEndMs <= trimStartMs)
+        trimEndMs = (double)reader->lengthInSamples * 1000.0 / juce::jmax(1.0, reader->sampleRate);
+
+    const double outputSampleRate = 48000.0;
+    const int outputSamples = juce::jlimit(1, (int)(outputSampleRate * 60.0 * 12.0), (int)std::ceil(outputDurationMs * outputSampleRate / 1000.0));
+    juce::AudioBuffer<float> output(2, outputSamples);
+    output.clear();
+    std::sort(suppressedRanges.begin(), suppressedRanges.end(), [](const PitchLabRange &a, const PitchLabRange &b)
+              { return a.startMs < b.startMs; });
+
+    double cursorMs = 0.0;
+    for (const auto &range : suppressedRanges)
+    {
+        const double startMs = juce::jlimit(0.0, sourceTimelineDurationMs, range.startMs);
+        const double endMs = juce::jlimit(0.0, sourceTimelineDurationMs, range.endMs);
+        if (startMs > cursorMs + 4.0)
+            pitchLabMixSourceRange(*reader, output, outputSampleRate,
+                                   pitchLabLocalMsToFileSec(cursorMs, trimStartMs, trimEndMs, sourceTimelineDurationMs),
+                                   pitchLabLocalMsToFileSec(startMs, trimStartMs, trimEndMs, sourceTimelineDurationMs),
+                                   cursorMs, startMs, 0.0);
+        cursorMs = juce::jmax(cursorMs, endMs);
+    }
+    if (cursorMs < sourceTimelineDurationMs - 4.0)
+        pitchLabMixSourceRange(*reader, output, outputSampleRate,
+                               pitchLabLocalMsToFileSec(cursorMs, trimStartMs, trimEndMs, sourceTimelineDurationMs),
+                               pitchLabLocalMsToFileSec(sourceTimelineDurationMs, trimStartMs, trimEndMs, sourceTimelineDurationMs),
+                               cursorMs, sourceTimelineDurationMs, 0.0);
+
+    for (const auto &segment : segments)
+        pitchLabMixSourceRange(*reader, output, outputSampleRate,
+                               pitchLabLocalMsToFileSec(segment.originalStartMs, trimStartMs, trimEndMs, sourceTimelineDurationMs),
+                               pitchLabLocalMsToFileSec(segment.originalEndMs, trimStartMs, trimEndMs, sourceTimelineDurationMs),
+                               segment.targetStartMs, segment.targetEndMs, segment.semitones);
+
+    for (int ch = 0; ch < output.getNumChannels(); ++ch)
+    {
+        auto *samples = output.getWritePointer(ch);
+        for (int i = 0; i < output.getNumSamples(); ++i)
+            samples[i] = std::tanh(samples[i] * 0.98f);
+    }
+
+    outFile.deleteFile();
+    std::unique_ptr<juce::FileOutputStream> stream(outFile.createOutputStream());
+    if (!stream)
+        return {};
+    juce::WavAudioFormat wav;
+    std::unique_ptr<juce::AudioFormatWriter> writer(wav.createWriterFor(stream.get(), outputSampleRate, 2, 24, {}, 0));
+    if (!writer)
+        return {};
+    stream.release();
+    if (!writer->writeFromAudioSampleBuffer(output, 0, output.getNumSamples()))
+        return {};
+    return outFile.getFullPathName();
+}
 } // namespace
 
 @interface MixroomPromptAnalysisService : NSObject
@@ -2018,6 +2311,29 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     }
 
     const juce::String renderedPath = mixroom::instruments::renderInstrumentClipToWav(request);
+    if (renderedPath.isEmpty())
+        return @"";
+    return [NSString stringWithUTF8String:renderedPath.toRawUTF8()];
+}
+
++ (NSString *)renderPitchLabAudioObjC:(NSString *)sourcePath
+                              outPath:(NSString *)outPath
+                          trimStartMs:(double)trimStartMs
+                            trimEndMs:(double)trimEndMs
+             sourceTimelineDurationMs:(double)sourceTimelineDurationMs
+                     outputDurationMs:(double)outputDurationMs
+                     suppressedRanges:(NSArray<NSDictionary *> *)suppressedRanges
+                             segments:(NSArray<NSDictionary *> *)segments
+{
+    const juce::String renderedPath = renderPitchLabAudioNative(
+        juceFileFromNSString(sourcePath),
+        juceFileFromNSString(outPath),
+        trimStartMs,
+        trimEndMs,
+        sourceTimelineDurationMs,
+        outputDurationMs,
+        parsePitchLabRanges(suppressedRanges),
+        parsePitchLabSegments(segments));
     if (renderedPath.isEmpty())
         return @"";
     return [NSString stringWithUTF8String:renderedPath.toRawUTF8()];
@@ -3558,6 +3874,42 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 + (NSArray<NSNumber*>*)getMasterShaperPreviewObjC:(NSInteger)effectIndex pointCount:(NSInteger)pointCount
 {
     const auto v = JuceEngine::get().getMasterShaperPreview((int)effectIndex, (int)pointCount);
+    NSMutableArray<NSNumber*>* arr = [NSMutableArray arrayWithCapacity:v.size()];
+    for (float s : v)
+        [arr addObject:@(s)];
+    return arr;
+}
+
++ (NSArray<NSNumber*>*)getRowDynamicSoftenerFrameObjC:(NSInteger)row effectIndex:(NSInteger)effectIndex
+{
+    const auto v = JuceEngine::get().getRowDynamicSoftenerFrame((int)row, (int)effectIndex);
+    NSMutableArray<NSNumber*>* arr = [NSMutableArray arrayWithCapacity:v.size()];
+    for (float s : v)
+        [arr addObject:@(s)];
+    return arr;
+}
+
++ (NSArray<NSNumber*>*)getMasterDynamicSoftenerFrameObjC:(NSInteger)effectIndex
+{
+    const auto v = JuceEngine::get().getMasterDynamicSoftenerFrame((int)effectIndex);
+    NSMutableArray<NSNumber*>* arr = [NSMutableArray arrayWithCapacity:v.size()];
+    for (float s : v)
+        [arr addObject:@(s)];
+    return arr;
+}
+
++ (NSArray<NSNumber*>*)getRowTransientShaperVisualObjC:(NSInteger)row effectIndex:(NSInteger)effectIndex pointCount:(NSInteger)pointCount
+{
+    const auto v = JuceEngine::get().getRowTransientShaperVisual((int)row, (int)effectIndex, (int)pointCount);
+    NSMutableArray<NSNumber*>* arr = [NSMutableArray arrayWithCapacity:v.size()];
+    for (float s : v)
+        [arr addObject:@(s)];
+    return arr;
+}
+
++ (NSArray<NSNumber*>*)getMasterTransientShaperVisualObjC:(NSInteger)effectIndex pointCount:(NSInteger)pointCount
+{
+    const auto v = JuceEngine::get().getMasterTransientShaperVisual((int)effectIndex, (int)pointCount);
     NSMutableArray<NSNumber*>* arr = [NSMutableArray arrayWithCapacity:v.size()];
     for (float s : v)
         [arr addObject:@(s)];

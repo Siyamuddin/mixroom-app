@@ -165,6 +165,10 @@ extern "C"
     JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterStereoScopeJNI(JNIEnv *, jclass, jint, jint);
     JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getRowShaperPreviewJNI(JNIEnv *, jclass, jint, jint, jint);
     JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterShaperPreviewJNI(JNIEnv *, jclass, jint, jint);
+    JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getRowDynamicSoftenerFrameJNI(JNIEnv *, jclass, jint, jint);
+    JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterDynamicSoftenerFrameJNI(JNIEnv *, jclass, jint);
+    JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getRowTransientShaperVisualJNI(JNIEnv *, jclass, jint, jint, jint);
+    JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterTransientShaperVisualJNI(JNIEnv *, jclass, jint, jint);
 
     // Export and plugin discovery
     JNIEXPORT jstring JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_exportMixJNI(JNIEnv *, jclass, jstring, jstring, jint, jint, jboolean, jint, jstring, jboolean);
@@ -172,6 +176,7 @@ extern "C"
     JNIEXPORT jstring JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_exportTrackJNI(JNIEnv *, jclass, jint, jstring, jstring, jint, jint, jboolean, jint);
     JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getAvailablePluginsJNI(JNIEnv *, jclass);
     JNIEXPORT jstring JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_renderInstrumentClipJNI(JNIEnv *, jclass, jstring, jstring, jstring, jdouble, jobject, jobject);
+    JNIEXPORT jstring JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_renderPitchLabAudioJNI(JNIEnv *, jclass, jstring, jstring, jdouble, jdouble, jdouble, jdouble, jobject, jobject);
 
     // Video lane
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_loadVideoAudioJNI(JNIEnv *, jclass, jstring);

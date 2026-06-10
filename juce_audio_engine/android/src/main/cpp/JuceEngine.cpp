@@ -908,10 +908,6 @@ void JuceEngine::initialiseEngine()
     if (rows.empty())
     {
         addRow("Track 1", 0);
-        addRow("Track 2", 0);
-        addRow("Track 3", 0);
-        addRow("Track 4", 0);
-        addRow("Track 5", 0);
     }
 
     // Build bus graph (rows + master)
@@ -1933,6 +1929,8 @@ bool isBuiltInEffectIdentifier(const juce::String &pluginId)
         "Gain",
         "EQ 3-Band",
         "Compressor",
+        "Dynamic Softener",
+        "Transient Shaper",
         "Limiter",
         "Clipper",
         "De-Esser",
@@ -2267,6 +2265,10 @@ std::unique_ptr<juce::AudioProcessor> createEffectProcessorFromIdentifier(
             return std::make_unique<DeesserAudioProcessor>();
         if (pluginId == "Compressor")
             return std::make_unique<CompressorAudioProcessor>();
+        if (pluginId == "Dynamic Softener")
+            return std::make_unique<DynamicSoftenerAudioProcessor>();
+        if (pluginId == "Transient Shaper")
+            return std::make_unique<TransientShaperAudioProcessor>();
         if (pluginId == "Limiter")
             return std::make_unique<LimiterAudioProcessor>();
         if (pluginId == "Clipper")
@@ -4563,6 +4565,10 @@ bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath)
             plugin = std::make_unique<DeesserAudioProcessor>();
         else if (pluginPath == "Compressor")
             plugin = std::make_unique<CompressorAudioProcessor>();
+        else if (pluginPath == "Dynamic Softener")
+            plugin = std::make_unique<DynamicSoftenerAudioProcessor>();
+        else if (pluginPath == "Transient Shaper")
+            plugin = std::make_unique<TransientShaperAudioProcessor>();
         else if (pluginPath == "Limiter")
             plugin = std::make_unique<LimiterAudioProcessor>();
         else if (pluginPath == "Clipper")
@@ -5403,6 +5409,10 @@ bool JuceEngine::insertMasterEffect(const juce::String &pluginPath)
             plugin = std::make_unique<DeesserAudioProcessor>();
         else if (pluginPath == "Compressor")
             plugin = std::make_unique<CompressorAudioProcessor>();
+        else if (pluginPath == "Dynamic Softener")
+            plugin = std::make_unique<DynamicSoftenerAudioProcessor>();
+        else if (pluginPath == "Transient Shaper")
+            plugin = std::make_unique<TransientShaperAudioProcessor>();
         else if (pluginPath == "Limiter")
             plugin = std::make_unique<LimiterAudioProcessor>();
         else if (pluginPath == "Clipper")
@@ -7782,6 +7792,94 @@ std::vector<float> JuceEngine::getMasterShaperPreview(int effectIndex, int point
     return std::vector<float>((size_t)(count + 1), 1.0f);
 }
 
+std::vector<float> JuceEngine::getRowDynamicSoftenerFrame(int row, int effectIndex)
+{
+    const size_t fallbackSize = (size_t)(DynamicSoftenerModule::kBandCount * 3);
+
+    if (row < 0 || row >= (int)rows.size())
+        return std::vector<float>(fallbackSize, 0.0f);
+
+    auto &chain = rows[(size_t)row].fxChain;
+    if (effectIndex < 0 || effectIndex >= chain.size())
+        return std::vector<float>(fallbackSize, 0.0f);
+
+    auto nodeID = chain.getReference(effectIndex);
+    auto node = graph.getNodeForId(nodeID);
+    if (!node)
+        return std::vector<float>(fallbackSize, 0.0f);
+
+    if (auto *softener = dynamic_cast<DynamicSoftenerAudioProcessor *>(node->getProcessor()))
+        return softener->getVisualFrame();
+
+    return std::vector<float>(fallbackSize, 0.0f);
+}
+
+std::vector<float> JuceEngine::getMasterDynamicSoftenerFrame(int effectIndex)
+{
+    const size_t fallbackSize = (size_t)(DynamicSoftenerModule::kBandCount * 3);
+
+    if (!masterEffectChain)
+        return std::vector<float>(fallbackSize, 0.0f);
+
+    if (effectIndex < 0 || effectIndex >= masterEffectChain->size())
+        return std::vector<float>(fallbackSize, 0.0f);
+
+    auto nodeID = masterEffectChain->getReference(effectIndex);
+    auto node = graph.getNodeForId(nodeID);
+    if (!node)
+        return std::vector<float>(fallbackSize, 0.0f);
+
+    if (auto *softener = dynamic_cast<DynamicSoftenerAudioProcessor *>(node->getProcessor()))
+        return softener->getVisualFrame();
+
+    return std::vector<float>(fallbackSize, 0.0f);
+}
+
+std::vector<float> JuceEngine::getRowTransientShaperVisual(int row, int effectIndex, int pointCount)
+{
+    const int count = juce::jlimit(32, 512, pointCount);
+    const size_t fallbackSize = (size_t)(count * TransientShaperModule::kVisualStride);
+
+    if (row < 0 || row >= (int)rows.size())
+        return std::vector<float>(fallbackSize, 0.0f);
+
+    auto &chain = rows[(size_t)row].fxChain;
+    if (effectIndex < 0 || effectIndex >= chain.size())
+        return std::vector<float>(fallbackSize, 0.0f);
+
+    auto nodeID = chain.getReference(effectIndex);
+    auto node = graph.getNodeForId(nodeID);
+    if (!node)
+        return std::vector<float>(fallbackSize, 0.0f);
+
+    if (auto *transientShaper = dynamic_cast<TransientShaperAudioProcessor *>(node->getProcessor()))
+        return transientShaper->getRecentVisual(count);
+
+    return std::vector<float>(fallbackSize, 0.0f);
+}
+
+std::vector<float> JuceEngine::getMasterTransientShaperVisual(int effectIndex, int pointCount)
+{
+    const int count = juce::jlimit(32, 512, pointCount);
+    const size_t fallbackSize = (size_t)(count * TransientShaperModule::kVisualStride);
+
+    if (!masterEffectChain)
+        return std::vector<float>(fallbackSize, 0.0f);
+
+    if (effectIndex < 0 || effectIndex >= masterEffectChain->size())
+        return std::vector<float>(fallbackSize, 0.0f);
+
+    auto nodeID = masterEffectChain->getReference(effectIndex);
+    auto node = graph.getNodeForId(nodeID);
+    if (!node)
+        return std::vector<float>(fallbackSize, 0.0f);
+
+    if (auto *transientShaper = dynamic_cast<TransientShaperAudioProcessor *>(node->getProcessor()))
+        return transientShaper->getRecentVisual(count);
+
+    return std::vector<float>(fallbackSize, 0.0f);
+}
+
 int JuceEngine::addRow(const juce::String &name, int iconId)
 {
     GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
@@ -8092,6 +8190,8 @@ const juce::StringArray JuceEngine::mixroomPlugins{
     "Gain",
     "EQ 3-Band",
     "Compressor",
+    "Dynamic Softener",
+    "Transient Shaper",
     "Limiter",
     "Clipper",
     "De-Esser",

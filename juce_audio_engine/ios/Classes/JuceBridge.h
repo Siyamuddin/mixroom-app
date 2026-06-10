@@ -41,6 +41,14 @@
                                    bpm:(double)bpm
                                  notes:(NSArray<NSDictionary *> *)notes
                                 params:(NSDictionary<NSString *, NSNumber *> *)params;
++ (NSString *)renderPitchLabAudioObjC:(NSString *)sourcePath
+                              outPath:(NSString *)outPath
+                          trimStartMs:(double)trimStartMs
+                            trimEndMs:(double)trimEndMs
+             sourceTimelineDurationMs:(double)sourceTimelineDurationMs
+                     outputDurationMs:(double)outputDurationMs
+                     suppressedRanges:(NSArray<NSDictionary *> *)suppressedRanges
+                             segments:(NSArray<NSDictionary *> *)segments;
 + (NSArray<NSDictionary *> *)scanPluginsObjC:(NSArray<NSString *> * _Nullable)searchPaths;
 + (NSArray<NSDictionary *> *)rescanPluginsObjC:(NSArray<NSString *> * _Nullable)searchPaths;
 + (NSDictionary<NSString *, id> *)getEngineDiagnosticsObjC;
@@ -292,5 +300,9 @@
 + (NSArray<NSNumber *> *)getMasterStereoScopeObjC:(NSInteger)effectIndex pointCount:(NSInteger)pointCount;
 + (NSArray<NSNumber *> *)getRowShaperPreviewObjC:(NSInteger)row effectIndex:(NSInteger)effectIndex pointCount:(NSInteger)pointCount;
 + (NSArray<NSNumber *> *)getMasterShaperPreviewObjC:(NSInteger)effectIndex pointCount:(NSInteger)pointCount;
++ (NSArray<NSNumber *> *)getRowDynamicSoftenerFrameObjC:(NSInteger)row effectIndex:(NSInteger)effectIndex;
++ (NSArray<NSNumber *> *)getMasterDynamicSoftenerFrameObjC:(NSInteger)effectIndex;
++ (NSArray<NSNumber *> *)getRowTransientShaperVisualObjC:(NSInteger)row effectIndex:(NSInteger)effectIndex pointCount:(NSInteger)pointCount;
++ (NSArray<NSNumber *> *)getMasterTransientShaperVisualObjC:(NSInteger)effectIndex pointCount:(NSInteger)pointCount;
 
 @end

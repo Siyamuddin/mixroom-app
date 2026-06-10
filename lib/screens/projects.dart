@@ -24,6 +24,7 @@ import 'package:mixroom/helpers/subscription_limits.dart';
 import 'package:mixroom/screens/audio_editor.dart';
 import 'package:mixroom/widgets/app_responsive_body.dart';
 import 'package:mixroom/widgets/app_shell_figma.dart';
+import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 
 class _NoSwipeMaterialPageRoute<T> extends MaterialPageRoute<T> {
@@ -2816,7 +2817,133 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       return;
     }
 
+    if (_isIncomingAudioFile(bundleFile.path)) {
+      await _importAudioFileAsNewProject(bundleFile);
+      return;
+    }
+
     await _importProjectFromFile(bundleFile.path);
+  }
+
+  bool _isIncomingAudioFile(String path) {
+    switch (p.extension(path).toLowerCase()) {
+      case '.wav':
+      case '.wave':
+      case '.mp3':
+      case '.m4a':
+      case '.aac':
+      case '.caf':
+      case '.aiff':
+      case '.aif':
+      case '.flac':
+      case '.ogg':
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  String _safeIncomingAudioFileName(String rawName) {
+    final extension = p.extension(rawName).toLowerCase();
+    final stem = p.basenameWithoutExtension(rawName).trim().replaceAll(
+          RegExp(r'[^A-Za-z0-9._ -]+'),
+          '_',
+        );
+    final safeStem = stem.isEmpty ? 'recording' : stem;
+    return '$safeStem$extension';
+  }
+
+  Future<void> _importAudioFileAsNewProject(File audioFile) async {
+    if (!await audioFile.exists()) {
+      showAppSnackBar(
+        context,
+        L10n.translate(context, 'File is unavailable.'),
+        tone: AppPopupTone.error,
+      );
+      return;
+    }
+
+    showLoadingDialog(
+      context,
+      message: L10n.translate(context, 'Importing recording…'),
+    );
+    try {
+      await Future.delayed(const Duration(milliseconds: 200));
+      if (!mounted) return;
+      final projectName = p.basenameWithoutExtension(audioFile.path).trim();
+      final newDir = await ProjectManager.createNewProjectDir(
+        name: projectName.isEmpty ? 'Imported Recording' : projectName,
+      );
+      final audioDir = ProjectManager.audioDir(newDir);
+      await audioDir.create(recursive: true);
+      final safeName = _safeIncomingAudioFileName(p.basename(audioFile.path));
+      final dest = File(p.join(audioDir.path, safeName));
+      await audioFile.copy(dest.path);
+      final json = await ProjectManager.readProjectJson(newDir);
+      json['version'] = 6;
+      json['rows'] = <Map<String, dynamic>>[
+        <String, dynamic>{
+          'rowId': -1,
+          'name': 'Track 1',
+          'iconId': 0,
+          'kind': 'audio',
+        },
+      ];
+      json['tracks'] = <Map<String, dynamic>>[
+        <String, dynamic>{
+          'fileName': safeName,
+          'label': p.basenameWithoutExtension(safeName),
+          'clipType': 'audio',
+          'trimStartMs': 0,
+          'trimEndMs': 0,
+          'offset': 0.0,
+          'crossfade': 0.0,
+          'gain': 2.0,
+          'normalizeVolume': false,
+          'normalizeGain': 1.0,
+          'preNormalizeGain': 2.0,
+          'pitchSemitones': 0.0,
+          'isReversed': false,
+          'sourceTempoBpm': 0.0,
+          'stretchToProjectTempo': false,
+          'tempoStretchPreservePitch': false,
+          'tempoWarpMode': 'complex',
+          'recordingLatencyMs': 0.0,
+          'alignmentOffsetMs': 0.0,
+          'rowIndex': 0,
+          'rowId': -1,
+          'automation': <Map<String, dynamic>>[
+            <String, dynamic>{'x': 0.0, 'volume': 1.0},
+            <String, dynamic>{'x': 1.0, 'volume': 1.0},
+          ],
+        },
+      ];
+      await ProjectManager.writeProjectJson(newDir, json);
+      if (!mounted) return;
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      await Navigator.push(
+        context,
+        _NoSwipeMaterialPageRoute(
+          builder: (_) => AudioEditorScreen(
+            mode: 'Pro',
+            projectDir: newDir,
+            onUpgradeRequested: widget.onUpgradeRequested,
+          ),
+        ),
+      );
+      if (!mounted) return;
+      await _refresh();
+    } catch (error) {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        '${L10n.translate(context, 'Import failed')}: $error',
+        tone: AppPopupTone.error,
+      );
+    }
   }
 
   Future<void> _importProjectFromFile(String path) async {

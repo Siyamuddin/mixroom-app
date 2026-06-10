@@ -29,6 +29,7 @@ import java.io.FileOutputStream
 class MainActivity : FlutterFragmentActivity() {
   companion object {
     private const val MAX_INCOMING_MIXROOM_BYTES = 512L * 1024L * 1024L
+    private const val MAX_INCOMING_AUDIO_BYTES = 512L * 1024L * 1024L
     private const val REQUEST_CODE_SAVE_EXPORTED_FILE = 40171
   }
 
@@ -213,7 +214,7 @@ class MainActivity : FlutterFragmentActivity() {
       return
     }
 
-    val path = copyUriToCacheIfMixroom(uri) ?: return
+    val path = copyUriToCacheIfSupportedImport(uri) ?: return
 
     if (isInitial && openFileChannel == null) {
       initialMixroomPath = path
@@ -388,10 +389,14 @@ class MainActivity : FlutterFragmentActivity() {
     }
   }
 
-  private fun copyUriToCacheIfMixroom(uri: Uri): String? {
+  private fun copyUriToCacheIfSupportedImport(uri: Uri): String? {
     val rawName = guessFileName(uri) ?: return null
-    if (!rawName.lowercase().endsWith(".mixroom")) return null
+    val lowerName = rawName.lowercase()
+    val isProject = lowerName.endsWith(".mixroom")
+    val isAudio = isSupportedIncomingAudioName(lowerName)
+    if (!isProject && !isAudio) return null
     val safeName = sanitizeFileName(rawName)
+    val maxBytes = if (isProject) MAX_INCOMING_MIXROOM_BYTES else MAX_INCOMING_AUDIO_BYTES
 
     return try {
       val input = contentResolver.openInputStream(uri) ?: return null
@@ -408,7 +413,7 @@ class MainActivity : FlutterFragmentActivity() {
             val r = ins.read(buf)
             if (r <= 0) break
             totalBytes += r.toLong()
-            if (totalBytes > MAX_INCOMING_MIXROOM_BYTES) {
+            if (totalBytes > maxBytes) {
               exceededLimit = true
               break
             }
@@ -425,6 +430,19 @@ class MainActivity : FlutterFragmentActivity() {
     } catch (e: Exception) {
       null
     }
+  }
+
+  private fun isSupportedIncomingAudioName(lowerName: String): Boolean {
+    return lowerName.endsWith(".wav") ||
+      lowerName.endsWith(".wave") ||
+      lowerName.endsWith(".mp3") ||
+      lowerName.endsWith(".m4a") ||
+      lowerName.endsWith(".aac") ||
+      lowerName.endsWith(".caf") ||
+      lowerName.endsWith(".aiff") ||
+      lowerName.endsWith(".aif") ||
+      lowerName.endsWith(".flac") ||
+      lowerName.endsWith(".ogg")
   }
 
   private fun guessFileName(uri: Uri): String? {

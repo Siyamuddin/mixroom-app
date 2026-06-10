@@ -499,6 +499,21 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
                                                        notes:notes
                                                       params:params];
         result(out);
+    } else if ([call.method isEqualToString:@"renderPitchLabAudio"]) {
+        NSDictionary *renderArgs = [args copy];
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            NSString *out = [JuceBridge renderPitchLabAudioObjC:renderArgs[@"sourcePath"] ?: @""
+                                                        outPath:renderArgs[@"outPath"] ?: @""
+                                                    trimStartMs:[renderArgs[@"trimStartMs"] doubleValue]
+                                                      trimEndMs:[renderArgs[@"trimEndMs"] doubleValue]
+                                       sourceTimelineDurationMs:[renderArgs[@"sourceTimelineDurationMs"] doubleValue]
+                                               outputDurationMs:[renderArgs[@"outputDurationMs"] doubleValue]
+                                               suppressedRanges:renderArgs[@"suppressedRanges"] ?: @[]
+                                                       segments:renderArgs[@"segments"] ?: @[]];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                result(out);
+            });
+        });
     } else if ([call.method isEqualToString:@"bypassPlugin"]) {
         NSDictionary* a = call.arguments;
         [JuceBridge bypassPluginObjC:
@@ -1106,6 +1121,30 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSInteger effect = [call.arguments[@"effect"] integerValue];
         NSInteger pointCount = [call.arguments[@"pointCount"] integerValue];
         NSArray* arr = [JuceBridge getMasterShaperPreviewObjC:effect pointCount:pointCount];
+        result(arr);
+    }
+    else if ([call.method isEqualToString:@"getRowDynamicSoftenerFrame"]) {
+        NSInteger row = [call.arguments[@"row"] integerValue];
+        NSInteger effect = [call.arguments[@"effect"] integerValue];
+        NSArray* arr = [JuceBridge getRowDynamicSoftenerFrameObjC:row effectIndex:effect];
+        result(arr);
+    }
+    else if ([call.method isEqualToString:@"getMasterDynamicSoftenerFrame"]) {
+        NSInteger effect = [call.arguments[@"effect"] integerValue];
+        NSArray* arr = [JuceBridge getMasterDynamicSoftenerFrameObjC:effect];
+        result(arr);
+    }
+    else if ([call.method isEqualToString:@"getRowTransientShaperVisual"]) {
+        NSInteger row = [call.arguments[@"row"] integerValue];
+        NSInteger effect = [call.arguments[@"effect"] integerValue];
+        NSInteger pointCount = [call.arguments[@"pointCount"] integerValue];
+        NSArray* arr = [JuceBridge getRowTransientShaperVisualObjC:row effectIndex:effect pointCount:pointCount];
+        result(arr);
+    }
+    else if ([call.method isEqualToString:@"getMasterTransientShaperVisual"]) {
+        NSInteger effect = [call.arguments[@"effect"] integerValue];
+        NSInteger pointCount = [call.arguments[@"pointCount"] integerValue];
+        NSArray* arr = [JuceBridge getMasterTransientShaperVisualObjC:effect pointCount:pointCount];
         result(arr);
     }
 

@@ -300,7 +300,6 @@ void main() async {
   } else {
     await SystemChrome.setPreferredOrientations(<DeviceOrientation>[]);
   }
-
   await _runStartupStep('analytics.initialize', () async {
     await AnalyticsService.instance.initialize();
   });

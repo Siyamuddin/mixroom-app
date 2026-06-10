@@ -1795,6 +1795,475 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DeesserAudioProcessor)
 };
 
+// ============================
+// **** DYNAMIC SOFTENER ****
+// ============================
+
+struct DynamicSoftenerParameters
+{
+    int modeIndex{0};
+    float depthPercent{55.0f};
+    float detailPercent{55.0f};
+    float attackMs{5.0f};
+    float releaseMs{90.0f};
+    float maxCutDb{18.0f};
+    float wetTrimDb{0.0f};
+    float mixPercent{100.0f};
+    float outputGainDb{0.0f};
+    float lowRangeHz{20.0f};
+    float highRangeHz{20000.0f};
+    bool delta{false};
+};
+
+class DynamicSoftenerModule
+{
+public:
+    static constexpr int kBandCount = 48;
+
+    void prepare(double newSampleRate, int maxBlockSize)
+    {
+        sampleRate = sanitiseEffectSampleRate(newSampleRate);
+        bufferSize = juce::jmax(1, maxBlockSize);
+        dryBuffer.setSize(numOutputs, bufferSize);
+        wetBuffer.setSize(numOutputs, bufferSize);
+        reset();
+        updateAnalysisFilters(true);
+        updateCutFilters(true);
+    }
+
+    void reset()
+    {
+        dryBuffer.clear();
+        wetBuffer.clear();
+        bandEnvelope.fill(0.0f);
+        bandInputDb.fill(-90.0f);
+        spectralBaseDb.fill(-90.0f);
+        noiseFloorDb.fill(-90.0f);
+        bandReductionDb.fill(0.0f);
+        previousReductionDb.fill(0.0f);
+        lastCutReductionDb.fill(0.0f);
+        for (auto &bandFilters : analysisFilters)
+            for (auto &filter : bandFilters)
+                filter.reset();
+        for (auto &bandFilters : cutFilters)
+            for (auto &filter : bandFilters)
+                filter.reset();
+        for (int i = 0; i < kBandCount; ++i)
+        {
+            visualInputDb[(size_t)i].store(-90.0f, std::memory_order_relaxed);
+            visualReductionDb[(size_t)i].store(0.0f, std::memory_order_relaxed);
+        }
+    }
+
+    void setParameters(const juce::AudioProcessorValueTreeState &apvts)
+    {
+        params.modeIndex = juce::jlimit(
+            0, 1,
+            (int)std::round(apvts.getRawParameterValue("mode")->load()));
+        params.depthPercent = apvts.getRawParameterValue("depth")->load();
+        params.detailPercent = apvts.getRawParameterValue("detail")->load();
+        params.attackMs = apvts.getRawParameterValue("attack")->load();
+        params.releaseMs = apvts.getRawParameterValue("release")->load();
+        params.maxCutDb = apvts.getRawParameterValue("maxCut")->load();
+        params.wetTrimDb = apvts.getRawParameterValue("wetTrim")->load();
+        params.mixPercent = apvts.getRawParameterValue("mix")->load();
+        params.outputGainDb = apvts.getRawParameterValue("outGain")->load();
+        params.delta = apvts.getRawParameterValue("delta")->load() >= 0.5f;
+        params.lowRangeHz = clampFilterFrequencyForSampleRate(
+            apvts.getRawParameterValue("lowRange")->load(),
+            sampleRate,
+            20.0f,
+            10.0f);
+        params.highRangeHz = clampFilterFrequencyForSampleRate(
+            apvts.getRawParameterValue("highRange")->load(),
+            sampleRate,
+            20.0f,
+            10.0f);
+
+        if (params.highRangeHz < params.lowRangeHz + 20.0f)
+            params.highRangeHz = juce::jmin(
+                (float)(sampleRate * 0.45),
+                params.lowRangeHz + 20.0f);
+
+        const float detailNorm = juce::jlimit(0.0f, 1.0f, params.detailPercent * 0.01f);
+        currentQ = 1.15f + (std::pow(detailNorm, 1.35f) * 23.0f);
+        updateAnalysisFilters(false);
+    }
+
+    void process(juce::AudioBuffer<float> &buffer)
+    {
+        const int samples = buffer.getNumSamples();
+        if (samples <= 0)
+            return;
+
+        ensureCapacity(samples);
+        dryBuffer.makeCopyOf(buffer, true);
+        wetBuffer.makeCopyOf(buffer, true);
+
+        analyseInput(dryBuffer, samples);
+        updateReductionTargets(samples);
+        updateCutFilters(false);
+        applyDynamicCuts(wetBuffer, samples);
+        writeOutput(buffer, samples);
+        publishVisualFrame();
+    }
+
+    std::vector<float> getVisualFrame() const
+    {
+        std::vector<float> out;
+        out.reserve((size_t)kBandCount * 3);
+        const auto &freqs = bandFrequencies();
+        for (int i = 0; i < kBandCount; ++i)
+        {
+            out.push_back(freqs[(size_t)i]);
+            out.push_back(visualInputDb[(size_t)i].load(std::memory_order_relaxed));
+            out.push_back(visualReductionDb[(size_t)i].load(std::memory_order_relaxed));
+        }
+        return out;
+    }
+
+private:
+    static const std::array<float, kBandCount> &bandFrequencies()
+    {
+        static const std::array<float, kBandCount> freqs = []
+        {
+            std::array<float, kBandCount> values{};
+            const double minHz = 24.0;
+            const double maxHz = 20000.0;
+            const double minLog = std::log(minHz);
+            const double maxLog = std::log(maxHz);
+            for (int i = 0; i < kBandCount; ++i)
+            {
+                const double t = (double)i / (double)(kBandCount - 1);
+                values[(size_t)i] = (float)std::exp(minLog + ((maxLog - minLog) * t));
+            }
+            return values;
+        }();
+        return freqs;
+    }
+
+    static float smoothStep(float edge0, float edge1, float x)
+    {
+        if (edge0 == edge1)
+            return x >= edge1 ? 1.0f : 0.0f;
+        const float t = juce::jlimit(0.0f, 1.0f, (x - edge0) / (edge1 - edge0));
+        return t * t * (3.0f - (2.0f * t));
+    }
+
+    float rangeWeight(float frequencyHz) const
+    {
+        const float logFreq = std::log(juce::jmax(20.0f, frequencyHz));
+        const float low = std::log(juce::jmax(20.0f, params.lowRangeHz));
+        const float high = std::log(juce::jmax(params.lowRangeHz + 20.0f, params.highRangeHz));
+        const float edge = std::log(2.0f) * 0.45f;
+        const float lowFade = smoothStep(low - edge, low + edge, logFreq);
+        const float highFade = 1.0f - smoothStep(high - edge, high + edge, logFreq);
+        return juce::jlimit(0.0f, 1.0f, lowFade * highFade);
+    }
+
+    void ensureCapacity(int requiredSamples)
+    {
+        if (requiredSamples <= bufferSize)
+            return;
+        bufferSize = requiredSamples;
+        dryBuffer.setSize(numOutputs, bufferSize);
+        wetBuffer.setSize(numOutputs, bufferSize);
+    }
+
+    void updateAnalysisFilters(bool force)
+    {
+        const float analysisQ = juce::jlimit(0.45f, 16.0f, currentQ * 0.55f);
+        if (!force && std::abs(analysisQ - lastAnalysisQ) < 0.01f)
+            return;
+
+        const auto &freqs = bandFrequencies();
+        for (int band = 0; band < kBandCount; ++band)
+        {
+            const float frequency = clampFilterFrequencyForSampleRate(
+                freqs[(size_t)band],
+                sampleRate,
+                20.0f,
+                10.0f);
+            const auto coeffs = juce::IIRCoefficients::makeBandPass(
+                sampleRate,
+                frequency,
+                analysisQ);
+            for (int channel = 0; channel < numOutputs; ++channel)
+                analysisFilters[(size_t)band][(size_t)channel].setCoefficients(coeffs);
+        }
+        lastAnalysisQ = analysisQ;
+    }
+
+    void analyseInput(const juce::AudioBuffer<float> &buffer, int samples)
+    {
+        std::array<double, kBandCount> energy{};
+        const int channels = juce::jlimit(1, numOutputs, buffer.getNumChannels());
+        for (int sample = 0; sample < samples; ++sample)
+        {
+            for (int channel = 0; channel < channels; ++channel)
+            {
+                const float input = buffer.getReadPointer(channel)[sample];
+                for (int band = 0; band < kBandCount; ++band)
+                {
+                    const float filtered =
+                        analysisFilters[(size_t)band][(size_t)channel].processSingleSampleRaw(input);
+                    energy[(size_t)band] += (double)filtered * (double)filtered;
+                }
+            }
+        }
+
+        const float attackCoeff = timeCoeffForBlock(params.attackMs, samples);
+        const float releaseCoeff = timeCoeffForBlock(params.releaseMs, samples);
+        const double denom = (double)juce::jmax(1, samples * channels);
+        for (int band = 0; band < kBandCount; ++band)
+        {
+            const float level = (float)std::sqrt(energy[(size_t)band] / denom);
+            const float previous = bandEnvelope[(size_t)band];
+            const float coeff = level > previous ? attackCoeff : releaseCoeff;
+            bandEnvelope[(size_t)band] = level + (coeff * (previous - level));
+            bandInputDb[(size_t)band] =
+                juce::jlimit(-90.0f, 18.0f, juce::Decibels::gainToDecibels(
+                                               bandEnvelope[(size_t)band],
+                                               -90.0f));
+        }
+    }
+
+    float timeCoeffForBlock(float milliseconds, int samples) const
+    {
+        const float ms = juce::jmax(0.05f, milliseconds);
+        const float seconds = ms * 0.001f;
+        return std::exp(-(float)samples / (seconds * (float)sampleRate));
+    }
+
+    void updateReductionTargets(int samples)
+    {
+        const auto &freqs = bandFrequencies();
+        const float depthNorm = juce::jlimit(0.0f, 1.0f, params.depthPercent * 0.01f);
+        const float detailNorm = juce::jlimit(0.0f, 1.0f, params.detailPercent * 0.01f);
+        const float maxCutDb = juce::jlimit(0.0f, 40.0f, params.maxCutDb);
+        const float depthDb = maxCutDb * depthNorm;
+        const int radius = juce::jlimit(
+            1, 8,
+            (int)std::round(7.0f - (detailNorm * 5.0f)));
+        const float baseCoeff = timeCoeffForBlock(650.0f - (detailNorm * 360.0f), samples);
+        const float floorRiseCoeff = timeCoeffForBlock(1800.0f - (detailNorm * 1000.0f), samples);
+        const float floorFallCoeff = timeCoeffForBlock(90.0f, samples);
+
+        for (int band = 0; band < kBandCount; ++band)
+        {
+            const float inputDb = bandInputDb[(size_t)band];
+            const float previousBase = spectralBaseDb[(size_t)band];
+            spectralBaseDb[(size_t)band] = inputDb + (baseCoeff * (previousBase - inputDb));
+
+            const float previousFloor = noiseFloorDb[(size_t)band];
+            const float floorCoeff = inputDb < previousFloor ? floorFallCoeff : floorRiseCoeff;
+            noiseFloorDb[(size_t)band] = inputDb + (floorCoeff * (previousFloor - inputDb));
+
+            float localSum = 0.0f;
+            float weightSum = 0.0f;
+            for (int offset = -radius; offset <= radius; ++offset)
+            {
+                if (offset == 0)
+                    continue;
+                const int neighbor = band + offset;
+                if (neighbor < 0 || neighbor >= kBandCount)
+                    continue;
+                const float weight = 1.0f / (float)(1 + std::abs(offset));
+                localSum += bandInputDb[(size_t)neighbor] * weight;
+                weightSum += weight;
+            }
+            const float localDb = weightSum > 0.0f ? localSum / weightSum : inputDb;
+            const float localProminence = juce::jmax(0.0f, inputDb - localDb);
+            const float baseProminence = juce::jmax(0.0f, inputDb - spectralBaseDb[(size_t)band]);
+            const float noiseHeadroom = inputDb - noiseFloorDb[(size_t)band];
+            const float prominence = (localProminence * 0.72f) + (baseProminence * 0.28f);
+            const float prominenceThreshold = 1.1f + ((1.0f - detailNorm) * 6.1f);
+            const float detailWindow = 11.0f - (detailNorm * 5.0f);
+            const float signalGate =
+                smoothStep(-82.0f, -34.0f, inputDb) *
+                smoothStep(3.0f, 18.0f, noiseHeadroom);
+            const float softStrength =
+                smoothStep(prominenceThreshold, prominenceThreshold + detailWindow, prominence) *
+                signalGate;
+            const float hardThreshold = -46.0f + ((1.0f - depthNorm) * 18.0f);
+            const float hardLevelStrength = smoothStep(hardThreshold, hardThreshold + 28.0f, inputDb);
+            const float hardProminenceStrength =
+                smoothStep(prominenceThreshold * 0.58f,
+                           (prominenceThreshold * 0.58f) + (detailWindow * 0.75f),
+                           prominence);
+            const float hardStrength = juce::jlimit(
+                0.0f,
+                1.0f,
+                ((hardProminenceStrength * 0.70f) + (hardLevelStrength * 0.45f)) *
+                    signalGate);
+            const float resonanceStrength = params.modeIndex == 1
+                                                ? juce::jmax(softStrength, hardStrength)
+                                                : softStrength;
+            const float frequencyHz = freqs[(size_t)band];
+            const float harshBias =
+                juce::jlimit(0.72f,
+                             1.12f,
+                             0.78f +
+                                 (0.22f * smoothStep(650.0f, 4200.0f, frequencyHz)) +
+                                 (0.12f * smoothStep(4200.0f, 9500.0f, frequencyHz)));
+            const float targetReduction = juce::jmin(
+                maxCutDb,
+                depthDb * resonanceStrength * rangeWeight(frequencyHz) * harshBias);
+
+            const float previous = previousReductionDb[(size_t)band];
+            const float highSpeed = smoothStep(180.0f, 6200.0f, frequencyHz);
+            const float attackScale =
+                (1.32f - (0.62f * highSpeed)) *
+                (params.modeIndex == 0 ? (1.0f + (detailNorm * 0.45f)) : 1.0f);
+            const float releaseScale = 1.35f - (0.60f * highSpeed);
+            const float attackCoeff = timeCoeffForBlock(params.attackMs * attackScale, samples);
+            const float releaseCoeff = timeCoeffForBlock(params.releaseMs * releaseScale, samples);
+            const float coeff = targetReduction > previous ? attackCoeff : releaseCoeff;
+            const float smoothed = targetReduction + (coeff * (previous - targetReduction));
+            bandReductionDb[(size_t)band] = juce::jlimit(0.0f, maxCutDb, smoothed);
+            previousReductionDb[(size_t)band] = bandReductionDb[(size_t)band];
+        }
+    }
+
+    void updateCutFilters(bool force)
+    {
+        const auto &freqs = bandFrequencies();
+        if (!force && std::abs(currentQ - lastCutQ) < 0.01f)
+        {
+            bool anyChanged = false;
+            for (int band = 0; band < kBandCount; ++band)
+            {
+                if (std::abs(bandReductionDb[(size_t)band] - lastCutReductionDb[(size_t)band]) >= 0.03f)
+                {
+                    anyChanged = true;
+                    break;
+                }
+            }
+            if (!anyChanged)
+                return;
+        }
+
+        for (int band = 0; band < kBandCount; ++band)
+        {
+            const float frequency = clampFilterFrequencyForSampleRate(
+                freqs[(size_t)band],
+                sampleRate,
+                20.0f,
+                10.0f);
+            const float gain = juce::Decibels::decibelsToGain(-bandReductionDb[(size_t)band]);
+            const auto coeffs = juce::IIRCoefficients::makePeakFilter(
+                sampleRate,
+                frequency,
+                currentQ,
+                gain);
+            for (int channel = 0; channel < numOutputs; ++channel)
+                cutFilters[(size_t)band][(size_t)channel].setCoefficients(coeffs);
+            lastCutReductionDb[(size_t)band] = bandReductionDb[(size_t)band];
+        }
+        lastCutQ = currentQ;
+    }
+
+    void applyDynamicCuts(juce::AudioBuffer<float> &buffer, int samples)
+    {
+        const int channels = juce::jlimit(1, numOutputs, buffer.getNumChannels());
+        for (int band = 0; band < kBandCount; ++band)
+            for (int channel = 0; channel < channels; ++channel)
+                cutFilters[(size_t)band][(size_t)channel].processSamples(
+                    buffer.getWritePointer(channel),
+                    samples);
+    }
+
+    void writeOutput(juce::AudioBuffer<float> &buffer, int samples)
+    {
+        const int channels = juce::jlimit(1, numOutputs, buffer.getNumChannels());
+        const float mix = juce::jlimit(0.0f, 1.0f, params.mixPercent * 0.01f);
+        const float wetTrim = juce::Decibels::decibelsToGain(params.wetTrimDb);
+        const float outGain = juce::Decibels::decibelsToGain(params.outputGainDb);
+        for (int channel = 0; channel < channels; ++channel)
+        {
+            auto *out = buffer.getWritePointer(channel);
+            const auto *dry = dryBuffer.getReadPointer(channel);
+            const auto *wet = wetBuffer.getReadPointer(channel);
+            for (int sample = 0; sample < samples; ++sample)
+            {
+                const float wetSample = wet[sample] * wetTrim;
+                const float mixed = params.delta
+                                        ? dry[sample] - wetSample
+                                        : dry[sample] + ((wetSample - dry[sample]) * mix);
+                out[sample] = mixed * outGain;
+            }
+        }
+    }
+
+    void publishVisualFrame()
+    {
+        const float visualMix = params.delta ? 1.0f : juce::jlimit(0.0f, 1.0f, params.mixPercent * 0.01f);
+        for (int i = 0; i < kBandCount; ++i)
+        {
+            visualInputDb[(size_t)i].store(bandInputDb[(size_t)i], std::memory_order_relaxed);
+            visualReductionDb[(size_t)i].store(bandReductionDb[(size_t)i] * visualMix, std::memory_order_relaxed);
+        }
+    }
+
+    double sampleRate{44100.0};
+    int bufferSize{0};
+    float currentQ{6.0f};
+    float lastAnalysisQ{-1.0f};
+    float lastCutQ{-1.0f};
+    DynamicSoftenerParameters params;
+    juce::AudioBuffer<float> dryBuffer;
+    juce::AudioBuffer<float> wetBuffer;
+    std::array<float, kBandCount> bandEnvelope{};
+    std::array<float, kBandCount> bandInputDb{};
+    std::array<float, kBandCount> spectralBaseDb{};
+    std::array<float, kBandCount> noiseFloorDb{};
+    std::array<float, kBandCount> bandReductionDb{};
+    std::array<float, kBandCount> previousReductionDb{};
+    std::array<float, kBandCount> lastCutReductionDb{};
+    std::array<std::array<juce::IIRFilter, numOutputs>, kBandCount> analysisFilters;
+    std::array<std::array<juce::IIRFilter, numOutputs>, kBandCount> cutFilters;
+    std::array<std::atomic<float>, kBandCount> visualInputDb{};
+    std::array<std::atomic<float>, kBandCount> visualReductionDb{};
+};
+
+class DynamicSoftenerAudioProcessor : public juce::AudioProcessor
+{
+public:
+    DynamicSoftenerAudioProcessor();
+    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void reset() override;
+#ifndef JucePlugin_PreferredChannelConfigurations
+    bool isBusesLayoutSupported(const BusesLayout &layouts) const override;
+#endif
+    void processBlock(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+    void processBlockBypassed(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+    juce::AudioProcessorEditor *createEditor() override { return nullptr; }
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    bool isMidiEffect() const override { return false; }
+    void getStateInformation(juce::MemoryBlock &destData) override;
+    void setStateInformation(const void *data, int sizeInBytes) override;
+    std::vector<float> getVisualFrame() const { return softener.getVisualFrame(); }
+
+    ~DynamicSoftenerAudioProcessor() override = default;
+    const juce::String getName() const override { return "Dynamic Softener"; }
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String &) override {}
+    void releaseResources() override {}
+    bool hasEditor() const override { return false; }
+
+    juce::AudioProcessorValueTreeState parameters;
+
+private:
+    DynamicSoftenerModule softener;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DynamicSoftenerAudioProcessor)
+};
+
 // =====================
 // **** EQ 3-BAND ****
 // =====================
@@ -2441,6 +2910,310 @@ private:
     std::atomic<float> grDb{0.0f};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LimiterAudioProcessor)
+};
+
+// ****TRANSIENT SHAPER****
+
+struct TransientShaperParameters
+{
+    float attack = 0.0f;
+    float pump = 0.0f;
+    float sustain = 0.0f;
+    float speed = 65.0f;
+    bool clip = false;
+};
+
+class TransientShaperModule
+{
+public:
+    static constexpr int kVisualStride = 6;
+
+    void setParameters(const juce::AudioProcessorValueTreeState &apvts)
+    {
+        parameters.attack = juce::jlimit(
+            -100.0f,
+            100.0f,
+            apvts.getRawParameterValue("attack")->load());
+        parameters.pump = juce::jlimit(
+            0.0f,
+            100.0f,
+            apvts.getRawParameterValue("pump")->load());
+        parameters.sustain = juce::jlimit(
+            -100.0f,
+            100.0f,
+            apvts.getRawParameterValue("sustain")->load());
+        parameters.speed = juce::jlimit(
+            0.0f,
+            100.0f,
+            apvts.getRawParameterValue("speed")->load());
+        parameters.clip =
+            apvts.getRawParameterValue("clip")->load() >= 0.5f;
+    }
+
+    void prepare(double inputSampleRate, int maxBlockSize)
+    {
+        sampleRate = sanitiseEffectSampleRate(inputSampleRate);
+        bufferSize = juce::jmax(1, maxBlockSize);
+        visualHopSamples = juce::jlimit(
+            32,
+            256,
+            (int)std::round(sampleRate / 520.0));
+        updateCoefficients();
+        reset();
+    }
+
+    void reset()
+    {
+        fastEnvelope = 0.0f;
+        slowEnvelope = 0.0f;
+        pumpEnvelope = 0.0f;
+        visualSamples = 0;
+        visualInputPeak = 0.0f;
+        visualOutputPeak = 0.0f;
+        visualTransientPeak = 0.0f;
+        visualBodyPeak = 0.0f;
+        visualPumpPeak = 0.0f;
+        visualGainDbSum = 0.0f;
+        for (auto &frame : visualRing)
+            frame.fill(0.0f);
+        visualWritePos.store(0, std::memory_order_release);
+    }
+
+    void process(juce::AudioBuffer<float> &buffer)
+    {
+        const int numSamples = buffer.getNumSamples();
+        const int channels = juce::jmin(numOutputs, buffer.getNumChannels());
+        if (numSamples <= 0 || channels <= 0)
+            return;
+
+        updateCoefficients();
+
+        for (int sample = 0; sample < numSamples; ++sample)
+        {
+            float inputAbs = 0.0f;
+            for (int ch = 0; ch < channels; ++ch)
+                inputAbs = juce::jmax(inputAbs, std::abs(buffer.getSample(ch, sample)));
+
+            fastEnvelope = followEnvelope(
+                inputAbs,
+                fastEnvelope,
+                fastAttackCoeff,
+                fastReleaseCoeff);
+            slowEnvelope = followEnvelope(
+                inputAbs,
+                slowEnvelope,
+                slowAttackCoeff,
+                slowReleaseCoeff);
+
+            const float fastDb = juce::Decibels::gainToDecibels(
+                juce::jmax(fastEnvelope, 1.0e-5f),
+                -100.0f);
+            const float slowDb = juce::Decibels::gainToDecibels(
+                juce::jmax(slowEnvelope, 1.0e-5f),
+                -100.0f);
+            const float transient = juce::jlimit(
+                0.0f,
+                1.0f,
+                (fastDb - slowDb) / 18.0f);
+
+            if (transient > pumpEnvelope)
+                pumpEnvelope = transient;
+            else
+                pumpEnvelope *= pumpReleaseCoeff;
+
+            const float bodyPresence =
+                slowEnvelope / (slowEnvelope + 0.08f);
+            const float body = juce::jlimit(
+                0.0f,
+                1.0f,
+                bodyPresence * (1.0f - transient * 0.82f));
+
+            const float attackDb = (parameters.attack * 0.01f) * 15.0f * transient;
+            const float sustainDb = (parameters.sustain * 0.01f) * 15.0f * body;
+            const float pumpDb = -(parameters.pump * 0.01f) * 15.0f * pumpEnvelope;
+            const float gainDb = juce::jlimit(-36.0f, 24.0f, attackDb + sustainDb + pumpDb);
+            const float gain = juce::Decibels::decibelsToGain(gainDb);
+
+            float outputAbs = 0.0f;
+            for (int ch = 0; ch < channels; ++ch)
+            {
+                float value = buffer.getSample(ch, sample) * gain;
+                if (parameters.clip)
+                    value = juce::jlimit(-1.0f, 1.0f, value);
+                buffer.setSample(ch, sample, value);
+                outputAbs = juce::jmax(outputAbs, std::abs(value));
+            }
+
+            pushVisualSample(inputAbs, outputAbs, transient, body, pumpEnvelope, gainDb);
+        }
+    }
+
+    std::vector<float> getRecentVisual(int pointCount) const
+    {
+        const int count = juce::jlimit(32, kVisualRingSize, pointCount);
+        std::vector<float> out((size_t)(count * kVisualStride), 0.0f);
+
+        const int writePos = visualWritePos.load(std::memory_order_acquire);
+        int readPos = writePos - count;
+        while (readPos < 0)
+            readPos += kVisualRingSize;
+
+        for (int i = 0; i < count; ++i)
+        {
+            const auto &frame = visualRing[(size_t)readPos];
+            for (int j = 0; j < kVisualStride; ++j)
+                out[(size_t)(i * kVisualStride + j)] = frame[(size_t)j];
+            readPos = (readPos + 1) % kVisualRingSize;
+        }
+
+        return out;
+    }
+
+private:
+    static constexpr int kVisualRingSize = 1024;
+
+    static float makeCoeff(float milliseconds, double sr)
+    {
+        const float safeMs = juce::jmax(0.05f, milliseconds);
+        return std::exp(-1.0f / (safeMs * 0.001f * (float)sr));
+    }
+
+    static float followEnvelope(float input,
+                                float envelope,
+                                float attackCoeff,
+                                float releaseCoeff)
+    {
+        const float coeff = input > envelope ? attackCoeff : releaseCoeff;
+        return input + coeff * (envelope - input);
+    }
+
+    void updateCoefficients()
+    {
+        const float speed = juce::jlimit(0.0f, 1.0f, parameters.speed * 0.01f);
+        const float fastAttackMs = 6.0f - speed * 5.65f;
+        const float fastReleaseMs = 110.0f - speed * 86.0f;
+        const float slowAttackMs = 85.0f - speed * 68.0f;
+        const float slowReleaseMs = 520.0f - speed * 360.0f;
+        const float pumpReleaseMs = 280.0f - speed * 205.0f;
+
+        fastAttackCoeff = makeCoeff(fastAttackMs, sampleRate);
+        fastReleaseCoeff = makeCoeff(fastReleaseMs, sampleRate);
+        slowAttackCoeff = makeCoeff(slowAttackMs, sampleRate);
+        slowReleaseCoeff = makeCoeff(slowReleaseMs, sampleRate);
+        pumpReleaseCoeff = makeCoeff(pumpReleaseMs, sampleRate);
+    }
+
+    void pushVisualSample(float input,
+                          float output,
+                          float transient,
+                          float body,
+                          float pump,
+                          float gainDb)
+    {
+        visualInputPeak = juce::jmax(visualInputPeak, juce::jlimit(0.0f, 1.5f, input));
+        visualOutputPeak = juce::jmax(visualOutputPeak, juce::jlimit(0.0f, 1.5f, output));
+        visualTransientPeak = juce::jmax(visualTransientPeak, transient);
+        visualBodyPeak = juce::jmax(visualBodyPeak, body);
+        visualPumpPeak = juce::jmax(visualPumpPeak, pump);
+        visualGainDbSum += gainDb;
+        ++visualSamples;
+
+        if (visualSamples < visualHopSamples)
+            return;
+
+        const float inv = 1.0f / (float)juce::jmax(1, visualSamples);
+        std::array<float, kVisualStride> frame{
+            juce::jlimit(0.0f, 1.0f, visualInputPeak),
+            juce::jlimit(0.0f, 1.0f, visualOutputPeak),
+            juce::jlimit(0.0f, 1.0f, visualTransientPeak),
+            juce::jlimit(0.0f, 1.0f, visualBodyPeak),
+            juce::jlimit(0.0f, 1.0f, visualPumpPeak),
+            juce::jlimit(-1.0f, 1.0f, (visualGainDbSum * inv) / 24.0f),
+        };
+
+        int writePos = visualWritePos.load(std::memory_order_relaxed);
+        visualRing[(size_t)writePos] = frame;
+        writePos = (writePos + 1) % kVisualRingSize;
+        visualWritePos.store(writePos, std::memory_order_release);
+
+        visualSamples = 0;
+        visualInputPeak = 0.0f;
+        visualOutputPeak = 0.0f;
+        visualTransientPeak = 0.0f;
+        visualBodyPeak = 0.0f;
+        visualPumpPeak = 0.0f;
+        visualGainDbSum = 0.0f;
+    }
+
+    double sampleRate = 44100.0;
+    int bufferSize = 0;
+    int visualHopSamples = 85;
+
+    TransientShaperParameters parameters;
+    float fastEnvelope = 0.0f;
+    float slowEnvelope = 0.0f;
+    float pumpEnvelope = 0.0f;
+    float fastAttackCoeff = 0.0f;
+    float fastReleaseCoeff = 0.0f;
+    float slowAttackCoeff = 0.0f;
+    float slowReleaseCoeff = 0.0f;
+    float pumpReleaseCoeff = 0.0f;
+
+    int visualSamples = 0;
+    float visualInputPeak = 0.0f;
+    float visualOutputPeak = 0.0f;
+    float visualTransientPeak = 0.0f;
+    float visualBodyPeak = 0.0f;
+    float visualPumpPeak = 0.0f;
+    float visualGainDbSum = 0.0f;
+    std::array<std::array<float, kVisualStride>, kVisualRingSize> visualRing{};
+    std::atomic<int> visualWritePos{0};
+};
+
+class TransientShaperAudioProcessor : public juce::AudioProcessor
+{
+public:
+    TransientShaperAudioProcessor();
+
+    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void reset() override;
+    void processBlock(juce::AudioBuffer<float> &, juce::MidiBuffer &) override;
+
+#ifndef JucePlugin_PreferredChannelConfigurations
+    bool isBusesLayoutSupported(const BusesLayout &layouts) const override;
+#endif
+
+    juce::AudioProcessorEditor *createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    bool isMidiEffect() const override { return false; }
+
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String &) override {}
+    void releaseResources() override {}
+
+    void getStateInformation(juce::MemoryBlock &destData) override;
+    void setStateInformation(const void *data, int sizeInBytes) override;
+
+    const juce::String getName() const override { return "Transient Shaper"; }
+
+    std::vector<float> getRecentVisual(int pointCount) const
+    {
+        return shaper.getRecentVisual(pointCount);
+    }
+
+    juce::AudioProcessorValueTreeState parameters;
+
+private:
+    TransientShaperModule shaper;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TransientShaperAudioProcessor)
 };
 
 // ****CLIPPER****

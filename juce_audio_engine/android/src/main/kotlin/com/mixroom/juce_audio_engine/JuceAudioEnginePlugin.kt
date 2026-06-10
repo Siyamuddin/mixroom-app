@@ -770,6 +770,25 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             )
           }
         }
+        "renderPitchLabAudio" -> {
+          runHeavyTask("renderPitchLabAudio", result) {
+            @Suppress("UNCHECKED_CAST")
+            val suppressed =
+              args["suppressedRanges"] as? List<Map<String, Any>> ?: emptyList()
+            @Suppress("UNCHECKED_CAST")
+            val segments = args["segments"] as? List<Map<String, Any>> ?: emptyList()
+            JuceBridge.renderPitchLabAudioJNI(
+              args.stringValue("sourcePath"),
+              args.stringValue("outPath"),
+              args.doubleValue("trimStartMs", 0.0),
+              args.doubleValue("trimEndMs", 0.0),
+              args.doubleValue("sourceTimelineDurationMs", 0.0),
+              args.doubleValue("outputDurationMs", 0.0),
+              suppressed,
+              segments,
+            )
+          }
+        }
         "bypassPlugin" -> {
           JuceBridge.bypassPluginJNI(
             args.intValue("track"),
@@ -1302,6 +1321,38 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         "getMasterShaperPreview" -> {
           result.success(
             JuceBridge.getMasterShaperPreviewJNI(
+              args.intValue("effect"),
+              args.intValue("pointCount", 192),
+            ).toList(),
+          )
+        }
+        "getRowDynamicSoftenerFrame" -> {
+          result.success(
+            JuceBridge.getRowDynamicSoftenerFrameJNI(
+              args.intValue("row"),
+              args.intValue("effect"),
+            ).toList(),
+          )
+        }
+        "getMasterDynamicSoftenerFrame" -> {
+          result.success(
+            JuceBridge.getMasterDynamicSoftenerFrameJNI(
+              args.intValue("effect"),
+            ).toList(),
+          )
+        }
+        "getRowTransientShaperVisual" -> {
+          result.success(
+            JuceBridge.getRowTransientShaperVisualJNI(
+              args.intValue("row"),
+              args.intValue("effect"),
+              args.intValue("pointCount", 192),
+            ).toList(),
+          )
+        }
+        "getMasterTransientShaperVisual" -> {
+          result.success(
+            JuceBridge.getMasterTransientShaperVisualJNI(
               args.intValue("effect"),
               args.intValue("pointCount", 192),
             ).toList(),

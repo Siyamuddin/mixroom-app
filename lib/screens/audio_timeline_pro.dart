@@ -149,51 +149,21 @@ class _AutomationClipClipboardEntry {
 }
 
 class _AutomationPointsClipboardEntry {
-  final _AutomationValueKind kind;
-  final String signature;
-  final bool clipRelative;
   final List<AutomationPoint> points;
 
   const _AutomationPointsClipboardEntry({
-    required this.kind,
-    required this.signature,
-    required this.clipRelative,
     required this.points,
   });
-
-  bool isCompatibleWith(
-    _AutomationValueFormatter formatter, {
-    required bool expectClipRelative,
-  }) {
-    if (kind != formatter.valueKind) return false;
-    if (clipRelative != expectClipRelative) return false;
-    if (kind == _AutomationValueKind.generic) {
-      return signature == formatter.signature;
-    }
-    return true;
-  }
 }
 
 class _AutomationAreaClipboardEntry {
-  final _AutomationValueKind kind;
-  final String signature;
   final double durationMs;
   final List<AutomationPoint> relativePoints;
 
   const _AutomationAreaClipboardEntry({
-    required this.kind,
-    required this.signature,
     required this.durationMs,
     required this.relativePoints,
   });
-
-  bool isCompatibleWith(_AutomationValueFormatter formatter) {
-    if (kind != formatter.valueKind) return false;
-    if (kind == _AutomationValueKind.generic) {
-      return signature == formatter.signature;
-    }
-    return true;
-  }
 }
 
 enum _TimelineTool {
@@ -467,6 +437,7 @@ class AudioCanvasTimeline extends StatefulWidget {
   final Future<void> Function(int clipIndex)
       onDetectClipTempoAndSetProjectTempo;
   final Future<void> Function(int clipIndex)? onOpenClipWarpEditor;
+  final Future<void> Function(int clipIndex)? onOpenPitchLab;
   final void Function(int clipIndex, double newTimelineDurationMs,
       {double? newStartMs}) onStretchClip;
   final Future<void> Function(int clipIndex) onStretchClipCommit;
@@ -631,6 +602,7 @@ class AudioCanvasTimeline extends StatefulWidget {
     required this.onStretchClipToTempoPreservePitch,
     required this.onDetectClipTempoAndSetProjectTempo,
     this.onOpenClipWarpEditor,
+    this.onOpenPitchLab,
     required this.onStretchClip,
     required this.onStretchClipCommit,
     this.onRenameClip,
@@ -994,6 +966,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   Offset? _dragStartLocalOffset; // Local position where drag started
   Offset?
       _dragStartGlobalOffset; // === FIX ===: Added for total vertical displacement tracking
+  int? _timelineKeyboardModifierPointer;
 
   // Trim state
   int? _trimClipIndex;
@@ -1044,6 +1017,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   String? _automationClipMenuClipId;
   int? _automationEditorRow;
   String? _automationEditorTargetId;
+  int? _automationTargetPickerRow;
   _AutomationClipClipboardEntry? _automationClipClipboard;
   static _AutomationPointsClipboardEntry? _automationPointsClipboard;
   static _AutomationAreaClipboardEntry? _automationAreaClipboard;
@@ -1183,6 +1157,19 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _automationClipDragMode != null;
 
   bool get _timelineHasMultiTouch => _activeTimelinePointers.length > 1;
+
+  bool get _timelineClipDragSnapEnabled =>
+      _magnetEnabled &&
+      !(_timelineKeyboardModifierPointer != null &&
+          HardwareKeyboard.instance.isAltPressed);
+
+  double _quantizeMsForTimelineClipDrag(double rawMs) {
+    return _timelineClipDragSnapEnabled ? _quantizeMs(rawMs) : rawMs;
+  }
+
+  double _segmentStartMsForTimelineClipDrag(double rawMs) {
+    return _timelineClipDragSnapEnabled ? _segmentStartMsForTap(rawMs) : rawMs;
+  }
 
   bool _isInstrumentLane(int row) {
     return row >= 0 &&
@@ -1473,6 +1460,13 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final desktopSelectionModifierPressed =
         Platform.isMacOS ? keyboard.isMetaPressed : keyboard.isControlPressed;
     final desktopPrimaryPointer = _isDesktopPrimaryTimelinePointer(event);
+    final keyboardModifierDragPointer =
+        (event.kind == PointerDeviceKind.mouse ||
+                event.kind == PointerDeviceKind.trackpad) &&
+            event.buttons == kPrimaryMouseButton;
+    if (keyboardModifierDragPointer) {
+      _timelineKeyboardModifierPointer = event.pointer;
+    }
     if (_isDesktopSecondaryTimelinePointer(event)) {
       if (keyboard.isAltPressed) {
         unawaited(
@@ -1538,6 +1532,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         if (snapshot != null) {
           _restoreGestureSelectionSnapshot(snapshot);
         }
+        _timelineKeyboardModifierPointer = null;
         _clearPendingClipTapState();
         _clearPendingAutomationClipSelection();
         _clearAutomationClipMenu();
@@ -1735,6 +1730,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         _selectionBoxActive = false;
         _selectionBoxStart = null;
         _selectionBoxCurrent = null;
+        _timelineKeyboardModifierPointer = null;
         _suppressImmediateTapAfterSelectionBox();
       });
       return;
@@ -1802,6 +1798,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   void _onTimelinePointerCancel(PointerCancelEvent event) {
     _onDeadZonePointerCancel(event);
     _activeTimelinePointers.remove(event.pointer);
+    if (_timelineKeyboardModifierPointer == event.pointer) {
+      _timelineKeyboardModifierPointer = null;
+    }
     if (_clipLoopPreviewPointer == event.pointer) {
       _stopClipLoopPreview();
       return;
@@ -2563,6 +2562,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _expandedTab[row] = _normalizeExpandedTab(2);
       _automationEditorRow = row;
       _automationEditorTargetId = resolvedTargetId;
+      _automationTargetPickerRow = null;
     });
     for (int i = 0; i < oldExpanded.length && i < _rowExpanded.length; i++) {
       if (oldExpanded[i] != _rowExpanded[i]) {
@@ -2602,6 +2602,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     } else if (_automationEditorRow == row) {
       _automationEditorRow = null;
       _automationEditorTargetId = null;
+    }
+    if (normalizedTab != 2 || _automationTargetPickerRow != row) {
+      _automationTargetPickerRow = null;
     }
     _expandedTab[row] = normalizedTab;
     if (normalizedTab != 2 && _automationRangeSelectionRow == row) {
@@ -2681,6 +2684,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _expandedTab[row] = _normalizeExpandedTab(2);
     _automationEditorRow = row;
     _automationEditorTargetId = resolvedTargetId;
+    _automationTargetPickerRow = null;
   }
 
   void _closeAutomationEditor() {
@@ -2694,6 +2698,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       }
       _automationEditorRow = null;
       _automationEditorTargetId = null;
+      _automationTargetPickerRow = null;
     });
   }
 
@@ -2878,28 +2883,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       labels[id] = label.isEmpty ? id : label;
     }
     return labels;
-  }
-
-  Color _automationColorForTarget(
-    String targetId, {
-    bool isOrphan = false,
-  }) {
-    if (isOrphan) {
-      return const Color(0xFFD25C68);
-    }
-    const palette = <Color>[
-      Color(0xFF4D8DF0),
-      Color(0xFF42B985),
-      Color(0xFFE19A44),
-      Color(0xFF58B9CF),
-      Color(0xFFD36D61),
-      Color(0xFF89B45B),
-    ];
-    var hash = 0;
-    for (final rune in targetId.runes) {
-      hash = ((hash * 31) + rune) & 0x7fffffff;
-    }
-    return palette[hash % palette.length];
   }
 
   List<_TimelineAutomationClipVisual> _timelineAutomationClipVisuals() {
@@ -3851,6 +3834,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       if (normalizedTab != 2) {
         _automationEditorRow = null;
         _automationEditorTargetId = null;
+        _automationTargetPickerRow = null;
       }
     });
     for (int i = 0; i < oldExpanded.length && i < _rowExpanded.length; i++) {
@@ -3872,6 +3856,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       }
       _automationEditorRow = null;
       _automationEditorTargetId = null;
+      _automationTargetPickerRow = null;
     });
     for (int i = 0; i < oldExpanded.length && i < _rowExpanded.length; i++) {
       if (oldExpanded[i] != _rowExpanded[i]) {
@@ -3894,6 +3879,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
     if (_selectedRowIndex >= _rowCount) {
       _selectedRowIndex = _rowCount == 0 ? -1 : _rowCount - 1;
+    }
+    if (_automationTargetPickerRow != null &&
+        (_automationTargetPickerRow! < 0 ||
+            _automationTargetPickerRow! >= _rowCount)) {
+      _automationTargetPickerRow = null;
     }
     _extraAutomationTimelineLanesByRow
         .removeWhere((row, _) => row < 0 || row >= _rowCount);
@@ -4081,10 +4071,33 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
   }
 
-  double _automationLaneLocalY(double volume, double laneHeight) {
+  _AutomationValueFormatter _automationValueFormatterForTarget(
+    int row,
+    String targetId,
+  ) {
+    final targetMeta = _automationTargetMetaById(row, targetId);
+    final targetLabel = (targetMeta?['label'] ?? targetId).toString().trim();
+    final targetParamId =
+        (targetMeta?['paramId'] ?? targetId).toString().trim();
+    return _AutomationValueFormatter(
+      targetLabel: targetLabel.isEmpty ? targetId : targetLabel,
+      targetParamId: targetParamId.isEmpty ? targetId : targetParamId,
+      targetMin: (targetMeta?['min'] as num?)?.toDouble() ?? 0.0,
+      targetMax: (targetMeta?['max'] as num?)?.toDouble() ?? 1.0,
+      isVolumeLane: targetMeta?['isVolume'] == true || targetId == 'volume',
+    );
+  }
+
+  double _automationLaneLocalY(
+    double volume,
+    double laneHeight, {
+    _AutomationValueFormatter? formatter,
+  }) {
     const verticalPadding = 12.0;
     final usable = laneHeight - verticalPadding * 2;
-    return verticalPadding + (1 - volume) * usable;
+    final displayVolume =
+        formatter?.displayNormalizedForStoredNormalized(volume) ?? volume;
+    return verticalPadding + (1 - displayVolume) * usable;
   }
 
   bool _isAutomationLaneTabForRow(int row) {
@@ -4930,9 +4943,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
     if (mode == 'move') {
       var nextStart = origin.startMs + deltaMs;
-      if (_magnetEnabled) {
-        nextStart = _segmentStartMsForTap(nextStart);
-      }
+      nextStart = _segmentStartMsForTimelineClipDrag(nextStart);
       nextStart = math.max(0.0, nextStart).toDouble();
       final hoveredRow = _rowForLocalY(localPos.dy);
       final nextRow =
@@ -4946,9 +4957,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       );
     } else if (mode == 'trim_end') {
       var nextEndMs = origin.startMs + origin.lengthMs + deltaMs;
-      if (_magnetEnabled) {
-        nextEndMs = _segmentStartMsForTap(nextEndMs);
-      }
+      nextEndMs = _segmentStartMsForTimelineClipDrag(nextEndMs);
       final minEndMs = origin.startMs + _kAutomationClipMinLengthMs;
       nextEndMs = nextEndMs.clamp(minEndMs, _maxDurationMs).toDouble();
       final nextLength = (nextEndMs - origin.startMs)
@@ -4957,9 +4966,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       current[index] = origin.copyWith(lengthMs: nextLength);
     } else if (mode == 'trim_start') {
       var nextStart = origin.startMs + deltaMs;
-      if (_magnetEnabled) {
-        nextStart = _segmentStartMsForTap(nextStart);
-      }
+      nextStart = _segmentStartMsForTimelineClipDrag(nextStart);
       final maxStart =
           origin.startMs + origin.lengthMs - _kAutomationClipMinLengthMs;
       nextStart = nextStart.clamp(0.0, maxStart).toDouble();
@@ -5030,12 +5037,24 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       final px = (p.x - _scrollOffsetMs) * _pixelsPerMs;
 
       // compute LANE-local py
-      final py = _automationLaneLocalY(p.volume, laneHeight);
+      final formatter = _automationValueFormatterForTarget(
+        row,
+        _activeAutomationTargetIdForRow(row),
+      );
+      final py = _automationLaneLocalY(
+        p.volume,
+        laneHeight,
+        formatter: formatter,
+      );
 
       if ((pos - Offset(px, py)).distance < 20) {
         // compute the offset between finger and point Y
         final p = lane[i];
-        final py = _automationLaneLocalY(p.volume, laneHeight);
+        final py = _automationLaneLocalY(
+          p.volume,
+          laneHeight,
+          formatter: formatter,
+        );
         setState(() {
           _interactionMode = 'automation';
           _isUserInteracting = true;
@@ -5055,6 +5074,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (_automationDragIndex == null) return;
     if (!_isAutomationLaneTabForRow(row)) return;
     final targetId = _activeAutomationTargetIdForRow(row);
+    final formatter = _automationValueFormatterForTarget(row, targetId);
 
     final points =
         List<AutomationPoint>.from(_activeAutomationPointsForRow(row));
@@ -5101,9 +5121,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final effectiveFingerY = pos.dy - (_automationFingerOffsetY ?? 0.0);
 
     // map finger Y → volume
-    final normalized =
+    final displayNormalized =
         1 - ((effectiveFingerY - verticalPadding) / usableHeight);
-    p.volume = normalized.clamp(0.0, 1.0);
+    p.volume = formatter.storedNormalizedForDisplayNormalized(
+      displayNormalized.clamp(0.0, 1.0).toDouble(),
+    );
 
     if (_magnetEnabled && targetId == 'volume') {
       if ((p.volume - 0.75).abs() < 0.03) {
@@ -6012,6 +6034,18 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                       if (mounted) setState(() {});
                                     },
                                   ),
+                                if (widget.onOpenPitchLab != null)
+                                  _buildInlineClipActionPill(
+                                    icon: Icons.graphic_eq_rounded,
+                                    label: L10n.translate(context, 'Pitch Lab'),
+                                    color: const Color(0xFF8BE7C8),
+                                    compact: compactSheet,
+                                    onTap: () async {
+                                      _closeInlineClipControl();
+                                      await widget.onOpenPitchLab!(clipIndex);
+                                      if (mounted) setState(() {});
+                                    },
+                                  ),
                                 if (widget.onStemSeparation != null)
                                   _buildInlineClipActionPill(
                                     icon: Icons.library_music_outlined,
@@ -6434,6 +6468,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         singleSelectionIndex >= 0 &&
         singleSelectionIndex < widget.clips.length &&
         !widget.clips[singleSelectionIndex].isMidi;
+    final canOpenPitchLab = hasSingleSelection &&
+        widget.onOpenPitchLab != null &&
+        singleSelectionIndex >= 0 &&
+        singleSelectionIndex < widget.clips.length &&
+        !widget.clips[singleSelectionIndex].isMidi;
     final canReplaceSamplerSource = hasSingleSelection &&
         widget.onReplaceSamplerSource != null &&
         singleSelectionIndex >= 0 &&
@@ -6453,6 +6492,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final int popupActionCount =
         (hasSingleSelection ? (canSplitAtPlayhead ? 5 : 4) : 3) +
             (canGlueSelection ? 1 : 0) +
+            (canOpenPitchLab ? 1 : 0) +
             (canCreateSampler ? 1 : 0) +
             (canReplaceSamplerSource ? 1 : 0);
     final double popupWidth = math.min(
@@ -6592,6 +6632,24 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
               await onCreateSamplerFromClip(singleSelectionIndex);
             },
             tooltip: L10n.translate(context, 'Create sampler'),
+          ),
+        ),
+      ]);
+    }
+    if (canOpenPitchLab) {
+      popupChildren.addAll(<Widget>[
+        Container(width: 1, height: 16, color: Colors.white24),
+        Expanded(
+          child: _buildClipPopupAction(
+            key: const ValueKey('selected_clip_popup_pitch_lab'),
+            icon: Icons.graphic_eq_rounded,
+            color: const Color(0xFF8BE7C8),
+            onTap: () async {
+              final onOpenPitchLab = widget.onOpenPitchLab;
+              if (onOpenPitchLab == null) return;
+              await onOpenPitchLab(singleSelectionIndex);
+            },
+            tooltip: L10n.translate(context, 'Pitch Lab'),
           ),
         ),
       ]);
@@ -7502,7 +7560,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
               child: FittedBox(
                 fit: BoxFit.scaleDown,
                 child: Text(
-                  label,
+                  L10n.translate(context, label),
                   maxLines: 1, // Never wrap
                   overflow: TextOverflow.visible, // No ellipsis
                   softWrap: false, // NEVER wrap to next line
@@ -7800,18 +7858,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       targetMax: targetMax,
       isVolumeLane: isVolumeTarget,
     );
-    final bool clipboardMatchesSelection =
-        _automationPointsClipboard?.isCompatibleWith(
-              formatter,
-              expectClipRelative: false,
-            ) ??
-            false;
-    final bool areaClipboardMatchesSelection =
-        _automationAreaClipboard?.isCompatibleWith(formatter) ?? false;
-    final accentColor = _automationColorForTarget(
-      activeTargetId,
-      isOrphan: isOrphanTarget,
-    );
     final targetDisplayTitle = targetFullLabel.isEmpty
         ? (targetLabel.isEmpty ? activeTargetId : targetLabel)
         : targetFullLabel;
@@ -7849,6 +7895,29 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         }
       }
       return false;
+    }
+
+    String automationTargetLabel(Map<String, dynamic> target) {
+      final id = (target['id'] ?? '').toString().trim();
+      final rawLabel =
+          (target['fullLabel'] ?? target['label'] ?? id).toString().trim();
+      final label = rawLabel.isEmpty ? id : rawLabel;
+      return L10n.translate(context, label);
+    }
+
+    void selectAutomationTarget(String nextTargetId) {
+      if (nextTargetId.trim().isEmpty) return;
+      setState(() {
+        final resolved = _resolveAutomationTabTargetId(row, nextTargetId);
+        if (_isAutomationRangeSelectionModeFor(row, activeTargetId) &&
+            resolved != activeTargetId) {
+          _clearAutomationRangeSelectionMode();
+        }
+        widget.setSelectedAutomationTargetId(row, resolved);
+        _automationEditorRow = row;
+        _automationEditorTargetId = resolved;
+        _automationTargetPickerRow = null;
+      });
     }
 
     double? laneHighlightStartMs;
@@ -7907,10 +7976,16 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         startMs: safeStart.toDouble(),
         endMs: safeEnd.toDouble(),
         relativeToStart: true,
-      );
+      )
+          .map(
+            (point) => AutomationPoint(
+              x: point.x,
+              volume:
+                  formatter.displayNormalizedForStoredNormalized(point.volume),
+            ),
+          )
+          .toList(growable: false);
       _automationAreaClipboard = _AutomationAreaClipboardEntry(
-        kind: formatter.valueKind,
-        signature: formatter.signature,
         durationMs: safeEnd - safeStart,
         relativePoints: copiedRelative,
       );
@@ -7923,12 +7998,16 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
 
     void copyAllAutomationPoints() {
-      final copiedPoints =
-          lanePoints.map((point) => point.copy()).toList(growable: false);
+      final copiedPoints = lanePoints
+          .map(
+            (point) => AutomationPoint(
+              x: point.x,
+              volume:
+                  formatter.displayNormalizedForStoredNormalized(point.volume),
+            ),
+          )
+          .toList(growable: false);
       _automationPointsClipboard = _AutomationPointsClipboardEntry(
-        kind: formatter.valueKind,
-        signature: formatter.signature,
-        clipRelative: false,
         points: copiedPoints,
       );
       ScaffoldMessenger.of(context)
@@ -7944,15 +8023,21 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
     void pasteAllAutomationPoints() {
       final clipboard = _automationPointsClipboard;
-      if (clipboard == null ||
-          !clipboardMatchesSelection ||
-          clipboard.points.isEmpty) {
+      if (clipboard == null || clipboard.points.isEmpty) {
         return;
       }
       final before =
           lanePoints.map((point) => point.copy()).toList(growable: false);
-      final copiedAfter =
-          clipboard.points.map((point) => point.copy()).toList(growable: false);
+      final copiedAfter = clipboard.points
+          .map(
+            (point) => AutomationPoint(
+              x: point.x,
+              volume: formatter.storedNormalizedForDisplayNormalized(
+                point.volume,
+              ),
+            ),
+          )
+          .toList(growable: false);
       _commitAutomationPointsForTarget(
           row, activeTargetId, before, copiedAfter);
       setState(() {});
@@ -8059,7 +8144,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     void pasteAutomationAreaAtPlayhead() {
       final clipboard = _automationAreaClipboard;
       if (clipboard == null ||
-          !areaClipboardMatchesSelection ||
           clipboard.relativePoints.isEmpty ||
           clipboard.durationMs <= 0.0) {
         return;
@@ -8079,8 +8163,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         relativeToStart: true,
       );
       final pastedPoints = relativeSlice
-          .map((point) =>
-              AutomationPoint(x: startMs + point.x, volume: point.volume))
+          .map(
+            (point) => AutomationPoint(
+              x: startMs + point.x,
+              volume: formatter.storedNormalizedForDisplayNormalized(
+                point.volume,
+              ),
+            ),
+          )
           .toList(growable: false);
       final before =
           lanePoints.map((point) => point.copy()).toList(growable: false);
@@ -8367,107 +8457,289 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                     ],
                   ),
                   const SizedBox(height: 7),
-                  Container(
-                    height: 36,
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    decoration: BoxDecoration(
-                      color: _kTimelineShellFill,
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.12),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.tune_rounded,
-                          size: 14,
-                          color: accentColor.withValues(alpha: 0.85),
-                        ),
-                        const SizedBox(width: 7),
-                        Expanded(
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<String>(
-                              value: activeTargetId,
-                              isExpanded: true,
-                              dropdownColor: kMixroomGlassDropdownMenuColor,
-                              iconEnabledColor: _kTimelineShellMutedText,
-                              style: const TextStyle(
-                                fontFamily: 'Pretendard',
-                                color: _kTimelineShellText,
-                                fontSize: 11.6,
-                                fontWeight: FontWeight.w600,
-                              ),
-                              onChanged: (nextTargetId) {
-                                if (nextTargetId == null ||
-                                    nextTargetId.trim().isEmpty) {
-                                  return;
-                                }
-                                setState(() {
-                                  final resolved =
-                                      _resolveAutomationTabTargetId(
-                                    row,
-                                    nextTargetId,
-                                  );
-                                  if (_isAutomationRangeSelectionModeFor(
-                                        row,
-                                        activeTargetId,
-                                      ) &&
-                                      resolved != activeTargetId) {
-                                    _clearAutomationRangeSelectionMode();
-                                  }
-                                  widget.setSelectedAutomationTargetId(
-                                    row,
-                                    resolved,
-                                  );
-                                  _automationEditorRow = row;
-                                  _automationEditorTargetId = resolved;
-                                });
-                              },
-                              items: availableTargets.map((target) {
-                                final id =
-                                    (target['id'] ?? '').toString().trim();
-                                final fullLabel = (target['fullLabel'] ??
-                                        target['label'] ??
-                                        id)
-                                    .toString()
-                                    .trim();
-                                final label =
-                                    fullLabel.isEmpty ? id : fullLabel;
-                                final hasAutomationData =
-                                    hasAutomationDataForTarget(target);
-                                return DropdownMenuItem<String>(
-                                  value: id,
-                                  child: Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          label,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                      if (hasAutomationData) ...[
-                                        const SizedBox(width: 6),
-                                        Container(
-                                          width: 8,
-                                          height: 8,
-                                          decoration: BoxDecoration(
-                                            color: accentColor.withValues(
-                                              alpha: 0.92,
-                                            ),
-                                            shape: BoxShape.circle,
-                                          ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                );
-                              }).toList(growable: false),
+                  LayoutBuilder(
+                    builder: (context, pickerConstraints) {
+                      return MenuAnchor(
+                        alignmentOffset: const Offset(0, 5),
+                        onOpen: () {
+                          if (_automationTargetPickerRow == row) return;
+                          setState(() => _automationTargetPickerRow = row);
+                        },
+                        onClose: () {
+                          if (!mounted || _automationTargetPickerRow != row) {
+                            return;
+                          }
+                          setState(() => _automationTargetPickerRow = null);
+                        },
+                        style: MenuStyle(
+                          backgroundColor: const WidgetStatePropertyAll<Color>(
+                            kMixroomGlassDropdownMenuColor,
+                          ),
+                          surfaceTintColor: const WidgetStatePropertyAll<Color>(
+                            Colors.transparent,
+                          ),
+                          elevation: const WidgetStatePropertyAll<double>(10),
+                          padding:
+                              const WidgetStatePropertyAll<EdgeInsetsGeometry>(
+                            EdgeInsets.zero,
+                          ),
+                          shape: WidgetStatePropertyAll<OutlinedBorder>(
+                            RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          side: WidgetStatePropertyAll<BorderSide>(
+                            BorderSide(
+                              color: Colors.white.withValues(alpha: 0.14),
                             ),
                           ),
                         ),
-                      ],
-                    ),
+                        menuChildren: [
+                          SizedBox(
+                            width: pickerConstraints.maxWidth,
+                            height: 224,
+                            child: Scrollbar(
+                              child: ListView.separated(
+                                padding: const EdgeInsets.all(7),
+                                itemCount: availableTargets.length,
+                                separatorBuilder: (_, __) =>
+                                    const SizedBox(height: 5),
+                                itemBuilder: (context, index) {
+                                  final target = availableTargets[index];
+                                  final id =
+                                      (target['id'] ?? '').toString().trim();
+                                  final selected = id == activeTargetId;
+                                  final isOrphan = target['isOrphan'] == true;
+                                  final hasAutomationData =
+                                      hasAutomationDataForTarget(target);
+                                  return MenuItemButton(
+                                    onPressed: id.isEmpty
+                                        ? null
+                                        : () => selectAutomationTarget(id),
+                                    style: ButtonStyle(
+                                      padding: const WidgetStatePropertyAll<
+                                          EdgeInsetsGeometry>(
+                                        EdgeInsets.zero,
+                                      ),
+                                      minimumSize:
+                                          const WidgetStatePropertyAll<Size>(
+                                        Size.zero,
+                                      ),
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                      backgroundColor:
+                                          const WidgetStatePropertyAll<Color>(
+                                        Colors.transparent,
+                                      ),
+                                      overlayColor: WidgetStateProperty
+                                          .resolveWith<Color?>((states) {
+                                        if (states
+                                            .contains(WidgetState.pressed)) {
+                                          return Colors.white
+                                              .withValues(alpha: 0.08);
+                                        }
+                                        if (states
+                                            .contains(WidgetState.hovered)) {
+                                          return Colors.white.withValues(
+                                            alpha: 0.055,
+                                          );
+                                        }
+                                        return null;
+                                      }),
+                                    ),
+                                    child: Container(
+                                      height: 34,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: selected
+                                            ? Colors.white.withValues(
+                                                alpha: 0.105,
+                                              )
+                                            : Colors.white.withValues(
+                                                alpha: 0.025,
+                                              ),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(
+                                          color: selected
+                                              ? _kTimelineWarmBorder
+                                              : Colors.white.withValues(
+                                                  alpha: 0.055,
+                                                ),
+                                        ),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            selected
+                                                ? Icons.check_rounded
+                                                : Icons.tune_rounded,
+                                            size: selected ? 14 : 13,
+                                            color: selected
+                                                ? _kTimelineShellText
+                                                : Colors.white.withValues(
+                                                    alpha: 0.32,
+                                                  ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              automationTargetLabel(target),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                fontFamily: 'Pretendard',
+                                                color: selected
+                                                    ? _kTimelineShellText
+                                                    : Colors.white.withValues(
+                                                        alpha: 0.78,
+                                                      ),
+                                                fontSize: 11.4,
+                                                fontWeight: selected
+                                                    ? FontWeight.w800
+                                                    : FontWeight.w600,
+                                                letterSpacing: 0,
+                                              ),
+                                            ),
+                                          ),
+                                          if (isOrphan) ...[
+                                            const SizedBox(width: 7),
+                                            Icon(
+                                              Icons.warning_amber_rounded,
+                                              size: 14,
+                                              color: const Color(0xFFFFB3B3)
+                                                  .withValues(alpha: 0.9),
+                                            ),
+                                          ] else if (hasAutomationData) ...[
+                                            const SizedBox(width: 7),
+                                            Container(
+                                              width: 7,
+                                              height: 7,
+                                              decoration: BoxDecoration(
+                                                color: _kTimelineShellMutedText
+                                                    .withValues(alpha: 0.78),
+                                                shape: BoxShape.circle,
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                        ],
+                        builder: (context, controller, child) {
+                          return Container(
+                            height: 38,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.055),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.12),
+                              ),
+                            ),
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(8),
+                                onTap: () {
+                                  if (controller.isOpen) {
+                                    controller.close();
+                                  } else {
+                                    controller.open();
+                                  }
+                                },
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        width: 7,
+                                        height: 22,
+                                        decoration: BoxDecoration(
+                                          color: _kTimelineWarmBorder
+                                              .withValues(alpha: 0.82),
+                                          borderRadius:
+                                              BorderRadius.circular(99),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 9),
+                                      Expanded(
+                                        child: Column(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              L10n.translate(
+                                                context,
+                                                'Parameters',
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                color: Colors.white.withValues(
+                                                  alpha: 0.48,
+                                                ),
+                                                fontFamily: 'Pretendard',
+                                                fontSize: 8.8,
+                                                fontWeight: FontWeight.w700,
+                                                height: 1.0,
+                                                letterSpacing: 0,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 3),
+                                            Text(
+                                              L10n.translate(
+                                                context,
+                                                targetDisplayTitle,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                fontFamily: 'Pretendard',
+                                                color: _kTimelineShellText,
+                                                fontSize: 11.6,
+                                                fontWeight: FontWeight.w700,
+                                                height: 1.0,
+                                                letterSpacing: 0,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      AnimatedRotation(
+                                        turns: _automationTargetPickerRow == row
+                                            ? 0.5
+                                            : 0.0,
+                                        duration:
+                                            const Duration(milliseconds: 120),
+                                        curve: Curves.easeOutCubic,
+                                        child: Icon(
+                                          Icons.keyboard_arrow_down_rounded,
+                                          size: 20,
+                                          color: Colors.white.withValues(
+                                            alpha: 0.66,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    },
                   ),
                   const SizedBox(height: 7),
                   SizedBox(
@@ -8483,7 +8755,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                         toolbarAction(
                           label: L10n.translate(context, 'Paste'),
                           icon: Icons.content_paste_outlined,
-                          onTap: clipboardMatchesSelection
+                          onTap: _automationPointsClipboard != null
                               ? pasteAllAutomationPoints
                               : null,
                         ),
@@ -8510,7 +8782,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                         toolbarAction(
                           label: L10n.translate(context, 'Paste here'),
                           icon: Icons.vertical_align_top_rounded,
-                          onTap: areaClipboardMatchesSelection
+                          onTap: _automationAreaClipboard != null
                               ? pasteAutomationAreaAtPlayhead
                               : null,
                         ),
@@ -9262,7 +9534,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                     ),
                   if (widget.onInsertInstrumentLaneBelow != null)
                     ListTile(
-                      leading: const Icon(Icons.keyboard_arrow_down_rounded,
+                      leading: const Icon(Icons.piano_outlined,
                           color: _kTimelineShellText),
                       title: Text(
                           L10n.translate(ctx, 'Insert Instrument Lane Below'),
@@ -9464,11 +9736,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                           : FittedBox(
                               fit: BoxFit.scaleDown,
                               alignment: Alignment.centerLeft,
-                              child: const Text(
-                                'Automation',
+                              child: Text(
+                                L10n.translate(context, 'Automation'),
                                 maxLines: 1,
                                 softWrap: false,
-                                style: TextStyle(
+                                style: const TextStyle(
                                   fontFamily: 'Pretendard',
                                   color: Color(0xFFC7CDD4),
                                   fontSize: 11,
@@ -10411,7 +10683,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           final baseRow = _dragGroupStartRows[index];
           if (baseMs == null || baseRow == null) continue;
           final nextStartMs =
-              _quantizeMs(baseMs + _dragDeltaMs).clamp(0.0, double.infinity);
+              _quantizeMsForTimelineClipDrag(baseMs + _dragDeltaMs)
+                  .clamp(0.0, double.infinity);
           final nextRow = (baseRow + _dragDeltaRows)
               .clamp(0, math.max(0, _rowCount - 1))
               .toInt();
@@ -10509,6 +10782,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _dragStartLocalOffset = null;
       _dragGroupStartMs.clear();
       _dragGroupStartRows.clear();
+      _timelineKeyboardModifierPointer = null;
       // _dragStartClipMs and _dragStartRow are kept for the painter until commit
       // _activeTrimHandleX = null;
       _trimClipIndex = null;
@@ -10647,7 +10921,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
       // Update the *temporary* drag state
       // The painter will use these values to draw the ghost clip
-      _dragStartClipMs = _quantizeMs(
+      _dragStartClipMs = _quantizeMsForTimelineClipDrag(
         originalStartMs + deltaMs,
       ); // === FIX ===: Start from original clip position + delta
       _dragStartRow = newRow; // === FIX ===: Use the calculated new row
@@ -10734,9 +11008,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
     if (_interactionMode == 'trim-start') {
       double targetVisibleStartMs = originalStartMs + deltaTimelineMs;
-      if (_magnetEnabled) {
-        targetVisibleStartMs = _quantizeMs(targetVisibleStartMs);
-      }
+      targetVisibleStartMs =
+          _quantizeMsForTimelineClipDrag(targetVisibleStartMs);
       targetVisibleStartMs = targetVisibleStartMs
           .clamp(minVisibleStartMs, originalVisibleEndMs - minTimelineTrimMs)
           .toDouble();
@@ -10751,9 +11024,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       newStartMs = targetVisibleStartMs;
     } else if (_interactionMode == 'trim-end') {
       double targetVisibleEndMs = originalVisibleEndMs + deltaTimelineMs;
-      if (_magnetEnabled) {
-        targetVisibleEndMs = _quantizeMs(targetVisibleEndMs);
-      }
+      targetVisibleEndMs = _quantizeMsForTimelineClipDrag(targetVisibleEndMs);
       targetVisibleEndMs = targetVisibleEndMs
           .clamp(
             originalStartMs + minTimelineTrimMs,
@@ -10855,9 +11126,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
     if (_interactionMode == 'stretch-start') {
       double targetStartMs = originalStartMs + deltaMs;
-      if (_magnetEnabled) {
-        targetStartMs = _quantizeMs(targetStartMs);
-      }
+      targetStartMs = _quantizeMsForTimelineClipDrag(targetStartMs);
       targetStartMs =
           targetStartMs.clamp(0.0, originalEndMs - minDurationMs).toDouble();
       newDurationMs =
@@ -10865,9 +11134,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       newStartMs = targetStartMs;
     } else if (_interactionMode == 'stretch-end') {
       double targetEndMs = originalEndMs + deltaMs;
-      if (_magnetEnabled) {
-        targetEndMs = _quantizeMs(targetEndMs);
-      }
+      targetEndMs = _quantizeMsForTimelineClipDrag(targetEndMs);
       targetEndMs =
           targetEndMs.clamp(originalStartMs + minDurationMs, 36000000.0);
       newDurationMs =
@@ -11465,6 +11732,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _onTimelineTap(TapUpDetails details) {
+    _timelineKeyboardModifierPointer = null;
     if (_suppressNextTimelineTapAfterSelectionBox) {
       _suppressNextTimelineTapAfterSelectionBox = false;
       return;
@@ -13989,11 +14257,16 @@ class _AutomationLaneState extends State<_AutomationLane> {
   double _pxToTime(double px) =>
       (px / widget.pixelsPerMs) + widget.scrollOffsetMs;
 
-  double _volumeToPy(double v) => verticalPadding + (1.0 - v) * _usableHeight;
+  double _volumeToPy(double v) {
+    final display = _valueFormatter.displayNormalizedForStoredNormalized(v);
+    return verticalPadding + (1.0 - display) * _usableHeight;
+  }
 
   double _pyToVolume(double py) {
-    double v = 1.0 - ((py - verticalPadding) / _usableHeight);
-    return v.clamp(0.0, 1.0);
+    final display = 1.0 - ((py - verticalPadding) / _usableHeight);
+    return _valueFormatter.storedNormalizedForDisplayNormalized(
+      display.clamp(0.0, 1.0).toDouble(),
+    );
   }
 
   // ---------- Hit test ----------
@@ -14369,12 +14642,32 @@ class _AutomationPainter extends CustomPainter {
 
   double _volumeToPy(double v) => verticalPadding + (1.0 - v) * _usableHeight;
 
+  _AutomationValueFormatter get _valueFormatter => _AutomationValueFormatter(
+        targetLabel: targetLabel,
+        targetParamId: targetParamId,
+        targetMin: targetMin,
+        targetMax: targetMax,
+        isVolumeLane: isVolumeLane,
+      );
+
   double _normalizedToTargetValue(double normalized) {
     final span = targetMax - targetMin;
     if (!span.isFinite || span.abs() < 1e-9) {
       return normalized.clamp(0.0, 1.0).toDouble();
     }
     return targetMin + span * normalized.clamp(0.0, 1.0).toDouble();
+  }
+
+  double _displayNormalizedForStoredNormalized(double normalized) {
+    return _valueFormatter.displayNormalizedForStoredNormalized(normalized);
+  }
+
+  double _storedNormalizedForRawValue(double rawValue) {
+    final span = targetMax - targetMin;
+    if (!span.isFinite || span.abs() < 1e-9) {
+      return rawValue.clamp(0.0, 1.0).toDouble();
+    }
+    return ((rawValue - targetMin) / span).clamp(0.0, 1.0).toDouble();
   }
 
   String _trimTrailingZeros(String text) {
@@ -14465,6 +14758,9 @@ class _AutomationPainter extends CustomPainter {
       context,
       const ['gain', 'level', 'trim', 'makeup', 'boost', 'attenuation'],
     );
+    if (hasGainHint && min >= -0.001 && max > 1.001 && max <= 3.001) {
+      return _AutomationValueKind.gainUiDb;
+    }
     if (hasDbHint || (hasGainHint && (min < 0.0 || max > 2.5))) {
       return _AutomationValueKind.db;
     }
@@ -14490,7 +14786,13 @@ class _AutomationPainter extends CustomPainter {
     return _AutomationValueKind.generic;
   }
 
-  double get _midGuideNormalized => isVolumeLane ? 0.75 : 0.5;
+  double get _midGuideNormalized {
+    if (isVolumeLane) return 0.75;
+    if (_valueKind == _AutomationValueKind.gainUiDb) {
+      return _storedNormalizedForRawValue(_kGainAutomationUiUnity);
+    }
+    return 0.5;
+  }
 
   double _volToDb(double v) {
     if (v <= 0.0001) return double.negativeInfinity;
@@ -14499,6 +14801,19 @@ class _AutomationPainter extends CustomPainter {
         clamped >= 0.75 ? (1.0 + ((clamped - 0.75) / 0.25)) : (clamped / 0.75);
     if (gain <= 0.0001) return double.negativeInfinity;
     return 20 * math.log(gain) / math.log(10);
+  }
+
+  double _gainUiToDb(double gainUi) {
+    final min = targetMin.isFinite ? targetMin : 0.0;
+    final max = targetMax.isFinite && targetMax > min ? targetMax : 3.0;
+    final unity = _kGainAutomationUiUnity.clamp(min, max).toDouble();
+    final clamped = gainUi.clamp(min, max).toDouble();
+    if (clamped <= unity) {
+      final t = ((clamped - min) / (unity - min)).clamp(0.0, 1.0).toDouble();
+      return _kGainAutomationDbMin + ((0.0 - _kGainAutomationDbMin) * t);
+    }
+    final t = ((clamped - unity) / (max - unity)).clamp(0.0, 1.0).toDouble();
+    return _kGainAutomationDbMax * t;
   }
 
   String _formatValueLabel(double normalized) {
@@ -14517,6 +14832,12 @@ class _AutomationPainter extends CustomPainter {
       case _AutomationValueKind.volumeDb:
         final db = _volToDb(clamped);
         if (db.isInfinite) return '-∞';
+        final value = _formatNumber(db.abs(), maxDecimals: 1);
+        final sign = db >= 0 ? '+' : '-';
+        return '$sign$value dB';
+      case _AutomationValueKind.gainUiDb:
+        final db = _gainUiToDb(raw);
+        if (db.isInfinite || raw <= targetMin + 0.000001) return '-∞';
         final value = _formatNumber(db.abs(), maxDecimals: 1);
         final sign = db >= 0 ? '+' : '-';
         return '$sign$value dB';
@@ -14558,6 +14879,27 @@ class _AutomationPainter extends CustomPainter {
     }
   }
 
+  List<_AutomationAxisTick> _axisTicks() {
+    return <_AutomationAxisTick>[
+      _AutomationAxisTick(
+        storedNormalized: 1.0,
+        displayNormalized: _displayNormalizedForStoredNormalized(1.0),
+        label: _formatValueLabel(1.0),
+      ),
+      _AutomationAxisTick(
+        storedNormalized: _midGuideNormalized,
+        displayNormalized:
+            _displayNormalizedForStoredNormalized(_midGuideNormalized),
+        label: _formatValueLabel(_midGuideNormalized),
+      ),
+      _AutomationAxisTick(
+        storedNormalized: 0.0,
+        displayNormalized: _displayNormalizedForStoredNormalized(0.0),
+        label: _formatValueLabel(0.0),
+      ),
+    ];
+  }
+
   void _paintAxisLabel(
     Canvas canvas,
     TextPainter tp,
@@ -14593,23 +14935,22 @@ class _AutomationPainter extends CustomPainter {
       ..color = Colors.white.withValues(alpha: 0.10)
       ..strokeWidth = 1;
 
-    final topY = _volumeToPy(1.0);
-    final middleY = _volumeToPy(_midGuideNormalized);
-    final bottomY = _volumeToPy(0.0);
-
-    canvas.drawLine(
-        Offset(axisWidth, topY), Offset(size.width, topY), guidePaint);
-    canvas.drawLine(
-        Offset(axisWidth, middleY), Offset(size.width, middleY), guidePaint);
-    canvas.drawLine(
-        Offset(axisWidth, bottomY), Offset(size.width, bottomY), guidePaint);
+    final axisTicks = _axisTicks();
+    for (final tick in axisTicks) {
+      final y = _volumeToPy(tick.displayNormalized);
+      canvas.drawLine(Offset(axisWidth, y), Offset(size.width, y), guidePaint);
+    }
 
     // Y-axis labels on the very left
     final tp = TextPainter(textDirection: TextDirection.ltr);
-    _paintAxisLabel(canvas, tp, _formatValueLabel(1.0), topY);
-    _paintAxisLabel(
-        canvas, tp, _formatValueLabel(_midGuideNormalized), middleY);
-    _paintAxisLabel(canvas, tp, _formatValueLabel(0.0), bottomY);
+    for (final tick in axisTicks) {
+      _paintAxisLabel(
+        canvas,
+        tp,
+        tick.label,
+        _volumeToPy(tick.displayNormalized),
+      );
+    }
 
     if (points.isEmpty) return;
 
@@ -14724,7 +15065,7 @@ class _AutomationPainter extends CustomPainter {
     final pixelPoints = points.map((p) {
       return Offset(
         _timeToPx(p.x), // x is timeMs
-        _volumeToPy(p.volume),
+        _volumeToPy(_displayNormalizedForStoredNormalized(p.volume)),
       );
     }).toList();
     path.moveTo(pixelPoints.first.dx, pixelPoints.first.dy);
@@ -14794,6 +15135,18 @@ class _AutomationPainter extends CustomPainter {
   }
 }
 
+class _AutomationAxisTick {
+  const _AutomationAxisTick({
+    required this.storedNormalized,
+    required this.displayNormalized,
+    required this.label,
+  });
+
+  final double storedNormalized;
+  final double displayNormalized;
+  final String label;
+}
+
 class _AutomationPointClipboardEntry {
   final _AutomationValueKind kind;
   final double rawValue;
@@ -14818,6 +15171,7 @@ class _AutomationPointClipboardEntry {
 
 enum _AutomationValueKind {
   volumeDb,
+  gainUiDb,
   percent,
   db,
   hz,
@@ -14828,6 +15182,10 @@ enum _AutomationValueKind {
   cents,
   generic,
 }
+
+const double _kGainAutomationUiUnity = 2.0;
+const double _kGainAutomationDbMin = -60.0;
+const double _kGainAutomationDbMax = 6.0;
 
 class _AutomationValueFormatter {
   final String targetLabel;
@@ -14951,6 +15309,9 @@ class _AutomationValueFormatter {
       context,
       const ['gain', 'level', 'trim', 'makeup', 'boost', 'attenuation'],
     );
+    if (hasGainHint && min >= -0.001 && max > 1.001 && max <= 3.001) {
+      return _AutomationValueKind.gainUiDb;
+    }
     if (hasDbHint || (hasGainHint && (min < 0.0 || max > 2.5))) {
       return _AutomationValueKind.db;
     }
@@ -14994,19 +15355,90 @@ class _AutomationValueFormatter {
     return (0.75 + ((gain - 1.0) * 0.25)).clamp(0.75, 1.0);
   }
 
+  double _gainUiToDb(double gainUi) {
+    final min = targetMin.isFinite ? targetMin : 0.0;
+    final max = targetMax.isFinite && targetMax > min ? targetMax : 3.0;
+    final unity = _kGainAutomationUiUnity.clamp(min, max).toDouble();
+    final clamped = gainUi.clamp(min, max).toDouble();
+    if (clamped <= unity) {
+      final t = ((clamped - min) / (unity - min)).clamp(0.0, 1.0).toDouble();
+      return _kGainAutomationDbMin + ((0.0 - _kGainAutomationDbMin) * t);
+    }
+    final t = ((clamped - unity) / (max - unity)).clamp(0.0, 1.0).toDouble();
+    return _kGainAutomationDbMax * t;
+  }
+
+  double _dbToGainUi(double db) {
+    final min = targetMin.isFinite ? targetMin : 0.0;
+    final max = targetMax.isFinite && targetMax > min ? targetMax : 3.0;
+    final unity = _kGainAutomationUiUnity.clamp(min, max).toDouble();
+    if (!db.isFinite && db.isNegative) return min;
+    final clampedDb =
+        db.clamp(_kGainAutomationDbMin, _kGainAutomationDbMax).toDouble();
+    if (clampedDb <= 0.0) {
+      final t =
+          ((clampedDb - _kGainAutomationDbMin) / (0.0 - _kGainAutomationDbMin))
+              .clamp(0.0, 1.0);
+      return (min + ((unity - min) * t)).clamp(min, max).toDouble();
+    }
+    final t = (clampedDb / _kGainAutomationDbMax).clamp(0.0, 1.0);
+    return (unity + ((max - unity) * t)).clamp(min, max).toDouble();
+  }
+
+  double displayNormalizedForStoredNormalized(double normalized) {
+    final clamped = normalized.clamp(0.0, 1.0).toDouble();
+    if (valueKind != _AutomationValueKind.gainUiDb) return clamped;
+    final raw = _normalizedToTargetValue(clamped);
+    if (raw <= targetMin + 0.000001) return 0.0;
+    return _dbToVol(_gainUiToDb(raw));
+  }
+
+  double storedNormalizedForDisplayNormalized(double displayNormalized) {
+    final clamped = displayNormalized.clamp(0.0, 1.0).toDouble();
+    if (valueKind != _AutomationValueKind.gainUiDb) return clamped;
+    if (clamped <= 0.000001) {
+      return _targetValueToNormalized(targetMin);
+    }
+    return _targetValueToNormalized(_dbToGainUi(_volToDb(clamped)));
+  }
+
   double rawValueForNormalized(double normalized) {
     final clamped = normalized.clamp(0.0, 1.0).toDouble();
-    if (valueKind == _AutomationValueKind.volumeDb) {
-      return _volToDb(clamped);
+    switch (valueKind) {
+      case _AutomationValueKind.volumeDb:
+        return _volToDb(clamped);
+      case _AutomationValueKind.gainUiDb:
+        return _gainUiToDb(_normalizedToTargetValue(clamped));
+      case _AutomationValueKind.percent:
+      case _AutomationValueKind.db:
+      case _AutomationValueKind.hz:
+      case _AutomationValueKind.seconds:
+      case _AutomationValueKind.milliseconds:
+      case _AutomationValueKind.ratio:
+      case _AutomationValueKind.semitone:
+      case _AutomationValueKind.cents:
+      case _AutomationValueKind.generic:
+        return _normalizedToTargetValue(clamped);
     }
-    return _normalizedToTargetValue(clamped);
   }
 
   double normalizedForRawValue(double rawValue) {
-    if (valueKind == _AutomationValueKind.volumeDb) {
-      return _dbToVol(rawValue);
+    switch (valueKind) {
+      case _AutomationValueKind.volumeDb:
+        return _dbToVol(rawValue);
+      case _AutomationValueKind.gainUiDb:
+        return _targetValueToNormalized(_dbToGainUi(rawValue));
+      case _AutomationValueKind.percent:
+      case _AutomationValueKind.db:
+      case _AutomationValueKind.hz:
+      case _AutomationValueKind.seconds:
+      case _AutomationValueKind.milliseconds:
+      case _AutomationValueKind.ratio:
+      case _AutomationValueKind.semitone:
+      case _AutomationValueKind.cents:
+      case _AutomationValueKind.generic:
+        return _targetValueToNormalized(rawValue);
     }
-    return _targetValueToNormalized(rawValue);
   }
 
   String formatValueLabel(double normalized) {
@@ -15025,6 +15457,12 @@ class _AutomationValueFormatter {
       case _AutomationValueKind.volumeDb:
         final db = _volToDb(clamped);
         if (db.isInfinite) return '-∞';
+        final value = _formatNumber(db.abs(), maxDecimals: 1);
+        final sign = db >= 0 ? '+' : '-';
+        return '$sign$value dB';
+      case _AutomationValueKind.gainUiDb:
+        final db = _gainUiToDb(raw);
+        if (db.isInfinite || raw <= targetMin + 0.000001) return '-∞';
         final value = _formatNumber(db.abs(), maxDecimals: 1);
         final sign = db >= 0 ? '+' : '-';
         return '$sign$value dB';
@@ -15069,6 +15507,7 @@ class _AutomationValueFormatter {
   String get inputLabel {
     switch (valueKind) {
       case _AutomationValueKind.volumeDb:
+      case _AutomationValueKind.gainUiDb:
         return 'volume value';
       case _AutomationValueKind.percent:
         return 'percent value';
@@ -15093,6 +15532,7 @@ class _AutomationValueFormatter {
   String get inputHint {
     switch (valueKind) {
       case _AutomationValueKind.volumeDb:
+      case _AutomationValueKind.gainUiDb:
         return 'e.g. 0 dB, -12, -inf';
       case _AutomationValueKind.percent:
         return 'e.g. 50%';
@@ -15129,7 +15569,8 @@ class _AutomationValueFormatter {
     final lower = input.trim().toLowerCase();
     if (lower.isEmpty) return null;
 
-    if (valueKind == _AutomationValueKind.volumeDb) {
+    if (valueKind == _AutomationValueKind.volumeDb ||
+        valueKind == _AutomationValueKind.gainUiDb) {
       if (lower == '-∞' ||
           lower == '-inf' ||
           lower == 'inf-' ||
@@ -15138,7 +15579,9 @@ class _AutomationValueFormatter {
       }
       final db = _extractFirstNumber(lower);
       if (db == null) return null;
-      return _dbToVol(db);
+      return valueKind == _AutomationValueKind.volumeDb
+          ? _dbToVol(db)
+          : _targetValueToNormalized(_dbToGainUi(db));
     }
 
     var parsed = _extractFirstNumber(lower);
@@ -15147,6 +15590,8 @@ class _AutomationValueFormatter {
     switch (valueKind) {
       case _AutomationValueKind.volumeDb:
         return _dbToVol(parsed);
+      case _AutomationValueKind.gainUiDb:
+        return _targetValueToNormalized(_dbToGainUi(parsed));
       case _AutomationValueKind.percent:
         final looksNormalizedRange = targetMin >= -0.001 && targetMax <= 1.001;
         if (looksNormalizedRange) {

@@ -140,8 +140,14 @@ class ProjectStateBuilder {
     if (timelineRows.length > inferredRows) {
       inferredRows = timelineRows.length;
     }
+    final effectiveRoleOverrides = <int, String>{};
+    for (var i = 0; i < timelineRows.length; i++) {
+      final override = normalizeTrackRoleOverride(timelineRows[i].roleOverride);
+      if (override.isNotEmpty) effectiveRoleOverrides[i] = override;
+    }
+    effectiveRoleOverrides.addAll(roleOverrides);
     if (roleOverrides.isNotEmpty) {
-      final overrideMax = roleOverrides.keys
+      final overrideMax = effectiveRoleOverrides.keys
           .where((k) => k >= 0)
           .fold<int>(-1, (acc, v) => math.max(acc, v));
       if (overrideMax >= 0) {
@@ -262,6 +268,11 @@ class ProjectStateBuilder {
             laneKind: rowMeta?.kind.wireName ?? 'audio',
             instrumentId: rowMeta?.instrumentId ?? '',
             instrumentName: rowMeta?.instrumentName ?? '',
+            roleOverride: rowMeta?.roleOverride ?? '',
+            groupId: rowMeta?.groupId ?? '',
+            inputDeviceName: rowMeta?.inputDeviceName ?? '',
+            inputChannelStart: rowMeta?.inputChannelStart ?? 0,
+            inputChannelCount: rowMeta?.inputChannelCount ?? 1,
             clips: const [],
             hasAudio: false,
             approxRms: 0,
@@ -519,7 +530,7 @@ class ProjectStateBuilder {
       }
 
       // Apply override: treat as fully consistent and set role probs hard
-      final override = roleOverrides[row];
+      final override = effectiveRoleOverrides[row];
       if (override != null) {
         roleProbs = {
           'vocals': 0.0,
@@ -553,6 +564,11 @@ class ProjectStateBuilder {
           laneKind: rowMeta?.kind.wireName ?? 'audio',
           instrumentId: rowMeta?.instrumentId ?? '',
           instrumentName: rowMeta?.instrumentName ?? '',
+          roleOverride: rowMeta?.roleOverride ?? '',
+          groupId: rowMeta?.groupId ?? '',
+          inputDeviceName: rowMeta?.inputDeviceName ?? '',
+          inputChannelStart: rowMeta?.inputChannelStart ?? 0,
+          inputChannelCount: rowMeta?.inputChannelCount ?? 1,
           clips: clipsByRow[row],
           approxRms: rms,
           approxCrest: crest,

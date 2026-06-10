@@ -1,4 +1,5 @@
 const List<String> kInstrumentPickerOrderedCategories = <String>[
+  'Tools',
   'On Device',
   'Keys',
   'Strings',
@@ -17,6 +18,12 @@ const List<String> kInstrumentPickerOrderedCategories = <String>[
 String normalizeInstrumentPickerCategory(String raw) {
   final key = raw.trim().toLowerCase();
   switch (key) {
+    case 'tool':
+    case 'tools':
+    case 'editor':
+    case 'utility':
+    case 'utilities':
+      return 'Tools';
     case 'on device':
     case 'device':
     case 'hosted':

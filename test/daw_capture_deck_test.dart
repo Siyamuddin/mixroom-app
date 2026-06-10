@@ -10,6 +10,7 @@ void main() {
     bool busy = false,
     bool canBounceSelection = true,
     bool canFreezeRow = true,
+    bool canCleanUpRecording = true,
     List<double> recordingPeaks = const <double>[0.12, 0.48, 0.31, 0.76],
     VoidCallback? onClose,
     Future<void> Function()? onStartRecording,
@@ -17,6 +18,7 @@ void main() {
     Future<void> Function()? onCaptureMix,
     Future<void> Function()? onBounceSelection,
     Future<void> Function()? onFreezeRow,
+    Future<void> Function()? onCleanUpRecording,
   }) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -38,6 +40,7 @@ void main() {
                 selectedClipCount: 1,
                 canBounceSelection: canBounceSelection,
                 canFreezeRow: canFreezeRow,
+                canCleanUpRecording: canCleanUpRecording,
                 onFullscreenChanged: (_) {},
                 onClose: onClose ?? () {},
                 onStartRecording: onStartRecording ?? () async {},
@@ -45,6 +48,8 @@ void main() {
                 onCaptureMix: onCaptureMix ?? () async {},
                 onBounceSelection: onBounceSelection ?? () async {},
                 onFreezeRow: onFreezeRow ?? () async {},
+                onOpenExport: () async {},
+                onCleanUpRecording: onCleanUpRecording ?? () async {},
               ),
             ),
           ),
@@ -58,12 +63,14 @@ void main() {
     var recordStarted = false;
     var mixCaptured = false;
     var bounced = false;
+    var cleaned = false;
 
     await pumpDeck(
       tester,
       onStartRecording: () async => recordStarted = true,
       onCaptureMix: () async => mixCaptured = true,
       onBounceSelection: () async => bounced = true,
+      onCleanUpRecording: () async => cleaned = true,
     );
 
     expect(find.byKey(const ValueKey('daw_capture_deck')), findsOneWidget);
@@ -77,10 +84,13 @@ void main() {
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('capture_deck_bounce_button')));
     await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('capture_deck_cleanup_button')));
+    await tester.pump();
 
     expect(recordStarted, isTrue);
     expect(mixCaptured, isTrue);
     expect(bounced, isTrue);
+    expect(cleaned, isTrue);
   });
 
   testWidgets(
@@ -94,6 +104,7 @@ void main() {
       desktop: false,
       canBounceSelection: false,
       canFreezeRow: false,
+      canCleanUpRecording: false,
       onBounceSelection: () async => bounced = true,
       onFreezeRow: () async => frozen = true,
     );

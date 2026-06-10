@@ -107,6 +107,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   String? _selectedRoot;
   String? _selectedTreePath;
   String? _previewFocusPath;
+  String _sampleFilter = 'all';
   List<String> _rootFoldersSnapshot = const <String>[];
   bool _dragOutsideNotified = false;
   Timer? _folderHoldTimer;
@@ -209,6 +210,53 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   bool _isAudioFile(String path) {
     final ext = p.extension(path).toLowerCase();
     return _kAudioExtensions.contains(ext);
+  }
+
+  bool _sampleMatchesFilter(String path) {
+    if (_sampleFilter == 'all') return true;
+    final label = p.basenameWithoutExtension(path).toLowerCase();
+    final duration = _durationByFile[path];
+    final shortOneShot = duration != null && duration.inMilliseconds <= 1800;
+    final loopLike = label.contains('loop') ||
+        RegExp(r'(^|[^0-9])([6-9][0-9]|1[0-9]{2}|2[0-4][0-9])\s?bpm')
+            .hasMatch(label) ||
+        (duration != null && duration.inMilliseconds >= 1800);
+    switch (_sampleFilter) {
+      case 'loops':
+        return loopLike;
+      case 'oneshots':
+        return shortOneShot ||
+            label.contains('one shot') ||
+            label.contains('oneshot') ||
+            label.contains('kick') ||
+            label.contains('snare') ||
+            label.contains('clap') ||
+            label.contains('hat');
+      case 'drums':
+        return label.contains('drum') ||
+            label.contains('kick') ||
+            label.contains('snare') ||
+            label.contains('clap') ||
+            label.contains('hat') ||
+            label.contains('perc');
+      case 'bass':
+        return label.contains('bass') || label.contains('808');
+      case 'melodic':
+        return label.contains('chord') ||
+            label.contains('melody') ||
+            label.contains('keys') ||
+            label.contains('piano') ||
+            label.contains('synth') ||
+            label.contains('guitar');
+      case 'fx':
+        return label.contains('fx') ||
+            label.contains('sweep') ||
+            label.contains('riser') ||
+            label.contains('impact') ||
+            label.contains('texture');
+      default:
+        return true;
+    }
   }
 
   String _decodeDisplayLabel(String value) {
@@ -655,6 +703,9 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
     if (children == null) return;
     for (final entity in children) {
       final isDir = entity is Directory;
+      if (!isDir && !_sampleMatchesFilter(entity.path)) {
+        continue;
+      }
       lines.add(
         _TreeLine(
           path: entity.path,
@@ -1086,6 +1137,81 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
     );
   }
 
+  Widget _buildSampleFilterChips() {
+    const filters = <MapEntry<String, IconData>>[
+      MapEntry('all', Icons.apps_rounded),
+      MapEntry('loops', Icons.repeat_rounded),
+      MapEntry('oneshots', Icons.adjust_rounded),
+      MapEntry('drums', Icons.graphic_eq_rounded),
+      MapEntry('bass', Icons.speaker_rounded),
+      MapEntry('melodic', Icons.piano_rounded),
+      MapEntry('fx', Icons.auto_awesome_rounded),
+    ];
+    String labelFor(String id) {
+      switch (id) {
+        case 'loops':
+          return L10n.translate(context, 'Loops');
+        case 'oneshots':
+          return L10n.translate(context, 'One Shots');
+        case 'drums':
+          return L10n.translate(context, 'Drums');
+        case 'bass':
+          return L10n.translate(context, 'Bass');
+        case 'melodic':
+          return L10n.translate(context, 'Melodic');
+        case 'fx':
+          return L10n.translate(context, 'FX');
+        default:
+          return L10n.translate(context, 'All');
+      }
+    }
+
+    return SizedBox(
+      height: 36,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        itemCount: filters.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 6),
+        itemBuilder: (context, index) {
+          final entry = filters[index];
+          final selected = _sampleFilter == entry.key;
+          return FilterChip(
+            selected: selected,
+            showCheckmark: false,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            visualDensity: const VisualDensity(horizontal: -4, vertical: -4),
+            avatar: Icon(
+              entry.value,
+              size: 13,
+              color: selected ? Colors.black87 : Colors.white70,
+            ),
+            label: Text(
+              labelFor(entry.key),
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: selected ? Colors.black87 : Colors.white70,
+              ),
+            ),
+            selectedColor: _kPanelAccent,
+            backgroundColor: _kPanelFill,
+            side: BorderSide(
+              color: selected
+                  ? _kPanelAccent.withOpacity(0.6)
+                  : Colors.white.withOpacity(0.12),
+            ),
+            onSelected: (_) {
+              setState(() {
+                _sampleFilter = entry.key;
+              });
+            },
+          );
+        },
+      ),
+    );
+  }
+
   Widget _buildTree() {
     final root = _selectedRoot;
     if (root == null) {
@@ -1444,6 +1570,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                           ),
                         ),
                         if (widget.rootFolders.isNotEmpty) _buildRootSelector(),
+                        if (widget.rootFolders.isNotEmpty)
+                          _buildSampleFilterChips(),
                         Expanded(child: _buildTree()),
                         _buildPreviewStrip(),
                       ],

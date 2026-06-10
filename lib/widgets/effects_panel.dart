@@ -44,6 +44,7 @@ const Color _kFxWarmAccentBorder = Color(0xFFE0B27F);
 const Color _kFxCoolAccent = Color(0xFFBBD3E4);
 const Color _kFxCoolAccentSoft = Color(0xFFA7C4D9);
 const Duration _kShaperPreviewPollInterval = Duration(milliseconds: 16);
+const Duration _kDynamicSoftenerPollInterval = Duration(milliseconds: 40);
 
 bool _previewFramesChanged(
   List<double> previous,
@@ -282,6 +283,376 @@ Future<String?> _showMixroomChoiceDialog({
   );
 }
 
+double _numericParamStep(Map<String, dynamic> param, double currentValue) {
+  final minV = (param['min'] as num?)?.toDouble() ?? 0.0;
+  final maxV = (param['max'] as num?)?.toDouble() ?? 1.0;
+  final range = (maxV - minV).abs();
+  final unit = _normalizeParamUnit(param['unit']);
+  final name = (param['name'] ?? '').toString().toLowerCase();
+
+  if (unit == 'Hz') {
+    if (currentValue.abs() >= 2000.0) return 100.0;
+    if (currentValue.abs() >= 200.0) return 10.0;
+    return 1.0;
+  }
+  if (unit == 'dB') return 0.5;
+  if (unit == '%' || name.contains('mix') || name.contains('amount')) {
+    return range <= 1.0 ? 0.01 : 1.0;
+  }
+  if (unit == 'ms') return currentValue.abs() >= 100.0 ? 10.0 : 1.0;
+  if (unit == '°') return 1.0;
+  if (range <= 2.0) return 0.01;
+  if (range <= 20.0) return 0.1;
+  return math.max(0.1, range / 100.0);
+}
+
+String _numericParamInputSeed(Map<String, dynamic> param, double value) {
+  final unit = _normalizeParamUnit(param['unit']);
+  if (unit == 'Hz' || unit == '%' || unit == '°') {
+    return value.toStringAsFixed(0);
+  }
+  if (unit == 'dB' || unit == 'ms') return value.toStringAsFixed(1);
+  final rounded = value.roundToDouble();
+  if ((value - rounded).abs() < 1.0e-6) return rounded.toInt().toString();
+  return value.toStringAsFixed(2);
+}
+
+double? _parseNumericParamInput(String raw, Map<String, dynamic> param) {
+  final trimmed = raw.trim();
+  if (trimmed.isEmpty) return null;
+  final unit = _normalizeParamUnit(param['unit']);
+  final lower = trimmed.toLowerCase();
+  final kiloHz = unit == 'Hz' && RegExp(r'\bk(?:hz)?\b').hasMatch(lower);
+  final cleaned =
+      lower.replaceAll(',', '.').replaceAll(RegExp(r'[^0-9eE+\-.]'), '');
+  if (cleaned.isEmpty || cleaned == '-' || cleaned == '+') return null;
+  final parsed = double.tryParse(cleaned);
+  if (parsed == null || parsed.isNaN || parsed.isInfinite) return null;
+  return kiloHz ? parsed * 1000.0 : parsed;
+}
+
+Future<double?> _showNumericParamEntryDialog({
+  required BuildContext context,
+  required Map<String, dynamic> param,
+  required double currentValue,
+}) async {
+  return showDialog<double>(
+    context: context,
+    useRootNavigator: true,
+    builder: (ctx) => _NumericParamEntryDialog(
+      param: param,
+      currentValue: currentValue,
+    ),
+  );
+}
+
+class _NumericParamEntryDialog extends StatefulWidget {
+  const _NumericParamEntryDialog({
+    required this.param,
+    required this.currentValue,
+  });
+
+  final Map<String, dynamic> param;
+  final double currentValue;
+
+  @override
+  State<_NumericParamEntryDialog> createState() =>
+      _NumericParamEntryDialogState();
+}
+
+class _NumericParamEntryDialogState extends State<_NumericParamEntryDialog> {
+  late final TextEditingController _controller;
+  late final FocusNode _focusNode;
+  late final double _minValue;
+  late final double _maxValue;
+  String? _errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    _minValue = (widget.param['min'] as num?)?.toDouble() ?? 0.0;
+    _maxValue = (widget.param['max'] as num?)?.toDouble() ?? 1.0;
+    _controller = TextEditingController(
+      text: _numericParamInputSeed(widget.param, widget.currentValue),
+    );
+    _focusNode = FocusNode();
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final parsed = _parseNumericParamInput(_controller.text, widget.param);
+    if (parsed == null) {
+      setState(() => _errorText = 'Enter a number');
+      return;
+    }
+    _focusNode.unfocus();
+    Navigator.of(context).pop(parsed.clamp(_minValue, _maxValue).toDouble());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF5F666D),
+      surfaceTintColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+      ),
+      title: Text(
+        (widget.param['name'] ?? 'Value').toString(),
+        style: const TextStyle(
+          color: _kFxPanelText,
+          fontSize: 16,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      content: TextField(
+        controller: _controller,
+        focusNode: _focusNode,
+        autofocus: true,
+        keyboardType: const TextInputType.numberWithOptions(
+          decimal: true,
+          signed: true,
+        ),
+        textInputAction: TextInputAction.done,
+        onSubmitted: (_) => _submit(),
+        style: const TextStyle(color: _kFxPanelText),
+        decoration: InputDecoration(
+          errorText: _errorText,
+          suffixText: _normalizeParamUnit(widget.param['unit']),
+          suffixStyle: const TextStyle(color: _kFxPanelMutedText),
+          helperText:
+              '${_formatParamValueForDisplay(widget.param, _minValue)} - ${_formatParamValueForDisplay(widget.param, _maxValue)}',
+          helperStyle: const TextStyle(color: _kFxPanelMutedText),
+          filled: true,
+          fillColor: Colors.white.withValues(alpha: 0.08),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide(
+              color: Colors.white.withValues(alpha: 0.12),
+            ),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: _kFxCoolAccent),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: const Text('Set'),
+        ),
+      ],
+    );
+  }
+}
+
+Widget _buildParamStepButton({
+  required IconData icon,
+  required VoidCallback onPressed,
+  required String tooltip,
+}) {
+  return Tooltip(
+    message: tooltip,
+    child: IconButton(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 18),
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 34, height: 34),
+      color: _kFxPanelText,
+      style: IconButton.styleFrom(
+        backgroundColor: Colors.white.withValues(alpha: 0.08),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+        ),
+      ),
+    ),
+  );
+}
+
+Widget _buildGenericFloatParamEditor({
+  required BuildContext context,
+  required String effectName,
+  required Map<String, dynamic> param,
+  required ValueChanged<double> setLocalValue,
+  required FutureOr<void> Function(double value) setRemoteValue,
+  required void Function(double oldValue, double newValue) commitValue,
+  required ValueChanged<double?> setDragStartValue,
+  required double? Function() getDragStartValue,
+}) {
+  final paramName = param['name'] as String;
+  final minV = (param['min'] as num).toDouble();
+  final maxV = (param['max'] as num).toDouble();
+  final rawV = (param['value'] as num).toDouble().clamp(minV, maxV).toDouble();
+  final valueText = _formatParamValueForDisplay(param, rawV);
+  final skew = _getParamSkew(effectName, paramName);
+
+  void sendValue(double value) {
+    final result = setRemoteValue(value);
+    if (result is Future<void>) unawaited(result);
+  }
+
+  void applyDiscreteValue(double nextValue) {
+    final oldValue = (param['value'] as num).toDouble();
+    final clamped = nextValue.clamp(minV, maxV).toDouble();
+    if ((oldValue - clamped).abs() < 1.0e-6) return;
+    setLocalValue(clamped);
+    sendValue(clamped);
+    commitValue(oldValue, clamped);
+  }
+
+  double toNorm(double v) => ((v - minV) / (maxV - minV)).clamp(0.0, 1.0);
+  double fromNorm(double t) => minV + (maxV - minV) * t.clamp(0.0, 1.0);
+
+  final norm = toNorm(rawV);
+  final sliderPos = (skew == null) ? norm : math.pow(norm, skew).toDouble();
+  final step = _numericParamStep(param, rawV);
+
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                paramName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
+            ),
+            _buildParamStepButton(
+              icon: Icons.remove_rounded,
+              tooltip: 'Decrease',
+              onPressed: () => applyDiscreteValue(rawV - step),
+            ),
+            const SizedBox(width: 6),
+            Tooltip(
+              message: 'Enter value',
+              child: TextButton(
+                onPressed: () async {
+                  final picked = await _showNumericParamEntryDialog(
+                    context: context,
+                    param: param,
+                    currentValue: rawV,
+                  );
+                  if (picked == null) return;
+                  applyDiscreteValue(picked);
+                },
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(66, 34),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  visualDensity: VisualDensity.compact,
+                  backgroundColor: Colors.white.withValues(alpha: 0.10),
+                  foregroundColor: _kFxPanelText,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    side: BorderSide(
+                      color: Colors.white.withValues(alpha: 0.14),
+                    ),
+                  ),
+                ),
+                child: Text(
+                  valueText,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            _buildParamStepButton(
+              icon: Icons.add_rounded,
+              tooltip: 'Increase',
+              onPressed: () => applyDiscreteValue(rawV + step),
+            ),
+          ],
+        ),
+        Row(
+          children: [
+            Text(
+              _formatParamValueForDisplay(param, minV),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            Expanded(
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  showValueIndicator: ShowValueIndicator.always,
+                  valueIndicatorTextStyle: const TextStyle(
+                    color: Color.fromARGB(255, 0, 0, 0),
+                    fontSize: 12,
+                  ),
+                ),
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onDoubleTap: () {
+                    final defaultValue = _paramDefaultAsDouble(param);
+                    if (defaultValue == null) return;
+                    applyDiscreteValue(defaultValue);
+                  },
+                  child: Slider(
+                    value: sliderPos,
+                    min: 0.0,
+                    max: 1.0,
+                    divisions: 200,
+                    label: valueText,
+                    onChangeStart: (_) {
+                      setDragStartValue(rawV);
+                    },
+                    onChanged: (p) {
+                      final t = p.clamp(0.0, 1.0);
+                      final newNorm = (skew == null)
+                          ? t
+                          : math.pow(t, 1.0 / skew).toDouble();
+                      final v = fromNorm(newNorm);
+                      setLocalValue(v);
+                      sendValue(v);
+                    },
+                    onChangeEnd: (p) {
+                      final startValue = getDragStartValue();
+                      if (startValue == null) return;
+                      final t = p.clamp(0.0, 1.0);
+                      final newNorm = (skew == null)
+                          ? t
+                          : math.pow(t, 1.0 / skew).toDouble();
+                      final v = fromNorm(newNorm);
+                      commitValue(startValue, v);
+                      setDragStartValue(null);
+                    },
+                  ),
+                ),
+              ),
+            ),
+            Text(
+              _formatParamValueForDisplay(param, maxV),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
+
 Widget _buildMixroomChoiceField({
   required BuildContext context,
   required String value,
@@ -384,55 +755,92 @@ Widget _buildDegradeModeSelectorTile({
   required String value,
   required List<String> choices,
   required ValueChanged<String> onSelected,
+  bool oneRow = false,
 }) {
+  Widget buildChoice(String choice, {bool compact = false}) {
+    final isSelected = choice == value;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: () => onSelected(choice),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+          padding: EdgeInsets.symmetric(
+            horizontal: compact ? 8 : 12,
+            vertical: compact ? 8 : 9,
+          ),
+          decoration: _mixroomFxInsetDecoration(
+            radius: 999,
+            selected: isSelected,
+          ),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              choice,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontSize: compact ? 12.5 : null,
+                    color: isSelected
+                        ? Colors.white
+                        : Colors.white.withValues(alpha: 0.82),
+                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                  ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   return Padding(
     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: _kFxPanelText,
-              ),
-        ),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: choices.map((choice) {
-            final isSelected = choice == value;
-            return Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(999),
-                onTap: () => onSelected(choice),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 140),
-                  curve: Curves.easeOutCubic,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                  decoration: _mixroomFxInsetDecoration(
-                    radius: 999,
-                    selected: isSelected,
-                  ),
-                  child: Text(
-                    choice,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: isSelected
-                              ? Colors.white
-                              : Colors.white.withValues(alpha: 0.82),
-                          fontWeight:
-                              isSelected ? FontWeight.w700 : FontWeight.w600,
-                        ),
-                  ),
+    child: oneRow
+        ? Row(
+            children: [
+              SizedBox(
+                width: 54,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: _kFxPanelText,
+                      ),
                 ),
               ),
-            );
-          }).toList(),
-        ),
-      ],
-    ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Row(
+                  children: [
+                    for (int i = 0; i < choices.length; i++) ...[
+                      if (i > 0) const SizedBox(width: 6),
+                      Expanded(child: buildChoice(choices[i], compact: true)),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: _kFxPanelText,
+                    ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: choices.map(buildChoice).toList(),
+              ),
+            ],
+          ),
   );
 }
 
@@ -469,7 +877,7 @@ Widget _buildFxParamsHeader({
         const SizedBox(width: 10),
         Expanded(
           child: Text(
-            title,
+            L10n.translate(context, title),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
@@ -485,9 +893,9 @@ Widget _buildFxParamsHeader({
             onPressed: onReset,
             style: _mixroomFxGhostButtonStyle(),
             icon: const Icon(Icons.restart_alt, size: 16),
-            label: const Text(
-              'Reset',
-              style: TextStyle(
+            label: Text(
+              L10n.translate(context, 'Reset'),
+              style: const TextStyle(
                 fontFamily: 'Pretendard',
                 fontSize: 12.4,
                 fontWeight: FontWeight.w600,
@@ -501,6 +909,402 @@ Widget _buildFxParamsHeader({
       ],
     ),
   );
+}
+
+class _EffectInfoCopy {
+  const _EffectInfoCopy({
+    required this.summary,
+    required this.parameters,
+  });
+
+  final String summary;
+  final List<String> parameters;
+}
+
+List<String> _parameterNameSummary(List<Map<String, dynamic>> params) {
+  final names = <String>[];
+  for (final param in params) {
+    final name = (param['name'] ?? '').toString().trim();
+    if (name.isEmpty || names.contains(name)) continue;
+    names.add(name);
+  }
+  if (names.isEmpty) return const <String>['Controls depend on the plugin.'];
+  return names.take(6).map((name) => '$name: Plugin control.').toList();
+}
+
+_EffectInfoCopy _effectInfoCopy(
+  String effectName,
+  List<Map<String, dynamic>> params,
+) {
+  switch (effectName.trim()) {
+    case 'Reverb':
+      return const _EffectInfoCopy(
+        summary: 'Adds room or space around the sound.',
+        parameters: <String>[
+          'Room Size: space size.',
+          'Predelay: time before the room sound starts.',
+          'Mix: dry/wet balance.',
+        ],
+      );
+    case 'Compressor':
+      return const _EffectInfoCopy(
+        summary: 'Evens out loud and quiet parts.',
+        parameters: <String>[
+          'Threshold: level where compression starts.',
+          'Ratio: compression strength.',
+          'Attack: how fast it grabs peaks.',
+          'Release: how fast it lets go.',
+          'Makeup: output level after compression.',
+          'Mix: dry/wet balance.',
+        ],
+      );
+    case 'Dynamic Softener':
+      return const _EffectInfoCopy(
+        summary: 'Reduces harsh moments without dulling everything.',
+        parameters: <String>[
+          'Mode: softening style.',
+          'Depth: amount of softening.',
+          'Focus: detail sensitivity.',
+          'Attack: how fast it reacts.',
+          'Release: how fast it recovers.',
+          'Cut Limit: max reduction.',
+        ],
+      );
+    case 'Transient Shaper':
+      return const _EffectInfoCopy(
+        summary: 'Changes the punch and tail of hits.',
+        parameters: <String>[
+          'Attack: front-edge punch.',
+          'Sustain: tail length and body.',
+          'Pump: movement after the hit.',
+          'Speed: response speed.',
+          'Clip: catches sharp peaks.',
+        ],
+      );
+    case 'Limiter':
+      return const _EffectInfoCopy(
+        summary: 'Stops peaks from getting too loud.',
+        parameters: <String>[
+          'Threshold: level where limiting starts.',
+          'Release: recovery speed.',
+          'Ceiling: max output level.',
+        ],
+      );
+    case 'Clipper':
+    case 'Mixroom Clipper':
+      return const _EffectInfoCopy(
+        summary: 'Trims peaks for a louder, harder sound.',
+        parameters: <String>[
+          'Threshold: level where clipping starts.',
+          'Ceiling: max output level.',
+        ],
+      );
+    case 'EQ 3-Band':
+      return const _EffectInfoCopy(
+        summary: 'Quick tone control for lows, mids, and highs.',
+        parameters: <String>[
+          'Low Gain: bass cut or boost.',
+          'Mid Gain: body and presence cut or boost.',
+          'High Gain: brightness cut or boost.',
+        ],
+      );
+    case 'Degrade':
+      return const _EffectInfoCopy(
+        summary: 'Adds digital wear and texture.',
+        parameters: <String>[
+          'Mode: texture style.',
+          'Tone: brightness.',
+          'Depth: amount of degradation.',
+          'Spread: stereo width.',
+        ],
+      );
+    case 'Delay':
+      return const _EffectInfoCopy(
+        summary: 'Repeats the sound like an echo.',
+        parameters: <String>[
+          'Delay Time: spacing between echoes.',
+          'Feedback: number of repeats.',
+          'Mix: dry/wet balance.',
+        ],
+      );
+    case 'De-Esser':
+      return const _EffectInfoCopy(
+        summary: 'Reduces sharp S sounds and vocal harshness.',
+        parameters: <String>[
+          'Frequency: harsh range to target.',
+          'Threshold: level where reduction starts.',
+          'Amount: reduction strength.',
+          'Mix: dry/wet balance.',
+        ],
+      );
+    case 'Distortion':
+      return const _EffectInfoCopy(
+        summary: 'Adds grit, drive, and harmonic color.',
+        parameters: <String>[
+          'Drive: distortion amount.',
+          'Tone: brightness.',
+          'Output: level after distortion.',
+          'Mix: dry/wet balance.',
+        ],
+      );
+    case 'Stereo':
+      return const _EffectInfoCopy(
+        summary: 'Controls stereo width.',
+        parameters: <String>[
+          'Width: wider or narrower stereo image.',
+          'Low Bypass: keeps bass centered.',
+          'Mono: folds the signal to center.',
+        ],
+      );
+    case 'Stereo Pro':
+      return const _EffectInfoCopy(
+        summary: 'Shapes the stereo image more precisely.',
+        parameters: <String>[
+          'Gain: output level.',
+          'Width: stereo spread.',
+          'Asymmetry: left/right balance shape.',
+          'Rotation: image angle.',
+        ],
+      );
+    case 'Volume Shaper':
+      return const _EffectInfoCopy(
+        summary: 'Creates rhythmic volume movement.',
+        parameters: <String>[
+          'Shape: volume curve.',
+          'Rate: movement speed.',
+          'Phase: timing offset.',
+          'Depth: movement amount.',
+          'Smooth: softer edges.',
+          'Swing: groove feel.',
+        ],
+      );
+    case 'Time Shaper':
+      return const _EffectInfoCopy(
+        summary: 'Creates rhythmic timing changes.',
+        parameters: <String>[
+          'Pattern: timing movement.',
+          'Rate: movement speed.',
+          'Phase: timing offset.',
+          'Amount: effect strength.',
+          'Smooth: softer edges.',
+          'Swing: groove feel.',
+        ],
+      );
+    case 'Chorus':
+      return const _EffectInfoCopy(
+        summary: 'Adds a wider, doubled sound.',
+        parameters: <String>[
+          'Rate: movement speed.',
+          'Depth: movement amount.',
+          'Mix: dry/wet balance.',
+        ],
+      );
+    case 'Vibrato':
+      return const _EffectInfoCopy(
+        summary: 'Adds pitch movement.',
+        parameters: <String>[
+          'Rate: movement speed.',
+          'Depth: pitch movement amount.',
+          'Mix: dry/wet balance.',
+        ],
+      );
+    case 'Gain':
+      return const _EffectInfoCopy(
+        summary: 'Changes overall level.',
+        parameters: <String>['Volume: output level.'],
+      );
+    case 'Pitch Shift':
+      return const _EffectInfoCopy(
+        summary: 'Moves pitch up or down.',
+        parameters: <String>[
+          'Semitones: pitch shift amount.',
+          'Mix: dry/wet balance.',
+        ],
+      );
+    case 'Pitch Corrector':
+      return const _EffectInfoCopy(
+        summary: 'Pulls notes toward a key.',
+        parameters: <String>[
+          'Key: target key.',
+          'Scale: allowed notes.',
+          'Correction: tuning strength.',
+          'Retune Speed: how fast notes move.',
+          'Mix: dry/wet balance.',
+        ],
+      );
+    default:
+      return _EffectInfoCopy(
+        summary: 'Changes this sound.',
+        parameters: _parameterNameSummary(params),
+      );
+  }
+}
+
+String _effectInfoBulletText(BuildContext context, String parameter) {
+  const fallbackSuffix = ': Plugin control.';
+  if (parameter.endsWith(fallbackSuffix)) {
+    final name =
+        parameter.substring(0, parameter.length - fallbackSuffix.length);
+    return '$name: ${L10n.translate(context, 'Plugin control.')}';
+  }
+  return L10n.translate(context, parameter);
+}
+
+Widget _buildEffectInfoButton({
+  required BuildContext context,
+  required String effectName,
+  required List<Map<String, dynamic>> params,
+}) {
+  final copy = _effectInfoCopy(effectName, params);
+  return IconButton(
+    tooltip: L10n.translate(context, 'Plugin info'),
+    onPressed: () => _showEffectInfoDialog(
+      context: context,
+      effectName: effectName,
+      copy: copy,
+    ),
+    icon: const Icon(Icons.info_outline_rounded, size: 17),
+    visualDensity: VisualDensity.compact,
+    padding: EdgeInsets.zero,
+    constraints: const BoxConstraints.tightFor(width: 34, height: 34),
+    color: _kFxPanelText,
+    style: IconButton.styleFrom(
+      backgroundColor: Colors.white.withValues(alpha: 0.08),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+      ),
+    ),
+  );
+}
+
+void _showEffectInfoDialog({
+  required BuildContext context,
+  required String effectName,
+  required _EffectInfoCopy copy,
+}) {
+  unawaited(
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF3B434B),
+          surfaceTintColor: Colors.transparent,
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 22, vertical: 24),
+          contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+          titlePadding: const EdgeInsets.fromLTRB(20, 18, 12, 0),
+          actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+          ),
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  L10n.translate(context, effectName),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: _kFxPanelText,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: L10n.translate(context, 'Close'),
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                icon: const Icon(Icons.close_rounded, size: 18),
+                color: _kFxPanelMutedText,
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 340),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  L10n.translate(context, copy.summary),
+                  style: const TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: _kFxPanelText,
+                    fontSize: 13,
+                    height: 1.35,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  L10n.translate(context, 'Parameters'),
+                  style: const TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: _kFxPanelMutedText,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                for (final parameter in copy.parameters) ...[
+                  _EffectInfoBullet(
+                    text: _effectInfoBulletText(context, parameter),
+                  ),
+                  const SizedBox(height: 7),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(L10n.translate(context, 'Close')),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+}
+
+class _EffectInfoBullet extends StatelessWidget {
+  const _EffectInfoBullet({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 4,
+          height: 4,
+          margin: const EdgeInsets.only(top: 7, right: 9),
+          decoration: BoxDecoration(
+            color: _kFxCoolAccent.withValues(alpha: 0.86),
+            shape: BoxShape.circle,
+          ),
+        ),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(
+              fontFamily: 'Pretendard',
+              color: _kFxPanelText,
+              fontSize: 12.6,
+              height: 1.32,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 enum _RowEffectsMenuAction {
@@ -590,6 +1394,14 @@ bool _showsSpectrumPreview(String effectName) {
 
 bool _showsShaperPreview(String effectName) {
   return effectName == 'Volume Shaper' || effectName == 'Time Shaper';
+}
+
+bool _showsDynamicSoftenerPreview(String effectName) {
+  return effectName == 'Dynamic Softener';
+}
+
+bool _showsTransientShaperVisualizer(String effectName) {
+  return effectName == 'Transient Shaper';
 }
 
 String _dynamicsReductionMeterTitle(String effectName) {
@@ -952,6 +1764,14 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   bool _shaperPreviewRunning = false;
   bool _shaperPreviewRequestInFlight = false;
   List<double> _shaperPreview = const <double>[];
+  Timer? _softenerPreviewTimer;
+  bool _softenerPreviewRunning = false;
+  bool _softenerPreviewRequestInFlight = false;
+  List<double> _softenerFrame = const <double>[];
+  Timer? _transientShaperVisualTimer;
+  bool _transientShaperVisualRunning = false;
+  bool _transientShaperVisualRequestInFlight = false;
+  List<double> _transientShaperVisual = const <double>[];
   double _eqAnalyzerSampleRate = 44100.0;
   int _eqParametricTabIndex = 0;
   bool _playbackRefreshBusy = false;
@@ -1082,6 +1902,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     _stopEqWaveformPolling();
     _stopStereoScopePolling();
     _stopShaperPreviewPolling();
+    _stopTransientShaperVisualPolling();
+    _stopDynamicSoftenerPolling();
     setState(() {
       _selectedEffectIndex = null;
       _currentParams = [];
@@ -1343,6 +2165,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     _stopEqWaveformPolling();
     _stopStereoScopePolling();
     _stopShaperPreviewPolling();
+    _stopTransientShaperVisualPolling();
+    _stopDynamicSoftenerPolling();
     super.dispose();
   }
 
@@ -1497,6 +2321,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
       _stopEqWaveformPolling();
       _stopStereoScopePolling();
       _stopShaperPreviewPolling();
+      _stopDynamicSoftenerPolling();
+      _stopTransientShaperVisualPolling();
     } else if (!hadSelection) {
       if (showLoading) {
         setState(() {
@@ -1506,6 +2332,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
       _stopEqWaveformPolling();
       _stopStereoScopePolling();
       _stopShaperPreviewPolling();
+      _stopDynamicSoftenerPolling();
+      _stopTransientShaperVisualPolling();
     }
     final names = await widget.getEffectsForRow(widget.rowIndex);
     var ids = await widget.getEffectIdsForRow(widget.rowIndex);
@@ -1533,6 +2361,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         _stopEqWaveformPolling();
         _stopStereoScopePolling();
         _stopShaperPreviewPolling();
+        _stopDynamicSoftenerPolling();
+        _stopTransientShaperVisualPolling();
       }
     });
   }
@@ -2161,6 +2991,92 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     _shaperPreviewTimer?.cancel();
     _shaperPreviewTimer = null;
     _shaperPreview = const <double>[];
+  }
+
+  void _startDynamicSoftenerPolling({required int effectIndex}) {
+    _stopDynamicSoftenerPolling();
+    _softenerPreviewRunning = true;
+    _softenerPreviewRequestInFlight = false;
+
+    Future<void> fetchFrame() async {
+      if (!mounted ||
+          !_softenerPreviewRunning ||
+          _softenerPreviewRequestInFlight) {
+        return;
+      }
+      _softenerPreviewRequestInFlight = true;
+
+      try {
+        final arr = await JuceAudioEngine.getRowDynamicSoftenerFrame(
+          widget.rowIndex,
+          effectIndex,
+        );
+        if (!mounted || !_softenerPreviewRunning) return;
+        if (!_previewFramesChanged(_softenerFrame, arr, tolerance: 0.0005)) {
+          return;
+        }
+        setState(() {
+          _softenerFrame = arr;
+        });
+      } catch (_) {
+        // ignore transient bridge errors while polling
+      } finally {
+        _softenerPreviewRequestInFlight = false;
+      }
+    }
+
+    unawaited(fetchFrame());
+    _softenerPreviewTimer =
+        Timer.periodic(_kDynamicSoftenerPollInterval, (_) => fetchFrame());
+  }
+
+  void _stopDynamicSoftenerPolling() {
+    _softenerPreviewRunning = false;
+    _softenerPreviewRequestInFlight = false;
+    _softenerPreviewTimer?.cancel();
+    _softenerPreviewTimer = null;
+    _softenerFrame = const <double>[];
+  }
+
+  void _startTransientShaperVisualPolling({required int effectIndex}) {
+    _stopTransientShaperVisualPolling();
+    _transientShaperVisualRunning = true;
+    _transientShaperVisualRequestInFlight = false;
+
+    _transientShaperVisualTimer =
+        Timer.periodic(_kShaperPreviewPollInterval, (_) async {
+      if (!mounted ||
+          !_transientShaperVisualRunning ||
+          _transientShaperVisualRequestInFlight) {
+        return;
+      }
+      _transientShaperVisualRequestInFlight = true;
+
+      try {
+        final arr = await JuceAudioEngine.getRowTransientShaperVisual(
+          widget.rowIndex,
+          effectIndex,
+          pointCount: 192,
+        );
+        if (!mounted || !_transientShaperVisualRunning) return;
+        if (!_previewFramesChanged(_transientShaperVisual, arr)) return;
+        setState(() {
+          _transientShaperVisual = arr;
+        });
+      } catch (_) {
+        // ignore transient bridge errors while polling
+      } finally {
+        _transientShaperVisualRequestInFlight = false;
+      }
+    });
+  }
+
+  void _stopTransientShaperVisualPolling() {
+    _transientShaperVisualRunning = false;
+    _transientShaperVisualRequestInFlight = false;
+    _transientShaperVisualTimer?.cancel();
+    _transientShaperVisualTimer = null;
+    _transientShaperVisual = const <double>[];
   }
 
   Future<void> _refreshEqAnalyzerSampleRate() async {
@@ -2906,85 +3822,90 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
           : showReturnHighlight
               ? _mixroomFxReturnHighlightDecoration(radius: 14)
               : const BoxDecoration(color: Colors.transparent),
-      child: ListTile(
-        dense: true,
-        minLeadingWidth: 22,
-        horizontalTitleGap: 4,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 2),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        clipBehavior: Clip.antiAlias,
+        child: ListTile(
+          dense: true,
+          minLeadingWidth: 22,
+          horizontalTitleGap: 4,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 2),
 
-        // only this area starts the reorder gesture
-        leading: ReorderableDragStartListener(
-          index: idx,
-          child: const Padding(
-            padding: EdgeInsets.only(left: 2.0, right: 2.0),
-            child: Icon(
-              Icons.drag_handle_rounded,
-              size: 18,
-              color: Color(0xCCF4F4F4),
+          // only this area starts the reorder gesture
+          leading: ReorderableDragStartListener(
+            index: idx,
+            child: const Padding(
+              padding: EdgeInsets.only(left: 2.0, right: 2.0),
+              child: Icon(
+                Icons.drag_handle_rounded,
+                size: 18,
+                color: Color(0xCCF4F4F4),
+              ),
             ),
           ),
-        ),
 
-        title: Text(
-          _effects[idx],
-          maxLines: 1,
-          softWrap: false,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            color: _kFxPanelText,
-            fontSize: 15,
-            fontWeight: FontWeight.w500,
+          title: Text(
+            L10n.translate(context, _effects[idx]),
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: _kFxPanelText,
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+            ),
           ),
-        ),
 
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              width: 42,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Switch(
-                  value: !_bypassed[idx],
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  onChanged: (active) async {
-                    final shouldBypass = !active;
-                    final previous = _bypassed[idx];
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 42,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Switch(
+                    value: !_bypassed[idx],
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    onChanged: (active) async {
+                      final shouldBypass = !active;
+                      final previous = _bypassed[idx];
 
-                    setState(() => _bypassed[idx] = shouldBypass);
-                    try {
-                      await widget.setBypassForRow(
-                          widget.rowIndex, idx, shouldBypass);
-                    } catch (_) {
-                      if (!mounted) return;
-                      setState(() => _bypassed[idx] = previous);
-                    }
-                  },
-                  activeColor: const Color(0xFFF4F4F4),
-                  inactiveThumbColor: const Color(0xFFB8BDC3),
-                  inactiveTrackColor: const Color(0xFFDFE2E5),
-                  activeTrackColor: const Color(0xFF545A60),
+                      setState(() => _bypassed[idx] = shouldBypass);
+                      try {
+                        await widget.setBypassForRow(
+                            widget.rowIndex, idx, shouldBypass);
+                      } catch (_) {
+                        if (!mounted) return;
+                        setState(() => _bypassed[idx] = previous);
+                      }
+                    },
+                    activeColor: const Color(0xFFF4F4F4),
+                    inactiveThumbColor: const Color(0xFFB8BDC3),
+                    inactiveTrackColor: const Color(0xFFDFE2E5),
+                    activeTrackColor: const Color(0xFF545A60),
+                  ),
                 ),
               ),
-            ),
-            IconButton(
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
-              icon: const Icon(
-                Icons.delete_outline,
-                size: 18,
-                color: Color.fromARGB(255, 255, 164, 164),
+              IconButton(
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
+                icon: const Icon(
+                  Icons.delete_outline,
+                  size: 18,
+                  color: Color.fromARGB(255, 255, 164, 164),
+                ),
+                onPressed: () => _confirmRemove(idx),
               ),
-              onPressed: () => _confirmRemove(idx),
-            ),
-          ],
-        ),
+            ],
+          ),
 
-        onTap: () async {
-          final liveIdx = await _resolveLiveEffectIndex(idx);
-          final targetIdx = liveIdx >= 0 ? liveIdx : idx;
-          await _openPluginParams(targetIdx);
-        },
+          onTap: () async {
+            final liveIdx = await _resolveLiveEffectIndex(idx);
+            final targetIdx = liveIdx >= 0 ? liveIdx : idx;
+            await _openPluginParams(targetIdx);
+          },
+        ),
       ),
     );
 
@@ -3006,25 +3927,28 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
           top: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
         ),
       ),
-      child: ListTile(
-        dense: true,
-        minLeadingWidth: 26,
-        horizontalTitleGap: 6,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 2),
-        leading: const Icon(
-          Icons.add_circle_outline,
-          color: _kFxPanelText,
-          size: 19,
-        ),
-        title: Text(
-          L10n.translate(context, 'Add Effect'),
-          style: const TextStyle(
+      child: Material(
+        color: Colors.transparent,
+        child: ListTile(
+          dense: true,
+          minLeadingWidth: 26,
+          horizontalTitleGap: 6,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 2),
+          leading: const Icon(
+            Icons.add_circle_outline,
             color: _kFxPanelText,
-            fontSize: 15,
-            fontWeight: FontWeight.w500,
+            size: 19,
           ),
+          title: Text(
+            L10n.translate(context, 'Add Effect'),
+            style: const TextStyle(
+              color: _kFxPanelText,
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          onTap: _showAddEffectModal,
         ),
-        onTap: _showAddEffectModal,
       ),
     );
     return _wrapWithHalos(
@@ -3099,6 +4023,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
       "EQ Parametric",
       "Delay",
       "Compressor",
+      "Dynamic Softener",
+      "Transient Shaper",
       "Clipper",
       "Limiter",
       "Distortion",
@@ -3205,7 +4131,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                             contentPadding:
                                 const EdgeInsets.symmetric(horizontal: 10),
                             title: Text(
-                              name,
+                              L10n.translate(context, name),
                               maxLines: 1,
                               softWrap: false,
                               overflow: TextOverflow.ellipsis,
@@ -3358,6 +4284,12 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     }
 
     if (_isLikelyExternalEffectSlot(idx)) {
+      _stopCompressorMetering();
+      _stopEqWaveformPolling();
+      _stopStereoScopePolling();
+      _stopShaperPreviewPolling();
+      _stopDynamicSoftenerPolling();
+      _stopTransientShaperVisualPolling();
       setState(() {
         _rowEffectsMenuOpen = false;
         _selectedEffectIndex = null;
@@ -3404,6 +4336,16 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
       _startShaperPreviewPolling(effectIndex: idx);
     } else {
       _stopShaperPreviewPolling();
+    }
+    if (_showsTransientShaperVisualizer(_effects[idx])) {
+      _startTransientShaperVisualPolling(effectIndex: idx);
+    } else {
+      _stopTransientShaperVisualPolling();
+    }
+    if (_showsDynamicSoftenerPreview(_effects[idx])) {
+      _startDynamicSoftenerPolling(effectIndex: idx);
+    } else {
+      _stopDynamicSoftenerPolling();
     }
 
     var params = await widget.getTrackPluginParameters(widget.rowIndex, idx);
@@ -3532,6 +4474,31 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
               name,
               oldValue,
               defaultValue,
+            );
+          },
+          onValueTap: () async {
+            final oldValue = (param['value'] as num).toDouble();
+            final picked = await _showNumericParamEntryDialog(
+              context: context,
+              param: param,
+              currentValue: oldValue,
+            );
+            if (!mounted || picked == null) return;
+            final nextValue = picked
+                .clamp(
+                  (param['min'] as num).toDouble(),
+                  (param['max'] as num).toDouble(),
+                )
+                .toDouble();
+            if ((oldValue - nextValue).abs() < 1.0e-6) return;
+            setState(() => param['value'] = nextValue);
+            _setTrackEffectParam(widget.rowIndex, idx, name, nextValue);
+            _commitTrackEffectParam(
+              widget.rowIndex,
+              idx,
+              name,
+              oldValue,
+              nextValue,
             );
           },
         );
@@ -3838,6 +4805,33 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
       // Must match JUCE fixed centers for accurate preview
       final freqs = [140.0, 1200.0, 8000.0];
 
+      Future<void> typeEq3BandValue(Map<String, dynamic> param) async {
+        final name = param['name'] as String;
+        final oldValue = (param['value'] as num).toDouble();
+        final picked = await _showNumericParamEntryDialog(
+          context: context,
+          param: param,
+          currentValue: oldValue,
+        );
+        if (!mounted || picked == null) return;
+        final nextValue = picked
+            .clamp(
+              (param['min'] as num).toDouble(),
+              (param['max'] as num).toDouble(),
+            )
+            .toDouble();
+        if ((oldValue - nextValue).abs() < 1.0e-6) return;
+        setState(() => param['value'] = nextValue);
+        _setTrackEffectParam(widget.rowIndex, idx, name, nextValue);
+        _commitTrackEffectParam(
+          widget.rowIndex,
+          idx,
+          name,
+          oldValue,
+          nextValue,
+        );
+      }
+
       return _wrapWithHalos(
           haloKeys: effectPageHaloKeys,
           borderRadius: BorderRadius.circular(12),
@@ -3850,6 +4844,11 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                   context: context,
                   title: effectName,
                   onBack: () => _returnToEffectsList(effectIndex: idx),
+                  trailing: _buildEffectInfoButton(
+                    context: context,
+                    effectName: effectName,
+                    params: _currentParams,
+                  ),
                 ),
                 const SizedBox(height: 10),
                 LayoutBuilder(
@@ -3904,6 +4903,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                       max: (pLow['max'] as num).toDouble(),
                                       defaultValue: _paramDefaultAsDouble(pLow),
                                       unit: 'dB',
+                                      onValueTap: () =>
+                                          unawaited(typeEq3BandValue(pLow)),
                                       onDoubleTapReset: () {
                                         final defaultValue =
                                             _paramDefaultAsDouble(pLow);
@@ -3979,6 +4980,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                       max: (pMid['max'] as num).toDouble(),
                                       defaultValue: _paramDefaultAsDouble(pMid),
                                       unit: 'dB',
+                                      onValueTap: () =>
+                                          unawaited(typeEq3BandValue(pMid)),
                                       onDoubleTapReset: () {
                                         final defaultValue =
                                             _paramDefaultAsDouble(pMid);
@@ -4055,6 +5058,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                                       defaultValue:
                                           _paramDefaultAsDouble(pHigh),
                                       unit: 'dB',
+                                      onValueTap: () =>
+                                          unawaited(typeEq3BandValue(pHigh)),
                                       onDoubleTapReset: () {
                                         final defaultValue =
                                             _paramDefaultAsDouble(pHigh);
@@ -4129,6 +5134,11 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                 context: context,
                 title: effectName,
                 onBack: () => _returnToEffectsList(effectIndex: idx),
+                trailing: _buildEffectInfoButton(
+                  context: context,
+                  effectName: effectName,
+                  params: _currentParams,
+                ),
               ),
               const SizedBox(height: 10),
 
@@ -4177,6 +5187,66 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                       (_paramByName(_currentParams, 'Spread')?['value'] as num?)
                               ?.toDouble() ??
                           40.0,
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              if (_showsTransientShaperVisualizer(effectName) &&
+                  _currentParams.isNotEmpty) ...[
+                _TransientShaperVisualizerCard(
+                  frames: _transientShaperVisual,
+                  attackPercent:
+                      (_paramByName(_currentParams, 'Attack')?['value'] as num?)
+                              ?.toDouble() ??
+                          0.0,
+                  pumpPercent:
+                      (_paramByName(_currentParams, 'Pump')?['value'] as num?)
+                              ?.toDouble() ??
+                          0.0,
+                  sustainPercent:
+                      (_paramByName(_currentParams, 'Sustain')?['value']
+                                  as num?)
+                              ?.toDouble() ??
+                          0.0,
+                  speedPercent:
+                      (_paramByName(_currentParams, 'Speed')?['value'] as num?)
+                              ?.toDouble() ??
+                          65.0,
+                  clip: (_paramByName(_currentParams, 'Clip')?['value']
+                          as bool?) ??
+                      false,
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              if (_showsDynamicSoftenerPreview(effectName)) ...[
+                _DynamicSoftenerPreview(
+                  frame: _softenerFrame,
+                  mode: (_paramByName(_currentParams, 'Mode')?['value'] ??
+                          'Gentle')
+                      .toString(),
+                  depthPercent:
+                      (_paramByName(_currentParams, 'Depth')?['value'] as num?)
+                              ?.toDouble() ??
+                          55.0,
+                  detailPercent:
+                      (_paramByName(_currentParams, 'Focus')?['value'] as num?)
+                              ?.toDouble() ??
+                          55.0,
+                  maxCutDb: (_paramByName(_currentParams, 'Cut Limit')?['value']
+                              as num?)
+                          ?.toDouble() ??
+                      18.0,
+                  lowRangeHz:
+                      (_paramByName(_currentParams, 'Low Range')?['value']
+                                  as num?)
+                              ?.toDouble() ??
+                          20.0,
+                  highRangeHz:
+                      (_paramByName(_currentParams, 'High Range')?['value']
+                                  as num?)
+                              ?.toDouble() ??
+                          20000.0,
                 ),
                 const SizedBox(height: 12),
               ],
@@ -4257,159 +5327,29 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                     effectName: effectName,
                     param: param,
                     borderRadius: BorderRadius.circular(10),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 4, horizontal: 4),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(param['name'] as String,
-                              style: Theme.of(context).textTheme.bodyLarge),
-                          // const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              Text(
-                                _formatParamValueForDisplay(
-                                  param,
-                                  (param['min'] as num).toDouble(),
-                                ),
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                              // const SizedBox(width: 8),
-                              Expanded(
-                                child: SliderTheme(
-                                  data: SliderTheme.of(context).copyWith(
-                                    showValueIndicator:
-                                        ShowValueIndicator.always,
-                                    valueIndicatorTextStyle: const TextStyle(
-                                      color: Color.fromARGB(255, 0, 0, 0),
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  child: (() {
-                                    final effectName = _effects[idx];
-                                    final paramName = param['name'] as String;
-
-                                    final minV =
-                                        (param['min'] as num).toDouble();
-                                    final maxV =
-                                        (param['max'] as num).toDouble();
-                                    final rawV = (param['value'] as num)
-                                        .toDouble()
-                                        .clamp(minV, maxV);
-                                    final valueText =
-                                        _formatParamValueForDisplay(
-                                      param,
-                                      rawV,
-                                    );
-
-                                    final skew = _getParamSkew(
-                                        effectName, paramName); // null = linear
-
-                                    // value -> 0..1
-                                    double toNorm(double v) =>
-                                        ((v - minV) / (maxV - minV))
-                                            .clamp(0.0, 1.0);
-
-                                    // 0..1 -> value
-                                    double fromNorm(double t) =>
-                                        minV +
-                                        (maxV - minV) * t.clamp(0.0, 1.0);
-
-                                    // if skew exists: position uses norm^skew, and inverse uses ^(1/skew)
-                                    final norm = toNorm(rawV);
-                                    final sliderPos = (skew == null)
-                                        ? norm
-                                        : math.pow(norm, skew).toDouble();
-
-                                    return GestureDetector(
-                                      behavior: HitTestBehavior.translucent,
-                                      onDoubleTap: () {
-                                        final defaultValue =
-                                            _paramDefaultAsDouble(param);
-                                        if (defaultValue == null) return;
-                                        final clampedDefault = defaultValue
-                                            .clamp(minV, maxV)
-                                            .toDouble();
-                                        final oldValue =
-                                            (param['value'] as num).toDouble();
-                                        if ((oldValue - clampedDefault).abs() <
-                                            1.0e-6) {
-                                          return;
-                                        }
-                                        setState(() =>
-                                            param['value'] = clampedDefault);
-                                        _setTrackEffectParam(widget.rowIndex,
-                                            idx, paramName, clampedDefault);
-                                        _commitTrackEffectParam(
-                                          widget.rowIndex,
-                                          idx,
-                                          paramName,
-                                          oldValue,
-                                          clampedDefault,
-                                        );
-                                      },
-                                      child: Slider(
-                                        value: sliderPos,
-                                        min: 0.0,
-                                        max: 1.0,
-                                        divisions: 200,
-                                        label: valueText,
-                                        onChangeStart: (_) {
-                                          _paramDragStartValue = rawV;
-                                        },
-                                        onChanged: (p) {
-                                          final t = p.clamp(0.0, 1.0);
-                                          final newNorm = (skew == null)
-                                              ? t
-                                              : math
-                                                  .pow(t, 1.0 / skew!)
-                                                  .toDouble();
-                                          final v = fromNorm(newNorm);
-
-                                          setState(() => param['value'] = v);
-                                          _setTrackEffectParam(widget.rowIndex,
-                                              idx, paramName, v);
-                                        },
-                                        onChangeEnd: (p) {
-                                          if (_paramDragStartValue == null)
-                                            return;
-
-                                          final t = p.clamp(0.0, 1.0);
-                                          final newNorm = (skew == null)
-                                              ? t
-                                              : math
-                                                  .pow(t, 1.0 / skew!)
-                                                  .toDouble();
-                                          final v = fromNorm(newNorm);
-
-                                          _commitTrackEffectParam(
-                                            widget.rowIndex,
-                                            idx,
-                                            paramName,
-                                            _paramDragStartValue!,
-                                            v,
-                                          );
-
-                                          _paramDragStartValue = null;
-                                        },
-                                      ),
-                                    );
-                                  })(),
-                                ),
-                              ),
-                              // const SizedBox(width: 8),
-                              Text(
-                                _formatParamValueForDisplay(
-                                  param,
-                                  (param['max'] as num).toDouble(),
-                                ),
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ],
-                          ),
-                        ],
+                    child: _buildGenericFloatParamEditor(
+                      context: context,
+                      effectName: _effects[idx],
+                      param: param,
+                      setLocalValue: (value) =>
+                          setState(() => param['value'] = value),
+                      setRemoteValue: (value) => _setTrackEffectParam(
+                        widget.rowIndex,
+                        idx,
+                        param['name'] as String,
+                        value,
                       ),
+                      commitValue: (oldValue, newValue) =>
+                          _commitTrackEffectParam(
+                        widget.rowIndex,
+                        idx,
+                        param['name'] as String,
+                        oldValue,
+                        newValue,
+                      ),
+                      setDragStartValue: (value) =>
+                          _paramDragStartValue = value,
+                      getDragStartValue: () => _paramDragStartValue,
                     ),
                   ),
                 ] else if (param['type'] == 'bool') ...[
@@ -4453,13 +5393,15 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                         effectName: effectName,
                         param: param,
                         borderRadius: BorderRadius.circular(10),
-                        child: effectName == 'Degrade' &&
+                        child: (effectName == 'Degrade' ||
+                                    effectName == 'Dynamic Softener') &&
                                 param['name'] == 'Mode'
                             ? _buildDegradeModeSelectorTile(
                                 context: context,
                                 label: param['name'] as String,
                                 value: current,
                                 choices: choices,
+                                oneRow: effectName == 'Dynamic Softener',
                                 onSelected: (picked) {
                                   if (picked == current) return;
                                   final oldVal = param['value'];
@@ -4646,6 +5588,14 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
   bool _shaperPreviewRunning = false;
   bool _shaperPreviewRequestInFlight = false;
   List<double> _shaperPreview = const <double>[];
+  Timer? _softenerPreviewTimer;
+  bool _softenerPreviewRunning = false;
+  bool _softenerPreviewRequestInFlight = false;
+  List<double> _softenerFrame = const <double>[];
+  Timer? _transientShaperVisualTimer;
+  bool _transientShaperVisualRunning = false;
+  bool _transientShaperVisualRequestInFlight = false;
+  List<double> _transientShaperVisual = const <double>[];
   double _eqAnalyzerSampleRate = 44100.0;
   int _eqParametricTabIndex = 0;
 
@@ -4762,6 +5712,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     _stopEqWaveformPolling();
     _stopStereoScopePolling();
     _stopShaperPreviewPolling();
+    _stopTransientShaperVisualPolling();
+    _stopDynamicSoftenerPolling();
     setState(() {
       _selectedEffectIndex = null;
       _currentParams = [];
@@ -5100,6 +6052,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     _stopEqWaveformPolling();
     _stopStereoScopePolling();
     _stopShaperPreviewPolling();
+    _stopTransientShaperVisualPolling();
+    _stopDynamicSoftenerPolling();
     super.dispose();
   }
 
@@ -5107,6 +6061,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     _stopEqWaveformPolling();
     _stopStereoScopePolling();
     _stopShaperPreviewPolling();
+    _stopTransientShaperVisualPolling();
+    _stopDynamicSoftenerPolling();
     final names = await widget.getMasterEffects();
     var ids = await widget.getMasterEffectIds();
     if (ids.length != names.length) {
@@ -5614,6 +6570,89 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     _shaperPreviewTimer?.cancel();
     _shaperPreviewTimer = null;
     _shaperPreview = const <double>[];
+  }
+
+  void _startDynamicSoftenerPolling({required int effectIndex}) {
+    _stopDynamicSoftenerPolling();
+    _softenerPreviewRunning = true;
+    _softenerPreviewRequestInFlight = false;
+
+    Future<void> fetchFrame() async {
+      if (!mounted ||
+          !_softenerPreviewRunning ||
+          _softenerPreviewRequestInFlight) {
+        return;
+      }
+      _softenerPreviewRequestInFlight = true;
+
+      try {
+        final arr =
+            await JuceAudioEngine.getMasterDynamicSoftenerFrame(effectIndex);
+        if (!mounted || !_softenerPreviewRunning) return;
+        if (!_previewFramesChanged(_softenerFrame, arr, tolerance: 0.0005)) {
+          return;
+        }
+        setState(() {
+          _softenerFrame = arr;
+        });
+      } catch (_) {
+        // ignore transient bridge errors while polling
+      } finally {
+        _softenerPreviewRequestInFlight = false;
+      }
+    }
+
+    unawaited(fetchFrame());
+    _softenerPreviewTimer =
+        Timer.periodic(_kDynamicSoftenerPollInterval, (_) => fetchFrame());
+  }
+
+  void _stopDynamicSoftenerPolling() {
+    _softenerPreviewRunning = false;
+    _softenerPreviewRequestInFlight = false;
+    _softenerPreviewTimer?.cancel();
+    _softenerPreviewTimer = null;
+    _softenerFrame = const <double>[];
+  }
+
+  void _startTransientShaperVisualPolling({required int effectIndex}) {
+    _stopTransientShaperVisualPolling();
+    _transientShaperVisualRunning = true;
+    _transientShaperVisualRequestInFlight = false;
+
+    _transientShaperVisualTimer =
+        Timer.periodic(_kShaperPreviewPollInterval, (_) async {
+      if (!mounted ||
+          !_transientShaperVisualRunning ||
+          _transientShaperVisualRequestInFlight) {
+        return;
+      }
+      _transientShaperVisualRequestInFlight = true;
+
+      try {
+        final arr = await JuceAudioEngine.getMasterTransientShaperVisual(
+          effectIndex,
+          pointCount: 192,
+        );
+        if (!mounted || !_transientShaperVisualRunning) return;
+        if (!_previewFramesChanged(_transientShaperVisual, arr)) return;
+        setState(() {
+          _transientShaperVisual = arr;
+        });
+      } catch (_) {
+        // ignore transient bridge errors while polling
+      } finally {
+        _transientShaperVisualRequestInFlight = false;
+      }
+    });
+  }
+
+  void _stopTransientShaperVisualPolling() {
+    _transientShaperVisualRunning = false;
+    _transientShaperVisualRequestInFlight = false;
+    _transientShaperVisualTimer?.cancel();
+    _transientShaperVisualTimer = null;
+    _transientShaperVisual = const <double>[];
   }
 
   Future<void> _refreshEqAnalyzerSampleRate() async {
@@ -6198,7 +7237,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
         ),
 
         title: Text(
-          _effects[idx],
+          L10n.translate(context, _effects[idx]),
           maxLines: 1,
           softWrap: false,
           overflow: TextOverflow.ellipsis,
@@ -6282,9 +7321,9 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
           color: _kFxPanelText,
           size: 19,
         ),
-        title: const Text(
-          'Add Effect',
-          style: TextStyle(
+        title: Text(
+          L10n.translate(context, 'Add Effect'),
+          style: const TextStyle(
             color: _kFxPanelText,
             fontSize: 15,
             fontWeight: FontWeight.w500,
@@ -6354,6 +7393,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
       "EQ Parametric",
       "Delay",
       "Compressor",
+      "Dynamic Softener",
+      "Transient Shaper",
       "Clipper",
       "Limiter",
       "Distortion",
@@ -6450,7 +7491,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                             contentPadding:
                                 const EdgeInsets.symmetric(horizontal: 10),
                             title: Text(
-                              name,
+                              L10n.translate(context, name),
                               maxLines: 1,
                               softWrap: false,
                               overflow: TextOverflow.ellipsis,
@@ -6638,6 +7679,16 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     } else {
       _stopShaperPreviewPolling();
     }
+    if (_showsTransientShaperVisualizer(_effects[idx])) {
+      _startTransientShaperVisualPolling(effectIndex: idx);
+    } else {
+      _stopTransientShaperVisualPolling();
+    }
+    if (_showsDynamicSoftenerPreview(_effects[idx])) {
+      _startDynamicSoftenerPolling(effectIndex: idx);
+    } else {
+      _stopDynamicSoftenerPolling();
+    }
 
     var params = await widget.getMasterPluginParameters(idx);
     if (params.isEmpty) {
@@ -6757,6 +7808,30 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
               name,
               oldValue,
               defaultValue,
+            );
+          },
+          onValueTap: () async {
+            final oldValue = (param['value'] as num).toDouble();
+            final picked = await _showNumericParamEntryDialog(
+              context: context,
+              param: param,
+              currentValue: oldValue,
+            );
+            if (!mounted || picked == null) return;
+            final nextValue = picked
+                .clamp(
+                  (param['min'] as num).toDouble(),
+                  (param['max'] as num).toDouble(),
+                )
+                .toDouble();
+            if ((oldValue - nextValue).abs() < 1.0e-6) return;
+            setState(() => param['value'] = nextValue);
+            widget.setMasterEffectParam(idx, name, nextValue);
+            widget.onMasterPluginParamCommit?.call(
+              idx,
+              name,
+              oldValue,
+              nextValue,
             );
           },
         );
@@ -7050,6 +8125,32 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
       // Must match JUCE fixed centers for accurate preview
       final freqs = [140.0, 1200.0, 8000.0];
 
+      Future<void> typeEq3BandValue(Map<String, dynamic> param) async {
+        final name = param['name'] as String;
+        final oldValue = (param['value'] as num).toDouble();
+        final picked = await _showNumericParamEntryDialog(
+          context: context,
+          param: param,
+          currentValue: oldValue,
+        );
+        if (!mounted || picked == null) return;
+        final nextValue = picked
+            .clamp(
+              (param['min'] as num).toDouble(),
+              (param['max'] as num).toDouble(),
+            )
+            .toDouble();
+        if ((oldValue - nextValue).abs() < 1.0e-6) return;
+        setState(() => param['value'] = nextValue);
+        widget.setMasterEffectParam(idx, name, nextValue);
+        widget.onMasterPluginParamCommit?.call(
+          idx,
+          name,
+          oldValue,
+          nextValue,
+        );
+      }
+
       return SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
         child: Column(
@@ -7059,6 +8160,11 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
               context: context,
               title: effectName,
               onBack: () => _returnToEffectsList(effectIndex: idx),
+              trailing: _buildEffectInfoButton(
+                context: context,
+                effectName: effectName,
+                params: _currentParams,
+              ),
             ),
             const SizedBox(height: 10),
             LayoutBuilder(
@@ -7110,6 +8216,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                                   max: (pLow['max'] as num).toDouble(),
                                   defaultValue: _paramDefaultAsDouble(pLow),
                                   unit: 'dB',
+                                  onValueTap: () =>
+                                      unawaited(typeEq3BandValue(pLow)),
                                   onDoubleTapReset: () {
                                     final defaultValue =
                                         _paramDefaultAsDouble(pLow);
@@ -7179,6 +8287,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                                   max: (pMid['max'] as num).toDouble(),
                                   defaultValue: _paramDefaultAsDouble(pMid),
                                   unit: 'dB',
+                                  onValueTap: () =>
+                                      unawaited(typeEq3BandValue(pMid)),
                                   onDoubleTapReset: () {
                                     final defaultValue =
                                         _paramDefaultAsDouble(pMid);
@@ -7249,6 +8359,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                                   max: (pHigh['max'] as num).toDouble(),
                                   defaultValue: _paramDefaultAsDouble(pHigh),
                                   unit: 'dB',
+                                  onValueTap: () =>
+                                      unawaited(typeEq3BandValue(pHigh)),
                                   onDoubleTapReset: () {
                                     final defaultValue =
                                         _paramDefaultAsDouble(pHigh);
@@ -7312,38 +8424,17 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            children: [
-              IconButton(
-                padding: EdgeInsets.zero,
-                visualDensity: VisualDensity.compact,
-                constraints:
-                    const BoxConstraints.tightFor(width: 26, height: 26),
-                splashRadius: 14,
-                icon: const Icon(Icons.arrow_back, size: 18),
-                onPressed: () => _returnToEffectsList(effectIndex: idx),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  effectName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      color: Colors.white.withOpacity(1.00),
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w600),
-                ),
-              ),
-            ],
+          _buildFxParamsHeader(
+            context: context,
+            title: effectName,
+            onBack: () => _returnToEffectsList(effectIndex: idx),
+            trailing: _buildEffectInfoButton(
+              context: context,
+              effectName: effectName,
+              params: _currentParams,
+            ),
           ),
-          const SizedBox(height: 4),
-          const Divider(
-            height: 1,
-            thickness: 0.9,
-            color: Color.fromARGB(213, 104, 104, 104),
-          ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 10),
 
           if (effectName == 'Stereo Pro' && _currentParams.isNotEmpty) ...[
             _StereoProPreview(
@@ -7386,6 +8477,61 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                   (_paramByName(_currentParams, 'Spread')?['value'] as num?)
                           ?.toDouble() ??
                       40.0,
+            ),
+            const SizedBox(height: 12),
+          ],
+
+          if (_showsDynamicSoftenerPreview(effectName)) ...[
+            _DynamicSoftenerPreview(
+              frame: _softenerFrame,
+              mode: (_paramByName(_currentParams, 'Mode')?['value'] ?? 'Gentle')
+                  .toString(),
+              depthPercent:
+                  (_paramByName(_currentParams, 'Depth')?['value'] as num?)
+                          ?.toDouble() ??
+                      55.0,
+              detailPercent:
+                  (_paramByName(_currentParams, 'Focus')?['value'] as num?)
+                          ?.toDouble() ??
+                      55.0,
+              maxCutDb:
+                  (_paramByName(_currentParams, 'Cut Limit')?['value'] as num?)
+                          ?.toDouble() ??
+                      18.0,
+              lowRangeHz:
+                  (_paramByName(_currentParams, 'Low Range')?['value'] as num?)
+                          ?.toDouble() ??
+                      20.0,
+              highRangeHz:
+                  (_paramByName(_currentParams, 'High Range')?['value'] as num?)
+                          ?.toDouble() ??
+                      20000.0,
+            ),
+            const SizedBox(height: 12),
+          ],
+
+          if (_showsTransientShaperVisualizer(effectName) &&
+              _currentParams.isNotEmpty) ...[
+            _TransientShaperVisualizerCard(
+              frames: _transientShaperVisual,
+              attackPercent:
+                  (_paramByName(_currentParams, 'Attack')?['value'] as num?)
+                          ?.toDouble() ??
+                      0.0,
+              pumpPercent:
+                  (_paramByName(_currentParams, 'Pump')?['value'] as num?)
+                          ?.toDouble() ??
+                      0.0,
+              sustainPercent:
+                  (_paramByName(_currentParams, 'Sustain')?['value'] as num?)
+                          ?.toDouble() ??
+                      0.0,
+              speedPercent:
+                  (_paramByName(_currentParams, 'Speed')?['value'] as num?)
+                          ?.toDouble() ??
+                      65.0,
+              clip: (_paramByName(_currentParams, 'Clip')?['value'] as bool?) ??
+                  false,
             ),
             const SizedBox(height: 12),
           ],
@@ -7464,139 +8610,26 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                 effectName: effectName,
                 param: param,
                 borderRadius: BorderRadius.circular(10),
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(param['name'] as String,
-                          style: Theme.of(context).textTheme.bodyLarge),
-                      Row(
-                        children: [
-                          Text(
-                            _formatParamValueForDisplay(
-                              param,
-                              (param['min'] as num).toDouble(),
-                            ),
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          Expanded(
-                            child: SliderTheme(
-                              data: SliderTheme.of(context).copyWith(
-                                showValueIndicator: ShowValueIndicator.always,
-                                valueIndicatorTextStyle: const TextStyle(
-                                  color: Color.fromARGB(255, 0, 0, 0),
-                                  fontSize: 12,
-                                ),
-                              ),
-                              child: (() {
-                                final effectName = _effects[idx];
-                                final paramName = param['name'] as String;
-
-                                final minV = (param['min'] as num).toDouble();
-                                final maxV = (param['max'] as num).toDouble();
-                                final rawV = (param['value'] as num)
-                                    .toDouble()
-                                    .clamp(minV, maxV);
-                                final valueText =
-                                    _formatParamValueForDisplay(param, rawV);
-
-                                final skew =
-                                    _getParamSkew(effectName, paramName);
-
-                                double toNorm(double v) =>
-                                    ((v - minV) / (maxV - minV))
-                                        .clamp(0.0, 1.0);
-
-                                double fromNorm(double t) =>
-                                    minV + (maxV - minV) * t.clamp(0.0, 1.0);
-
-                                final norm = toNorm(rawV);
-                                final sliderPos = (skew == null)
-                                    ? norm
-                                    : math.pow(norm, skew).toDouble();
-
-                                return GestureDetector(
-                                  behavior: HitTestBehavior.translucent,
-                                  onDoubleTap: () {
-                                    final defaultValue =
-                                        _paramDefaultAsDouble(param);
-                                    if (defaultValue == null) return;
-                                    final clampedDefault = defaultValue
-                                        .clamp(minV, maxV)
-                                        .toDouble();
-                                    final oldValue =
-                                        (param['value'] as num).toDouble();
-                                    if ((oldValue - clampedDefault).abs() <
-                                        1.0e-6) {
-                                      return;
-                                    }
-                                    setState(
-                                        () => param['value'] = clampedDefault);
-                                    widget.setMasterEffectParam(
-                                        idx, paramName, clampedDefault);
-                                    widget.onMasterPluginParamCommit?.call(
-                                      idx,
-                                      paramName,
-                                      oldValue,
-                                      clampedDefault,
-                                    );
-                                  },
-                                  child: Slider(
-                                    value: sliderPos,
-                                    min: 0.0,
-                                    max: 1.0,
-                                    divisions: 200,
-                                    label: valueText,
-                                    onChangeStart: (_) {
-                                      _paramDragStartValue = rawV;
-                                    },
-                                    onChanged: (p) {
-                                      final t = p.clamp(0.0, 1.0);
-                                      final newNorm = (skew == null)
-                                          ? t
-                                          : math.pow(t, 1.0 / skew!).toDouble();
-                                      final v = fromNorm(newNorm);
-
-                                      setState(() => param['value'] = v);
-                                      widget.setMasterEffectParam(
-                                          idx, paramName, v);
-                                    },
-                                    onChangeEnd: (p) {
-                                      if (_paramDragStartValue == null) return;
-
-                                      final t = p.clamp(0.0, 1.0);
-                                      final newNorm = (skew == null)
-                                          ? t
-                                          : math.pow(t, 1.0 / skew!).toDouble();
-                                      final v = fromNorm(newNorm);
-
-                                      widget.onMasterPluginParamCommit?.call(
-                                        idx,
-                                        paramName,
-                                        _paramDragStartValue!,
-                                        v,
-                                      );
-
-                                      _paramDragStartValue = null;
-                                    },
-                                  ),
-                                );
-                              })(),
-                            ),
-                          ),
-                          Text(
-                            _formatParamValueForDisplay(
-                              param,
-                              (param['max'] as num).toDouble(),
-                            ),
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
-                    ],
+                child: _buildGenericFloatParamEditor(
+                  context: context,
+                  effectName: _effects[idx],
+                  param: param,
+                  setLocalValue: (value) =>
+                      setState(() => param['value'] = value),
+                  setRemoteValue: (value) => widget.setMasterEffectParam(
+                    idx,
+                    param['name'] as String,
+                    value,
                   ),
+                  commitValue: (oldValue, newValue) =>
+                      widget.onMasterPluginParamCommit?.call(
+                    idx,
+                    param['name'] as String,
+                    oldValue,
+                    newValue,
+                  ),
+                  setDragStartValue: (value) => _paramDragStartValue = value,
+                  getDragStartValue: () => _paramDragStartValue,
                 ),
               ),
             ] else if (param['type'] == 'bool') ...[
@@ -7638,12 +8671,15 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                     effectName: effectName,
                     param: param,
                     borderRadius: BorderRadius.circular(10),
-                    child: effectName == 'Degrade' && param['name'] == 'Mode'
+                    child: (effectName == 'Degrade' ||
+                                effectName == 'Dynamic Softener') &&
+                            param['name'] == 'Mode'
                         ? _buildDegradeModeSelectorTile(
                             context: context,
                             label: param['name'] as String,
                             value: current,
                             choices: choices,
+                            oneRow: effectName == 'Dynamic Softener',
                             onSelected: (picked) {
                               if (picked == current) return;
                               final oldVal = param['value'];
@@ -7706,6 +8742,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
 // ---- Sizes for the vertical faders/rows (tweak to taste) ----
 const double _eqFaderHeight = 156;
 const double _eqRowHeight = _eqFaderHeight + 60; // space for labels above/below
+const double _eqParametricFaderSlotWidth = 72;
 
 class _EqFaderSpec {
   final String label;
@@ -7719,6 +8756,7 @@ class _EqFaderSpec {
   final ValueChanged<double> onChanged;
   final ValueChanged<double> onChangeEnd;
   final VoidCallback? onReset;
+  final VoidCallback? onValueTap;
 
   const _EqFaderSpec({
     required this.label,
@@ -7732,6 +8770,7 @@ class _EqFaderSpec {
     required this.onChanged,
     required this.onChangeEnd,
     required this.onReset,
+    required this.onValueTap,
   });
 }
 
@@ -7920,6 +8959,8 @@ Widget _buildEqFaderRow({
               onChanged: f.onChanged,
               onChangeEnd: f.onChangeEnd,
               onDoubleTapReset: f.onReset,
+              onValueTap: f.onValueTap,
+              width: _eqParametricFaderSlotWidth,
             ),
         ],
       ),
@@ -9334,9 +10375,779 @@ class _DegradePreviewPainter extends CustomPainter {
   }
 }
 
+class _DynamicSoftenerPreview extends StatelessWidget {
+  final List<double> frame;
+  final String mode;
+  final double depthPercent;
+  final double detailPercent;
+  final double maxCutDb;
+  final double lowRangeHz;
+  final double highRangeHz;
+
+  const _DynamicSoftenerPreview({
+    required this.frame,
+    required this.mode,
+    required this.depthPercent,
+    required this.detailPercent,
+    required this.maxCutDb,
+    required this.lowRangeHz,
+    required this.highRangeHz,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      height: 120,
+      decoration: BoxDecoration(
+        color: _kFxPanelFill,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _kFxPanelBorder),
+      ),
+      padding: const EdgeInsets.all(8),
+      child: SizedBox.expand(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: CustomPaint(
+            painter: _DynamicSoftenerPreviewPainter(
+              frame: frame,
+              mode: mode,
+              depthPercent: depthPercent,
+              detailPercent: detailPercent,
+              maxCutDb: maxCutDb,
+              lowRangeHz: lowRangeHz,
+              highRangeHz: highRangeHz,
+            ),
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DynamicSoftenerPreviewPainter extends CustomPainter {
+  final List<double> frame;
+  final String mode;
+  final double depthPercent;
+  final double detailPercent;
+  final double maxCutDb;
+  final double lowRangeHz;
+  final double highRangeHz;
+
+  const _DynamicSoftenerPreviewPainter({
+    required this.frame,
+    required this.mode,
+    required this.depthPercent,
+    required this.detailPercent,
+    required this.maxCutDb,
+    required this.lowRangeHz,
+    required this.highRangeHz,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    if (w <= 1.0 || h <= 1.0) return;
+
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()
+        ..shader = ui.Gradient.linear(
+          Offset.zero,
+          Offset(w, h),
+          <Color>[
+            Colors.white.withValues(alpha: 0.04),
+            _kFxCoolAccent.withValues(alpha: 0.06),
+          ],
+          const <double>[0.0, 1.0],
+        ),
+    );
+
+    double xForHz(double hz) {
+      final clampedHz = hz.clamp(20.0, 20000.0).toDouble();
+      final t = (math.log(clampedHz / 20.0) / math.log(20000.0 / 20.0))
+          .clamp(0.0, 1.0)
+          .toDouble();
+      return w * t;
+    }
+
+    double smoothStep(double edge0, double edge1, double value) {
+      if (edge0 == edge1) return value >= edge1 ? 1.0 : 0.0;
+      final t = ((value - edge0) / (edge1 - edge0)).clamp(0.0, 1.0).toDouble();
+      return t * t * (3.0 - 2.0 * t);
+    }
+
+    double rangeWeightForHz(double hz) {
+      final logFreq = math.log(hz.clamp(20.0, 20000.0).toDouble());
+      final low = math.log(lowRangeHz.clamp(20.0, 20000.0).toDouble());
+      final high = math.log(
+        math
+            .max(lowRangeHz + 20.0, highRangeHz)
+            .clamp(20.0, 20000.0)
+            .toDouble(),
+      );
+      final edge = math.log(2.0) * 0.44;
+      final lowFade = smoothStep(low - edge, low + edge, logFreq);
+      final highFade = 1.0 - smoothStep(high - edge, high + edge, logFreq);
+      return (lowFade * highFade).clamp(0.0, 1.0).toDouble();
+    }
+
+    const labelLaneHeight = 18.0;
+    final graphBottom = math.max(36.0, h - labelLaneHeight);
+    final graphHeight = math.max(1.0, graphBottom);
+
+    double yForInputDb(double db) {
+      final t = ((db + 86.0) / 96.0).clamp(0.0, 1.0).toDouble();
+      return (graphBottom - 2.0) - (graphHeight * 0.86 * t);
+    }
+
+    final depthNorm = (depthPercent / 100.0).clamp(0.0, 1.0).toDouble();
+    final detailNorm = (detailPercent / 100.0).clamp(0.0, 1.0).toDouble();
+    final maxCut = math.max(1.0, maxCutDb);
+    const visibleCutDb = 24.0;
+    final zeroY = graphBottom * 0.50;
+
+    double yForCutDb(double db) {
+      final t = (db / visibleCutDb).clamp(0.0, 1.0).toDouble();
+      return zeroY + (graphHeight * 0.38 * t);
+    }
+
+    void drawEqFrequencyRegions() {
+      const regionEdgesHz = [20.0, 80.0, 300.0, 1200.0, 5000.0, 20000.0];
+      const markerHz = [80.0, 300.0, 1200.0, 5000.0, 12000.0];
+
+      final divider = Paint()
+        ..color = Colors.white.withValues(alpha: 0.08)
+        ..strokeWidth = 1.0;
+
+      for (int i = 0; i < regionEdgesHz.length - 1; i++) {
+        final f0 = regionEdgesHz[i];
+        final f1 = regionEdgesHz[i + 1];
+        final x0 = xForHz(f0);
+        final x1 = xForHz(f1);
+        final shade = Paint()
+          ..color = i.isEven
+              ? Colors.white.withValues(alpha: 0.035)
+              : Colors.black.withValues(alpha: 0.03);
+        canvas.drawRect(Rect.fromLTRB(x0, 0, x1, graphBottom), shade);
+        canvas.drawLine(Offset(x0, 0), Offset(x0, graphBottom), divider);
+      }
+      final lastEdgeX = xForHz(regionEdgesHz.last);
+      canvas.drawLine(
+          Offset(lastEdgeX, 0), Offset(lastEdgeX, graphBottom), divider);
+
+      for (final hz in markerHz) {
+        final x = xForHz(hz);
+        canvas.drawLine(Offset(x, 0), Offset(x, graphBottom), divider);
+        final tp = TextPainter(
+          text: TextSpan(
+            text: _fmtHz(hz),
+            style: const TextStyle(
+              color: _kFxPanelMutedText,
+              fontSize: 9,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        final textX = (x - tp.width * 0.5).clamp(0.0, w - tp.width);
+        tp.paint(canvas, Offset(textX, graphBottom + 4.0));
+      }
+    }
+
+    drawEqFrequencyRegions();
+
+    final gridPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.08)
+      ..strokeWidth = 1;
+    canvas.drawLine(Offset(0, zeroY), Offset(w, zeroY), gridPaint);
+
+    final rangeLeft = xForHz(lowRangeHz);
+    final rangeRight = xForHz(highRangeHz);
+    final rangeRect = Rect.fromLTRB(
+      math.min(rangeLeft, rangeRight),
+      0,
+      math.max(rangeLeft, rangeRight),
+      graphBottom,
+    );
+    canvas.drawRect(
+      rangeRect,
+      Paint()
+        ..color = _kFxCoolAccent.withValues(alpha: 0.055)
+        ..style = PaintingStyle.fill,
+    );
+    final edgePaint = Paint()
+      ..color = _kFxCoolAccentSoft.withValues(alpha: 0.42)
+      ..strokeWidth = 1.2;
+    canvas.drawLine(Offset(rangeRect.left, 0),
+        Offset(rangeRect.left, graphBottom), edgePaint);
+    canvas.drawLine(Offset(rangeRect.right, 0),
+        Offset(rangeRect.right, graphBottom), edgePaint);
+
+    final frequencies = <double>[];
+    final inputDb = <double>[];
+    final reductionDb = <double>[];
+    for (int i = 0; i + 2 < frame.length; i += 3) {
+      final hz = frame[i];
+      if (hz <= 0.0) continue;
+      frequencies.add(hz);
+      inputDb.add(frame[i + 1].clamp(-90.0, 10.0).toDouble());
+      reductionDb
+          .add(frame[i + 2].clamp(0.0, math.max(1.0, maxCutDb)).toDouble());
+    }
+
+    if (frequencies.isEmpty) {
+      const idleBands = 48;
+      for (int i = 0; i < idleBands; i++) {
+        final t = i / (idleBands - 1);
+        final hz = 20.0 * math.pow(20000.0 / 20.0, t).toDouble();
+        frequencies.add(hz);
+        inputDb.add(-82.0 + math.sin(t * math.pi * 4.0) * 2.0);
+        reductionDb.add(0.0);
+      }
+    }
+
+    var peakDb = -90.0;
+    for (final db in inputDb) {
+      peakDb = math.max(peakDb, db);
+    }
+    final hasSignal = peakDb > -84.0;
+
+    final spectrumPath = Path();
+    double? lastSpectrumY;
+    for (int i = 0; i < frequencies.length; i++) {
+      final x = xForHz(frequencies[i]);
+      final y = yForInputDb(inputDb[i]);
+      if (i == 0) {
+        spectrumPath.moveTo(0, y);
+        if (x > 0.0) spectrumPath.lineTo(x, y);
+      } else {
+        spectrumPath.lineTo(x, y);
+      }
+      lastSpectrumY = y;
+    }
+    if (lastSpectrumY != null) {
+      spectrumPath.lineTo(w, lastSpectrumY);
+    }
+    final spectrumFill = Path.from(spectrumPath)
+      ..lineTo(w, graphBottom)
+      ..lineTo(0, graphBottom)
+      ..close();
+    canvas.drawPath(
+      spectrumFill,
+      Paint()
+        ..color = _kFxCoolAccent.withValues(alpha: hasSignal ? 0.18 : 0.08)
+        ..style = PaintingStyle.fill,
+    );
+    canvas.drawPath(
+      spectrumPath,
+      Paint()
+        ..color = _kFxCoolAccentSoft.withValues(alpha: hasSignal ? 0.82 : 0.46)
+        ..strokeWidth = 1.2
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..style = PaintingStyle.stroke
+        ..isAntiAlias = true,
+    );
+
+    final depthCeilingPath = Path();
+    const curveSteps = 128;
+    for (int i = 0; i <= curveSteps; i++) {
+      final t = i / curveSteps;
+      final hz = 20.0 * math.pow(20000.0 / 20.0, t).toDouble();
+      final allowedCutDb = maxCut * depthNorm * rangeWeightForHz(hz);
+      final x = xForHz(hz);
+      final y = yForCutDb(allowedCutDb);
+      if (i == 0) {
+        depthCeilingPath.moveTo(x, y);
+      } else {
+        depthCeilingPath.lineTo(x, y);
+      }
+    }
+    canvas.drawPath(
+      depthCeilingPath,
+      Paint()
+        ..color = Colors.white.withValues(alpha: 0.30)
+        ..strokeWidth = 1.4
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..style = PaintingStyle.stroke
+        ..isAntiAlias = true,
+    );
+
+    final actualReductionPath = Path();
+    final reductionFill = Path();
+    var hasReductionPath = false;
+    var lastReductionY = zeroY;
+
+    for (int i = 0; i < frequencies.length; i++) {
+      final measured = (reductionDb[i] / maxCut).clamp(0.0, 1.0).toDouble();
+      final actualCutDb = maxCut * measured * rangeWeightForHz(frequencies[i]);
+      final x = xForHz(frequencies[i]);
+      final y = yForCutDb(actualCutDb);
+      if (!hasReductionPath) {
+        actualReductionPath.moveTo(0, y);
+        if (x > 0.0) actualReductionPath.lineTo(x, y);
+        reductionFill.moveTo(0, zeroY);
+        reductionFill.lineTo(0, y);
+        if (x > 0.0) reductionFill.lineTo(x, y);
+        hasReductionPath = true;
+      } else {
+        actualReductionPath.lineTo(x, y);
+        reductionFill.lineTo(x, y);
+      }
+      lastReductionY = y;
+
+      if (actualCutDb > 0.18) {
+        final halfWidth = ui.lerpDouble(9.0, 3.4, detailNorm)!;
+        final blobRect = Rect.fromLTRB(
+          x - halfWidth,
+          zeroY,
+          x + halfWidth,
+          y,
+        );
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(blobRect, Radius.circular(halfWidth)),
+          Paint()
+            ..shader = ui.Gradient.linear(
+              blobRect.topCenter,
+              blobRect.bottomCenter,
+              <Color>[
+                _kFxWarmAccentBorder.withValues(alpha: 0.34),
+                _kFxWarmAccent.withValues(alpha: 0.035),
+              ],
+              const <double>[0.0, 1.0],
+            ),
+        );
+      }
+    }
+
+    if (hasReductionPath) {
+      reductionFill
+        ..lineTo(w, lastReductionY)
+        ..lineTo(w, zeroY)
+        ..lineTo(0, zeroY)
+        ..close();
+      actualReductionPath.lineTo(w, lastReductionY);
+      canvas.drawPath(
+        reductionFill,
+        Paint()
+          ..color = _kFxWarmAccent.withValues(alpha: 0.14)
+          ..style = PaintingStyle.fill,
+      );
+      canvas.drawPath(
+        actualReductionPath,
+        Paint()
+          ..color = _kFxWarmAccentBorder
+          ..strokeWidth = 1.8
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round
+          ..style = PaintingStyle.stroke
+          ..isAntiAlias = true,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DynamicSoftenerPreviewPainter oldDelegate) {
+    return oldDelegate.frame != frame ||
+        oldDelegate.mode != mode ||
+        oldDelegate.depthPercent != depthPercent ||
+        oldDelegate.detailPercent != detailPercent ||
+        oldDelegate.maxCutDb != maxCutDb ||
+        oldDelegate.lowRangeHz != lowRangeHz ||
+        oldDelegate.highRangeHz != highRangeHz;
+  }
+}
+
 enum _ShaperPreviewKind {
   volume,
   time,
+}
+
+class _TransientShaperVisualStats {
+  final double transient;
+  final double body;
+  final double pump;
+  final double gainNorm;
+
+  const _TransientShaperVisualStats({
+    required this.transient,
+    required this.body,
+    required this.pump,
+    required this.gainNorm,
+  });
+
+  static _TransientShaperVisualStats fromFrames(List<double> frames) {
+    const stride = 6;
+    final count = frames.length ~/ stride;
+    if (count <= 0) {
+      return const _TransientShaperVisualStats(
+        transient: 0,
+        body: 0,
+        pump: 0,
+        gainNorm: 0,
+      );
+    }
+
+    final start = math.max(0, count - 18);
+    double transient = 0;
+    double body = 0;
+    double pump = 0;
+    double gain = 0;
+    int n = 0;
+    for (int i = start; i < count; i++) {
+      final o = i * stride;
+      transient = math.max(transient, frames[o + 2].clamp(0.0, 1.0).toDouble());
+      body = math.max(body, frames[o + 3].clamp(0.0, 1.0).toDouble());
+      pump = math.max(pump, frames[o + 4].clamp(0.0, 1.0).toDouble());
+      gain += frames[o + 5].clamp(-1.0, 1.0).toDouble();
+      n++;
+    }
+
+    return _TransientShaperVisualStats(
+      transient: transient,
+      body: body,
+      pump: pump,
+      gainNorm: n <= 0 ? 0 : gain / n,
+    );
+  }
+}
+
+class _TransientShaperVisualizerCard extends StatelessWidget {
+  final List<double> frames;
+  final double attackPercent;
+  final double pumpPercent;
+  final double sustainPercent;
+  final double speedPercent;
+  final bool clip;
+
+  const _TransientShaperVisualizerCard({
+    required this.frames,
+    required this.attackPercent,
+    required this.pumpPercent,
+    required this.sustainPercent,
+    required this.speedPercent,
+    required this.clip,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final stats = _TransientShaperVisualStats.fromFrames(frames);
+    final gainDb = stats.gainNorm * 24.0;
+    final gainLabel = gainDb >= 0
+        ? '+${gainDb.toStringAsFixed(1)} dB'
+        : '${gainDb.toStringAsFixed(1)} dB';
+
+    return Container(
+      height: 142,
+      decoration: BoxDecoration(
+        color: _kFxPanelFill,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _kFxPanelBorder),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 34),
+              child: CustomPaint(
+                painter: _TransientShaperVisualizerPainter(
+                  frames: frames,
+                  attackPercent: attackPercent,
+                  sustainPercent: sustainPercent,
+                  pumpPercent: pumpPercent,
+                ),
+              ),
+            ),
+            Positioned(
+              left: 10,
+              right: 10,
+              bottom: 8,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _TransientActivityPill(
+                      label: 'Attack',
+                      value: stats.transient,
+                      setting: attackPercent,
+                      color: const Color(0xFFF2A85B),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: _TransientActivityPill(
+                      label: 'Body',
+                      value: stats.body,
+                      setting: sustainPercent,
+                      color: const Color(0xFF7DD3FC),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: _TransientActivityPill(
+                      label: clip ? 'Clip' : 'Gain',
+                      value: clip
+                          ? 1.0
+                          : stats.gainNorm.abs().clamp(0.0, 1.0).toDouble(),
+                      setting: speedPercent,
+                      color: clip
+                          ? const Color(0xFFF87171)
+                          : (gainDb >= 0
+                              ? const Color(0xFFA7F3D0)
+                              : const Color(0xFFFCA5A5)),
+                      valueText: clip ? 'On' : gainLabel,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TransientActivityPill extends StatelessWidget {
+  final String label;
+  final double value;
+  final double setting;
+  final Color color;
+  final String? valueText;
+
+  const _TransientActivityPill({
+    required this.label,
+    required this.value,
+    required this.setting,
+    required this.color,
+    this.valueText,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final display = valueText ??
+        (setting >= 0 ? '+${setting.round()}' : '${setting.round()}');
+    return Container(
+      height: 26,
+      padding: const EdgeInsets.symmetric(horizontal: 7),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 5,
+            height: 14,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.30 + value * 0.62),
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.80),
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(width: 3),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              display,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TransientShaperVisualizerPainter extends CustomPainter {
+  final List<double> frames;
+  final double attackPercent;
+  final double sustainPercent;
+  final double pumpPercent;
+
+  const _TransientShaperVisualizerPainter({
+    required this.frames,
+    required this.attackPercent,
+    required this.sustainPercent,
+    required this.pumpPercent,
+  });
+
+  static const int _stride = 6;
+
+  double _frameValue(int index, int offset) {
+    final i = index * _stride + offset;
+    if (i < 0 || i >= frames.length) return 0.0;
+    return frames[i].clamp(-1.0, 1.0).toDouble();
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = (Offset.zero & size).deflate(1.0);
+    final centerY = rect.center.dy;
+    final count = frames.length ~/ _stride;
+    final radius = Radius.circular(math.min(12.0, rect.height * 0.18));
+
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect, radius),
+      Paint()..color = Colors.black.withValues(alpha: 0.18),
+    );
+    canvas.drawLine(
+      Offset(rect.left + 8, centerY),
+      Offset(rect.right - 8, centerY),
+      Paint()
+        ..color = Colors.white.withValues(alpha: 0.10)
+        ..strokeWidth = 1,
+    );
+
+    if (count <= 1) {
+      final idle = Path()
+        ..moveTo(rect.left + 10, centerY)
+        ..cubicTo(
+            rect.left + rect.width * 0.30,
+            centerY - 8,
+            rect.left + rect.width * 0.56,
+            centerY + 8,
+            rect.right - 10,
+            centerY);
+      canvas.drawPath(
+        idle,
+        Paint()
+          ..color = Colors.white.withValues(alpha: 0.20)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.0
+          ..strokeCap = StrokeCap.round,
+      );
+      return;
+    }
+
+    final inputPath = Path();
+    final outputPath = Path();
+    final attackPath = Path();
+    final sustainPath = Path();
+    final attackNorm = (attackPercent.abs() / 100.0).clamp(0.0, 1.0).toDouble();
+    final sustainNorm =
+        (sustainPercent.abs() / 100.0).clamp(0.0, 1.0).toDouble();
+    final pumpNorm = (pumpPercent.abs() / 100.0).clamp(0.0, 1.0).toDouble();
+
+    for (int i = 0; i < count; i++) {
+      final t = count == 1 ? 0.0 : i / (count - 1);
+      final x = rect.left + rect.width * t;
+      final input = math.sqrt(_frameValue(i, 0).clamp(0.0, 1.0));
+      final output = math.sqrt(_frameValue(i, 1).clamp(0.0, 1.0));
+      final inputY = centerY - input * rect.height * 0.34;
+      final outputY = centerY - output * rect.height * 0.36;
+      final attackY =
+          centerY - (input * (0.24 + attackNorm * 0.30)) * rect.height;
+      final sustainY =
+          centerY + (output * (0.18 + sustainNorm * 0.24)) * rect.height;
+
+      if (i == 0) {
+        inputPath.moveTo(x, inputY);
+        outputPath.moveTo(x, outputY);
+        attackPath.moveTo(x, centerY);
+        attackPath.lineTo(x, attackY);
+        sustainPath.moveTo(x, centerY);
+        sustainPath.lineTo(x, sustainY);
+      } else {
+        inputPath.lineTo(x, inputY);
+        outputPath.lineTo(x, outputY);
+        attackPath.lineTo(x, attackY);
+        sustainPath.lineTo(x, sustainY);
+      }
+    }
+    attackPath
+      ..lineTo(rect.right, centerY)
+      ..close();
+    sustainPath
+      ..lineTo(rect.right, centerY)
+      ..close();
+
+    canvas.drawPath(
+      attackPath,
+      Paint()
+        ..shader = ui.Gradient.linear(
+          rect.topCenter,
+          Offset(rect.center.dx, centerY),
+          [
+            const Color(0xFFF2A85B).withValues(alpha: 0.28),
+            const Color(0xFFF2A85B).withValues(alpha: 0.02),
+          ],
+        ),
+    );
+    canvas.drawPath(
+      sustainPath,
+      Paint()
+        ..shader = ui.Gradient.linear(
+          Offset(rect.center.dx, centerY),
+          rect.bottomCenter,
+          [
+            const Color(0xFF7DD3FC).withValues(alpha: 0.02),
+            const Color(0xFF7DD3FC).withValues(alpha: 0.22),
+          ],
+        ),
+    );
+
+    canvas.drawPath(
+      inputPath,
+      Paint()
+        ..color = Colors.white.withValues(alpha: 0.22)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.2
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
+    canvas.drawPath(
+      outputPath,
+      Paint()
+        ..color = Colors.white.withValues(alpha: 0.78)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.2
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
+
+    final pumpY = centerY + rect.height * (0.34 - pumpNorm * 0.30);
+    canvas.drawLine(
+      Offset(rect.left + 10, pumpY),
+      Offset(rect.right - 10, pumpY),
+      Paint()
+        ..color =
+            const Color(0xFFF87171).withValues(alpha: 0.16 + pumpNorm * 0.20)
+        ..strokeWidth = 1.4
+        ..strokeCap = StrokeCap.round
+        ..style = PaintingStyle.stroke,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _TransientShaperVisualizerPainter oldDelegate) {
+    return oldDelegate.frames != frames ||
+        oldDelegate.attackPercent != attackPercent ||
+        oldDelegate.sustainPercent != sustainPercent ||
+        oldDelegate.pumpPercent != pumpPercent;
+  }
 }
 
 class _ShaperPreviewCard extends StatelessWidget {
@@ -10375,10 +12186,11 @@ Widget _verticalFader({
   onChanged,
   onChangeEnd,
   VoidCallback? onDoubleTapReset,
+  VoidCallback? onValueTap,
   ValueChanged<Offset>? onLongPressStart,
   String? unit, // e.g. "Hz"
   bool logarithmic = false,
-  double width = 56, // 👈 new
+  double? width,
 }) {
   final pos = logarithmic
       ? _toLogPos(value, min, max)
@@ -10394,8 +12206,15 @@ Widget _verticalFader({
                   ? value.toStringAsFixed(0)
                   : '${value.toStringAsFixed(0)} $unit');
 
+  final faderWidth = width ??
+      switch (unit) {
+        'Hz' => 72.0,
+        'dB' => 68.0,
+        _ => 56.0,
+      };
+
   return _EqVerticalFader(
-    width: width,
+    width: faderWidth,
     label: label,
     labelText: labelText,
     pos: pos,
@@ -10409,6 +12228,7 @@ Widget _verticalFader({
     onDoubleTapReset: (defaultValue != null && onDoubleTapReset != null)
         ? onDoubleTapReset
         : null,
+    onValueTap: onValueTap,
     onLongPressStart: onLongPressStart,
   );
 }
@@ -10426,6 +12246,7 @@ class _EqVerticalFader extends StatefulWidget {
   final ValueChanged<double> onChanged;
   final ValueChanged<double> onChangeEnd;
   final VoidCallback? onDoubleTapReset;
+  final VoidCallback? onValueTap;
   final ValueChanged<Offset>? onLongPressStart;
 
   const _EqVerticalFader({
@@ -10441,6 +12262,7 @@ class _EqVerticalFader extends StatefulWidget {
     required this.onChanged,
     required this.onChangeEnd,
     required this.onDoubleTapReset,
+    required this.onValueTap,
     required this.onLongPressStart,
   });
 
@@ -10469,9 +12291,29 @@ class _EqVerticalFaderState extends State<_EqVerticalFader> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(widget.labelText,
-                style: Theme.of(context).textTheme.labelMedium,
-                overflow: TextOverflow.ellipsis),
+            Tooltip(
+              message: 'Enter value',
+              child: InkWell(
+                borderRadius: BorderRadius.circular(6),
+                onTap: widget.onValueTap,
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  child: SizedBox(
+                    width: widget.width - 8,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        widget.labelText,
+                        maxLines: 1,
+                        softWrap: false,
+                        style: Theme.of(context).textTheme.labelMedium,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
             const SizedBox(height: _valueToFaderGap),
             SizedBox(
               height: _eqFaderHeight,

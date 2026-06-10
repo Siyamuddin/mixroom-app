@@ -163,7 +163,6 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   static const double _followPlayheadViewportAnchor = 0.42;
   static const double _rollExtensionChunkBeats = 16.0;
   static const double _rulerHeight = 28.0;
-  static const bool _sequencerComingSoon = true;
   static const int _sequencerStepsPerBar = 16;
   static const List<_StepSequencerLane> _defaultSequencerLanes =
       <_StepSequencerLane>[
@@ -193,9 +192,6 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   late final TabController _tabController;
   late final Ticker _followViewportTicker;
   int _lastTabIndex = 0;
-  bool _redirectingDisabledSequencerTab = false;
-  DateTime _lastSequencerComingSoonNoticeAt =
-      DateTime.fromMillisecondsSinceEpoch(0);
 
   double _rowHeight = 22.0;
   double _pxPerBeat = 56.0;
@@ -767,38 +763,10 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
   void _handleTabChanged() {
     final idx = _tabController.index;
-    if (_redirectingDisabledSequencerTab) return;
-    if (_sequencerComingSoon && idx == 1) {
-      _showSequencerComingSoonNotice();
-      _returnToLastAvailableTab();
-      return;
-    }
     if (idx == _lastTabIndex) return;
     _lastTabIndex = idx;
     if (!mounted) return;
     setState(() {});
-  }
-
-  void _showSequencerComingSoonNotice() {
-    final now = DateTime.now();
-    if (now.difference(_lastSequencerComingSoonNoticeAt).inMilliseconds < 500) {
-      return;
-    }
-    _lastSequencerComingSoonNoticeAt = now;
-    _showPianoRollNotice('Sequencer coming soon');
-  }
-
-  void _returnToLastAvailableTab() {
-    final target = _lastTabIndex == 1 ? 0 : _lastTabIndex;
-    _redirectingDisabledSequencerTab = true;
-    _tabController.animateTo(target);
-    _lastTabIndex = target;
-    if (mounted) {
-      setState(() {});
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _redirectingDisabledSequencerTab = false;
-    });
   }
 
   void _syncKeysWithGridScroll() {
@@ -3378,11 +3346,6 @@ class _PianoRollEditorState extends State<PianoRollEditor>
             dividerColor: Colors.transparent,
             splashBorderRadius: BorderRadius.circular(18),
             onTap: (index) {
-              if (_sequencerComingSoon && index == 1) {
-                _showSequencerComingSoonNotice();
-                _returnToLastAvailableTab();
-                return;
-              }
               if (_lastTabIndex == index) return;
               _lastTabIndex = index;
               setState(() {});
@@ -3391,17 +3354,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
               Tab(height: tabHeight, text: 'MIDI'),
               Tab(
                 height: tabHeight,
-                child: Opacity(
-                  opacity: 0.42,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.lock_rounded, size: 12),
-                      const SizedBox(width: 4),
-                      Text(L10n.translate(context, 'Sequencer')),
-                    ],
-                  ),
-                ),
+                text: L10n.translate(context, 'Sequencer'),
               ),
               Tab(
                 height: tabHeight,

@@ -169,7 +169,7 @@ def _build_system_prompt(
     lines.extend(_client_policy_prompt_lines(client_policy))
     if "daw.project_edit.set_tempo" in client_capabilities:
         lines.append(
-            "- This client supports project_edit set_tempo for direct BPM/project tempo changes."
+            "- This client supports project_edit set_tempo for direct BPM/project tempo changes. For requests like \"make the song faster/slower\", include time_stretch_audio=true and preserve_pitch=true so existing audio follows the new tempo. For grid/metronome-only BPM edits, omit or set time_stretch_audio=false."
         )
     else:
         lines.append("- This client does not support project_edit set_tempo.")
@@ -769,7 +769,7 @@ For `daw_assistant_actions`:
   "assistant_message": "short user-facing response in the same language",
   "actions": [
     {
-      "type": "tutorial|clarify|clip_edit|effect_edit|automation_edit|midi_compose|stem_separate|role_override",
+      "type": "tutorial|clarify|clip_edit|effect_edit|automation_edit|midi_compose|stem_separate|role_override|audio_enhance",
       "data": { ... }
     }
   ]
@@ -800,7 +800,7 @@ Action data rules:
     3) target effect (or add effect)
     4) target parameter control
 - clarify: {"question": "...", "options": ["...","..."]}
-- clip_edit: {"operation":"trim|auto_trim|cut|stretch|glue|move|tempo_follow|auto_bpm_align|tempo_detect_set_project|duplicate|delete|dialog_cleanup|dialog_remove_range|dialog_tighten_pauses|dialog_lift_quiet","target": {...}, ...}
+- clip_edit: {"operation":"trim|auto_trim|cut|stretch|glue|move|tempo_follow|auto_bpm_align|align_first_sound|tempo_detect_set_project|duplicate|delete|dialog_cleanup|dialog_remove_range|dialog_tighten_pauses|dialog_lift_quiet","target": {...}, ...}
   - NEVER emit a bare `clip_edit` action with a missing or unknown `operation`
   - timeline/arrangement movement is always `clip_edit`, never `mix_model_request`
   - use cut only for clip region splitting (timeline clip split), not for MIDI note chopping
@@ -813,6 +813,7 @@ Action data rules:
   - if the user refers to "this one", "that one", or "here" and selection context exists, set `target.prefer_selected=true` unless a more explicit clip target is already known
   - when the user specifies musical time such as bars, measures, or beats, prefer `new_start_measure` / `new_start_bar` or `delta_measures` / `delta_bars` instead of converting to milliseconds yourself
   - `new_start_measure` / `new_start_bar` is 1-indexed: measure 1 = timeline start, measure 3 = the start of the third measure
+  - use `align_first_sound` when the user asks to compensate latency, align the first audible sound/onset/volume start, or place a recorded vocal/instrument entrance on the playhead, nearest beat, bar, or measure; include `align_to` (`playhead` | `nearest_beat` | `nearest_bar` | `bar` | `beat` | `project_start` | `clip_start`) or target timing fields when known
   - for arranging existing samples into loops, beats, fills, or buildups, prefer `duplicate` / `move` on existing clips instead of re-inserting the same material
   - `duplicate` may include `paste_start_measure`, `paste_start_beat`, `repeat_count`, `step_measures`, `step_beats`, `step_ms`, and optional row deltas for compact repeating arrangements
   - include `beats_per_bar` only when the meter is not the default 4/4
@@ -866,6 +867,7 @@ Action data rules:
 - stem_separate: {"operation":"vocal_instrumental","target": {...}}
   - include target.clip_index when possible
 - role_override: {"operation":"set|clear","target":{"row_index": 0}, "role":"vocals|drums|bass|guitar|synth|other"}
+- audio_enhance: {"operation":"phone_mic_cleanup","target": {...}}
 
 Automation clip notes:
 - Use `start_ms` and `length_ms` when creating or moving clips.
@@ -1309,7 +1311,7 @@ Tool outputs
 
 `daw_assistant_actions`
 Top level:
-`{"assistant_message":"...","actions":[{"type":"tutorial|clarify|clip_edit|effect_edit|automation_edit|midi_compose|stem_separate|role_override","data":{...}}]}`
+`{"assistant_message":"...","actions":[{"type":"tutorial|clarify|clip_edit|effect_edit|automation_edit|midi_compose|stem_separate|role_override|audio_enhance","data":{...}}]}`
 - keep `assistant_message` to one short sentence
 - if any action is `clarify` or `tutorial`, do not use `assistant_message` to restate the same question or steps
 - if any action is `tutorial`, prefer short copy like `Showing you in the UI.` rather than numbered instructions
@@ -1327,13 +1329,14 @@ Action data
     - `row:<row_index>:fx_contains:<effect_name_or_token>:param:<param_name_or_id>`
   - for drill-down tutorials, include `row_index`, `effect_index/effect_name`, `param_id/param_name`, `effect_missing`, `show_add_effect`, `drilldown`
 - `clarify`: `{"question":"...","options":["...","..."]}`
-- `clip_edit`: `operation` is one of `trim|auto_trim|cut|stretch|glue|move|tempo_follow|auto_bpm_align|tempo_detect_set_project|duplicate|delete|dialog_cleanup|dialog_remove_range|dialog_tighten_pauses|dialog_lift_quiet`
+- `clip_edit`: `operation` is one of `trim|auto_trim|cut|stretch|glue|move|tempo_follow|auto_bpm_align|align_first_sound|tempo_detect_set_project|duplicate|delete|dialog_cleanup|dialog_remove_range|dialog_tighten_pauses|dialog_lift_quiet`
   - `cut` is clip-region splitting only
   - `glue` merges/consolidates multiple existing clips into one clip
   - include `trim_side` when relevant
   - `move` needs `new_start_ms`, `delta_ms`, `new_start_measure`, `delta_measures`, `direction`, and/or `new_row_index`
   - when the user specifies bars/measures/beats, prefer `new_start_measure` / `new_start_bar` or `delta_measures` / `delta_bars` instead of converting to milliseconds
   - `new_start_measure` / `new_start_bar` is 1-indexed: measure 1 = timeline start
+  - `align_first_sound` aligns the detected first audible onset/volume start to `align_to`, `target_ms`, `bar_index`, `beat_index`, or the nearest beat by default
   - for repeated arrangements, `duplicate` may include `paste_start_measure`, `paste_start_beat`, `repeat_count`, `step_measures`, `step_beats`, `step_ms`, and row deltas
   - include `beats_per_bar` only when the meter is not the default 4/4
   - `stretch` should include `timeline_duration_ms` or `duration_ms`
@@ -1367,6 +1370,7 @@ Action data
   - long-form requests like 8/16/32-bar melodies, basslines, or chord loops are valid when a target MIDI clip or packaged built-in instrument exists
 - `stem_separate`: `{"operation":"vocal_instrumental","target":{...}}`
 - `role_override`: `{"operation":"set|clear","target":{"row_index":0},"role":"vocals|drums|bass|guitar|synth|other"}`
+- `audio_enhance`: `{"operation":"phone_mic_cleanup","target":{...}}`
 - `project_edit`: `{"operation":"set_tempo","tempo_bpm":156}`
 - `sample_insert`: `{"operation":"insert_audio_clips|replace_audio_clips","items":[{"library_path":"Starter Kit v1/Processed Drums/Kick-01.mp3","row_index":0,"start_measure":1}]}`
   - for beat-building from packaged samples, choose files whose folder/name semantics directly match the requested drum role
@@ -1444,7 +1448,7 @@ SYSTEM_PROMPT_V3 = """
 # Role
 You are Mixroom AI Co-Producer.
 
-Return exactly one tool call per turn:
+Return one or more tool calls per turn when the user gives multiple executable intents:
 - informational_response
 - daw_assistant_actions
 - mix_model_request
@@ -1518,7 +1522,7 @@ All row_index and clip_index values must be 0-based.
 Musical measure fields are 1-based: measure 1 = timeline start.
 
 # Routing
-Choose exactly one tool.
+Choose the minimum tool call set that covers the user's request. For compound prompts, emit every supported executable intent instead of rejecting the whole prompt.
 
 Use informational_response for:
 - explanation, help, analysis, summary, or "what's in the project"
@@ -1819,6 +1823,8 @@ starter rhythm, prefer action over clarification.
 - Use stem_separate only for supported audio clip targets. Resolve row
   position, row name, filename, or obvious content cues before clarifying.
 - Use role_override only to set or clear a role.
+- Use audio_enhance for phone-mic cleanup, noisy voice-recording cleanup,
+  and similar "clean up this recording" requests.
 
 # Mix Semantics
 Use mix_model_request only when the goal is a sonic change.
@@ -1944,12 +1950,43 @@ TOOLS = [
                                                 "minimum": 20,
                                                 "maximum": 999,
                                             },
+                                            "time_stretch_audio": {
+                                                "type": "boolean",
+                                                "description": "True when the user asks to make the song/audio faster or slower; false for grid-only BPM edits.",
+                                            },
+                                            "preserve_pitch": {
+                                                "type": "boolean",
+                                                "description": "Use true by default for song-speed changes.",
+                                            },
                                         },
                                         "required": ["operation"],
                                         "anyOf": [
                                             {"required": ["tempo_bpm"]},
                                             {"required": ["bpm"]},
                                         ],
+                                        "additionalProperties": True,
+                                    },
+                                },
+                                "required": ["type", "data"],
+                                "additionalProperties": False,
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "enum": ["audio_enhance"],
+                                    },
+                                    "data": {
+                                        "type": "object",
+                                        "properties": {
+                                            "operation": {
+                                                "type": "string",
+                                                "enum": ["phone_mic_cleanup"],
+                                            },
+                                            "target": _daw_target_schema(),
+                                        },
+                                        "required": ["operation", "target"],
                                         "additionalProperties": True,
                                     },
                                 },
@@ -2314,6 +2351,7 @@ TOOLS = [
                                                     "move",
                                                     "tempo_follow",
                                                     "auto_bpm_align",
+                                                    "align_first_sound",
                                                     "tempo_detect_set_project",
                                                     "duplicate",
                                                     "delete",
@@ -2329,6 +2367,33 @@ TOOLS = [
                                                 "enum": ["start", "end"],
                                             },
                                             "new_start_ms": {
+                                                "type": "number"
+                                            },
+                                            "target_ms": {
+                                                "type": "number"
+                                            },
+                                            "align_to_ms": {
+                                                "type": "number"
+                                            },
+                                            "first_sound_target_ms": {
+                                                "type": "number"
+                                            },
+                                            "align_to": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "playhead",
+                                                    "nearest_beat",
+                                                    "nearest_bar",
+                                                    "bar",
+                                                    "beat",
+                                                    "project_start",
+                                                    "clip_start",
+                                                ],
+                                            },
+                                            "bar_index": {
+                                                "type": "number"
+                                            },
+                                            "beat_index": {
                                                 "type": "number"
                                             },
                                             "paste_start_ms": {
@@ -2890,6 +2955,7 @@ def _build_tools(client_capabilities: set[str]) -> list[dict[str, Any]]:
         "midi_compose",
         "stem_separate",
         "role_override",
+        "audio_enhance",
     ]
     if "daw.project_edit.set_tempo" in client_capabilities:
         allowed_action_types.append("project_edit")

@@ -15,6 +15,7 @@ class SubscriptionLimits {
     'EQ Parametric',
     'Delay',
     'Compressor',
+    'Transient Shaper',
     'Chorus',
     'Limiter',
   };

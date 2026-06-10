@@ -158,6 +158,7 @@ class LocalMixingModel {
     // substring-based
     'De-Esser': ['Threshold', 'Frequency'],
     'Compressor': ['Threshold', 'Attack', 'Release', 'Ratio', 'Makeup', 'Mix'],
+    'Transient Shaper': ['Attack', 'Pump', 'Sustain', 'Speed', 'Clip'],
     'Limiter': ['Threshold', 'Release', 'Ceiling'],
     'Clipper': ['Threshold', 'Ceiling'],
   };
@@ -1390,6 +1391,154 @@ class LocalMixingModel {
     return false;
   }
 
+  String _canonicalTargetRole(String raw) {
+    final role =
+        raw.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+    switch (role) {
+      case 'vocal':
+      case 'voice':
+      case 'lead_vocal':
+      case 'lead_vocals':
+      case 'singer':
+      case 'rap':
+        return 'vocals';
+      case 'drum':
+      case 'kit':
+      case 'percussion':
+      case 'perc':
+      case 'beat':
+        return 'drums';
+      case 'sub':
+      case 'sub_bass':
+      case '808':
+        return 'bass';
+      case 'gtr':
+      case 'acoustic_guitar':
+      case 'electric_guitar':
+        return 'guitar';
+      case 'keys':
+      case 'keyboard':
+      case 'piano':
+      case 'pad':
+      case 'lead':
+      case 'arp':
+        return 'synth';
+      default:
+        return role.replaceAll('_', ' ');
+    }
+  }
+
+  List<String> _roleTextAliases(String role) {
+    switch (_canonicalTargetRole(role)) {
+      case 'vocals':
+        return const [
+          'vocal',
+          'vocals',
+          'vox',
+          'lead vocal',
+          'voice',
+          'singer',
+          'singing',
+          'rap',
+          'rapper',
+        ];
+      case 'drums':
+        return const [
+          'drum',
+          'drums',
+          'kit',
+          'kick',
+          'snare',
+          'hat',
+          'hihat',
+          'hi hat',
+          'percussion',
+          'perc',
+          'beat',
+        ];
+      case 'bass':
+        return const ['bass', 'sub', 'sub bass', '808'];
+      case 'guitar':
+        return const [
+          'guitar',
+          'gtr',
+          'acoustic',
+          'electric guitar',
+          'strum',
+        ];
+      case 'synth':
+        return const [
+          'synth',
+          'pad',
+          'lead',
+          'keys',
+          'keyboard',
+          'piano',
+          'organ',
+          'pluck',
+          'arp',
+        ];
+      default:
+        return <String>[_canonicalTargetRole(role)];
+    }
+  }
+
+  String _normalizedTargetText(String raw) {
+    return raw
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  bool _targetTextContainsAlias(String haystack, String alias) {
+    final normalizedAlias = _normalizedTargetText(alias);
+    if (normalizedAlias.isEmpty || haystack.isEmpty) return false;
+    final pattern = '(^| )${RegExp.escape(normalizedAlias)}( |${r'$'})';
+    return RegExp(pattern).hasMatch(haystack);
+  }
+
+  int _rowTextRoleScore(RowState row, String role) {
+    final canonicalRole = _canonicalTargetRole(role);
+    if (row.roleOverride == canonicalRole) return 1000;
+
+    final aliases = _roleTextAliases(canonicalRole);
+    final rowText = _normalizedTargetText(
+      '${row.rowName} ${row.instrumentName} ${row.instrumentId}',
+    );
+    final clipText = _normalizedTargetText(
+      row.clips
+          .map((clip) => clip.fileName ?? '')
+          .where((name) => name.trim().isNotEmpty)
+          .join(' '),
+    );
+
+    var score = 0;
+    for (final alias in aliases) {
+      if (_targetTextContainsAlias(rowText, alias)) score += 8;
+      if (_targetTextContainsAlias(clipText, alias)) score += 4;
+    }
+    return score;
+  }
+
+  bool _rowClassifierMatchesRole(RowState row, String role) {
+    if (!_rowUsable(row)) return false;
+    if (row.roleConsistency < 0.65) return false;
+    final canonicalRole = _canonicalTargetRole(role);
+    final probability = row.roleProbs[canonicalRole] ?? 0.0;
+    final topRole = _canonicalTargetRole(_topRole(row));
+    final interpretationTop = _canonicalTargetRole(row.interpretation.topRole);
+    final classifierConfidence = row.interpretation.classificationConfidence;
+    final margin = row.interpretation.topRoleMargin;
+
+    if (probability >= 0.45) return true;
+    return probability >= 0.30 &&
+        topRole == canonicalRole &&
+        interpretationTop == canonicalRole &&
+        classifierConfidence >= 0.35 &&
+        margin >= 0.08;
+  }
+
   List<RowState> _resolveTargets(
       ProjectState p, MixTarget target, Map<int, String> roleOverrides) {
     if (target.role == null && target.rowIndex == null) {
@@ -1401,14 +1550,38 @@ class LocalMixingModel {
       if (i >= 0 && i < p.rows.length) return [p.rows[i]];
     }
 
-    final role = target.role?.toLowerCase();
+    final role = target.role == null
+        ? null
+        : _canonicalTargetRole(target.role!.toLowerCase());
     if (role != null && role.isNotEmpty) {
-      final rows = p.rows.where((r) {
+      final overrideRows = p.rows.where((r) {
         final ov = roleOverrides[r.rowIndex];
-        if (ov != null) return ov == role;
-        if (r.roleConsistency < 0.65) return false;
-        return (r.roleProbs[role] ?? 0.0) >= 0.25;
+        return ov != null && _canonicalTargetRole(ov) == role;
       }).toList();
+      if (overrideRows.isNotEmpty) return overrideRows;
+
+      final scoredTextRows = <({RowState row, int score})>[];
+      for (final row in p.rows) {
+        if (!_rowUsable(row)) continue;
+        final score = _rowTextRoleScore(row, role);
+        if (score > 0) scoredTextRows.add((row: row, score: score));
+      }
+      if (scoredTextRows.isNotEmpty) {
+        scoredTextRows.sort((a, b) {
+          final byScore = b.score.compareTo(a.score);
+          if (byScore != 0) return byScore;
+          return a.row.rowIndex.compareTo(b.row.rowIndex);
+        });
+        final topScore = scoredTextRows.first.score;
+        return scoredTextRows
+            .where((entry) => entry.score == topScore)
+            .map((entry) => entry.row)
+            .toList(growable: false);
+      }
+
+      final rows = p.rows
+          .where((r) => _rowClassifierMatchesRole(r, role))
+          .toList(growable: false);
       if (rows.isNotEmpty) return rows;
     }
 
@@ -1417,13 +1590,23 @@ class LocalMixingModel {
 
   List<RowState> _rowsForRole(
       ProjectState p, String role, Map<int, String> roleOverrides) {
-    return p.rows.where((r) {
+    final canonicalRole = _canonicalTargetRole(role);
+    final overrideRows = p.rows.where((r) {
       if (!_rowUsable(r)) return false;
       final ov = roleOverrides[r.rowIndex];
-      if (ov != null) return ov == role;
-      if (r.roleConsistency < 0.65) return false;
-      return (r.roleProbs[role] ?? 0.0) >= 0.25;
-    }).toList();
+      return ov != null && _canonicalTargetRole(ov) == canonicalRole;
+    }).toList(growable: false);
+    if (overrideRows.isNotEmpty) return overrideRows;
+
+    final textRows = p.rows.where((r) {
+      if (!_rowUsable(r)) return false;
+      return _rowTextRoleScore(r, canonicalRole) > 0;
+    }).toList(growable: false);
+    if (textRows.isNotEmpty) return textRows;
+
+    return p.rows.where((r) {
+      return _rowClassifierMatchesRole(r, canonicalRole);
+    }).toList(growable: false);
   }
 
   // -----------------------------
@@ -3970,7 +4153,7 @@ enum DisagreementReason {
 
 const Map<String, List<String>> fxResetGroups = {
   'eq': ['EQ'],
-  'dynamics': ['Compressor', 'De-Esser'],
+  'dynamics': ['Compressor', 'Transient Shaper', 'De-Esser'],
   'time': ['Reverb', 'Delay'],
   'distortion': ['Distortion', 'Saturation', 'Drive'],
 };

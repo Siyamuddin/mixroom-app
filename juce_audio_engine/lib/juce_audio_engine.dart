@@ -238,6 +238,36 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<String?> renderPitchLabAudio({
+    required String sourcePath,
+    required String outPath,
+    required double trimStartMs,
+    required double trimEndMs,
+    required double sourceTimelineDurationMs,
+    required double outputDurationMs,
+    required List<Map<String, double>> suppressedRanges,
+    required List<Map<String, double>> segments,
+  }) async {
+    try {
+      return await _ch.invokeMethod<String>('renderPitchLabAudio', {
+        'sourcePath': sourcePath,
+        'outPath': outPath,
+        'trimStartMs': trimStartMs,
+        'trimEndMs': trimEndMs,
+        'sourceTimelineDurationMs': sourceTimelineDurationMs,
+        'outputDurationMs': outputDurationMs,
+        'suppressedRanges': suppressedRanges,
+        'segments': segments,
+      });
+    } on PlatformException catch (e) {
+      _logError('renderPitchLabAudio', e);
+      return null;
+    } on MissingPluginException catch (e) {
+      _logError('renderPitchLabAudio', e);
+      return null;
+    }
+  }
+
   // DEPRECATED – prefer loadClip()
   static Future<void> loadTrack(int index, String path) async {
     try {
@@ -1639,6 +1669,69 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<void> configureTrackGroups(
+    List<Map<String, dynamic>> groups,
+  ) async {
+    try {
+      await _ch.invokeMethod('configureTrackGroups', {'groups': groups});
+    } on MissingPluginException {
+      return;
+    } on PlatformException catch (e) {
+      _logError('configureTrackGroups', e);
+    }
+  }
+
+  static Future<void> assignRowToGroup(int row, String? groupId) async {
+    try {
+      await _ch.invokeMethod('assignRowToGroup', {
+        'row': row,
+        'groupId': groupId ?? '',
+      });
+    } on MissingPluginException {
+      return;
+    } on PlatformException catch (e) {
+      _logError('assignRowToGroup', e);
+    }
+  }
+
+  static Future<void> setTrackGroupMixState({
+    required String groupId,
+    double? gain,
+    double? pan,
+    bool? muted,
+    bool? soloed,
+  }) async {
+    try {
+      await _ch.invokeMethod('setTrackGroupMixState', {
+        'groupId': groupId,
+        if (gain != null) 'gain': gain,
+        if (pan != null) 'pan': pan,
+        if (muted != null) 'muted': muted,
+        if (soloed != null) 'soloed': soloed,
+      });
+    } on MissingPluginException {
+      return;
+    } on PlatformException catch (e) {
+      _logError('setTrackGroupMixState', e);
+    }
+  }
+
+  static Future<void> setTrackGroupEffects(
+    String groupId,
+    List<Map<String, dynamic>> effects,
+  ) async {
+    try {
+      await _ch.invokeMethod('setTrackGroupEffects', {
+        'groupId': groupId,
+        'effects': effects,
+      });
+    } on MissingPluginException {
+      return;
+    } on PlatformException catch (e) {
+      _logError('setTrackGroupEffects', e);
+    }
+  }
+
   static Future<void> setRowGain(int row, double gain0to3) async {
     try {
       await _ch.invokeMethod('setRowGain', {
@@ -2214,6 +2307,84 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<void> setRowMonitorTarget({
+    required int row,
+    String inputDeviceName = '',
+    int channelStart = 0,
+    int channelCount = 1,
+  }) async {
+    try {
+      await _ch.invokeMethod('setRowMonitorTarget', {
+        'row': row,
+        'inputDeviceName': inputDeviceName,
+        'channelStart': channelStart,
+        'channelCount': channelCount,
+      });
+    } on MissingPluginException {
+      return;
+    } on PlatformException catch (e) {
+      _logError('setRowMonitorTarget', e);
+    }
+  }
+
+  static Future<double> getEstimatedRecordingLatencyMs() async {
+    try {
+      final res = await _ch.invokeMethod<num>('getEstimatedRecordingLatencyMs');
+      return (res ?? 0).toDouble();
+    } on MissingPluginException {
+      return 0.0;
+    } on PlatformException catch (e) {
+      _logError('getEstimatedRecordingLatencyMs', e);
+      return 0.0;
+    }
+  }
+
+  static Future<void> setClipWarpOptions({
+    required int clipIndex,
+    required String clipId,
+    required String warpMode,
+    required bool preservePitch,
+    double? sourceTempoBpm,
+    double? targetTempoBpm,
+  }) async {
+    try {
+      await _ch.invokeMethod('setClipWarpOptions', {
+        'clipIndex': clipIndex,
+        'clipId': clipId,
+        'warpMode': warpMode,
+        'preservePitch': preservePitch,
+        if (sourceTempoBpm != null) 'sourceTempoBpm': sourceTempoBpm,
+        if (targetTempoBpm != null) 'targetTempoBpm': targetTempoBpm,
+      });
+    } on MissingPluginException {
+      return;
+    } on PlatformException catch (e) {
+      _logError('setClipWarpOptions', e);
+    }
+  }
+
+  static Future<String> renderEnhancedAudioCache({
+    required String inputPath,
+    required String outputPath,
+    required String preset,
+    Map<String, dynamic> options = const <String, dynamic>{},
+  }) async {
+    try {
+      final res = await _ch.invokeMethod<String>('renderEnhancedAudioCache', {
+        'inputPath': inputPath,
+        'outputPath': outputPath,
+        'preset': preset,
+        'options': options,
+      });
+      return res ?? '';
+    } on MissingPluginException {
+      return '';
+    } on PlatformException catch (e) {
+      _logError('renderEnhancedAudioCache', e);
+      return '';
+    }
+  }
+
   static Future<bool> preferNonBluetoothRecordingInput() async {
     try {
       final res =
@@ -2534,6 +2705,74 @@ class JuceAudioEngine {
       return raw.map((e) => (e as num).toDouble()).toList(growable: false);
     } on PlatformException catch (e) {
       _logError('getMasterShaperPreview', e);
+      return const <double>[];
+    }
+  }
+
+  static Future<List<double>> getRowDynamicSoftenerFrame(
+    int row,
+    int effect,
+  ) async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>(
+        'getRowDynamicSoftenerFrame',
+        {'row': row, 'effect': effect},
+      );
+      if (raw == null) return const <double>[];
+      return raw.map((e) => (e as num).toDouble()).toList(growable: false);
+    } on PlatformException catch (e) {
+      _logError('getRowDynamicSoftenerFrame', e);
+      return const <double>[];
+    }
+  }
+
+  static Future<List<double>> getMasterDynamicSoftenerFrame(
+    int effect,
+  ) async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>(
+        'getMasterDynamicSoftenerFrame',
+        {'effect': effect},
+      );
+      if (raw == null) return const <double>[];
+      return raw.map((e) => (e as num).toDouble()).toList(growable: false);
+    } on PlatformException catch (e) {
+      _logError('getMasterDynamicSoftenerFrame', e);
+      return const <double>[];
+    }
+  }
+
+  static Future<List<double>> getRowTransientShaperVisual(
+    int row,
+    int effect, {
+    int pointCount = 192,
+  }) async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>(
+        'getRowTransientShaperVisual',
+        {'row': row, 'effect': effect, 'pointCount': pointCount},
+      );
+      if (raw == null) return const <double>[];
+      return raw.map((e) => (e as num).toDouble()).toList(growable: false);
+    } on PlatformException catch (e) {
+      _logError('getRowTransientShaperVisual', e);
+      return const <double>[];
+    }
+  }
+
+  static Future<List<double>> getMasterTransientShaperVisual(
+    int effect, {
+    int pointCount = 192,
+  }) async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>(
+        'getMasterTransientShaperVisual',
+        {'effect': effect, 'pointCount': pointCount},
+      );
+      if (raw == null) return const <double>[];
+      return raw.map((e) => (e as num).toDouble()).toList(growable: false);
+    } on PlatformException catch (e) {
+      _logError('getMasterTransientShaperVisual', e);
       return const <double>[];
     }
   }

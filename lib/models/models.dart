@@ -19,6 +19,36 @@ const String kTempoWarpModeBeats = 'beats';
 const String kTempoWarpModeComplex = 'complex';
 const String kTempoWarpModeRepitch = 'repitch';
 
+const Set<String> kTrackRoleOverrideValues = <String>{
+  'vocals',
+  'drums',
+  'bass',
+  'guitar',
+  'synth',
+  'other',
+};
+
+String normalizeTrackRoleOverride(String? rawRole) {
+  final role = (rawRole ?? '').trim().toLowerCase();
+  if (role.isEmpty || role == 'auto' || role == 'automatic') return '';
+  switch (role) {
+    case 'vocal':
+    case 'vox':
+    case 'lead_vocal':
+    case 'lead vocals':
+      return 'vocals';
+    case 'drum':
+    case 'percussion':
+      return 'drums';
+    case 'keys':
+    case 'piano':
+    case 'keyboard':
+      return 'synth';
+    default:
+      return kTrackRoleOverrideValues.contains(role) ? role : '';
+  }
+}
+
 String normalizeTempoWarpMode(String? value) {
   switch ((value ?? '').trim().toLowerCase()) {
     case kTempoWarpModeBeats:
@@ -101,6 +131,9 @@ class AudioTrack {
   bool stretchToProjectTempo; // clip follows project tempo when enabled
   bool tempoStretchPreservePitch; // false=resample, true=stretch-preserve
   String tempoWarpMode; // beats, complex, or repitch for desktop warp UI
+  double recordingLatencyMs; // capture/device compensation applied at insert
+  double alignmentOffsetMs; // onset/grid alignment delta applied after insert
+  String audioEnhancementPreset; // non-empty when a cleanup preset was applied
   double reverb; // deprecated
   double echo; // deprecated
   bool didExtractWaveform;
@@ -140,6 +173,9 @@ class AudioTrack {
     this.stretchToProjectTempo = false,
     this.tempoStretchPreservePitch = false,
     String tempoWarpMode = kTempoWarpModeComplex,
+    this.recordingLatencyMs = 0.0,
+    this.alignmentOffsetMs = 0.0,
+    this.audioEnhancementPreset = '',
     this.reverb = 0.0,
     this.echo = 0.0,
     this.didExtractWaveform = false,
@@ -188,6 +224,9 @@ class AudioTrack {
     bool stretchToProjectTempo = false,
     bool tempoStretchPreservePitch = false,
     String tempoWarpMode = kTempoWarpModeComplex,
+    double recordingLatencyMs = 0.0,
+    double alignmentOffsetMs = 0.0,
+    String audioEnhancementPreset = '',
     double reverb = 0.0,
     double echo = 0.0,
     bool didExtractWaveform = false,
@@ -228,6 +267,9 @@ class AudioTrack {
       stretchToProjectTempo: stretchToProjectTempo,
       tempoStretchPreservePitch: tempoStretchPreservePitch,
       tempoWarpMode: tempoWarpMode,
+      recordingLatencyMs: recordingLatencyMs,
+      alignmentOffsetMs: alignmentOffsetMs,
+      audioEnhancementPreset: audioEnhancementPreset,
       reverb: reverb,
       echo: echo,
       didExtractWaveform: didExtractWaveform,
@@ -299,6 +341,11 @@ class TimelineRow {
   String instrumentId;
   String instrumentName;
   Map<String, double> instrumentParams;
+  String roleOverride;
+  String groupId;
+  String inputDeviceName;
+  int inputChannelStart;
+  int inputChannelCount;
 
   TimelineRow({
     required this.rowId,
@@ -308,7 +355,13 @@ class TimelineRow {
     this.instrumentId = '',
     this.instrumentName = '',
     Map<String, double>? instrumentParams,
-  }) : instrumentParams = instrumentParams ?? const <String, double>{};
+    String roleOverride = '',
+    this.groupId = '',
+    this.inputDeviceName = '',
+    this.inputChannelStart = 0,
+    this.inputChannelCount = 1,
+  })  : roleOverride = normalizeTrackRoleOverride(roleOverride),
+        instrumentParams = instrumentParams ?? const <String, double>{};
 
   bool get isInstrumentLane => kind == TimelineRowKind.instrument;
 
@@ -320,6 +373,11 @@ class TimelineRow {
     String? instrumentId,
     String? instrumentName,
     Map<String, double>? instrumentParams,
+    String? roleOverride,
+    String? groupId,
+    String? inputDeviceName,
+    int? inputChannelStart,
+    int? inputChannelCount,
   }) {
     return TimelineRow(
       rowId: rowId ?? this.rowId,
@@ -329,8 +387,39 @@ class TimelineRow {
       instrumentId: instrumentId ?? this.instrumentId,
       instrumentName: instrumentName ?? this.instrumentName,
       instrumentParams: instrumentParams ?? this.instrumentParams,
+      roleOverride: roleOverride ?? this.roleOverride,
+      groupId: groupId ?? this.groupId,
+      inputDeviceName: inputDeviceName ?? this.inputDeviceName,
+      inputChannelStart: inputChannelStart ?? this.inputChannelStart,
+      inputChannelCount: inputChannelCount ?? this.inputChannelCount,
     );
   }
+}
+
+class TrackGroup {
+  final String id;
+  final String name;
+  final int color;
+  final List<int> rowIds;
+  final double gain;
+  final double pan;
+  final bool muted;
+  final bool soloed;
+  final bool collapsed;
+  final List<EffectSnapshot> effects;
+
+  const TrackGroup({
+    required this.id,
+    required this.name,
+    this.color = 0,
+    this.rowIds = const <int>[],
+    this.gain = kDefaultGainUi,
+    this.pan = 0.5,
+    this.muted = false,
+    this.soloed = false,
+    this.collapsed = false,
+    this.effects = const <EffectSnapshot>[],
+  });
 }
 
 // consider making extendable to general automation points, not just volume
@@ -555,6 +644,10 @@ extension AudioTrackSerialization on AudioTrack {
       "stretchToProjectTempo": stretchToProjectTempo,
       "tempoStretchPreservePitch": tempoStretchPreservePitch,
       "tempoWarpMode": normalizeTempoWarpMode(tempoWarpMode),
+      "recordingLatencyMs": recordingLatencyMs,
+      "alignmentOffsetMs": alignmentOffsetMs,
+      if (audioEnhancementPreset.trim().isNotEmpty)
+        "audioEnhancementPreset": audioEnhancementPreset.trim(),
       "rowIndex": rowIndex,
       "rowId": rowId,
       "clipId": clipId,
@@ -581,6 +674,11 @@ class RowStateSnapshot {
   final String? selectedAutomationTargetId;
   final bool muted;
   final bool soloed;
+  final String roleOverride;
+  final String groupId;
+  final String inputDeviceName;
+  final int inputChannelStart;
+  final int inputChannelCount;
 
   RowStateSnapshot({
     required this.row,
@@ -593,7 +691,12 @@ class RowStateSnapshot {
     this.selectedAutomationTargetId,
     this.muted = false,
     this.soloed = false,
-  });
+    String roleOverride = '',
+    this.groupId = '',
+    this.inputDeviceName = '',
+    this.inputChannelStart = 0,
+    this.inputChannelCount = 1,
+  }) : roleOverride = normalizeTrackRoleOverride(roleOverride);
 
   Map<String, dynamic> toJson() {
     return {
@@ -607,6 +710,12 @@ class RowStateSnapshot {
       "selectedAutomationTargetId": selectedAutomationTargetId,
       "muted": muted,
       "soloed": soloed,
+      if (roleOverride.isNotEmpty) "roleOverride": roleOverride,
+      if (groupId.trim().isNotEmpty) "groupId": groupId.trim(),
+      if (inputDeviceName.trim().isNotEmpty)
+        "inputDeviceName": inputDeviceName.trim(),
+      "inputChannelStart": inputChannelStart,
+      "inputChannelCount": inputChannelCount,
     };
   }
 
@@ -635,6 +744,13 @@ class RowStateSnapshot {
           (json["selectedAutomationTargetId"] as String?)?.trim(),
       muted: json["muted"] == true,
       soloed: json["soloed"] == true,
+      roleOverride: (json["roleOverride"] as String?)?.trim() ?? '',
+      groupId: (json["groupId"] as String?)?.trim() ?? '',
+      inputDeviceName: (json["inputDeviceName"] as String?)?.trim() ?? '',
+      inputChannelStart:
+          ((json["inputChannelStart"] as num?)?.toInt() ?? 0).clamp(0, 999),
+      inputChannelCount:
+          ((json["inputChannelCount"] as num?)?.toInt() ?? 1).clamp(1, 999),
     );
   }
 }
@@ -699,6 +815,43 @@ extension MasterEffectsSnapshotJson on MasterEffectsSnapshot {
           .map((e) =>
               EffectSnapshotJson.fromJson((e as Map).cast<String, dynamic>()))
           .toList(),
+    );
+  }
+}
+
+extension TrackGroupJson on TrackGroup {
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        "id": id,
+        "name": name,
+        "color": color,
+        "rowIds": rowIds,
+        "gain": gain,
+        "pan": pan,
+        "muted": muted,
+        "soloed": soloed,
+        "collapsed": collapsed,
+        "effects": effects.map((e) => e.toJson()).toList(),
+      };
+
+  static TrackGroup fromJson(Map<String, dynamic> json) {
+    return TrackGroup(
+      id: (json["id"] as String?)?.trim() ?? '',
+      name: (json["name"] as String?)?.trim() ?? 'Group',
+      color: (json["color"] as num?)?.toInt() ?? 0,
+      rowIds: ((json["rowIds"] as List?) ?? const [])
+          .whereType<num>()
+          .map((value) => value.toInt())
+          .where((value) => value >= 0)
+          .toList(growable: false),
+      gain: ((json["gain"] as num?) ?? kDefaultGainUi).toDouble(),
+      pan: ((json["pan"] as num?) ?? 0.5).toDouble(),
+      muted: json["muted"] == true,
+      soloed: json["soloed"] == true,
+      collapsed: json["collapsed"] == true,
+      effects: ((json["effects"] as List?) ?? const [])
+          .whereType<Map>()
+          .map((e) => EffectSnapshotJson.fromJson(e.cast<String, dynamic>()))
+          .toList(growable: false),
     );
   }
 }
