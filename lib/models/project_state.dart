@@ -109,6 +109,7 @@ class ProjectState {
   final double masterPan0to1;
   final int maxRows;
   final List<RowState> rows;
+  final List<TrackGroup> trackGroups;
   final List<EffectState> masterEffects;
   final List<List<int>> overlapMatrix; // row-row overlap (0/1)
   final List<List<double>> overlapRatioMatrix; // row-row overlap amount (0..1)
@@ -122,6 +123,7 @@ class ProjectState {
     this.masterPan0to1 = 0.5,
     required this.maxRows,
     required this.rows,
+    this.trackGroups = const [],
     this.masterEffects = const [],
     required this.overlapMatrix,
     this.overlapRatioMatrix = const [],
@@ -136,6 +138,7 @@ class ProjectState {
         'master_pan_0to1': masterPan0to1,
         'max_rows': maxRows,
         'rows': rows.map((r) => r.toJson()).toList(),
+        'track_groups': trackGroups.map((group) => group.toJson()).toList(),
         'master_effects': masterEffects.map((e) => e.toJson()).toList(),
         'overlap_matrix': overlapMatrix,
         'overlap_ratio_matrix': overlapRatioMatrix,
@@ -150,6 +153,7 @@ class ProjectState {
         'master_pan_0to1': masterPan0to1,
         'max_rows': maxRows,
         'rows': rows.map((r) => r.toMagnitudeResolverJson()).toList(),
+        'track_groups': trackGroups.map((group) => group.toJson()).toList(),
         'master_effects': masterEffects.map((e) => e.toJson()).toList(),
         'overlap_matrix': overlapMatrix,
         'overlap_ratio_matrix': overlapRatioMatrix,
@@ -167,6 +171,7 @@ class RowState {
   final String instrumentName;
   final String roleOverride;
   final String groupId;
+  final int rowColor;
   final String inputDeviceName;
   final int inputChannelStart;
   final int inputChannelCount;
@@ -242,6 +247,7 @@ class RowState {
     this.instrumentName = '',
     String roleOverride = '',
     this.groupId = '',
+    this.rowColor = 0,
     this.inputDeviceName = '',
     this.inputChannelStart = 0,
     this.inputChannelCount = 1,
@@ -271,6 +277,7 @@ class RowState {
         },
         if (roleOverride.isNotEmpty) 'role_override': roleOverride,
         if (groupId.trim().isNotEmpty) 'group_id': groupId.trim(),
+        if (rowColor != 0) 'row_color': rowColor,
         if (inputDeviceName.trim().isNotEmpty)
           'input_device_name': inputDeviceName.trim(),
         'input_channel_start': inputChannelStart,
@@ -297,6 +304,7 @@ class RowState {
         },
         if (roleOverride.isNotEmpty) 'role_override': roleOverride,
         if (groupId.trim().isNotEmpty) 'group_id': groupId.trim(),
+        if (rowColor != 0) 'row_color': rowColor,
         'features': {'approx_rms': approxRms, 'approx_crest': approxCrest},
         'role_probs': roleProbs,
         'audio_stats': audioStats,

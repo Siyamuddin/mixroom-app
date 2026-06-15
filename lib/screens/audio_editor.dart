@@ -27,16 +27,20 @@ import 'package:mixroom/helpers/timeline_tempo_mapping.dart';
 import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
 import 'package:mixroom/helpers/auth_service.dart';
+import 'package:mixroom/helpers/daw_add_menu_config.dart';
 import 'package:mixroom/helpers/daw_onboarding_prefs.dart';
 import 'package:mixroom/helpers/desktop_editor_prefs.dart';
+import 'package:mixroom/helpers/export_progress_ui.dart';
 import 'package:mixroom/helpers/feedback_service.dart';
 import 'package:mixroom/helpers/project_telemetry_service.dart';
 import 'package:mixroom/helpers/project_chat_history.dart';
+import 'package:mixroom/helpers/tablet_daw_panel_layout.dart';
+import 'package:mixroom/helpers/top_bar_visualizer_mode.dart';
+import 'package:mixroom/helpers/track_group_reconciler.dart';
 import 'package:mixroom/models/mixing_result.dart';
 import 'package:mixroom/screens/audio_timeline_pro.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:uuid/uuid.dart';
-import '../helpers/youtube_upload.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/models/project_state.dart';
 import 'package:mixroom/ai/assistant_action_utils.dart';
@@ -158,6 +162,7 @@ const Set<String> kDefaultProducerCaptureUsernameAllowlist = <String>{
 const String kBundledSamplePackAssetPrefix = 'assets/sample_packs/';
 const String kBundledSamplePackManifestFileName =
     '.mixroom_sample_pack_manifest.json';
+const String kUserSampleDropFolderName = 'Mixroom Samples';
 
 const List<Map<String, dynamic>> kBundledSfzFallbackCatalog = [
   {
@@ -3806,6 +3811,8 @@ class AudioEditorScreen extends StatefulWidget {
 
 enum _TopPopupType { none, projectSettings, tempo, master }
 
+enum _ContainedExportPanelStage { idle, exporting, success }
+
 const String _kDesktopShortcutUndo = 'undo';
 const String _kDesktopShortcutRedo = 'redo';
 const String _kDesktopShortcutPlayPause = 'play_pause';
@@ -3870,6 +3877,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   static const Key _editorBackButtonKey = Key('audio_editor_back_button');
   final GlobalKey _projectSettingsButtonKey =
       GlobalKey(debugLabel: 'audio_editor_project_settings_button');
+  final GlobalKey _projectNamePillKey =
+      GlobalKey(debugLabel: 'audio_editor_project_name_pill');
   final GlobalKey _tempoButtonKey =
       GlobalKey(debugLabel: 'audio_editor_tempo_button');
   final GlobalKey _masterPluginsButtonKey =
@@ -3900,6 +3909,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   static const double _kChatHistoryBottomGap = 20.0;
   static const double _kChatChromeOpacity = 0.32;
   static const double _kChatBarFixedHeight = 48.0;
+  static const double _kDesktopDawChatBarMaxWidth = 591.0;
   static const LinearGradient _kChatBarGradient = LinearGradient(
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
@@ -3907,6 +3917,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     colors: <Color>[
       Color.fromRGBO(232, 232, 232, 0.46),
       Color.fromRGBO(190, 196, 202, 0.44),
+    ],
+  );
+  static const Color _kTabletDawPanelFill = Color.fromRGBO(72, 86, 96, 0.84);
+  static const Color _kTabletDawControlFill =
+      Color.fromRGBO(82, 108, 132, 0.78);
+  static const Color _kTabletDawControlActiveFill =
+      Color.fromRGBO(76, 132, 178, 0.82);
+  static const LinearGradient _kTabletDawControlFlatGradient = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: <Color>[
+      _kTabletDawControlFill,
+      _kTabletDawControlFill,
     ],
   );
   double get _chatHistoryBottomGap =>
@@ -4130,6 +4153,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Duration _globalAudioClock = Duration.zero;
   final Stopwatch _transportUiStopwatch = Stopwatch()..start();
   bool _transportPollBusy = false;
+  bool _transportNativeCommandInFlight = false;
+  int _transportCommandSerial = 0;
+  bool _transportDesiredPlaying = false;
   Duration _lastTransportPollElapsed = Duration.zero;
   Duration _lastTransportSampleElapsed = Duration.zero;
   Duration _lastTransportUiNotifyElapsed = Duration.zero;
@@ -4268,6 +4294,28 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   static const double _kClipPitchMaxSemitones = 12.0;
 
   int _selectedRow = 0;
+  String _tabletRightPanelTab = 'fx';
+  int _tabletRowDetailTab = 1; // 0 = Volume, 1 = Effect, 2 = Automation
+  bool _tabletRightPanelCollapsed = true;
+  bool _tabletRightPanelHandleDragging = false;
+  Offset? _tabletRightPanelHandleDownGlobalPosition;
+  Offset? _tabletRightPanelHandleLastGlobalPosition;
+  bool _tabletRightPanelHandleMovedPastTapSlop = false;
+  bool _tabletRightPanelHandleResized = false;
+  double? _tabletRightPanelWidthOverride;
+  bool _tabletExportAdvancedOpen = false;
+  bool _masterMeterExpanded = false;
+  _ContainedExportPanelStage _containedExportPanelStage =
+      _ContainedExportPanelStage.idle;
+  double _containedExportProgress = 0.0;
+  int _containedExportEllipsisStep = 0;
+  int _containedExportRunToken = 0;
+  bool _containedExportCancelled = false;
+  Timer? _containedExportEllipsisTimer;
+  String? _containedExportFilePath;
+  String? _containedExportPreviewFilePath;
+  String? _containedExportSavedFilePath;
+  String? _containedExportSavedFileName;
   List<TimelineRow> _rows = [];
   final Map<int, _AutomationDiscoveryCacheEntry> _rowAutomationDiscoveryCache =
       <int, _AutomationDiscoveryCacheEntry>{};
@@ -4299,6 +4347,310 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _setGlobalAudioClock(value, forceNotify: true);
   }
 
+  bool get _hasTimelineClips => _audioTracks.isNotEmpty;
+
+  bool get _usesContainedExportPanel {
+    if (!mounted) return false;
+    return mixroomUsesTabletLandscapeShell(context);
+  }
+
+  void _syncTabletRowFxSelectionAfterRemove(int row, int removedEffectIndex) {
+    if (!mounted) return;
+    if (_tabletSelectedRowFxRow != row ||
+        _tabletSelectedRowFxIndex == null ||
+        removedEffectIndex < 0) {
+      return;
+    }
+
+    final selectedIndex = _tabletSelectedRowFxIndex!;
+    if (selectedIndex == removedEffectIndex) {
+      setState(() {
+        _tabletSelectedRowFxRow = null;
+        _tabletSelectedRowFxIndex = null;
+      });
+      return;
+    }
+
+    if (selectedIndex > removedEffectIndex) {
+      setState(() {
+        _tabletSelectedRowFxIndex = selectedIndex - 1;
+      });
+    }
+  }
+
+  void _clearTabletRowFxSelectionForRow(int row) {
+    if (!mounted || _tabletSelectedRowFxRow != row) return;
+    setState(() {
+      _tabletSelectedRowFxRow = null;
+      _tabletSelectedRowFxIndex = null;
+    });
+  }
+
+  String _audioClipDisplayName(AudioTrack clip) {
+    final label = clip.label.trim();
+    if (label.isNotEmpty) return label;
+    return L10n.translate(context, clip.isMidi ? 'MIDI Clip' : 'Audio Clip');
+  }
+
+  bool _isValidAudioClipOptionsIndex(int? clipIndex) {
+    if (clipIndex == null ||
+        clipIndex < 0 ||
+        clipIndex >= _audioTracks.length) {
+      return false;
+    }
+    return !_audioTracks[clipIndex].isMidi;
+  }
+
+  void _openTabletAudioClipOptions(int clipIndex) {
+    if (!_isValidAudioClipOptionsIndex(clipIndex)) return;
+    final clip = _audioTracks[clipIndex];
+    setState(() {
+      _selectedRow = clip.rowIndex.clamp(0, math.max(0, _rowCount - 1)).toInt();
+      _tabletRightPanelTab = 'inspector';
+      _tabletRightPanelCollapsed = false;
+      _tabletAudioClipOptionsIndex = clipIndex;
+      _tabletAudioClipOptionsNameDraft = _audioClipDisplayName(clip);
+      _tabletAudioClipOptionsGainStart = null;
+      _tabletAudioClipOptionsPitchStart = null;
+    });
+  }
+
+  void _closeTabletAudioClipOptions() {
+    if (_tabletAudioClipOptionsIndex == null) return;
+    setState(() {
+      _tabletAudioClipOptionsIndex = null;
+      _tabletAudioClipOptionsNameDraft = '';
+      _tabletAudioClipOptionsGainStart = null;
+      _tabletAudioClipOptionsPitchStart = null;
+    });
+  }
+
+  Future<void> _renameAudioClipFromPanel(int clipIndex, String rawName) async {
+    if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
+    final oldLabel = _audioTracks[clipIndex].label;
+    final nextLabel = rawName.trim();
+    if (nextLabel.isEmpty || oldLabel == nextLabel) return;
+
+    await _undoManager.execute(
+      SetClipLabelAction(
+        tracks: _audioTracks,
+        originalIndex: clipIndex,
+        oldLabel: oldLabel,
+        newLabel: nextLabel,
+        applyToState: (clip, label) {
+          clip.label = label;
+          setState(() {});
+        },
+      ),
+    );
+
+    _recordProducerManualEdit('clip_rename', {
+      'clip': clipIndex,
+      'old_label': oldLabel,
+      'new_label': nextLabel,
+    });
+  }
+
+  Future<void> _commitTabletAudioClipGain(int clipIndex) async {
+    final oldGain = _tabletAudioClipOptionsGainStart;
+    _tabletAudioClipOptionsGainStart = null;
+    if (oldGain == null || clipIndex < 0 || clipIndex >= _audioTracks.length) {
+      return;
+    }
+    final newGain = _audioTracks[clipIndex].gain.clamp(0.0, 3.0).toDouble();
+    if ((oldGain - newGain).abs() < 0.0001) return;
+    await _undoManager.execute(
+      SetClipGainAction(
+        tracks: _audioTracks,
+        originalIndex: clipIndex,
+        oldGain: oldGain,
+        newGain: newGain,
+        applyToState: (clip, gain) {
+          clip.gain = gain;
+          setState(() {});
+        },
+      ),
+    );
+    _recordProducerManualEdit('clip_gain', {
+      'clip': clipIndex,
+      'old_gain': oldGain,
+      'new_gain': newGain,
+    });
+  }
+
+  Future<void> _commitTabletAudioClipPitch(int clipIndex) async {
+    final oldPitch = _tabletAudioClipOptionsPitchStart;
+    _tabletAudioClipOptionsPitchStart = null;
+    if (oldPitch == null || clipIndex < 0 || clipIndex >= _audioTracks.length) {
+      return;
+    }
+    final newPitch = _audioTracks[clipIndex]
+        .pitchSemitones
+        .clamp(_kClipPitchMinSemitones, _kClipPitchMaxSemitones)
+        .toDouble();
+    if ((oldPitch - newPitch).abs() < 0.0001) return;
+    await _undoManager.execute(
+      SetClipPitchAction(
+        tracks: _audioTracks,
+        originalIndex: clipIndex,
+        oldPitch: oldPitch,
+        newPitch: newPitch,
+        applyToState: (clip, pitch) {
+          clip.pitchSemitones = pitch;
+          setState(() {});
+        },
+      ),
+    );
+    _recordProducerManualEdit('clip_pitch', {
+      'clip': clipIndex,
+      'old_pitch': oldPitch,
+      'new_pitch': newPitch,
+    });
+  }
+
+  Future<void> _setAudioClipReversedFromPanel(
+    int clipIndex,
+    bool reversed,
+  ) async {
+    if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
+    final clip = _audioTracks[clipIndex];
+    if (clip.isMidi || clip.isReversed == reversed) return;
+    await _undoManager.execute(
+      SetClipReverseAction(
+        tracks: _audioTracks,
+        originalIndex: clipIndex,
+        oldReversed: clip.isReversed,
+        newReversed: reversed,
+        applyToState: (target, value) {
+          target.isReversed = value;
+          setState(() {});
+        },
+      ),
+    );
+    _recordProducerManualEdit('clip_reverse', {
+      'clip': clipIndex,
+      'reversed': reversed,
+    });
+  }
+
+  double _tabletExpandedRightPanelWidthFor(double availableWidth) {
+    return TabletDawPanelLayout.expandedRightPanelWidth(
+      availableWidth: availableWidth,
+      preferredRightPanelWidth: _tabletRightPanelWidthOverride,
+    );
+  }
+
+  double _tabletReservedRightPanelWidthFor(
+    double availableWidth, {
+    required bool collapsed,
+  }) {
+    return TabletDawPanelLayout.reservedWidth(
+      usesTabletDawLayout: true,
+      collapsed: collapsed,
+      availableWidth: availableWidth,
+      preferredRightPanelWidth: _tabletRightPanelWidthOverride,
+    );
+  }
+
+  void _resizeTabletRightPanelBy(double deltaDx, double availableWidth) {
+    if (!mounted) return;
+    final current = _tabletExpandedRightPanelWidthFor(availableWidth);
+    final next = TabletDawPanelLayout.boundedPreferredRightPanelWidth(
+      current - deltaDx,
+    );
+    setState(() {
+      _tabletRightPanelWidthOverride = next;
+      _tabletRightPanelCollapsed = false;
+    });
+  }
+
+  bool _isLocalFilePath(String? path) {
+    final trimmed = path?.trim();
+    if (trimmed == null || trimmed.isEmpty) return false;
+    return !trimmed.contains('://');
+  }
+
+  void _deleteContainedExportFileIfSafe(String? path) {
+    if (!_isLocalFilePath(path)) return;
+    try {
+      final file = File(path!);
+      if (file.existsSync()) {
+        file.deleteSync();
+      }
+    } catch (_) {}
+  }
+
+  void _clearContainedExportPayload({bool deleteFiles = false}) {
+    if (deleteFiles) {
+      final previewPath = _containedExportPreviewFilePath;
+      final exportPath = _containedExportFilePath;
+      final savedPath = _containedExportSavedFilePath;
+      if (previewPath != null &&
+          previewPath != exportPath &&
+          previewPath != savedPath) {
+        _deleteContainedExportFileIfSafe(previewPath);
+      }
+      if (exportPath != null && exportPath != savedPath) {
+        _deleteContainedExportFileIfSafe(exportPath);
+      }
+    }
+    _containedExportFilePath = null;
+    _containedExportPreviewFilePath = null;
+    _containedExportSavedFilePath = null;
+    _containedExportSavedFileName = null;
+  }
+
+  void _startContainedExportEllipsisTimer() {
+    _containedExportEllipsisTimer?.cancel();
+    _containedExportEllipsisTimer = Timer.periodic(
+      const Duration(milliseconds: 500),
+      (_) {
+        if (!mounted ||
+            _containedExportPanelStage !=
+                _ContainedExportPanelStage.exporting) {
+          return;
+        }
+        setState(() {
+          _containedExportEllipsisStep = (_containedExportEllipsisStep + 1) % 3;
+        });
+      },
+    );
+  }
+
+  void _stopContainedExportEllipsisTimer() {
+    _containedExportEllipsisTimer?.cancel();
+    _containedExportEllipsisTimer = null;
+  }
+
+  int _beginContainedExportProgress() {
+    _clearContainedExportPayload(deleteFiles: true);
+    final token = ++_containedExportRunToken;
+    _cancelSignal = Completer();
+    _containedExportCancelled = false;
+    _containedExportEllipsisStep = 0;
+    _startContainedExportEllipsisTimer();
+    setState(() {
+      _tabletRightPanelTab = 'export';
+      _tabletRightPanelCollapsed = false;
+      _containedExportPanelStage = _ContainedExportPanelStage.exporting;
+      _containedExportProgress = 0.0;
+    });
+    return token;
+  }
+
+  void _cancelContainedExportProgress() {
+    _containedExportCancelled = true;
+    if (!_cancelSignal.isCompleted) {
+      _cancelSignal.complete();
+    }
+    _stopContainedExportEllipsisTimer();
+    if (!mounted) return;
+    setState(() {
+      _containedExportPanelStage = _ContainedExportPanelStage.idle;
+      _containedExportProgress = 0.0;
+    });
+  }
+
   void _scrubProjectTransport(double ms) {
     if (_isRecording) return;
     final clampedMs = math.max(0.0, ms);
@@ -4312,6 +4664,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     JuceAudioEngine.setMetronomeTransportMs(clampedMs);
   }
 
+  void _selectTabletRightPanelTab(String tabId, {bool openPanel = true}) {
+    if (!mounted) return;
+    setState(() {
+      _tabletRightPanelTab = tabId;
+      if (tabId != 'fx') {
+        _masterMeterExpanded = false;
+      }
+      if (openPanel) {
+        _tabletRightPanelCollapsed = false;
+      }
+    });
+    if (_rowCount <= 0) return;
+    final row = _selectedRow.clamp(0, _rowCount - 1).toInt();
+    if (tabId == 'inspector') {
+      _timelineController.ensureRowExpanded(row, tab: _tabletRowDetailTab);
+    } else if (tabId == 'fx') {
+      setState(() {
+        _tabletRowDetailTab = 1;
+      });
+      _timelineController.ensureRowExpanded(row, tab: 1);
+    }
+  }
+
+  void _openTabletExportPanel() {
+    if (!mounted) return;
+    setState(() {
+      _tabletRightPanelTab = 'export';
+      _tabletRightPanelCollapsed = false;
+      _masterMeterExpanded = false;
+      if (_containedExportPanelStage != _ContainedExportPanelStage.success) {
+        _containedExportPanelStage = _ContainedExportPanelStage.idle;
+      }
+    });
+  }
+
   Duration _estimateTransportClockFromSample() {
     if (!_isPlaying) {
       return Duration(
@@ -4319,26 +4706,39 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     final elapsedSinceSample =
         _transportUiStopwatch.elapsed - _lastTransportSampleElapsed;
-    final boundedElapsed = elapsedSinceSample > _kTransportMaxExtrapolation
-        ? _kTransportMaxExtrapolation
-        : elapsedSinceSample;
+    final boundedElapsed = !_hasTimelineClips
+        ? elapsedSinceSample
+        : elapsedSinceSample > _kTransportMaxExtrapolation
+            ? _kTransportMaxExtrapolation
+            : elapsedSinceSample;
     final estimatedSeconds = _lastTransportSampleSeconds +
         (boundedElapsed.inMicroseconds / 1e6) * _transportRateSecPerSec;
     return Duration(milliseconds: (estimatedSeconds * 1000).round());
   }
 
-  Future<void> _pollTransportFromJuceIfNeeded({bool force = false}) async {
+  Future<void> _pollTransportFromJuceIfNeeded({
+    bool force = false,
+    int? commandSerial,
+  }) async {
     if (_transportPollBusy) return;
+    if (!force && _transportNativeCommandInFlight) return;
     final now = _transportUiStopwatch.elapsed;
     if (!force && now - _lastTransportPollElapsed < _kTransportPollInterval) {
+      return;
+    }
+    if (_isPlaying && !_hasTimelineClips) {
+      _lastTransportPollElapsed = now;
+      _transportRateSecPerSec = 1.0;
       return;
     }
     _transportPollBusy = true;
     _lastTransportPollElapsed = now;
     final prevSampleSeconds = _lastTransportSampleSeconds;
     final prevSampleElapsed = _lastTransportSampleElapsed;
+    final pollCommandSerial = commandSerial ?? _transportCommandSerial;
     try {
       final t = await JuceAudioEngine.getTransportSeconds();
+      if (pollCommandSerial != _transportCommandSerial) return;
       final sampleElapsed = _transportUiStopwatch.elapsed;
       final wallDeltaUs = (sampleElapsed - prevSampleElapsed).inMicroseconds;
       if (wallDeltaUs > 0) {
@@ -4603,6 +5003,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   _TopPopupType _activeTopPopup = _TopPopupType.none;
   final AudioCanvasTimelineController _timelineController =
       AudioCanvasTimelineController();
+  final GlobalKey _tabletTopToolButtonKey =
+      GlobalKey(debugLabel: 'tablet_top_tool_button');
+  final GlobalKey _tabletTopQuantizeButtonKey =
+      GlobalKey(debugLabel: 'tablet_top_quantize_button');
+  final GlobalKey _bottomChatBarAnchorKey =
+      GlobalKey(debugLabel: 'bottom_chat_bar_anchor');
   final GlobalKey<_DynamicRackContentState> _masterRackContentKey =
       GlobalKey<_DynamicRackContentState>();
   final GlobalKey _editorContentStackKey =
@@ -4613,6 +5019,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   double? _masterPanDragStart;
   Future<void> Function(int effectIndex, String paramId)?
       _masterParameterRevealer;
+  int? _tabletSelectedRowFxRow;
+  int? _tabletSelectedRowFxIndex;
+  int? _tabletAudioClipOptionsIndex;
+  String _tabletAudioClipOptionsNameDraft = '';
+  double? _tabletAudioClipOptionsGainStart;
+  double? _tabletAudioClipOptionsPitchStart;
+  final Set<int> _tabletMixerExpandedRows = <int>{};
+  final Map<int, double> _tabletMixerRowGainDragStart = <int, double>{};
+  final Map<int, double> _tabletMixerRowPanDragStart = <int, double>{};
   final Map<int, double> _masterRackRowGainDragStart = <int, double>{};
   Map<int, List<bool>> _rowFxBypassSnapshot = {};
   List<bool> _masterFxBypassSnapshot = [];
@@ -4632,6 +5047,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   // BPM/time
   double _tempo = 120.0;
   String _projectKey = '';
+  int _timeSignatureNumerator = 4;
+  int _timeSignatureDenominator = 4;
   bool _tempoStretchEnabled = false;
   bool _tempoStretchPreservePitchDefault = false;
   Timer? _tempoUndoCommitTimer;
@@ -4665,7 +5082,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _recordingInputPrewarmInFlight = false;
   Future<bool>? _recordingInputPrewarmFuture;
   bool _recordTransitionInFlight = false;
+  bool _recordStartVisualPending = false;
+  bool _recordStartCancelRequested = false;
   Future<void>? _pendingIosRecordingRouteRestore;
+  Duration _lastInputDevicesLoadedElapsed = Duration.zero;
+  Duration _lastAudioRouteInfoRefreshElapsed = Duration.zero;
 
   bool _loadingDevices = false;
   bool _microphoneAccessBlocked = false;
@@ -4766,6 +5187,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _reopenSampleBrowserExpanded = false;
   bool _showAddActionsPanel = false;
   String? _activeAddActionId;
+  bool _rowGroupingSelectionMode = false;
+  final Set<int> _rowGroupingSelection = <int>{};
   bool _backButtonExitInFlight = false;
   bool _backButtonPressed = false;
   bool _backButtonTapFeedbackActive = false;
@@ -4775,6 +5198,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Offset? _topPopupTapDownGlobalPos;
   bool _topPopupTapMoved = false;
   final List<String> _sampleBrowserRoots = <String>[];
+  String? _sampleBrowserUserDropFolderPath;
   final List<List<DesktopFileDropItem>> _pendingDesktopFinderDropBatches =
       <List<DesktopFileDropItem>>[];
   final AccessingSecurityScopedResource _securityScopedResource =
@@ -4898,6 +5322,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     final name = _rows[row].name.trim();
     return name.isEmpty ? '$trackPrefix ${row + 1}' : name;
+  }
+
+  String _mixerDisplayNameForRow(int row) {
+    final group = _trackGroupForLeadRowIndex(row);
+    if (group != null) {
+      final name = group.name.trim();
+      if (name.isNotEmpty) return name;
+    }
+    return _rowDisplayName(row);
   }
 
   int _allocateEngineClipId() {
@@ -5289,10 +5722,340 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       instrumentParams: Map<String, double>.from(row.instrumentParams),
       roleOverride: row.roleOverride,
       groupId: row.groupId,
+      color: row.color,
       inputDeviceName: row.inputDeviceName,
       inputChannelStart: row.inputChannelStart,
       inputChannelCount: row.inputChannelCount,
     );
+  }
+
+  TrackGroup _cloneTrackGroup(TrackGroup group) {
+    return cloneTrackGroupForGroupReconcile(group);
+  }
+
+  int _deriveTrackGroupColorFromRows(
+      Iterable<int> rowIds, List<TimelineRow> rows) {
+    final rowIdSet = rowIds.toSet();
+    for (final row in rows) {
+      if (rowIdSet.contains(row.rowId) && row.color != 0) {
+        return row.color;
+      }
+    }
+    return 0;
+  }
+
+  TrackGroup _trackGroupWithColor(TrackGroup group, int color) {
+    return TrackGroup(
+      id: group.id,
+      name: group.name,
+      color: color,
+      rowIds: group.rowIds,
+      gain: group.gain,
+      pan: group.pan,
+      muted: group.muted,
+      soloed: group.soloed,
+      collapsed: group.collapsed,
+      effects: group.effects,
+    );
+  }
+
+  void _syncTrackGroupColorsFromRows(List<TimelineRow> rows) {
+    if (_trackGroups.isEmpty) return;
+    var changed = false;
+    final nextGroups = _trackGroups.map((group) {
+      final color = _deriveTrackGroupColorFromRows(group.rowIds, rows);
+      if (group.color == color) return _cloneTrackGroup(group);
+      changed = true;
+      return _trackGroupWithColor(group, color);
+    }).toList(growable: false);
+    if (!changed) return;
+    _trackGroups
+      ..clear()
+      ..addAll(nextGroups);
+  }
+
+  List<TimelineRow> _sanitizeTrackGroupsForRows(List<TimelineRow> rows) {
+    final reconciled = reconcileTrackGroupsForRows(
+      rows: rows,
+      groups: _trackGroups,
+    );
+    _trackGroups
+      ..clear()
+      ..addAll(reconciled.groups);
+    return reconciled.rows;
+  }
+
+  List<TrackGroup> _trackGroupsFromProjectJson(
+    Map<String, dynamic> json,
+  ) {
+    final rawGroups = json["trackGroups"] ?? json["track_groups"];
+    if (rawGroups is! List) return const <TrackGroup>[];
+    return rawGroups
+        .whereType<Map>()
+        .map((e) => TrackGroupJson.fromJson(e.cast<String, dynamic>()))
+        .where((group) => group.id.trim().isNotEmpty)
+        .toList(growable: false);
+  }
+
+  List<TrackGroup> _deriveTrackGroupsFromRows(List<TimelineRow> rows) {
+    final rowIdsByGroupId = <String, List<int>>{};
+    for (final row in rows) {
+      final groupId = row.groupId.trim();
+      if (groupId.isEmpty || row.rowId < 0) continue;
+      rowIdsByGroupId.putIfAbsent(groupId, () => <int>[]).add(row.rowId);
+    }
+    if (rowIdsByGroupId.isEmpty) return const <TrackGroup>[];
+    final groups = <TrackGroup>[];
+    for (final entry in rowIdsByGroupId.entries) {
+      if (entry.value.length < 2) continue;
+      groups.add(
+        TrackGroup(
+          id: entry.key,
+          name: 'Group',
+          rowIds: List<int>.from(entry.value, growable: false),
+        ),
+      );
+    }
+    return groups;
+  }
+
+  void _seedMissingTrackGroupsFromRows(List<TimelineRow> rows) {
+    if (_trackGroups.isNotEmpty) return;
+    final groups = _deriveTrackGroupsFromRows(rows);
+    if (groups.isEmpty) return;
+    _trackGroups
+      ..clear()
+      ..addAll(groups);
+  }
+
+  List<int> _trackGroupControlRowsFor(int row) {
+    return resolveTrackGroupControlRowIndices(
+      rows: _rows,
+      groups: _trackGroups,
+      sourceIndex: row,
+    ).where((item) => item >= 0 && item < _rowCount).toList(growable: false);
+  }
+
+  int _trackGroupLeadRowIndex(TrackGroup group) {
+    if (group.rowIds.isEmpty) return -1;
+    final leadRowId = group.rowIds.first;
+    return _rows.indexWhere((row) => row.rowId == leadRowId);
+  }
+
+  TrackGroup? _trackGroupForLeadRowIndex(int row) {
+    if (!_isValidRowIndex(row)) return null;
+    final rowId = _rows[row].rowId;
+    for (final group in _trackGroups) {
+      if (group.rowIds.isNotEmpty && group.rowIds.first == rowId) {
+        return group;
+      }
+    }
+    return null;
+  }
+
+  TrackGroup? _trackGroupById(String groupId) {
+    final normalized = groupId.trim();
+    if (normalized.isEmpty) return null;
+    for (final group in _trackGroups) {
+      if (group.id == normalized) return group;
+    }
+    return null;
+  }
+
+  int? _trackGroupLeadRowIndexForId(String groupId) {
+    final group = _trackGroupById(groupId);
+    if (group == null) return null;
+    final leadIndex = _trackGroupLeadRowIndex(group);
+    return _isValidRowIndex(leadIndex) ? leadIndex : null;
+  }
+
+  String _trackGroupDisplayName(String groupId) {
+    final group = _trackGroupById(groupId);
+    final name = group?.name.trim() ?? '';
+    return name.isEmpty ? 'Group Bus' : '$name Group Bus';
+  }
+
+  Future<List<TrackGroup>> _trackGroupsForAiProjectState() async {
+    final groups = <TrackGroup>[];
+    for (final group in _trackGroups) {
+      var effects = group.effects;
+      final leadIndex = _trackGroupLeadRowIndex(group);
+      if (_isValidRowIndex(leadIndex)) {
+        try {
+          final snapshot = await captureRowSnapshot(
+            leadIndex,
+            rowId: _rowIdAt(leadIndex),
+          );
+          effects = snapshot.effects;
+        } catch (error) {
+          debugPrint(
+            'AI group FX snapshot failed for ${group.id}: $error',
+          );
+        }
+      }
+      groups.add(
+        TrackGroup(
+          id: group.id,
+          name: group.name,
+          color: group.color,
+          rowIds: List<int>.from(group.rowIds),
+          gain: group.gain,
+          pan: group.pan,
+          muted: group.muted,
+          soloed: group.soloed,
+          collapsed: group.collapsed,
+          effects: effects,
+        ),
+      );
+    }
+    return groups;
+  }
+
+  void _applyTrackGroupMuteSoloState(
+    String groupId, {
+    bool? muted,
+    bool? soloed,
+  }) {
+    final nextGroups = _trackGroups.map((group) {
+      if (group.id != groupId) return _cloneTrackGroup(group);
+      return TrackGroup(
+        id: group.id,
+        name: group.name,
+        color: group.color,
+        rowIds: List<int>.from(group.rowIds),
+        gain: group.gain,
+        pan: group.pan,
+        muted: muted ?? group.muted,
+        soloed: soloed ?? group.soloed,
+        collapsed: group.collapsed,
+        effects: group.effects,
+      );
+    }).toList(growable: false);
+    setState(() {
+      _trackGroups
+        ..clear()
+        ..addAll(nextGroups);
+    });
+  }
+
+  Future<void> _setTrackGroupMuteSoloNative(
+    String groupId, {
+    bool? muted,
+    bool? soloed,
+  }) async {
+    final group = _trackGroups.firstWhere(
+      (item) => item.id == groupId,
+      orElse: () => TrackGroup(id: groupId, name: groupId),
+    );
+    await JuceAudioEngine.setTrackGroupMixState(
+      groupId: group.id,
+      gain: group.gain,
+      pan: group.pan,
+      muted: muted ?? group.muted,
+      soloed: soloed ?? group.soloed,
+    );
+  }
+
+  void _applyTrackGroupGainState(String groupId, double gain) {
+    final safeGain = gain.clamp(_kGainUiMin, _kGainUiMax).toDouble();
+    final nextGroups = _trackGroups.map((group) {
+      if (group.id != groupId) return _cloneTrackGroup(group);
+      return TrackGroup(
+        id: group.id,
+        name: group.name,
+        color: group.color,
+        rowIds: List<int>.from(group.rowIds),
+        gain: safeGain,
+        pan: group.pan,
+        muted: group.muted,
+        soloed: group.soloed,
+        collapsed: group.collapsed,
+        effects: group.effects,
+      );
+    }).toList(growable: false);
+    setState(() {
+      _trackGroups
+        ..clear()
+        ..addAll(nextGroups);
+      final group = _trackGroups.firstWhere(
+        (item) => item.id == groupId,
+        orElse: () => TrackGroup(id: groupId, name: groupId),
+      );
+      final leadIndex = _trackGroupLeadRowIndex(group);
+      if (_isValidRowIndex(leadIndex)) _rowGain[leadIndex] = safeGain;
+    });
+  }
+
+  Future<void> _setTrackGroupGainNative(String groupId, double gain) async {
+    final group = _trackGroups.firstWhere(
+      (item) => item.id == groupId,
+      orElse: () => TrackGroup(id: groupId, name: groupId),
+    );
+    await JuceAudioEngine.setTrackGroupMixState(
+      groupId: group.id,
+      gain: gain.clamp(_kGainUiMin, _kGainUiMax).toDouble(),
+      pan: group.pan,
+      muted: group.muted,
+      soloed: group.soloed,
+    );
+  }
+
+  void _applyTrackGroupPanState(String groupId, double pan) {
+    final safePan = pan.clamp(0.0, 1.0).toDouble();
+    final nextGroups = _trackGroups.map((group) {
+      if (group.id != groupId) return _cloneTrackGroup(group);
+      return TrackGroup(
+        id: group.id,
+        name: group.name,
+        color: group.color,
+        rowIds: List<int>.from(group.rowIds),
+        gain: group.gain,
+        pan: safePan,
+        muted: group.muted,
+        soloed: group.soloed,
+        collapsed: group.collapsed,
+        effects: group.effects,
+      );
+    }).toList(growable: false);
+    setState(() {
+      _trackGroups
+        ..clear()
+        ..addAll(nextGroups);
+      final group = _trackGroups.firstWhere(
+        (item) => item.id == groupId,
+        orElse: () => TrackGroup(id: groupId, name: groupId),
+      );
+      final leadIndex = _trackGroupLeadRowIndex(group);
+      if (_isValidRowIndex(leadIndex)) _rowPan[leadIndex] = safePan;
+    });
+  }
+
+  Future<void> _setTrackGroupPanNative(String groupId, double pan) async {
+    final group = _trackGroups.firstWhere(
+      (item) => item.id == groupId,
+      orElse: () => TrackGroup(id: groupId, name: groupId),
+    );
+    await JuceAudioEngine.setTrackGroupMixState(
+      groupId: group.id,
+      gain: group.gain,
+      pan: pan.clamp(0.0, 1.0).toDouble(),
+      muted: group.muted,
+      soloed: group.soloed,
+    );
+  }
+
+  Future<void> _syncTrackGroupsToEngine() async {
+    final groups = _trackGroups
+        .map((group) => <String, dynamic>{
+              'id': group.id,
+              'rowIds': group.rowIds,
+              'gain': group.gain,
+              'pan': group.pan,
+              'muted': group.muted,
+              'soloed': group.soloed,
+            })
+        .toList(growable: false);
+    await JuceAudioEngine.configureTrackGroups(groups);
   }
 
   TimelineRow _timelineRowFromJson(Map<String, dynamic> map) {
@@ -5314,6 +6077,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       instrumentParams: params,
       roleOverride: (map['roleOverride'] as String?)?.trim() ?? '',
       groupId: (map['groupId'] as String?)?.trim() ?? '',
+      color: (map['color'] as num?)?.toInt() ?? 0,
       inputDeviceName: (map['inputDeviceName'] as String?)?.trim() ?? '',
       inputChannelStart:
           ((map['inputChannelStart'] as num?)?.toInt() ?? 0).clamp(0, 999),
@@ -5335,6 +6099,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       },
       if (row.roleOverride.isNotEmpty) 'roleOverride': row.roleOverride,
       if (row.groupId.trim().isNotEmpty) 'groupId': row.groupId.trim(),
+      if (row.color != 0) 'color': row.color,
       if (row.inputDeviceName.trim().isNotEmpty)
         'inputDeviceName': row.inputDeviceName.trim(),
       'inputChannelStart': row.inputChannelStart,
@@ -5858,12 +6623,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return Rect.fromLTRB(left, top, right, bottom);
   }
 
+  Rect? _globalAnchorRect(GlobalKey key) {
+    final BuildContext? anchorContext = key.currentContext;
+    if (anchorContext == null) return null;
+    final RenderObject? anchorObject = anchorContext.findRenderObject();
+    if (anchorObject is! RenderBox || !anchorObject.hasSize) return null;
+    final Offset topLeft = anchorObject.localToGlobal(Offset.zero);
+    return topLeft & anchorObject.size;
+  }
+
   _TopPopupLayout _resolveTopPopupLayout({
     required GlobalKey anchorKey,
     required double desiredWidth,
     required double connectorWidth,
     bool centerOnToolbarPill = false,
     bool matchToolbarWidth = false,
+    bool alignLeftToAnchor = false,
   }) {
     final BuildContext? stackContext = _editorContentStackKey.currentContext;
     final RenderObject? stackObject = stackContext?.findRenderObject();
@@ -5891,12 +6666,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final double centerX = toolbarRect?.center.dx ??
         anchorRect?.center.dx ??
         (stackObject.size.width / 2);
-    final double centeredLeft = centerX - (resolvedWidth / 2);
+    final double requestedLeft = alignLeftToAnchor && anchorRect != null
+        ? anchorRect.left
+        : centerX - (resolvedWidth / 2);
     final double maxLeft = math.max(
       _kTopPopupHorizontalMargin,
       stackObject.size.width - resolvedWidth - _kTopPopupHorizontalMargin,
     );
-    final double left = centeredLeft.clamp(
+    final double left = requestedLeft.clamp(
       _kTopPopupHorizontalMargin,
       maxLeft,
     );
@@ -6587,7 +7364,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final action = await _undoManager.undo();
     if (!mounted || action == null) return;
     final message =
-        '${L10n.translate(context, 'Undo')}: ${L10n.translate(context, action.description)}';
+        '${L10n.translate(context, 'Undo')}: ${_localizedUndoHistoryDescription(action.description)}';
     await _persistUndoHistory();
     if (!mounted) return;
     final messenger = ScaffoldMessenger.of(context);
@@ -6606,7 +7383,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final action = await _undoManager.redo();
     if (!mounted || action == null) return;
     final message =
-        '${L10n.translate(context, 'Redo')}: ${L10n.translate(context, action.description)}';
+        '${L10n.translate(context, 'Redo')}: ${_localizedUndoHistoryDescription(action.description)}';
     await _persistUndoHistory();
     if (!mounted) return;
     final messenger = ScaffoldMessenger.of(context);
@@ -6680,7 +7457,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             dense: true,
                             contentPadding: EdgeInsets.zero,
                             title: Text(
-                              L10n.translate(context, entry.description),
+                              _localizedUndoHistoryDescription(
+                                entry.description,
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
@@ -6771,6 +7550,47 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       DateTime.fromMillisecondsSinceEpoch(timestampMs),
     );
     return '$sequence · ${time.format(context)}';
+  }
+
+  String _localizedUndoHistoryDescription(String description) {
+    final trimmed = description.trim();
+    if (trimmed.isEmpty) return trimmed;
+
+    final exact = L10n.translate(context, trimmed);
+    if (exact != trimmed) return exact;
+
+    final projectTempoMatch =
+        RegExp(r'^Project tempo set to ([0-9]+) BPM\.$').firstMatch(trimmed);
+    if (projectTempoMatch != null) {
+      return '${L10n.translate(context, 'Project tempo set to')} ${projectTempoMatch.group(1)} BPM.';
+    }
+
+    final addMatch = RegExp(r'^Add (.+)$').firstMatch(trimmed);
+    if (addMatch != null) {
+      return _localizedUndoVerbObjectPhrase(
+        verbKey: 'Add',
+        objectText: addMatch.group(1)!,
+      );
+    }
+
+    return trimmed;
+  }
+
+  String _localizedUndoVerbObjectPhrase({
+    required String verbKey,
+    required String objectText,
+  }) {
+    final object = L10n.translate(context, objectText.trim());
+    switch (Localizations.localeOf(context).languageCode) {
+      case 'ko':
+        return '$object ${L10n.translate(context, verbKey)}';
+      case 'ja':
+        return '$object${L10n.translate(context, verbKey)}';
+      case 'zh':
+        return '${L10n.translate(context, verbKey)}$object';
+      default:
+        return '${L10n.translate(context, verbKey)} $object';
+    }
   }
 
   void _handleDesktopCopySelectedClipsShortcut() {
@@ -6947,7 +7767,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final withinEndGuard =
           _transportUiStopwatch.elapsed < _transportEndCheckGraceUntil;
 
-      final reachedEnd = _globalAudioClock >= endPoint;
+      final reachedEnd = _hasTimelineClips && _globalAudioClock >= endPoint;
       final reachedLoopEnd = _loopEnabled &&
           _globalAudioClock >= Duration(milliseconds: _loopEndMs);
 
@@ -7089,7 +7909,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _refreshPlatformCapabilities();
       await _refreshMicrophonePermissionState();
       await _maybePromptMicrophonePermissionOnDawEntry();
-      await _loadInputDevicesFromJuce();
+      await _loadInputDevicesFromJuce(scheduleRecordingPrewarm: true);
       await _refreshAudioRouteInfo();
       await _loadBundledInstrumentCatalog();
       final engineSupportsLiveMidi =
@@ -7107,6 +7927,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _reloadRowsFromEngine();
       await _refreshProducerCaptureUiAllowlistAccess();
       await _loadProjectIfAny();
+      _scheduleRecordingInputPrewarm(reason: 'projectLoaded');
       await _flushPendingDesktopFinderDrops();
       setState(() => _isLoadingNextScreen = false);
       unawaited(_refreshDesktopHostedInstrumentCatalogAfterProjectOpen());
@@ -7156,7 +7977,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     await Future.delayed(const Duration(milliseconds: 120));
     if (!mounted) return;
-    await _exportAndNavigate();
+    if (_usesContainedExportPanel) {
+      await _exportAndNavigate(
+        selectedSettingsOverride:
+            _normalizeAudioExportSettings(_audioExportSettings),
+      );
+    } else {
+      await _exportAndNavigate();
+    }
   }
 
   String? _currentOnboardingUserId() {
@@ -8272,7 +9100,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           accent: const Color(0xFFFFCB78),
           placement: _DawTutorialCardPlacement.centerRight,
           mode: _DawTutorialAdvanceMode.interaction,
-          haloKeys: <String>['row:$row:automation_tab'],
+          haloKeys: <String>[
+            'row:$row:automation_tab',
+            'row:$row:automation_tab:strong',
+          ],
           helperText: _dawTutorialText('row_automation_tab_helper'),
           cardMaxWidth: 212,
           cardPadding: const EdgeInsets.fromLTRB(16, 120, 12, 140),
@@ -8313,7 +9144,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           accent: Color(0xFFFFC86F),
           placement: _DawTutorialCardPlacement.bottomCenter,
           mode: _DawTutorialAdvanceMode.next,
-          haloKeys: <String>['master:tab:volume', 'master:tab:effects'],
+          haloKeys: <String>[
+            'master:tab:volume',
+            'master:tab:effects',
+            'master:gain',
+            'master:param:gain',
+            'master:param:pan',
+          ],
           cardMaxWidth: 232,
           cardPadding: EdgeInsets.fromLTRB(16, 16, 16, 136),
         );
@@ -8486,8 +9323,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       case _DawTutorialStepId.rowAutomationInfo:
         _timelineController.ensureRowExpanded(row, tab: 2);
         break;
+      case _DawTutorialStepId.masterOpen:
+        if (_useTabletDesktopDawOnboardingLayout() &&
+            (_tabletRightPanelCollapsed || _masterMeterExpanded)) {
+          setState(() {
+            _tabletRightPanelCollapsed = false;
+            _tabletRightPanelTab = 'fx';
+            _masterMeterExpanded = false;
+          });
+        }
+        break;
       case _DawTutorialStepId.masterTabs:
-        if (!_showMasterRack) {
+        if (_useTabletDesktopDawOnboardingLayout()) {
+          setState(() {
+            if (_showMasterRack || _isMasterPopupOpen) {
+              _setActiveTopPopup(_TopPopupType.none);
+            }
+            _tabletRightPanelCollapsed = false;
+            _tabletRightPanelTab = 'fx';
+            _masterMeterExpanded = true;
+          });
+        } else if (!_showMasterRack) {
           setState(() {
             _setActiveTopPopup(_TopPopupType.master);
           });
@@ -8604,7 +9460,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _timelineController.collapseExpandedRows();
         break;
       case _DawTutorialStepId.masterTabs:
-        if (_showMasterRack || _isMasterPopupOpen) {
+        if (_useTabletDesktopDawOnboardingLayout()) {
+          if (_masterMeterExpanded || _showMasterRack || _isMasterPopupOpen) {
+            setState(() {
+              _masterMeterExpanded = false;
+              if (_showMasterRack || _isMasterPopupOpen) {
+                _setActiveTopPopup(_TopPopupType.none);
+              }
+            });
+          }
+        } else if (_showMasterRack || _isMasterPopupOpen) {
           setState(() {
             _setActiveTopPopup(_TopPopupType.none);
           });
@@ -8654,8 +9519,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _closeTutorialChatWindow();
     _closeAddActionsPanel();
     _timelineController.collapseExpandedRows();
-    if (_showMasterRack || _isMasterPopupOpen) {
+    if (_masterMeterExpanded || _showMasterRack || _isMasterPopupOpen) {
       setState(() {
+        _masterMeterExpanded = false;
         _setActiveTopPopup(_TopPopupType.none);
       });
     }
@@ -8888,6 +9754,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (row >= 0 && row < _rowExpandedTab.length) {
       _rowExpandedTab[row] = (tab == 1 || tab == 2) ? tab : 0;
     }
+    if (row >= 0 && row < _rowCount) {
+      setState(() {
+        _selectedRow = row;
+        _tabletRowDetailTab = tab.clamp(0, 2).toInt();
+      });
+    }
   }
 
   void _handleDawOnboardingRowExpansionChanged(int row, bool expanded) {
@@ -9074,7 +9946,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool syncClipRows = true,
   }) async {
     final previousStateById = _captureRowUiStateById();
-    _rows = List<TimelineRow>.from(nextRows);
+    _rows = _sanitizeTrackGroupsForRows(nextRows);
+    _syncTrackGroupColorsFromRows(_rows);
     _syncRowLocalStateToRowCount();
 
     _rowPeakHoldDb.removeWhere((_, __) => true);
@@ -9131,6 +10004,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (syncClipRows) {
       _syncAudioTrackRowsToCurrentRows();
     }
+    await _syncTrackGroupsToEngine();
     _pruneAutomationDiscoveryCaches();
 
     if (refreshAutomationTargets && !_isProjectLoading) {
@@ -9165,6 +10039,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               instrumentParams: previous == null
                   ? const <String, double>{}
                   : Map<String, double>.from(previous.instrumentParams),
+              roleOverride: previous?.roleOverride ?? '',
+              groupId: previous?.groupId ?? '',
+              color: previous?.color ?? 0,
+              inputDeviceName: previous?.inputDeviceName ?? '',
+              inputChannelStart: previous?.inputChannelStart ?? 0,
+              inputChannelCount: previous?.inputChannelCount ?? 1,
             );
           },
         )
@@ -9300,12 +10180,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               : Map<String, double>.from(saved.instrumentParams),
           roleOverride: saved?.roleOverride ?? '',
           groupId: saved?.groupId ?? '',
+          color: saved?.color ?? 0,
           inputDeviceName: saved?.inputDeviceName ?? '',
           inputChannelStart: saved?.inputChannelStart ?? 0,
           inputChannelCount: saved?.inputChannelCount ?? 1,
         ),
       );
     }
+    _seedMissingTrackGroupsFromRows(restoredRows);
     await _applyRowsToEditorState(
       restoredRows,
       refreshAutomationTargets: false,
@@ -9357,6 +10239,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _producerCaptureAccessHttpClient.close();
     _copiedChatMessageTimer?.cancel();
     _copiedChatMessageTimer = null;
+    _containedExportEllipsisTimer?.cancel();
+    _containedExportEllipsisTimer = null;
+    _clearContainedExportPayload(deleteFiles: true);
     _promptRateLimitRefreshTimer?.cancel();
     _promptRateLimitRefreshTimer = null;
     _desktopFinderDropSub?.cancel();
@@ -9402,6 +10287,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _meterDecayTimer?.cancel();
     _meters.dispose();
     _transportClock.dispose();
+    _timelineController.dispose();
     unawaited(JuceAudioEngine.shutdown());
     super.dispose();
   }
@@ -9702,6 +10588,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _sampleDragActive = false;
       _reopenSampleBrowserAfterDrag = false;
       _reopenSampleBrowserExpanded = false;
+      _tabletRightPanelCollapsed = true;
+      _tabletRightPanelHandleDragging = false;
+      _masterMeterExpanded = false;
       _invalidateAiLibrarySnapshotCache();
       await _ensureDefaultSampleBrowserRoots();
       final loadResult =
@@ -9747,6 +10636,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               .toDouble())
           .clamp(20.0, 999.0);
       _projectKey = normalizeProjectKey((json["projectKey"] ?? '').toString());
+      final rawTimeSignature = json["timeSignature"];
+      final timeSignatureJson = rawTimeSignature is Map<String, dynamic>
+          ? rawTimeSignature
+          : rawTimeSignature is Map
+              ? rawTimeSignature.cast<String, dynamic>()
+              : null;
+      _timeSignatureNumerator = _normalizeTimeSignatureNumerator(
+        timeSignatureJson?["numerator"] ??
+            json["timeSignatureNumerator"] ??
+            json["beatsPerBar"],
+      );
+      _timeSignatureDenominator = _normalizeTimeSignatureDenominator(
+        timeSignatureJson?["denominator"] ??
+            json["timeSignatureDenominator"] ??
+            json["beatUnit"],
+      );
       _syncTempoPickerSelection();
       _tempoStretchEnabled = (json["tempoStretchEnabled"] as bool?) ?? false;
       _tempoStretchPreservePitchDefault =
@@ -9772,7 +10677,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _loopEnabled = (uiSettings?["loopEnabled"] as bool?) ?? false;
       _loopStartMs = (uiSettings?["loopStartMs"] as num?)?.toInt() ?? 0;
       _loopEndMs = (uiSettings?["loopEndMs"] as num?)?.toInt() ?? 0;
-      await JuceAudioEngine.setMetronomeBpm(_tempo);
+      await _syncMetronomeTimingToEngine();
       await JuceAudioEngine.setMetronomeEnabled(_metronomeEnabled);
       await JuceAudioEngine.setMetronomeVolume(_metronomeVolume);
 
@@ -9785,13 +10690,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           .toList();
       _trackGroups
         ..clear()
-        ..addAll(
-          ((json["trackGroups"] as List?) ?? const [])
-              .whereType<Map>()
-              .map((e) => TrackGroupJson.fromJson(e.cast<String, dynamic>()))
-              .where((group) => group.id.trim().isNotEmpty)
-              .toList(growable: false),
-        );
+        ..addAll(_trackGroupsFromProjectJson(json));
       final tracks = (json["tracks"] as List?) ?? [];
       final migratedLegacyRows = _migrateLegacyInstrumentRows(rowsJson, tracks);
       json["rows"] = rowsJson;
@@ -9860,11 +10759,33 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
           final clipKind =
               ClipKindWire.fromWire((map['clipType'] as String?) ?? 'audio');
-          final instrumentId = (map['instrumentId'] as String?) ?? '';
-          final fallbackName =
-              instrumentId.isEmpty ? '' : _instrumentNameFromId(instrumentId);
-          final instrumentName =
-              (map['instrumentName'] as String?) ?? fallbackName;
+          final savedLane = rowIndex >= 0 && rowIndex < rowsJson.length
+              ? _timelineRowFromJson(rowsJson[rowIndex])
+              : null;
+          final savedLaneInstrumentId = savedLane?.isInstrumentLane == true
+              ? savedLane!.instrumentId.trim()
+              : '';
+          final rawInstrumentId =
+              ((map['instrumentId'] as String?) ?? '').trim();
+          final instrumentId = clipKind == ClipKind.midi &&
+                  rawInstrumentId.isEmpty &&
+                  savedLaneInstrumentId.isNotEmpty
+              ? savedLaneInstrumentId
+              : rawInstrumentId;
+          final instrumentSpec = instrumentId.isEmpty
+              ? null
+              : _findInstrumentSpecById(instrumentId);
+          final fallbackName = (instrumentSpec?['name'] as String?) ?? '';
+          final rawInstrumentName =
+              ((map['instrumentName'] as String?) ?? '').trim();
+          final savedLaneInstrumentName = savedLane?.isInstrumentLane == true
+              ? savedLane!.instrumentName.trim()
+              : '';
+          final instrumentName = rawInstrumentName.isNotEmpty
+              ? rawInstrumentName
+              : savedLaneInstrumentName.isNotEmpty
+                  ? savedLaneInstrumentName
+                  : fallbackName;
           final hostedInstrumentStateBase64 =
               ((map['hostedInstrumentStateB64'] as String?) ??
                       (map['hostedInstrumentStateBase64'] as String?) ??
@@ -9879,22 +10800,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               instrumentParams[e.key] = (e.value as num).toDouble();
             }
           }
-          final defaultSpec = _defaultInstrumentSpec();
-          final defaultInstrumentId =
-              (defaultSpec['id'] as String?) ?? 'mixroom.basic_synth';
-          final defaultInstrumentName =
-              (defaultSpec['name'] as String?) ?? 'Instrument';
-          final resolvedInstrumentId =
-              instrumentId.isEmpty ? defaultInstrumentId : instrumentId;
-          final resolvedInstrumentName =
-              instrumentName.isEmpty ? defaultInstrumentName : instrumentName;
+          if (clipKind == ClipKind.midi &&
+              instrumentParams.isEmpty &&
+              savedLane?.isInstrumentLane == true &&
+              savedLane!.instrumentParams.isNotEmpty) {
+            instrumentParams.addAll(savedLane.instrumentParams);
+          }
           final desktopExternalPluginHostingActive =
               PlatformCapabilities.current.isDesktop &&
                   _platformCapabilities.externalPluginHosting;
           final deferHostedInstrumentStateRestore =
               desktopExternalPluginHostingActive &&
                   hostedInstrumentStateBase64.isNotEmpty &&
-                  _instrumentIdUsesExternalPlugin(resolvedInstrumentId);
+                  _instrumentIdUsesExternalPlugin(instrumentId);
           final midiNotes = ((map['midiNotes'] as List?) ?? [])
               .whereType<Map>()
               .map((e) => MidiNote.fromJson(e.cast<String, dynamic>()))
@@ -9903,10 +10821,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               desktopExternalPluginHostingActive &&
                   clipKind == ClipKind.midi &&
                   _instrumentIdUsesExternalPlugin(
-                    resolvedInstrumentId,
+                    instrumentId,
                   ) &&
                   !_isKnownDesktopPluginId(
-                    resolvedInstrumentId,
+                    instrumentId,
                   );
           if (missingDesktopPluginInstrument) {
             _projectLoadIssues.add(
@@ -10000,19 +10918,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               await ensureTrackRowReady(rowIndex);
               final beforeCount = _audioTracks.length;
               await _addMidiTrack(
-                instrumentId: resolvedInstrumentId,
-                instrumentName: resolvedInstrumentName,
+                instrumentId: instrumentId,
+                instrumentName: instrumentName,
                 instrumentParams: instrumentParams.isNotEmpty
                     ? instrumentParams
-                    : _instrumentParamsFromSpec(
-                        _instrumentSpecById(resolvedInstrumentId),
-                      ),
+                    : instrumentSpec == null
+                        ? const <String, double>{}
+                        : _instrumentParamsFromSpec(instrumentSpec),
                 midiNotes: midiNotes,
                 row: rowIndex,
                 timeMs: offsetSec * 1000.0,
                 trimStartRequested: trimStartRequested,
                 trimEndRequested: trimEndRequested,
-                label: label.isEmpty ? resolvedInstrumentName : label,
+                label: label.isEmpty ? instrumentName : label,
                 gain: gain,
                 pitchSemitones: pitchSemitones,
                 sourceTempoBpm: sourceTempoBpm,
@@ -10077,7 +10995,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               audioFile.existsSync()) {
             await _addAudioTrackFromProjectFile(
               projectAudioFile: audioFile,
-              label: label.isEmpty ? resolvedInstrumentName : label,
+              label: label.isEmpty ? instrumentName : label,
               row: rowIndex,
               timeMs: offsetSec * 1000.0,
               trimStartRequested: trimStartRequested,
@@ -10104,16 +11022,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           } else if (clipKind == ClipKind.midi) {
             await _addMidiTrackFromProjectFile(
               projectAudioFile: audioFile,
-              label: label.isEmpty ? resolvedInstrumentName : label,
+              label: label.isEmpty ? instrumentName : label,
               row: rowIndex,
               timeMs: offsetSec * 1000.0,
-              instrumentId: resolvedInstrumentId,
-              instrumentName: resolvedInstrumentName,
+              instrumentId: instrumentId,
+              instrumentName: instrumentName,
               instrumentParams: instrumentParams.isNotEmpty
                   ? instrumentParams
-                  : _instrumentParamsFromSpec(
-                      _instrumentSpecById(resolvedInstrumentId),
-                    ),
+                  : instrumentSpec == null
+                      ? const <String, double>{}
+                      : _instrumentParamsFromSpec(instrumentSpec),
               midiNotes: midiNotes,
               trimStartRequested: trimStartRequested,
               trimEndRequested: trimEndRequested,
@@ -10187,14 +11105,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           tr.hostedInstrumentStateBase64 = hostedInstrumentStateBase64;
           if (clipKind == ClipKind.midi) {
             tr.clipKind = ClipKind.midi;
-            tr.instrumentId = resolvedInstrumentId;
-            tr.instrumentName = resolvedInstrumentName;
+            tr.instrumentId = instrumentId;
+            tr.instrumentName = instrumentName;
             tr.instrumentParams = Map<String, double>.from(
               instrumentParams.isNotEmpty
                   ? instrumentParams
-                  : _instrumentParamsFromSpec(
-                      _instrumentSpecById(resolvedInstrumentId),
-                    ),
+                  : instrumentSpec == null
+                      ? const <String, double>{}
+                      : _instrumentParamsFromSpec(instrumentSpec),
             );
             tr.midiNotes = midiNotes.map((note) => note.copy()).toList();
           }
@@ -10615,7 +11533,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Duration debounce = const Duration(seconds: 1),
   }) {
     if (!_loadedOnce || _isProjectLoading) return;
-    if (_isRecording || _isMidiClipRecording || _recordTransitionInFlight) {
+    if (_isRecording ||
+        _recordStartVisualPending ||
+        _isMidiClipRecording ||
+        _recordTransitionInFlight) {
       _projectAutosaveCoordinator.markDirty();
       return;
     }
@@ -10663,7 +11584,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!_cloudProjectsFeatureEnabled) return false;
     if (_cloudSyncMode != CloudSyncMode.auto) return false;
     if (!_loadedOnce || _isProjectLoading) return false;
-    if (_isRecording || _isMidiClipRecording || _recordTransitionInFlight) {
+    if (_isRecording ||
+        _recordStartVisualPending ||
+        _isMidiClipRecording ||
+        _recordTransitionInFlight) {
       return false;
     }
     if (_cloudAutoSyncConflict) return false;
@@ -10989,9 +11913,50 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  TimelineRow? _rowForClipFromRows(AudioTrack clip, List<TimelineRow> rows) {
+    if (clip.rowId >= 0) {
+      final byId = rows.where((row) => row.rowId == clip.rowId);
+      if (byId.isNotEmpty) return byId.first;
+    }
+    final rowIndex = clip.rowIndex;
+    if (rowIndex >= 0 && rowIndex < rows.length) {
+      return rows[rowIndex];
+    }
+    return null;
+  }
+
+  List<TimelineRow> _rowsWithMidiInstrumentMetadataForSave() {
+    final rows = _rows.map(_cloneTimelineRow).toList(growable: false);
+    for (final clip in _audioTracks) {
+      if (!clip.isMidi) continue;
+      final row = _rowForClipFromRows(clip, rows);
+      if (row == null || !row.isInstrumentLane) continue;
+
+      final instrumentId = row.instrumentId.trim().isEmpty
+          ? clip.instrumentId.trim()
+          : row.instrumentId;
+      if (instrumentId.trim().isEmpty) continue;
+
+      final rowIndex = rows.indexOf(row);
+      if (rowIndex < 0) continue;
+      rows[rowIndex] = row.copyWith(
+        instrumentId: instrumentId,
+        instrumentName: row.instrumentName.trim().isEmpty
+            ? clip.instrumentName.trim()
+            : row.instrumentName,
+        instrumentParams: row.instrumentParams.isEmpty
+            ? Map<String, double>.from(clip.instrumentParams)
+            : Map<String, double>.from(row.instrumentParams),
+      );
+    }
+    return rows;
+  }
+
   Map<String, dynamic> _buildProjectJsonSnapshot() {
     final now = DateTime.now().millisecondsSinceEpoch;
-    final rowsJson = _rows.map(_timelineRowToJson).toList(growable: false);
+    final rowsForSave = _rowsWithMidiInstrumentMetadataForSave();
+    final rowsJson =
+        rowsForSave.map(_timelineRowToJson).toList(growable: false);
 
     final tracksJson = <Map<String, dynamic>>[];
     for (final tr in _audioTracks) {
@@ -10999,6 +11964,31 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (!tr.isMidi && !src.existsSync()) continue;
       final fileName = p.basename(src.path).trim();
       if (fileName.isEmpty) continue;
+      final rowForTrack = _rowForClipFromRows(tr, rowsForSave);
+      final rowInstrumentId = rowForTrack?.isInstrumentLane == true
+          ? rowForTrack!.instrumentId
+          : '';
+      final rowInstrumentName = rowForTrack?.isInstrumentLane == true
+          ? rowForTrack!.instrumentName
+          : '';
+      final rowInstrumentParams = rowForTrack?.isInstrumentLane == true
+          ? rowForTrack!.instrumentParams
+          : const <String, double>{};
+      final savedInstrumentId = tr.isMidi &&
+              tr.instrumentId.trim().isEmpty &&
+              rowInstrumentId.isNotEmpty
+          ? rowInstrumentId
+          : tr.instrumentId;
+      final savedInstrumentName = tr.isMidi &&
+              tr.instrumentName.trim().isEmpty &&
+              rowInstrumentName.trim().isNotEmpty
+          ? rowInstrumentName
+          : tr.instrumentName;
+      final savedInstrumentParams = tr.isMidi &&
+              tr.instrumentParams.isEmpty &&
+              rowInstrumentParams.isNotEmpty
+          ? rowInstrumentParams
+          : tr.instrumentParams;
       tracksJson.add({
         "fileName": fileName,
         "clipId": tr.clipId,
@@ -11022,9 +12012,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         "rowIndex": tr.rowIndex,
         "rowId": tr.rowId,
         "automation": tr.volumeAutomation.map((p) => p.toJson()).toList(),
-        "instrumentId": tr.instrumentId,
-        "instrumentName": tr.instrumentName,
-        "instrumentParams": tr.instrumentParams,
+        "instrumentId": savedInstrumentId,
+        "instrumentName": savedInstrumentName,
+        "instrumentParams": savedInstrumentParams,
         "midiNotes": tr.midiNotes.map((n) => n.toJson()).toList(),
         if (tr.hostedInstrumentStateBase64.trim().isNotEmpty)
           "hostedInstrumentStateB64": tr.hostedInstrumentStateBase64.trim(),
@@ -11082,6 +12072,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       "projectId": _projectId,
       "tempoBpm": _tempo,
       "projectKey": _projectKey,
+      "timeSignature": {
+        "numerator": _timeSignatureNumerator,
+        "denominator": _timeSignatureDenominator,
+      },
       "tempoStretchEnabled": _tempoStretchEnabled,
       "tempoStretchPreservePitchDefault": _tempoStretchPreservePitchDefault,
       "rows": rowsJson,
@@ -11807,7 +12801,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (rows.isEmpty) {
       rows.add(TimelineRow(rowId: -1, name: 'Track 1', iconId: 0));
     }
-    return _RowLayoutSnapshot(rows: rows);
+    final groups = <TrackGroup>[];
+    final rawGroups = map['trackGroups'];
+    if (rawGroups is List) {
+      for (final item in rawGroups) {
+        final groupMap = item is Map<String, dynamic>
+            ? item
+            : item is Map
+                ? item.cast<String, dynamic>()
+                : null;
+        if (groupMap == null) continue;
+        final group = TrackGroupJson.fromJson(groupMap);
+        if (group.id.trim().isNotEmpty) groups.add(group);
+      }
+    }
+    return _RowLayoutSnapshot(rows: rows, trackGroups: groups);
   }
 
   _ProjectTempoSnapshot _commandProjectTempoSnapshot(Object? raw) {
@@ -11818,6 +12826,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             : const <String, dynamic>{};
     return _ProjectTempoSnapshot(
       tempo: _valueDouble(map['tempo']) ?? _tempo,
+      timeSignatureNumerator: _normalizeTimeSignatureNumerator(
+        map['timeSignatureNumerator'],
+        fallback: _timeSignatureNumerator,
+      ),
+      timeSignatureDenominator: _normalizeTimeSignatureDenominator(
+        map['timeSignatureDenominator'],
+        fallback: _timeSignatureDenominator,
+      ),
       clipOffsetsSec: _commandDoubleList(map['clipOffsetsSec']),
       clipVolumeAutomation:
           _commandAutomationPointLists(map['clipVolumeAutomation']),
@@ -12250,6 +13266,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _setRowGainLive(int row, double gain) async {
     if (!_isValidRowIndex(row)) return;
+    final group = _trackGroupForLeadRowIndex(row);
+    if (group != null) {
+      _applyTrackGroupGainState(group.id, gain);
+      await _setTrackGroupGainNative(group.id, gain);
+      return;
+    }
     await JuceAudioEngine.setRowGain(row, gain.clamp(_kGainUiMin, _kGainUiMax));
   }
 
@@ -12263,6 +13285,28 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final safeOldGain = oldGain.clamp(_kGainUiMin, _kGainUiMax).toDouble();
     final safeNewGain = newGain.clamp(_kGainUiMin, _kGainUiMax).toDouble();
     if ((safeNewGain - safeOldGain).abs() < 0.00001) return;
+
+    final group = _trackGroupForLeadRowIndex(row);
+    if (group != null) {
+      await _undoManager.execute(
+        SetRowGainAction(
+          row: row,
+          oldGain: safeOldGain,
+          newGain: safeNewGain,
+          applyNative: (_, gain) => _setTrackGroupGainNative(group.id, gain),
+          applyToState: (_, gain) {
+            _applyTrackGroupGainState(group.id, gain);
+          },
+        ),
+      );
+      _recordProducerManualEdit('${source}_group_bus', {
+        'group_id': group.id,
+        'row': row,
+        'old_gain': safeOldGain,
+        'new_gain': safeNewGain,
+      });
+      return;
+    }
 
     final gainTargetId = _rowMixAutomationTargetId('gain');
     if (_hasExplicitAutomationForTarget(row, gainTargetId)) {
@@ -12333,6 +13377,58 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   void _applyPersistedRowPanState(int row, double pan) {
     if (!_isValidRowIndex(row)) return;
     setState(() => _rowPan[row] = pan);
+  }
+
+  Future<void> _commitRowPanFromUi(
+    int row,
+    double oldPan,
+    double newPan, {
+    String source = 'row_pan',
+  }) async {
+    if (!_isValidRowIndex(row)) return;
+    final safeOldPan = oldPan.clamp(0.0, 1.0).toDouble();
+    final safeNewPan = newPan.clamp(0.0, 1.0).toDouble();
+    if ((safeNewPan - safeOldPan).abs() < 0.00001) return;
+
+    final group = _trackGroupForLeadRowIndex(row);
+    if (group != null) {
+      await _undoManager.execute(
+        SetRowPanAction(
+          row: row,
+          oldPan: safeOldPan,
+          newPan: safeNewPan,
+          applyNative: (_, pan) => _setTrackGroupPanNative(group.id, pan),
+          applyToState: (_, pan) {
+            _applyTrackGroupPanState(group.id, pan);
+          },
+        ),
+      );
+      _recordProducerManualEdit('${source}_group_bus', {
+        'group_id': group.id,
+        'row': row,
+        'old_pan': safeOldPan,
+        'new_pan': safeNewPan,
+      });
+      return;
+    }
+
+    await _undoManager.execute(
+      SetRowPanAction(
+        row: row,
+        oldPan: safeOldPan,
+        newPan: safeNewPan,
+        applyToState: (r, p) {
+          setState(() {
+            _rowPan[r] = p;
+          });
+        },
+      ),
+    );
+    _recordProducerManualEdit(source, {
+      'row': row,
+      'old_pan': safeOldPan,
+      'new_pan': safeNewPan,
+    });
   }
 
   void _applyPersistedMasterGainState(double gain) {
@@ -12966,6 +14062,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       !(_showPianoRoll && _pianoRollFullscreen) &&
       !(_showPitchLab && _pitchLabFullscreen);
 
+  bool get _tabletOverlayWindowFullscreen =>
+      (_sampleBrowserVisible && _sampleBrowserExpanded) ||
+      (_showCaptureDeck && _captureDeckFullscreen) ||
+      (_showPianoRoll && _pianoRollFullscreen) ||
+      (_showPitchLab && _pitchLabFullscreen);
+
   void _syncMeterPollingForVisibility() {
     if (_shouldPollMetersDuringPlayback) {
       _startMeterPolling();
@@ -13010,25 +14112,86 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     //   return;
     // }
 
-    setState(() {
-      //NOTE: before it was setLocalState, shouldn't have broke anything tho
-      _isPlaying = !_isPlaying;
-    });
+    final targetPlaying = !_isPlaying;
+    _transportDesiredPlaying = targetPlaying;
+    _transportCommandSerial++;
+    _applyOptimisticTransportVisual(targetPlaying);
+    await _drainTransportCommandQueue(setLocalState);
+  }
 
-    if (_isPlaying) {
-      await _resumeAudio(setLocalState);
-    } else {
-      await _pauseAudio(setLocalState);
+  void _applyOptimisticTransportVisual(bool targetPlaying) {
+    if (!mounted) return;
+    final currentVisualClock =
+        _isPlaying ? _estimateTransportClockFromSample() : _globalAudioClock;
+    if (targetPlaying &&
+        _loopEnabled &&
+        _loopEndMs > _loopStartMs &&
+        currentVisualClock >= Duration(milliseconds: _loopEndMs)) {
+      _syncTransportClock(Duration(milliseconds: _loopStartMs), playing: false);
+    } else if (!targetPlaying) {
+      _syncTransportClock(currentVisualClock, playing: false);
+    }
+
+    if (targetPlaying) {
+      _desktopPlaybackStartPoint = _globalAudioClock;
+      _transportPlayStartSyncGraceUntil =
+          _transportUiStopwatch.elapsed + _kTransportPlayStartSyncGrace;
+      _transportEndCheckGraceUntil =
+          _transportUiStopwatch.elapsed + const Duration(milliseconds: 420);
+      setState(() {
+        _isPlaying = true;
+        _syncTransportClock(_globalAudioClock, playing: true);
+      });
+      if (!(_transportTicker?.isActive ?? false)) {
+        _transportTicker?.start();
+      }
+      _syncMeterPollingForVisibility();
+      return;
+    }
+
+    _transportTicker?.stop();
+    setState(() {
+      _isPlaying = false;
+      _syncTransportClock(currentVisualClock, playing: false);
+    });
+    _stopMeterPolling();
+  }
+
+  Future<void> _drainTransportCommandQueue(StateSetter setLocalState) async {
+    if (_transportNativeCommandInFlight) return;
+    _transportNativeCommandInFlight = true;
+    try {
+      while (mounted) {
+        final commandSerial = _transportCommandSerial;
+        final targetPlaying = _transportDesiredPlaying;
+        if (targetPlaying) {
+          await _resumeAudio(setLocalState, commandSerial: commandSerial);
+        } else {
+          await _pauseAudio(setLocalState, commandSerial: commandSerial);
+        }
+        if (commandSerial == _transportCommandSerial) {
+          return;
+        }
+      }
+    } finally {
+      _transportNativeCommandInFlight = false;
     }
   }
 
-  Future<void> _resumeAudio(StateSetter setLocalState) async {
+  Future<void> _resumeAudio(
+    StateSetter setLocalState, {
+    int? commandSerial,
+  }) async {
+    bool commandIsCurrent() =>
+        commandSerial == null || commandSerial == _transportCommandSerial;
+    if (!commandIsCurrent()) return;
     if (_loopEnabled &&
         _loopEndMs > _loopStartMs &&
         _globalAudioClock >= Duration(milliseconds: _loopEndMs)) {
       final loopStart = Duration(milliseconds: _loopStartMs);
       _syncTransportClock(loopStart, playing: false);
     }
+    if (!commandIsCurrent()) return;
     _desktopPlaybackStartPoint = _globalAudioClock;
     _transportPlayStartSyncGraceUntil =
         _transportUiStopwatch.elapsed + _kTransportPlayStartSyncGrace;
@@ -13038,7 +14201,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _globalAudioClock.inMilliseconds / 1000.0);
     await JuceAudioEngine.setMetronomeTransportMs(
         _globalAudioClock.inMilliseconds.toDouble());
+    if (!commandIsCurrent()) return;
     await JuceAudioEngine.play();
+    if (!commandIsCurrent()) return;
     _syncTransportClock(_globalAudioClock, playing: true);
 
     if (!(_transportTicker?.isActive ?? false)) {
@@ -13049,14 +14214,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     // Android can occasionally miss the first transport start edge.
     await Future<void>.delayed(const Duration(milliseconds: 90));
-    if (!_isPlaying) return;
-    await _pollTransportFromJuceIfNeeded(force: true);
+    if (!_isPlaying || !commandIsCurrent()) return;
+    await _pollTransportFromJuceIfNeeded(
+      force: true,
+      commandSerial: commandSerial,
+    );
+    if (!commandIsCurrent()) return;
     if (_transportRateSecPerSec <= 0.0) {
       await JuceAudioEngine.play();
     }
   }
 
-  Future<void> _pauseAudio(StateSetter setLocalState) async {
+  Future<void> _pauseAudio(
+    StateSetter setLocalState, {
+    int? commandSerial,
+  }) async {
+    bool commandIsCurrent() =>
+        commandSerial == null || commandSerial == _transportCommandSerial;
     // On pause, cancel the timer, pause each track, and importantly, reset audioStarted.
     // _audioAutomationTimer?.cancel();
     _transportTicker?.stop();
@@ -13068,7 +14242,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           false; // Reset flag on pause so that resume triggers play.
     }
     await JuceAudioEngine.pause();
-    await _pollTransportFromJuceIfNeeded(force: true);
+    if (!commandIsCurrent()) return;
+    await _pollTransportFromJuceIfNeeded(
+      force: true,
+      commandSerial: commandSerial,
+    );
+    if (!commandIsCurrent()) return;
     _syncTransportClock(_globalAudioClock, playing: false);
 
     _stopMeterPolling();
@@ -13371,49 +14550,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             required ValueChanged<T?> onChanged,
             required String Function(T) textBuilder,
           }) {
-            return DropdownButtonFormField<T>(
+            return _buildMixroomDropdownField<T>(
+              label: label,
               value: value,
-              dropdownColor: kMixroomGlassDropdownMenuColor,
-              iconEnabledColor: Colors.white.withValues(alpha: 0.76),
-              style: const TextStyle(
-                fontFamily: 'Pretendard',
-                color: Color(0xFFF4F4F4),
-                fontWeight: FontWeight.w600,
-              ),
-              decoration: InputDecoration(
-                labelText: label,
-                labelStyle:
-                    TextStyle(color: Colors.white.withValues(alpha: 0.68)),
-                filled: true,
-                fillColor: const Color.fromRGBO(244, 244, 244, 0.09),
-                isDense: true,
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  borderSide: BorderSide.none,
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  borderSide: BorderSide(
-                    color: Colors.white.withValues(alpha: 0.12),
-                  ),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: const BorderRadius.all(Radius.circular(24)),
-                  borderSide: BorderSide(
-                    color: exportBlue.withValues(alpha: 0.66),
-                    width: 1.1,
-                  ),
-                ),
-              ),
-              items: options
-                  .map((option) => DropdownMenuItem<T>(
-                        value: option,
-                        child: Text(textBuilder(option)),
-                      ))
-                  .toList(),
+              options: options,
+              textBuilder: textBuilder,
               onChanged: onChanged,
+              height: 54,
+              radius: 22,
+              accentColor: exportBlue,
             );
           }
 
@@ -15243,17 +16388,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   int? _activeMidiRecordingClipIndex() {
     if (_showPianoRoll) {
+      final openIndex = _activeMidiClipEditorIndex();
+      if (openIndex >= 0 && openIndex < _audioTracks.length) {
+        if (!_audioTracks[openIndex].isMidi) return null;
+        return openIndex;
+      }
       final selectedClip = _primarySelectedClipOrNull();
       if (selectedClip != null && selectedClip.isMidi) {
         final selectedIndex = _timelinePrimarySelectedClipIndex;
         if (selectedIndex >= 0 && selectedIndex < _audioTracks.length) {
           return selectedIndex;
         }
-      }
-      final openIndex = _activeMidiClipEditorIndex();
-      if (openIndex >= 0 && openIndex < _audioTracks.length) {
-        if (!_audioTracks[openIndex].isMidi) return null;
-        return openIndex;
       }
       final armedEngineId = _armedMidiClipOrNull()?.engineClipId;
       if (armedEngineId == null || armedEngineId < 0) return null;
@@ -15993,16 +17138,47 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _startAudioRecordingJuce();
   }
 
+  Future<bool> _prepareAudioRecordingStartPreflight() async {
+    if (!await _ensureMicrophonePermissionForRecording()) {
+      return false;
+    }
+
+    if (Platform.isAndroid || Platform.isIOS) {
+      if (_inputDevices.isEmpty && !_loadingDevices) {
+        await _loadInputDevicesFromJuce(scheduleRecordingPrewarm: true);
+      } else if (!_inputDeviceCacheIsFresh() && !_loadingDevices) {
+        unawaited(
+          _loadInputDevicesFromJuce(scheduleRecordingPrewarm: true),
+        );
+      }
+
+      final routeKnown = _audioRouteInfoIsKnown(_audioRouteInfo);
+      if (!routeKnown) {
+        await _refreshAudioRouteInfo();
+      } else if (!_audioRouteInfoCacheIsFresh()) {
+        unawaited(_refreshAudioRouteInfo());
+      }
+
+      if (!await _confirmBluetoothMicMode(_audioRouteInfo)) {
+        return false;
+      }
+    }
+
+    // Background prewarm keeps the common path fast. Native record start still
+    // validates and opens inputs, so avoid doing a second synchronous input
+    // reopen here on the tap path.
+    await _applyCurrentLiveMonitoringPolicy(
+      info: _audioRouteInfo,
+      force: true,
+    );
+    return true;
+  }
+
   Future<void> _startAudioRecordingJuce() async {
     if (_recordTransitionInFlight) return;
     _recordTransitionInFlight = true;
+    _recordStartCancelRequested = false;
     try {
-      if (Platform.isIOS) {
-        final pendingRestore = _pendingIosRecordingRouteRestore;
-        if (pendingRestore != null) {
-          await pendingRestore;
-        }
-      }
       _midiInputPollTimer?.cancel();
       _midiInputPollTimer = null;
       _midiHeldNotesByKey.clear();
@@ -16021,27 +17197,32 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
 
+      if (mounted) {
+        setState(() {
+          _recordStartVisualPending = true;
+        });
+      }
+
+      if (Platform.isIOS) {
+        final pendingRestore = _pendingIosRecordingRouteRestore;
+        if (pendingRestore != null) {
+          await pendingRestore;
+        }
+      }
+      if (_recordStartCancelRequested) return;
+
       if (_loopEnabled) {
         await _restartAudio(_safeAudioEditorStateSetter);
       }
+      if (_recordStartCancelRequested) return;
 
       // 2) Determine where in the project we start recording (UNCHANGED)
       _recordingStartMs = _globalAudioClock.inMilliseconds.toDouble();
 
-      if (!await _ensureMicrophonePermissionForRecording()) {
+      if (!await _prepareAudioRecordingStartPreflight()) {
         return;
       }
-
-      await _refreshAudioRouteInfo();
-      if (!await _confirmBluetoothMicMode(_audioRouteInfo)) {
-        return;
-      }
-      // Keep record-start deterministic once the input route has been resolved.
-      await _ensureMobileRecordingRouteReady();
-      await _applyCurrentLiveMonitoringPolicy(
-        info: _audioRouteInfo,
-        force: true,
-      );
+      if (_recordStartCancelRequested) return;
 
       final startPlaybackAfterRecorder = Platform.isIOS;
 
@@ -16050,6 +17231,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       // arm and recorder start.
       if (!startPlaybackAfterRecorder && !_isPlaying) {
         await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
+      }
+      if (_recordStartCancelRequested) {
+        if (_isPlaying) {
+          await _pausePlayback();
+          if (mounted) {
+            setState(() {
+              _isPlaying = false;
+            });
+          }
+        }
+        return;
       }
 
       // 4) Prepare file path (CHANGE → WAV)
@@ -16074,17 +17266,46 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
         return;
       }
+      if (_recordStartCancelRequested) {
+        await JuceAudioEngine.stopRecording();
+        _lastPreparedRecordingDevice = null;
+        _lastPreparedRecordingInputOpenChannels = null;
+        if (_isPlaying) {
+          await _pausePlayback();
+          if (mounted) {
+            setState(() {
+              _isPlaying = false;
+            });
+          }
+        }
+        return;
+      }
 
       // 6) iOS starts playback after the recorder is armed so route/input state is
       // not invalidated between arm and first capture.
       if (startPlaybackAfterRecorder && !_isPlaying) {
         await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
       }
+      if (_recordStartCancelRequested) {
+        await JuceAudioEngine.stopRecording();
+        _lastPreparedRecordingDevice = null;
+        _lastPreparedRecordingInputOpenChannels = null;
+        if (_isPlaying) {
+          await _pausePlayback();
+          if (mounted) {
+            setState(() {
+              _isPlaying = false;
+            });
+          }
+        }
+        return;
+      }
 
       // 7) UI state (UNCHANGED)
       setState(() {
         _recordingFilePath = filePath;
         _isRecording = true;
+        _recordStartVisualPending = false;
         _isMidiClipRecording = false;
         _midiRecordingClipEngineId = null;
         _midiRecordingClipIndex = null;
@@ -16105,12 +17326,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       });
       _startRecordingRoutePolicyPolling();
     } finally {
+      if (mounted && !_isRecording && _recordStartVisualPending) {
+        setState(() {
+          _recordStartVisualPending = false;
+        });
+      }
+      _recordStartCancelRequested = false;
       _recordTransitionInFlight = false;
     }
   }
 
   Future<bool> _ensureMicrophonePermissionForRecording() async {
     if (!(Platform.isAndroid || Platform.isIOS)) return true;
+
+    if (_microphonePermissionStatus.isGranted ||
+        _microphonePermissionStatus.isLimited) {
+      return true;
+    }
 
     var status = await _getMicrophonePermissionStatus();
     if (status.isGranted || status.isLimited) {
@@ -16215,9 +17447,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _lastPreparedRecordingDevice = null;
       _lastPreparedRecordingInputOpenChannels = null;
       if (needsBluetoothStopRecovery) {
-        if (Platform.isAndroid) {
-          await Future<void>.delayed(const Duration(milliseconds: 250));
-        }
         if (Platform.isIOS) {
           deferredBluetoothRestore =
               JuceAudioEngine.restoreBluetoothPlaybackAfterRecordingStop()
@@ -16233,13 +17462,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           });
           unawaited(deferredBluetoothRestore);
         } else {
-          await JuceAudioEngine.restoreBluetoothPlaybackAfterRecordingStop();
-        }
-        if (Platform.isAndroid) {
-          await Future<void>.delayed(const Duration(milliseconds: 100));
-        }
-        if (!Platform.isIOS) {
-          await _refreshAudioRouteInfo(refreshNativeRoute: false);
+          deferredBluetoothRestore = (() async {
+            await Future<void>.delayed(const Duration(milliseconds: 250));
+            await JuceAudioEngine.restoreBluetoothPlaybackAfterRecordingStop();
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+            if (mounted) {
+              await _refreshAudioRouteInfo(refreshNativeRoute: false);
+            }
+          })();
+          unawaited(deferredBluetoothRestore);
         }
       } else if (Platform.isAndroid) {
         // The native stop-record path already restores playback routing. Forcing
@@ -16315,7 +17546,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
 
       // 3) Restore the intended playback state after the clip is inserted.
-      if (deferredBluetoothRestore != null) {
+      if (deferredBluetoothRestore != null &&
+          (resumePlaybackAfterStop || Platform.isIOS)) {
         await deferredBluetoothRestore;
       }
       if (resumePlaybackAfterStop && mounted && !_isPlaying) {
@@ -19594,8 +20826,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!_liveMidiEventPlaybackSupported) return false;
     if (engineClipId < 0 || rowId < 0) return false;
     final liveInstrumentId = _liveMidiEngineInstrumentId(instrumentId);
-    final normalizedParams =
-        _normalizedInstrumentParamsForPlayback(instrumentId, instrumentParams);
+    final normalizedParams = _normalizedInstrumentParamsForPlayback(
+      instrumentId,
+      instrumentParams,
+    );
     return _runWithAndroidEngineCriticalSection(
       () => JuceAudioEngine.loadMidiClip(
         engineClipId,
@@ -20016,6 +21250,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               "Max number of audio clips reached ($kNumClips). Unable to add more clips.")));
       return;
     }
+    if (instrumentId.trim().isEmpty) {
+      if (notifyUi && mounted) {
+        _showSmallNotice('This MIDI clip is missing its instrument.');
+      } else {
+        _projectLoadIssues.add(
+          const _ProjectLoadIssue(
+            type: _ProjectLoadIssueType.missingPlugin,
+            title: 'Missing MIDI Instrument',
+            detail:
+                'A MIDI clip in this project has no saved instrument, so it could not be restored.',
+          ),
+        );
+      }
+      return;
+    }
 
     if (!rowAlreadyEnsured) {
       await _ensureRowIndexExists(row);
@@ -20082,10 +21331,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
 
       if (!loadedLiveMidi) {
-        final renderedFallbackAvailable =
-            renderedFile != null && renderedFile.existsSync();
-        if (renderedFallbackAvailable) {
-          final fallbackFile = renderedFile!;
+        final fallbackFile = renderedFile;
+        if (fallbackFile != null && fallbackFile.existsSync()) {
           final fallbackLoaded = await _runWithAndroidEngineCriticalSection(
             () => JuceAudioEngine.loadClip(
               engineClipId,
@@ -20732,12 +21979,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     _tempoSyncInFlight = true;
-    do {
-      _tempoSyncQueued = false;
-      await JuceAudioEngine.setMetronomeBpm(_tempo);
-      await _syncAllTempoStretchToEngine();
-    } while (_tempoSyncQueued);
-    _tempoSyncInFlight = false;
+    try {
+      do {
+        _tempoSyncQueued = false;
+        await _syncMetronomeTimingToEngine();
+        await _syncAllTempoStretchToEngine();
+      } while (_tempoSyncQueued);
+    } finally {
+      _tempoSyncInFlight = false;
+    }
+  }
+
+  Future<void> _syncMetronomeTimingToEngine() async {
+    await JuceAudioEngine.setMetronomeBpm(_tempo);
+    await JuceAudioEngine.setMetronomeTimeSignature(
+      numerator: _timeSignatureNumerator,
+      denominator: _timeSignatureDenominator,
+    );
   }
 
   double _clampTempo(double bpm) => bpm.clamp(20.0, 999.0).toDouble();
@@ -20781,6 +22039,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   _ProjectTempoSnapshot _captureProjectTempoSnapshot() {
     return _ProjectTempoSnapshot(
       tempo: _clampTempo(_tempo),
+      timeSignatureNumerator: _timeSignatureNumerator,
+      timeSignatureDenominator: _timeSignatureDenominator,
       clipOffsetsSec:
           _audioTracks.map((clip) => clip.offset).toList(growable: false),
       clipVolumeAutomation: _audioTracks
@@ -20822,6 +22082,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   ) async {
     _setStateAndRefreshProjectSettings(() {
       _tempo = snapshot.tempo;
+      _timeSignatureNumerator = snapshot.timeSignatureNumerator;
+      _timeSignatureDenominator = snapshot.timeSignatureDenominator;
       for (int i = 0; i < _audioTracks.length; i++) {
         if (i < snapshot.clipOffsetsSec.length) {
           _audioTracks[i].offset = snapshot.clipOffsetsSec[i];
@@ -20903,6 +22165,45 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return t.toStringAsFixed(0);
     }
     return t.toStringAsFixed(1);
+  }
+
+  static const List<List<int>> _kProjectTimeSignatureOptions = <List<int>>[
+    <int>[2, 4],
+    <int>[3, 4],
+    <int>[4, 4],
+    <int>[5, 4],
+    <int>[6, 8],
+    <int>[7, 8],
+  ];
+
+  int _normalizeTimeSignatureNumerator(Object? raw, {int fallback = 4}) {
+    final parsed =
+        raw is num ? raw.toInt() : int.tryParse((raw ?? '').toString().trim());
+    return (parsed ?? fallback).clamp(1, 12).toInt();
+  }
+
+  int _normalizeTimeSignatureDenominator(Object? raw, {int fallback = 4}) {
+    final parsed =
+        raw is num ? raw.toInt() : int.tryParse((raw ?? '').toString().trim());
+    switch (parsed ?? fallback) {
+      case 2:
+      case 4:
+      case 8:
+      case 16:
+        return parsed ?? fallback;
+      default:
+        return 4;
+    }
+  }
+
+  String _timeSignatureLabel([int? numerator, int? denominator]) {
+    return '${numerator ?? _timeSignatureNumerator}/${denominator ?? _timeSignatureDenominator}';
+  }
+
+  double get _projectBarLengthQuarterBeats {
+    final numerator = math.max(1, _timeSignatureNumerator);
+    final denominator = math.max(1, _timeSignatureDenominator);
+    return numerator * 4.0 / denominator;
   }
 
   List<String> get _projectKeyOptions => <String>[
@@ -21354,7 +22655,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (before == null) return;
 
     final after = _captureProjectTempoSnapshot();
-    if ((before.tempo - after.tempo).abs() < 0.0001) return;
+    if ((before.tempo - after.tempo).abs() < 0.0001 &&
+        before.timeSignatureNumerator == after.timeSignatureNumerator &&
+        before.timeSignatureDenominator == after.timeSignatureDenominator) {
+      return;
+    }
     await _undoManager.addWithoutExecute(
       _ProjectTempoChangeAction(
         before: before,
@@ -21369,6 +22674,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if ((next - _clampTempo(_tempo)).abs() < 0.0001) return;
     _pendingTempoUndoBefore ??= _captureProjectTempoSnapshot();
     unawaited(_applyProjectTempoChange(next));
+    _scheduleProjectTempoUndoCommit();
+  }
+
+  void _setProjectTimeSignatureFromUi(int numerator, int denominator) {
+    final nextNumerator = _normalizeTimeSignatureNumerator(numerator);
+    final nextDenominator = _normalizeTimeSignatureDenominator(denominator);
+    if (nextNumerator == _timeSignatureNumerator &&
+        nextDenominator == _timeSignatureDenominator) {
+      return;
+    }
+    _pendingTempoUndoBefore ??= _captureProjectTempoSnapshot();
+    _setStateAndRefreshProjectSettings(() {
+      _timeSignatureNumerator = nextNumerator;
+      _timeSignatureDenominator = nextDenominator;
+    });
+    unawaited(_syncMetronomeTimingToEngine());
+    _updateOverallDurationIfNeeded();
+    _scheduleProjectAutosave();
     _scheduleProjectTempoUndoCommit();
   }
 
@@ -22030,43 +23353,47 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
-  Future<void> _exportAndNavigate() async {
-    _AudioExportSettings? selectedSettings;
-    try {
-      selectedSettings = await _showAudioExportSettingsSheet();
-    } catch (e) {
-      debugPrint('Failed to open export dialog: $e');
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _audioExportSettings = const _AudioExportSettings(
-          format: _ExportAudioFormat.wav,
-          sampleRate: 44100,
-          wavBitDepth: 16,
-          wavDithering: true,
-          mp3BitrateKbps: 192,
-          mp3Mode: _ExportMp3Mode.cbr,
-          mp3VbrQuality: 2,
-          channelMode: _ExportChannelMode.stereo,
-          normalize: false,
-          normalizeTargetDb: -1.0,
-          resampleQuality: _ExportResampleQuality.best,
-        );
-      });
+  Future<void> _exportAndNavigate({
+    _AudioExportSettings? selectedSettingsOverride,
+  }) async {
+    _AudioExportSettings? selectedSettings = selectedSettingsOverride;
+    if (selectedSettings == null) {
       try {
         selectedSettings = await _showAudioExportSettingsSheet();
-      } catch (retryError) {
-        debugPrint('Retry open export dialog failed: $retryError');
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              L10n.translate(context, 'Could not open export options.'),
+      } catch (e) {
+        debugPrint('Failed to open export dialog: $e');
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _audioExportSettings = const _AudioExportSettings(
+            format: _ExportAudioFormat.wav,
+            sampleRate: 44100,
+            wavBitDepth: 16,
+            wavDithering: true,
+            mp3BitrateKbps: 192,
+            mp3Mode: _ExportMp3Mode.cbr,
+            mp3VbrQuality: 2,
+            channelMode: _ExportChannelMode.stereo,
+            normalize: false,
+            normalizeTargetDb: -1.0,
+            resampleQuality: _ExportResampleQuality.best,
+          );
+        });
+        try {
+          selectedSettings = await _showAudioExportSettingsSheet();
+        } catch (retryError) {
+          debugPrint('Retry open export dialog failed: $retryError');
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                L10n.translate(context, 'Could not open export options.'),
+              ),
             ),
-          ),
-        );
-        return;
+          );
+          return;
+        }
       }
     }
     if (!mounted || selectedSettings == null) {
@@ -22085,21 +23412,43 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       ),
     );
 
+    final useContainedExportPanel = _usesContainedExportPanel;
+    int containedExportToken = 0;
+    if (useContainedExportPanel) {
+      containedExportToken = _beginContainedExportProgress();
+    }
+
     setState(() {
       _audioExportSettings = effectiveSettings;
       _activeAudioExportSettings = effectiveSettings;
-      _isLoadingNextScreen = true;
+      _isLoadingNextScreen = !useContainedExportPanel;
     });
     if (_isPlaying) {
       await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
     }
-    final exportPath = await Navigator.push<String>(
-      context,
-      MaterialPageRoute(
-        builder: (_) =>
-            ExportProgressPage(exportFn: _exportAudioOnly, videoFile: ""),
-      ),
-    );
+    final String? exportPath;
+    if (useContainedExportPanel) {
+      exportPath = await _exportAudioOnly((value) {
+        final progress = value.clamp(0.0, 1.0).toDouble();
+        if (!mounted ||
+            _containedExportCancelled ||
+            containedExportToken != _containedExportRunToken) {
+          return;
+        }
+        setState(() {
+          _containedExportProgress = progress;
+        });
+      });
+      _stopContainedExportEllipsisTimer();
+    } else {
+      exportPath = await Navigator.push<String>(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              ExportProgressPage(exportFn: _exportAudioOnly, videoFile: ""),
+        ),
+      );
+    }
     if (!mounted) {
       _activeAudioExportSettings = null;
       return;
@@ -22110,7 +23459,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _isLoadingNextScreen = false;
     });
 
+    if (useContainedExportPanel &&
+        (_containedExportCancelled ||
+            containedExportToken != _containedExportRunToken)) {
+      if (exportPath != null && exportPath.isNotEmpty) {
+        _deleteContainedExportFileIfSafe(exportPath);
+      }
+      return;
+    }
+
     if (exportPath == null || exportPath.isEmpty) {
+      if (useContainedExportPanel) {
+        setState(() {
+          _containedExportPanelStage = _ContainedExportPanelStage.idle;
+          _containedExportProgress = 0.0;
+        });
+      }
       unawaited(
         AnalyticsService.instance.track(
           AnalyticsEvents.exportFailed(
@@ -22125,9 +23489,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
 
+    final completedExportPath = exportPath;
     int exportFileSize = 0;
     try {
-      exportFileSize = await File(exportPath).length();
+      exportFileSize = await File(completedExportPath).length();
     } catch (_) {}
     unawaited(
       AnalyticsService.instance.track(
@@ -22140,13 +23505,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       ),
     );
 
-    final ext = p.extension(exportPath).replaceAll('.', '');
+    final ext = p.extension(completedExportPath).replaceAll('.', '');
     final suggestedFileName = ExportSaveDialog.buildSuggestedFileName(
       baseName: _projectName,
       extension: ext,
     );
     final savedPath = await ExportSaveDialog.saveExportedFile(
-      sourceFilePath: exportPath,
+      sourceFilePath: completedExportPath,
       suggestedFileName: suggestedFileName,
       desktopDialogTitle: L10n.translate(context, 'Save export'),
     );
@@ -22188,12 +23553,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       // ScaffoldMessenger.of(context).showSnackBar(
       //   SnackBar(content: Text(success_str)),// at: $savedPath')),
       // );
+      if (useContainedExportPanel) {
+        setState(() {
+          _tabletRightPanelTab = 'export';
+          _tabletRightPanelCollapsed = false;
+          _containedExportPanelStage = _ContainedExportPanelStage.success;
+          _containedExportProgress = 1.0;
+          _containedExportFilePath = completedExportPath;
+          _containedExportPreviewFilePath = resolvedPreviewPath;
+          _containedExportSavedFilePath = savedPath;
+          _containedExportSavedFileName =
+              resolvedSavedDisplayName ?? suggestedFileName;
+        });
+        return;
+      }
+
       final ExportSuccessAction? action =
           await Navigator.push<ExportSuccessAction>(
         context,
         MaterialPageRoute(
           builder: (context) => ExportSuccessScreen(
-            filePath: exportPath,
+            filePath: completedExportPath,
             previewFilePath: resolvedPreviewPath,
             savedFilePath: savedPath,
             savedFileName: resolvedSavedDisplayName ?? suggestedFileName,
@@ -22204,7 +23584,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       final shouldDeleteResolvedPreview = resolvedPreviewPath != null &&
           resolvedPreviewPath.isNotEmpty &&
-          resolvedPreviewPath != exportPath &&
+          resolvedPreviewPath != completedExportPath &&
           resolvedPreviewPath != savedPath;
       if (shouldDeleteResolvedPreview) {
         try {
@@ -22216,7 +23596,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
 
       try {
-        final tempExport = File(exportPath);
+        final tempExport = File(completedExportPath);
         if (await tempExport.exists()) {
           await tempExport.delete();
         }
@@ -22228,6 +23608,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     } else {
       if (!mounted) return;
+      if (useContainedExportPanel) {
+        setState(() {
+          _containedExportPanelStage = _ContainedExportPanelStage.idle;
+          _containedExportProgress = 0.0;
+        });
+      }
       final fail_str = L10n.translate(context, 'Export canceled or failed.');
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(fail_str)));
@@ -22706,8 +24092,75 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return '';
   }
 
+  Future<String?> _ensureUserSampleDropFolderPath() async {
+    try {
+      final documentsDir = await getApplicationDocumentsDirectory();
+      final dropDir =
+          Directory(p.join(documentsDir.path, kUserSampleDropFolderName));
+      if (!await dropDir.exists()) {
+        await dropDir.create(recursive: true);
+      }
+      return p.normalize(dropDir.path);
+    } catch (error, stackTrace) {
+      debugPrint('Failed to prepare user sample drop folder: $error');
+      unawaited(
+        CrashReportingService.instance.captureException(
+          error,
+          stackTrace: stackTrace,
+        ),
+      );
+      return null;
+    }
+  }
+
+  List<String> _orderedSampleBrowserRootsWithDefaults({
+    required List<String> bundledRoots,
+    required String? userDropRoot,
+  }) {
+    final defaultRoots = <String>[];
+    final seenDefaults = <String>{};
+
+    void addDefaultRoot(String? root) {
+      final normalized = root == null ? '' : p.normalize(root);
+      if (normalized.isEmpty || seenDefaults.contains(normalized)) return;
+      defaultRoots.add(normalized);
+      seenDefaults.add(normalized);
+    }
+
+    for (final root in bundledRoots) {
+      addDefaultRoot(root);
+    }
+    addDefaultRoot(userDropRoot);
+
+    final userRoots = <String>[];
+    final seenUserRoots = Set<String>.from(seenDefaults);
+    for (final root in _sampleBrowserRoots) {
+      final normalized = p.normalize(root);
+      if (normalized.isEmpty || seenUserRoots.contains(normalized)) continue;
+      userRoots.add(normalized);
+      seenUserRoots.add(normalized);
+    }
+
+    return <String>[...defaultRoots, ...userRoots];
+  }
+
+  Set<String> get _fixedSampleBrowserRootFolders {
+    final userDropRoot = _sampleBrowserUserDropFolderPath;
+    if (userDropRoot == null || userDropRoot.trim().isEmpty) {
+      return const <String>{};
+    }
+    return <String>{p.normalize(userDropRoot)};
+  }
+
+  bool _isFixedSampleBrowserRoot(String rootPath) {
+    final normalizedRoot = p.normalize(rootPath);
+    return _fixedSampleBrowserRootFolders.contains(normalizedRoot);
+  }
+
   Future<void> _ensureDefaultSampleBrowserRoots() async {
-    List<String> bundledRoots;
+    final userDropRoot = await _ensureUserSampleDropFolderPath();
+
+    List<String> bundledRoots = const <String>[];
     try {
       bundledRoots = await _mountBundledSamplePacks();
     } catch (error, stackTrace) {
@@ -22718,18 +24171,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           stackTrace: stackTrace,
         ),
       );
-      return;
     }
-    if (bundledRoots.isEmpty) return;
-    final existing = _sampleBrowserRoots.map(p.normalize).toSet();
-    final newRoots = bundledRoots
-        .map(p.normalize)
-        .where((root) => !existing.contains(root))
-        .toList(growable: false);
-    if (newRoots.isEmpty) return;
-    _sampleBrowserRoots.insertAll(0, newRoots);
-    unawaited(_persistDesktopSampleBrowserRoots());
-    _invalidateAiLibrarySnapshotCache();
+
+    final nextRoots = _orderedSampleBrowserRootsWithDefaults(
+      bundledRoots: bundledRoots,
+      userDropRoot: userDropRoot,
+    );
+    final normalizedUserDropRoot =
+        userDropRoot == null ? null : p.normalize(userDropRoot);
+    final rootsChanged = !_sameStringList(_sampleBrowserRoots, nextRoots);
+    final userDropChanged =
+        _sampleBrowserUserDropFolderPath != normalizedUserDropRoot;
+    if (!rootsChanged && !userDropChanged) return;
+
+    if (mounted) {
+      setState(() {
+        _sampleBrowserUserDropFolderPath = normalizedUserDropRoot;
+        if (rootsChanged) {
+          _sampleBrowserRoots
+            ..clear()
+            ..addAll(nextRoots);
+        }
+      });
+    } else {
+      _sampleBrowserUserDropFolderPath = normalizedUserDropRoot;
+      if (rootsChanged) {
+        _sampleBrowserRoots
+          ..clear()
+          ..addAll(nextRoots);
+      }
+    }
+
+    if (rootsChanged) {
+      unawaited(_persistDesktopSampleBrowserRoots());
+      _invalidateAiLibrarySnapshotCache();
+    }
   }
 
   Future<void> _flushPendingDesktopFinderDrops() async {
@@ -23425,6 +24901,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _removeSampleBrowserRoot(String rootPath) {
+    if (_isFixedSampleBrowserRoot(rootPath)) {
+      return;
+    }
     final normalizedRoot = p.normalize(rootPath);
     final rootPrefix =
         normalizedRoot.endsWith('/') ? normalizedRoot : '$normalizedRoot/';
@@ -24247,7 +25726,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _RowLayoutSnapshotAction(
           descriptionText: 'Change instrument lane',
           before: beforeLayout,
-          after: _RowLayoutSnapshot(rows: afterRows),
+          after: _RowLayoutSnapshot(
+            rows: afterRows,
+            trackGroups: beforeLayout.trackGroups,
+          ),
           applySnapshot: _applyRowLayoutSnapshot,
         ),
     ];
@@ -24327,6 +25809,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (row < 0 || row >= _rows.length) return;
     final lane = _rows[row];
     if (!lane.isInstrumentLane) return;
+    if (lane.instrumentId.trim().isEmpty) {
+      _showSmallNotice('This instrument lane is missing its instrument.');
+      return;
+    }
     final beforeCount = _audioTracks.length;
     await _undoManager.execute(
       AddMidiClipAction(
@@ -24363,6 +25849,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _handleAddActionSelection(String action) async {
+    final groupingRows =
+        action == 'group_rows' ? _rowsForActiveGroupingAction() : const <int>[];
+    if (action == 'group_rows') {
+      if (groupingRows.length < 2) {
+        _enterRowGroupingSelectionMode();
+        return;
+      }
+    }
     _trackUiClick(
       controlId: action,
       surface: 'add_actions',
@@ -24377,6 +25871,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     await Future<void>.delayed(const Duration(milliseconds: 65));
     _closeAddActionsPanel();
+    if (action == 'audio_row') {
+      await _addRow();
+      return;
+    }
     if (action == 'audio') {
       await _pickAndInsertAudioTrack();
       return;
@@ -24394,6 +25892,130 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _addInstrumentClipFromPicker();
       return;
     }
+    if (action == 'group_rows') {
+      await _createRowGroup(groupingRows);
+      _exitRowGroupingSelectionMode();
+      return;
+    }
+  }
+
+  List<int> _rowsForActiveGroupingAction() {
+    if (_rowGroupingSelectionMode) {
+      return _validRowGroupingSelection();
+    }
+    if (_rowGroupingSelection.length >= 2) {
+      return _validRowGroupingSelection();
+    }
+    return _rowsForSelectedClipGrouping();
+  }
+
+  List<int> _validRowGroupingSelection() {
+    final selected = _rowGroupingSelection
+        .where((row) => row >= 0 && row < _rowCount)
+        .toSet()
+        .toList()
+      ..sort();
+    return selected;
+  }
+
+  List<int> _rowsForSelectedClipGrouping() {
+    final rows = <int>{};
+    for (final index in _timelineSelectedClipIndices) {
+      if (index < 0 || index >= _audioTracks.length) continue;
+      final row = _audioTracks[index].rowIndex;
+      if (row >= 0 && row < _rowCount) rows.add(row);
+    }
+    final ordered = rows.toList()..sort();
+    return ordered;
+  }
+
+  void _enterRowGroupingSelectionMode() {
+    if (!mounted) return;
+    final seedRows = _rowsForSelectedClipGrouping();
+    setState(() {
+      _rowGroupingSelectionMode = true;
+      _showAddActionsPanel = false;
+      _rowGroupingSelection
+        ..clear()
+        ..addAll(seedRows);
+      _activeAddActionId = null;
+    });
+    _setDawPanelVisible('add_actions', false);
+  }
+
+  void _exitRowGroupingSelectionMode() {
+    if (!mounted) return;
+    setState(() {
+      _rowGroupingSelectionMode = false;
+      _rowGroupingSelection.clear();
+      if (_activeAddActionId == 'group_rows') {
+        _activeAddActionId = null;
+      }
+    });
+  }
+
+  void _toggleRowGroupingSelection(int row) {
+    if (row < 0 || row >= _rowCount) return;
+    setState(() {
+      if (_rowGroupingSelection.contains(row)) {
+        _rowGroupingSelection.remove(row);
+      } else {
+        _rowGroupingSelection.add(row);
+      }
+    });
+  }
+
+  Widget _buildRowGroupingAddButtonBadge() {
+    final count = _validRowGroupingSelection().length;
+    final visible = _rowGroupingSelectionMode && count > 0;
+    return Positioned(
+      right: -4,
+      top: -5,
+      child: IgnorePointer(
+        child: AnimatedScale(
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutBack,
+          scale: visible ? 1.0 : 0.72,
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 120),
+            opacity: visible ? 1.0 : 0.0,
+            child: Container(
+              constraints: const BoxConstraints(minWidth: 24),
+              height: 24,
+              padding: const EdgeInsets.symmetric(horizontal: 7),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8AA62),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.70),
+                  width: 1.1,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.28),
+                    blurRadius: 9,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: Text(
+                count.toString(),
+                maxLines: 1,
+                softWrap: false,
+                style: const TextStyle(
+                  fontFamily: 'Pretendard',
+                  color: Color(0xFF232A32),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  height: 1,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildAddActionTile({
@@ -24401,31 +26023,43 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required IconData icon,
     required String title,
     String? subtitle,
+    Widget? trailing,
     double topPadding = 6,
     double bottomPadding = 0,
+    bool enabled = true,
+    bool plainSurface = false,
     required VoidCallback onTap,
   }) {
     final selected = _activeAddActionId == id;
     Widget tile = Padding(
-      padding: EdgeInsets.fromLTRB(10, topPadding, 10, bottomPadding),
+      padding: EdgeInsets.fromLTRB(
+        plainSurface ? 4 : 10,
+        topPadding,
+        plainSurface ? 4 : 10,
+        bottomPadding,
+      ),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 120),
         decoration: BoxDecoration(
-          color: selected
-              ? const Color.fromRGBO(255, 255, 255, 0.07)
-              : Colors.transparent,
+          color: plainSurface
+              ? (selected
+                  ? Colors.white.withValues(alpha: 0.10)
+                  : Colors.transparent)
+              : (selected
+                  ? Colors.white.withValues(alpha: 0.12)
+                  : Colors.transparent),
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-            color: selected
-                ? Colors.white.withValues(alpha: 0.12)
-                : Colors.transparent,
-          ),
+          border: plainSurface
+              ? null
+              : selected
+                  ? Border.all(color: Colors.white.withValues(alpha: 0.12))
+                  : null,
         ),
         child: Material(
           color: Colors.transparent,
           child: InkWell(
             borderRadius: BorderRadius.circular(18),
-            onTap: onTap,
+            onTap: enabled ? onTap : null,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               child: Row(
@@ -24435,7 +26069,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 children: [
                   Padding(
                     padding: EdgeInsets.only(top: subtitle == null ? 0 : 2),
-                    child: Icon(icon, size: 19, color: Colors.white),
+                    child: Icon(
+                      icon,
+                      size: 19,
+                      color: enabled
+                          ? Colors.white
+                          : Colors.white.withValues(alpha: 0.38),
+                    ),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -24445,9 +26085,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       children: [
                         Text(
                           title,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontFamily: 'Pretendard',
-                            color: Colors.white,
+                            color: enabled
+                                ? Colors.white
+                                : Colors.white.withValues(alpha: 0.42),
                             fontSize: 15,
                             fontWeight: FontWeight.w500,
                             letterSpacing: -0.15,
@@ -24459,7 +26101,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             subtitle,
                             style: TextStyle(
                               fontFamily: 'Pretendard',
-                              color: Colors.white.withValues(alpha: 0.44),
+                              color: Colors.white.withValues(
+                                alpha: enabled ? 0.44 : 0.30,
+                              ),
                               fontSize: 11.5,
                               fontWeight: FontWeight.w400,
                               height: 1.15,
@@ -24469,6 +26113,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       ],
                     ),
                   ),
+                  if (trailing != null) ...[
+                    const SizedBox(width: 10),
+                    trailing,
+                  ],
                 ],
               ),
             ),
@@ -24476,18 +26124,53 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ),
       ),
     );
-    if (id == 'audio' || id == 'instrument') {
+    if (id == 'audio' || id == 'audio_row' || id == 'instrument') {
       tile = MultiHalo(
         highlighter: _mixHighlighter,
         haloKeys: <HaloKey>[
-          HaloKey(
-              id == 'audio' ? 'tutorial:add_audio' : 'tutorial:add_instrument'),
+          HaloKey(id == 'instrument'
+              ? 'tutorial:add_instrument'
+              : 'tutorial:add_audio'),
         ],
         borderRadius: BorderRadius.circular(12),
         child: tile,
       );
     }
     return tile;
+  }
+
+  Widget _buildAddActionCountPill(int count, {required bool active}) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 120),
+      curve: Curves.easeOutCubic,
+      constraints: const BoxConstraints(minWidth: 30),
+      height: 24,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: active
+            ? const Color(0xFFE8AA62)
+            : Colors.white.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: active
+              ? Colors.white.withValues(alpha: 0.54)
+              : Colors.white.withValues(alpha: 0.14),
+        ),
+      ),
+      child: Text(
+        count.toString(),
+        maxLines: 1,
+        softWrap: false,
+        style: TextStyle(
+          fontFamily: 'Pretendard',
+          color: active ? const Color(0xFF232A32) : Colors.white,
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+          height: 1,
+        ),
+      ),
+    );
   }
 
   Future<void> _snapshotFxBypassState() async {
@@ -24720,6 +26403,3089 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTabletRightDawPanel({
+    required double topInset,
+    required double availableWidth,
+  }) {
+    final panelWidth = _tabletReservedRightPanelWidthFor(
+      availableWidth,
+      collapsed: _tabletRightPanelCollapsed,
+    );
+    final masterPanelActive = _masterMeterExpanded &&
+        _tabletRightPanelTab != 'export' &&
+        _containedExportPanelStage != _ContainedExportPanelStage.exporting;
+    final surface = masterPanelActive
+        ? Color.lerp(
+            _kTabletDawPanelFill,
+            const Color(0xFF123D62),
+            0.26,
+          )!
+        : _kTabletDawPanelFill;
+    final rowCount = math.min(_rowCount, 6);
+
+    if (_tabletRightPanelCollapsed) {
+      return const SizedBox.shrink();
+    }
+
+    Widget panelHeader() {
+      return Padding(
+        padding: EdgeInsets.fromLTRB(
+          TabletDawPanelLayout.rightPanelHeaderHorizontalInset,
+          TabletDawPanelLayout.rightPanelHeaderTopInset,
+          TabletDawPanelLayout.rightPanelHeaderHorizontalInset,
+          TabletDawPanelLayout.rightPanelHeaderBottomInset,
+        ),
+        child: SizedBox(
+          height: TabletDawPanelLayout.rightPanelHeaderExportButtonSize,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final compact =
+                  TabletDawPanelLayout.usesCompactRightPanelHeader(panelWidth);
+              final gap = TabletDawPanelLayout.rightPanelHeaderGap(
+                compact: compact,
+              );
+              final headerWidth = constraints.maxWidth.isFinite
+                  ? constraints.maxWidth
+                  : panelWidth -
+                      (TabletDawPanelLayout.rightPanelHeaderHorizontalInset *
+                          2.0);
+              final exportButtonSize = headerWidth
+                  .clamp(
+                    0.0,
+                    TabletDawPanelLayout.rightPanelHeaderExportButtonSize,
+                  )
+                  .toDouble();
+              final selectorWidth = math
+                  .max(0.0, headerWidth - gap - exportButtonSize)
+                  .toDouble();
+              final showSelector = selectorWidth >=
+                  TabletDawPanelLayout.rightPanelHeaderMinSelectorWidth;
+              return Row(
+                children: [
+                  if (showSelector) ...[
+                    Expanded(
+                      child: _buildTabletRightPanelSelector(),
+                    ),
+                    SizedBox(width: gap),
+                  ],
+                  _buildTopCircleButtonShell(
+                    key: _exportButtonKey,
+                    semanticLabel: L10n.translate(context, 'Export'),
+                    semanticIdentifier: 'daw.export',
+                    onTap: () {
+                      _trackUiClick(
+                        controlId: 'export_button',
+                        surface: 'right_panel',
+                      );
+                      if (_tabletRightPanelTab == 'export' &&
+                          _containedExportPanelStage !=
+                              _ContainedExportPanelStage.exporting) {
+                        setState(() {
+                          _tabletRightPanelCollapsed = true;
+                          _masterMeterExpanded = false;
+                        });
+                        return;
+                      }
+                      if (_containedExportPanelStage ==
+                          _ContainedExportPanelStage.exporting) {
+                        setState(() {
+                          _tabletRightPanelTab = 'export';
+                          _tabletRightPanelCollapsed = false;
+                          _masterMeterExpanded = false;
+                        });
+                        return;
+                      }
+                      _openTabletExportPanel();
+                    },
+                    active: _isExportSheetOpen ||
+                        _tabletRightPanelTab == 'export' ||
+                        _containedExportPanelStage !=
+                            _ContainedExportPanelStage.idle,
+                    size: exportButtonSize,
+                    child: Center(
+                      child: _buildDawTopShareIcon(),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      );
+    }
+
+    BoxDecoration panelCardDecoration({Color? accent, double alpha = 0.74}) {
+      final base = accent == null
+          ? surface.withValues(alpha: alpha)
+          : Color.lerp(surface, accent, 0.12)!.withValues(alpha: alpha);
+      return BoxDecoration(
+        color: base,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      );
+    }
+
+    Widget rowPanel(int row) {
+      final group = _trackGroupForLeadRowIndex(row);
+      final frame =
+          row < _meters.rows.length ? _meters.rows[row] : MeterFrame.zero;
+      final peakDb = _heldPeakDbForRow(row, frame);
+      final levelLabel = _technicalLevelLabel(peakDb);
+      final levelColor = _technicalLevelColor(peakDb);
+      final levelTextColor =
+          Color.lerp(levelColor, Colors.white, 0.24) ?? levelColor;
+      final gain = group?.gain ??
+          (row < _rowGain.length ? _rowGain[row] : _kGainUiUnity);
+      final pan = group?.pan ?? (row < _rowPan.length ? _rowPan[row] : 0.5);
+      final rowColor = row < _rows.length ? _rows[row].color : 0;
+      final accent = rowColor == 0
+          ? const Color(0xFF1194FF)
+          : Color(rowColor).withValues(alpha: 1.0);
+      final expanded = _tabletMixerExpandedRows.contains(row);
+      final rowName = _mixerDisplayNameForRow(row);
+
+      Widget expandedSliders() {
+        if (!expanded) return const SizedBox.shrink();
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final showStepButtons = constraints.maxWidth >= 252.0;
+            return Column(
+              children: [
+                const SizedBox(height: 10),
+                PrettyGainSlider(
+                  value: gain,
+                  showStepButtons: showStepButtons,
+                  onChangeStart: (v) {
+                    _tabletMixerRowGainDragStart[row] = v;
+                  },
+                  onChanged: (v) {
+                    if (row >= _rowGain.length && group == null) return;
+                    if (group != null) {
+                      _applyTrackGroupGainState(group.id, v);
+                      unawaited(_setTrackGroupGainNative(group.id, v));
+                    } else {
+                      setState(() => _rowGain[row] = v);
+                      unawaited(_setRowGainLive(row, v));
+                    }
+                  },
+                  onChangeEnd: (v) {
+                    final oldGain =
+                        _tabletMixerRowGainDragStart.remove(row) ?? v;
+                    final latestGroup =
+                        group == null ? null : _trackGroupById(group.id);
+                    final newGain = latestGroup?.gain ??
+                        (row < _rowGain.length ? _rowGain[row] : v);
+                    unawaited(_commitRowGainFromUi(
+                      row,
+                      oldGain,
+                      newGain,
+                      source: 'right_panel_mixer_gain',
+                    ));
+                  },
+                ),
+                const SizedBox(height: 9),
+                PrettyStereoSlider(
+                  value: pan,
+                  showStepButtons: showStepButtons,
+                  onChangeStart: (v) {
+                    _tabletMixerRowPanDragStart[row] = v;
+                  },
+                  onChanged: (v) {
+                    if (row >= _rowPan.length && group == null) return;
+                    if (group != null) {
+                      _applyTrackGroupPanState(group.id, v);
+                      unawaited(_setTrackGroupPanNative(group.id, v));
+                    } else {
+                      setState(() => _rowPan[row] = v);
+                      unawaited(JuceAudioEngine.setRowPan(row, v));
+                    }
+                  },
+                  onChangeEnd: (v) {
+                    final oldPan = _tabletMixerRowPanDragStart.remove(row) ?? v;
+                    final latestGroup =
+                        group == null ? null : _trackGroupById(group.id);
+                    final newPan = latestGroup?.pan ??
+                        (row < _rowPan.length ? _rowPan[row] : v);
+                    unawaited(_commitRowPanFromUi(
+                      row,
+                      oldPan,
+                      newPan,
+                      source: 'right_panel_mixer_pan',
+                    ));
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      }
+
+      void toggleExpanded() {
+        setState(() {
+          if (expanded) {
+            _tabletMixerExpandedRows.remove(row);
+          } else {
+            _tabletMixerExpandedRows.add(row);
+          }
+        });
+      }
+
+      return Semantics(
+        button: true,
+        label: expanded ? 'Collapse $rowName mixer' : 'Expand $rowName mixer',
+        child: AnimatedSize(
+          duration: const Duration(milliseconds: 170),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          clipBehavior: Clip.hardEdge,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+            decoration: panelCardDecoration(accent: accent, alpha: 0.68),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.start,
+              children: [
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: toggleExpanded,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          rowName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: Color(0xFFF4F4F4),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            height: 1.0,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 92),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: levelColor.withValues(alpha: 0.22),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: levelTextColor.withValues(alpha: 0.62),
+                            ),
+                          ),
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerRight,
+                            child: Text(
+                              levelLabel,
+                              maxLines: 1,
+                              softWrap: false,
+                              style: TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: levelTextColor,
+                                fontSize: 11.8,
+                                fontWeight: FontWeight.w900,
+                                height: 1.0,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        width: 26,
+                        height: 26,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(
+                            alpha: expanded ? 0.18 : 0.10,
+                          ),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.12),
+                          ),
+                        ),
+                        child: Icon(
+                          expanded
+                              ? Icons.keyboard_arrow_up_rounded
+                              : Icons.keyboard_arrow_down_rounded,
+                          size: 18,
+                          color: Colors.white.withValues(alpha: 0.86),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 7),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: expanded ? null : toggleExpanded,
+                  child: Column(
+                    children: [
+                      MiniStereoMeterHorizontal(
+                        frame: frame,
+                        width: math.max(0.0, panelWidth - 52),
+                        height: 15,
+                      ),
+                    ],
+                  ),
+                ),
+                expandedSliders(),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget panelLabel(String label, String value) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
+        ),
+        child: Row(
+          children: [
+            Text(
+              L10n.translate(context, label),
+              style: TextStyle(
+                fontFamily: 'Pretendard',
+                color: Colors.white.withValues(alpha: 0.62),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                  fontFamily: 'Pretendard',
+                  color: Color(0xFFF4F4F4),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    Widget panelSectionTitle(String title, {String? value}) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(2, 0, 2, 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontFamily: 'Pretendard',
+                  color: Colors.white.withValues(alpha: 0.74),
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.8,
+                  height: 1.0,
+                ),
+              ),
+            ),
+            if (value != null)
+              Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.fade,
+                softWrap: false,
+                style: const TextStyle(
+                  fontFamily: 'Pretendard',
+                  color: Color(0xFFF4F4F4),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  height: 1.0,
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+
+    Widget compactPillButton({
+      required String label,
+      required IconData icon,
+      required VoidCallback onTap,
+    }) {
+      return Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: onTap,
+          child: Ink(
+            height: 34,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 15, color: const Color(0xFFF4F4F4)),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Color(0xFFF4F4F4),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      height: 1.0,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget clipPanelActionPill({
+      required String label,
+      required IconData icon,
+      required VoidCallback? onTap,
+      Color color = const Color(0xFFF4F4F4),
+    }) {
+      final enabled = onTap != null;
+      return Opacity(
+        opacity: enabled ? 1.0 : 0.45,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(13),
+            onTap: onTap,
+            child: Ink(
+              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.075),
+                borderRadius: BorderRadius.circular(13),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.10),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 15, color: color.withValues(alpha: 0.92)),
+                  const SizedBox(width: 7),
+                  Text(
+                    L10n.translate(context, label),
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: color.withValues(alpha: 0.94),
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      height: 1.0,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget clipTempoModeButton({
+      required String label,
+      required bool selected,
+      required VoidCallback onTap,
+    }) {
+      return Expanded(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 130),
+            curve: Curves.easeOutCubic,
+            margin: const EdgeInsets.all(2),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: selected
+                  ? Colors.white.withValues(alpha: 0.20)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(11),
+              border: selected
+                  ? Border.all(color: Colors.white.withValues(alpha: 0.13))
+                  : null,
+            ),
+            child: Text(
+              L10n.translate(context, label),
+              maxLines: 1,
+              overflow: TextOverflow.fade,
+              softWrap: false,
+              style: TextStyle(
+                fontFamily: 'Pretendard',
+                color: selected
+                    ? const Color(0xFFF4F4F4)
+                    : Colors.white.withValues(alpha: 0.66),
+                fontSize: 10.5,
+                fontWeight: FontWeight.w800,
+                height: 1.0,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget clipStepButton({
+      required IconData icon,
+      required VoidCallback onTap,
+    }) {
+      return Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: onTap,
+          child: Ink(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.075),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+            ),
+            child: Icon(
+              icon,
+              size: 16,
+              color: const Color(0xFFF4F4F4),
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget selectedAudioClipOptions() {
+      final clipIndex = _tabletAudioClipOptionsIndex;
+      if (!_isValidAudioClipOptionsIndex(clipIndex)) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _tabletAudioClipOptionsIndex != null) {
+            _closeTabletAudioClipOptions();
+          }
+        });
+        return const SizedBox.shrink();
+      }
+      final index = clipIndex!;
+      final clip = _audioTracks[index];
+      final accent = const Color(0xFF8A919D);
+      final pitch = clip.pitchSemitones
+          .clamp(_kClipPitchMinSemitones, _kClipPitchMaxSemitones)
+          .toDouble();
+      final gain = clip.gain.clamp(0.0, 3.0).toDouble();
+      final pitchLabel =
+          '${pitch >= 0 ? '+' : ''}${pitch.toStringAsFixed(1)}st';
+
+      Future<void> applyPitch(double next) async {
+        await _setClipPitchLive(
+          index,
+          next
+              .clamp(_kClipPitchMinSemitones, _kClipPitchMaxSemitones)
+              .toDouble(),
+        );
+      }
+
+      Widget section({
+        required String title,
+        required Widget child,
+        Widget? trailing,
+      }) {
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(12, 11, 12, 12),
+          decoration: panelCardDecoration(accent: accent),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(child: panelSectionTitle(title)),
+                  if (trailing != null) trailing,
+                ],
+              ),
+              child,
+            ],
+          ),
+        );
+      }
+
+      return ListView(
+        physics: const ClampingScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
+        children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
+            decoration: panelCardDecoration(accent: accent),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.10),
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.audio_file_rounded,
+                        color: Color(0xFFF4F4F4),
+                        size: 18,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        L10n.translate(context, 'Audio Clip Options'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: Color(0xFFF4F4F4),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          height: 1.0,
+                        ),
+                      ),
+                    ),
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: _closeTabletAudioClipOptions,
+                        child: Ink(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.10),
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.close_rounded,
+                            color: Color(0xFFF4F4F4),
+                            size: 17,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  key: ValueKey(
+                      'tablet_audio_clip_name_${clip.engineClipId}_${clip.label}'),
+                  initialValue: _audioClipDisplayName(clip),
+                  maxLength: 48,
+                  onChanged: (value) {
+                    _tabletAudioClipOptionsNameDraft = value;
+                  },
+                  onFieldSubmitted: (value) {
+                    unawaited(_renameAudioClipFromPanel(index, value));
+                  },
+                  style: const TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: Color(0xFFF4F4F4),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  decoration: InputDecoration(
+                    counterText: '',
+                    isDense: true,
+                    labelText: L10n.translate(context, 'Clip name'),
+                    labelStyle: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.58),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    filled: true,
+                    fillColor: Colors.black.withValues(alpha: 0.16),
+                    contentPadding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.check_rounded, size: 17),
+                      color: const Color(0xFFF4F4F4),
+                      onPressed: () => unawaited(
+                        _renameAudioClipFromPanel(
+                          index,
+                          _tabletAudioClipOptionsNameDraft,
+                        ),
+                      ),
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(13),
+                      borderSide: BorderSide(
+                        color: Colors.white.withValues(alpha: 0.10),
+                      ),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(13),
+                      borderSide: BorderSide(
+                        color: Colors.white.withValues(alpha: 0.10),
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(13),
+                      borderSide: BorderSide(
+                        color: Colors.white.withValues(alpha: 0.34),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          section(
+            title: 'Tone',
+            trailing: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(999),
+                onTap: () => unawaited(
+                  _handleToggleClipNormalize(index, !clip.normalizeVolume),
+                ),
+                child: Ink(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: (clip.normalizeVolume
+                            ? const Color(0xFFD7DBE2)
+                            : Colors.white)
+                        .withValues(alpha: clip.normalizeVolume ? 0.24 : 0.08),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.13),
+                    ),
+                  ),
+                  child: Text(
+                    L10n.translate(context, 'Normalize'),
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Color(0xFFF4F4F4),
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w800,
+                      height: 1.0,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                PrettyGainSlider(
+                  value: gain,
+                  trackColor: accent,
+                  inactiveTrackColor: Colors.white.withValues(alpha: 0.16),
+                  thumbColor: const Color(0xFFF4F4F4),
+                  onChangeStart: (_) {
+                    _tabletAudioClipOptionsGainStart = gain;
+                  },
+                  onChanged: (value) {
+                    unawaited(_setClipGainLive(index, value));
+                  },
+                  onChangeEnd: (_) {
+                    unawaited(_commitTabletAudioClipGain(index));
+                  },
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Text(
+                      L10n.translate(context, 'Pitch'),
+                      style: const TextStyle(
+                        fontFamily: 'Pretendard',
+                        color: Color(0xFFF4F4F4),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      pitchLabel,
+                      style: TextStyle(
+                        fontFamily: 'Pretendard',
+                        color: Colors.white.withValues(alpha: 0.82),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    clipStepButton(
+                      icon: Icons.remove_rounded,
+                      onTap: () {
+                        _tabletAudioClipOptionsPitchStart ??= pitch;
+                        unawaited(applyPitch(pitch - 0.5).then(
+                          (_) => _commitTabletAudioClipPitch(index),
+                        ));
+                      },
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: SliderTheme(
+                        data: SliderTheme.of(context).copyWith(
+                          trackHeight: 5,
+                          activeTrackColor: accent,
+                          inactiveTrackColor:
+                              Colors.white.withValues(alpha: 0.16),
+                          thumbColor: const Color(0xFFF4F4F4),
+                          overlayShape: SliderComponentShape.noOverlay,
+                        ),
+                        child: Slider(
+                          value: pitch,
+                          min: _kClipPitchMinSemitones,
+                          max: _kClipPitchMaxSemitones,
+                          divisions: 48,
+                          onChangeStart: (_) {
+                            _tabletAudioClipOptionsPitchStart = pitch;
+                          },
+                          onChanged: (value) {
+                            unawaited(applyPitch(value));
+                          },
+                          onChangeEnd: (_) {
+                            unawaited(_commitTabletAudioClipPitch(index));
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 7),
+                    clipStepButton(
+                      icon: Icons.add_rounded,
+                      onTap: () {
+                        _tabletAudioClipOptionsPitchStart ??= pitch;
+                        unawaited(applyPitch(pitch + 0.5).then(
+                          (_) => _commitTabletAudioClipPitch(index),
+                        ));
+                      },
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          section(
+            title: 'Tempo',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(13),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.08),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      clipTempoModeButton(
+                        label: 'Off',
+                        selected: !clip.stretchToProjectTempo,
+                        onTap: () => unawaited(
+                          _handleDisableClipTempoFollow(index),
+                        ),
+                      ),
+                      clipTempoModeButton(
+                        label: 'Resample',
+                        selected: clip.stretchToProjectTempo &&
+                            !clip.tempoStretchPreservePitch,
+                        onTap: () => unawaited(_handleAdjustClipToTempo(index)),
+                      ),
+                      clipTempoModeButton(
+                        label: 'Stretch',
+                        selected: clip.stretchToProjectTempo &&
+                            clip.tempoStretchPreservePitch,
+                        onTap: () => unawaited(
+                          _handleStretchClipToTempoPreservePitch(index),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 7,
+                  runSpacing: 7,
+                  children: [
+                    clipPanelActionPill(
+                      icon: Icons.swap_horiz_rounded,
+                      label: clip.isReversed ? 'Reversed' : 'Reverse',
+                      color: clip.isReversed
+                          ? const Color(0xFFD7DBE2)
+                          : const Color(0xFFF4F4F4),
+                      onTap: () => unawaited(
+                        _setAudioClipReversedFromPanel(
+                          index,
+                          !clip.isReversed,
+                        ),
+                      ),
+                    ),
+                    clipPanelActionPill(
+                      icon: Icons.auto_fix_high_rounded,
+                      label: 'Set BPM',
+                      onTap: () => unawaited(
+                        _handleDetectClipTempoAndSetProjectTempo(index),
+                      ),
+                    ),
+                    clipPanelActionPill(
+                      icon: Icons.blur_linear_rounded,
+                      label: 'Warp Pro',
+                      color: const Color(0xFF78D9FF),
+                      onTap: PlatformCapabilities.current.isDesktop
+                          ? () => unawaited(_openClipWarpEditor(index))
+                          : null,
+                    ),
+                    clipPanelActionPill(
+                      icon: Icons.graphic_eq_rounded,
+                      label: 'Pitch Lab',
+                      color: const Color(0xFF8BE7C8),
+                      onTap: () => unawaited(_openAudioPitchLabForClip(index)),
+                    ),
+                    clipPanelActionPill(
+                      icon: Icons.library_music_outlined,
+                      label: 'Split vocals',
+                      onTap: () =>
+                          unawaited(_handleStemSeparationForClip(index)),
+                    ),
+                    clipPanelActionPill(
+                      icon: Icons.keyboard_alt_outlined,
+                      label: 'Sampler',
+                      color: const Color(0xFFD7DBE2),
+                      onTap: () =>
+                          unawaited(_createSamplerFromAudioClip(index)),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    Widget selectedRowInspector() {
+      if (_rowCount == 0) return const SizedBox.shrink();
+      if (_tabletAudioClipOptionsIndex != null) {
+        final clipOptions = selectedAudioClipOptions();
+        if (clipOptions is! SizedBox) return clipOptions;
+      }
+      final row = _selectedRow.clamp(0, _rowCount - 1).toInt();
+      final rowInfo = _rows[row];
+      final group = rowInfo.groupId.trim().isEmpty
+          ? null
+          : _trackGroups
+              .where((item) => item.id == rowInfo.groupId.trim())
+              .cast<TrackGroup?>()
+              .firstOrNull;
+      final color = rowInfo.color == 0
+          ? const Color(0xFF1194FF)
+          : Color(rowInfo.color).withValues(alpha: 1.0);
+
+      Widget rowActionsCard() {
+        return Container(
+          padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
+          decoration: panelCardDecoration(accent: color),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              panelSectionTitle('ROW ACTIONS'),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: compactPillButton(
+                      label: 'Show Row',
+                      icon: Icons.open_in_full_rounded,
+                      onTap: () => _timelineController.ensureRowExpanded(
+                        row,
+                        tab: _tabletRowDetailTab,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: compactPillButton(
+                      label: 'Collapse',
+                      icon: Icons.unfold_less_rounded,
+                      onTap: _timelineController.collapseExpandedRows,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      }
+
+      return AnimatedBuilder(
+        animation: _meters,
+        builder: (context, _) {
+          final frame =
+              row < _meters.rows.length ? _meters.rows[row] : MeterFrame.zero;
+          final peakDb = _heldPeakDbForRow(row, frame);
+          return ListView(
+            physics: const ClampingScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
+            children: [
+              Container(
+                padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
+                decoration: panelCardDecoration(accent: color),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 14,
+                          height: 14,
+                          decoration: BoxDecoration(
+                            color: color,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.40),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _mixerDisplayNameForRow(row),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontFamily: 'Pretendard',
+                              color: Color(0xFFF4F4F4),
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                              height: 1.0,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          _technicalLevelLabel(peakDb),
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: Color(0xFFF4F4F4),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    MiniStereoMeterHorizontal(
+                      frame: frame,
+                      width: panelWidth - 48,
+                      height: 16,
+                    ),
+                    const SizedBox(height: 12),
+                    panelLabel(
+                      'Type',
+                      L10n.translate(
+                        context,
+                        rowInfo.isInstrumentLane ? 'MIDI Lane' : 'Audio Row',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    panelLabel(
+                      'Group',
+                      group?.name ?? L10n.translate(context, 'None'),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              rowActionsCard(),
+            ],
+          );
+        },
+      );
+    }
+
+    Widget selectedRowEffects() {
+      if (_rowCount == 0) return const SizedBox.shrink();
+      final row = _selectedRow.clamp(0, _rowCount - 1).toInt();
+      final selectedFxIndex =
+          _tabletSelectedRowFxRow == row ? _tabletSelectedRowFxIndex : null;
+
+      if (selectedFxIndex != null && selectedFxIndex >= 0) {
+        return SingleChildScrollView(
+          physics: const ClampingScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(0, 0, 0, 12),
+          child: RowEffectsPanel(
+            key: ValueKey('tablet_right_row_fx_params_${row}_$selectedFxIndex'),
+            rowIndex: row,
+            mode: _resolvedMode,
+            isProEntitled: _isProEntitled,
+            onUpgradeRequested: widget.onUpgradeRequested,
+            minHeight: 220,
+            parameterOnly: true,
+            selectedEffectIndex: selectedFxIndex,
+            onEffectDeselected: () {
+              if (_tabletSelectedRowFxRow != row ||
+                  _tabletSelectedRowFxIndex != selectedFxIndex) {
+                return;
+              }
+              setState(() {
+                _tabletSelectedRowFxRow = null;
+                _tabletSelectedRowFxIndex = null;
+              });
+            },
+            getEffectsForRow: (row) =>
+                JuceAudioEngine.getTrackEffectsForRow(row),
+            getEffectIdsForRow: (row) =>
+                JuceAudioEngine.getTrackEffectIdsForRow(row),
+            getBypassStateForRow: (row, effectIndex) =>
+                JuceAudioEngine.getRowEffectBypassState(row, effectIndex),
+            setBypassForRow: (row, effectIndex, bypass) async {
+              await _undoManager.execute(
+                BypassEffectAction(
+                  row: row,
+                  effectIndex: effectIndex,
+                  oldState: !bypass,
+                  newState: bypass,
+                  onChange: () {
+                    _refreshAudioEditorView();
+                    _refreshRowFx(row);
+                  },
+                ),
+              );
+              _recordProducerManualEdit('row_fx_bypass', {
+                'row': row,
+                'index': effectIndex,
+                'bypassed': bypass,
+              });
+            },
+            reorderEffectsForRow: (row, from, to) async {
+              await _undoManager.execute(
+                ReorderEffectAction(
+                  row: row,
+                  from: from,
+                  to: to,
+                  onChange: () {
+                    _refreshAudioEditorView();
+                    _refreshRowFx(row);
+                  },
+                ),
+              );
+              _recordProducerManualEdit('row_fx_reorder', {
+                'row': row,
+                'from': from,
+                'to': to,
+              });
+              _scheduleAutomationTargetsRefreshForRow(row);
+            },
+            removeEffectFromRow:
+                (row, effectIndex, name, applyingPreset) async {
+              if (applyingPreset) {
+                await JuceAudioEngine.removeTrackEffect(row, effectIndex);
+                _syncTabletRowFxSelectionAfterRemove(row, effectIndex);
+                return;
+              }
+              await _undoManager.execute(
+                RemoveEffectAction(
+                  row: row,
+                  effectIndex: effectIndex,
+                  pathOrName: name,
+                  onChange: () {
+                    _refreshAudioEditorView();
+                    _refreshRowFx(row);
+                  },
+                ),
+              );
+              _syncTabletRowFxSelectionAfterRemove(row, effectIndex);
+              _recordProducerManualEdit('row_fx_remove', {
+                'row': row,
+                'index': effectIndex,
+                'effect': name,
+              });
+              _trackPluginRemoved(
+                pluginName: name,
+                scope: 'track',
+                rowIndex: row,
+              );
+              _scheduleAutomationTargetsRefreshForRow(row);
+            },
+            insertEffectOnRow: (row, pathOrName) async {
+              final action = InsertEffectAction(
+                row: row,
+                pathOrName: pathOrName,
+                onChange: () {
+                  _refreshAudioEditorView();
+                  _refreshRowFx(row);
+                },
+              );
+              await _undoManager.execute(action);
+              if (action.inserted) {
+                _scheduleAutomationTargetsRefreshForRow(row);
+              }
+              if (!action.inserted) {
+                _showSmallNotice('Could not load this effect plugin.');
+                return;
+              }
+              _recordProducerManualEdit('row_fx_insert', {
+                'row': row,
+                'effect': pathOrName,
+              });
+              _trackPluginInserted(
+                pluginName: pathOrName,
+                scope: 'track',
+                rowIndex: row,
+              );
+            },
+            getTrackPluginParameters: (row, effectIndex) =>
+                JuceAudioEngine.getTrackPluginParameters(row, effectIndex),
+            scanPlugins: () => _scanDesktopPlugins(),
+            openTrackPluginEditor: PlatformCapabilities.current.isDesktop &&
+                    _platformCapabilities.nativePluginEditor
+                ? (row, effectIndex) =>
+                    JuceAudioEngine.openTrackPluginEditor(row, effectIndex)
+                : null,
+            setTrackEffectParam: (row, effectIndex, paramId, value) async {
+              await JuceAudioEngine.setTrackEffect(
+                row,
+                effectIndex,
+                paramId,
+                value,
+              );
+              _updateAutomationTargetBaselineForEffectParameter(
+                row: row,
+                effectIndex: effectIndex,
+                paramId: paramId,
+                value: value,
+                master: false,
+              );
+            },
+            onPluginParamCommit: (row, idx, paramId, oldValue, newValue) async {
+              await _undoManager.execute(
+                SetEffectParamAction(
+                  row: row,
+                  effectIndex: idx,
+                  paramId: paramId,
+                  oldValue: oldValue,
+                  newValue: newValue,
+                  onChange: () {
+                    _refreshAudioEditorView();
+                    _refreshRowFx(row);
+                  },
+                ),
+              );
+              _recordProducerManualEdit('row_fx_param', {
+                'row': row,
+                'index': idx,
+                'param_id': paramId,
+                'old_value': oldValue,
+                'new_value': newValue,
+              });
+              unawaited(
+                _trackPluginParameterCommitted(
+                  scope: 'track',
+                  rowIndex: row,
+                  effectIndex: idx,
+                  paramId: paramId,
+                  oldValue: oldValue,
+                  newValue: newValue,
+                ),
+              );
+            },
+            onPresetCommit: (before, after) async {
+              await _undoManager.execute(
+                TrackPresetChangeAction(
+                  before: before,
+                  after: after,
+                  onChange: () {
+                    _refreshAudioEditorView();
+                    unawaited(_refreshAutomationTargetsForRow(before.row));
+                  },
+                ),
+              );
+              _recordProducerManualEdit('row_preset_commit', {
+                'row': before.row,
+                'before_count': before.effects.length,
+                'after_count': after.effects.length,
+              });
+              _scheduleAutomationTargetsRefreshForRow(before.row);
+            },
+            onRequestAutomateParameter: _requestRowEffectAutomationClip,
+            onHeightChanged: (_) {},
+            projectBpm: _tempo,
+            meters: _meters,
+            getRowCompressorMeter: (row, fx) =>
+                JuceAudioEngine.getRowCompressorMeter(row, fx),
+            getRowEqWaveform: (row, fx, sampleCount) =>
+                JuceAudioEngine.getRowEqWaveform(
+              row,
+              fx,
+              sampleCount: sampleCount,
+            ),
+            getRowStereoScope: (row, fx, pointCount) =>
+                JuceAudioEngine.getRowStereoScope(
+              row,
+              fx,
+              pointCount: pointCount,
+            ),
+            tutorialHighlighter: _mixHighlighter,
+          ),
+        );
+      }
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
+        child: SizedBox(
+          width: double.infinity,
+          height: double.infinity,
+          child: Center(
+            child: Text(
+              L10n.translate(context, 'No Plugin Selected'),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontFamily: 'Pretendard',
+                color: Colors.white.withValues(alpha: 0.54),
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                height: 1.0,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget exportPanelButton({
+      required String label,
+      required VoidCallback onTap,
+      bool primary = false,
+    }) {
+      return SizedBox(
+        height: 38,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(19),
+            onTap: onTap,
+            child: Ink(
+              decoration: BoxDecoration(
+                color: primary
+                    ? const Color(0xFFF4F4F4).withValues(alpha: 0.84)
+                    : const Color(0xFFF4F4F4).withValues(alpha: 0.20),
+                borderRadius: BorderRadius.circular(19),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: primary ? 0.0 : 0.12),
+                ),
+                boxShadow: <BoxShadow>[
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.18),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Center(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: primary
+                        ? const Color(0xFF15436C)
+                        : const Color(0xFFF4F4F4),
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                    height: 1.0,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget containedExportProgressPanel() {
+      final progress = _containedExportProgress.clamp(0.0, 1.0).toDouble();
+      final exportingLabel = ExportProgressUi.normalizedExportingLabel(
+        L10n.translate(context, 'Exporting...'),
+      );
+      final dots = ExportProgressUi.animatedDots(_containedExportEllipsisStep);
+      final progressLabel = ExportProgressUi.progressPercentLabel(progress);
+
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final contentWidth =
+              math.min(150.0, math.max(112.0, constraints.maxWidth - 26.0));
+          return ListView(
+            physics: const ClampingScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(10, 20, 10, 12),
+            children: [
+              Center(
+                child: SizedBox(
+                  width: contentWidth,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            exportingLabel,
+                            maxLines: 1,
+                            softWrap: false,
+                            style: const TextStyle(
+                              fontFamily: 'Pretendard',
+                              color: Color(0xFFF4F4F4),
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w800,
+                              height: 1.0,
+                            ),
+                          ),
+                          SizedBox(
+                            width: 18,
+                            child: Text(
+                              dots,
+                              maxLines: 1,
+                              softWrap: false,
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Color(0xFFF4F4F4),
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w800,
+                                height: 1.0,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Semantics(
+                        label: L10n.translate(context, 'Export progress'),
+                        value: progressLabel,
+                        child: Container(
+                          key: const ValueKey(
+                            'tablet_export_progress_track',
+                          ),
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color:
+                                const Color(0xFFF4F4F4).withValues(alpha: 0.22),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: FractionallySizedBox(
+                              widthFactor: progress,
+                              child: Container(
+                                key: const ValueKey(
+                                  'tablet_export_progress_fill',
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF4F4F4),
+                                  borderRadius: BorderRadius.circular(999),
+                                  boxShadow: <BoxShadow>[
+                                    BoxShadow(
+                                      color: const Color(0xFF2596F9)
+                                          .withValues(alpha: 0.30),
+                                      blurRadius: 10,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 17),
+                      exportPanelButton(
+                        label: L10n.translate(context, 'Cancel'),
+                        onTap: _cancelContainedExportProgress,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      );
+    }
+
+    Widget containedExportSuccessPanel() {
+      final filePath = _containedExportFilePath;
+      if (filePath == null || filePath.trim().isEmpty) {
+        return selectedRowInspector();
+      }
+      final success = ExportSuccessScreen(
+        filePath: filePath,
+        previewFilePath: _containedExportPreviewFilePath,
+        savedFilePath: _containedExportSavedFilePath,
+        savedFileName: _containedExportSavedFileName,
+        isVideo: false,
+      );
+      final previewPath = success._resolvedPreviewPath();
+      final displayName = success._resolvedFileName();
+
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final contentWidth =
+              math.min(250.0, math.max(128.0, constraints.maxWidth - 22.0));
+          final buttonsCanFit = contentWidth >= 238.0;
+          final openButton = exportPanelButton(
+            label: success._openSavedLabel(context),
+            onTap: () => success._openSavedFile(context),
+          );
+          final shareButton = exportPanelButton(
+            label: L10n.translate(context, 'Share'),
+            onTap: () => success._shareFile(context),
+            primary: true,
+          );
+          final exportAgainButton = exportPanelButton(
+            label: L10n.translate(context, 'Export again'),
+            onTap: () {
+              setState(() {
+                _containedExportPanelStage = _ContainedExportPanelStage.idle;
+                _containedExportProgress = 0.0;
+              });
+            },
+          );
+
+          return ListView(
+            physics: const ClampingScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(10, 18, 10, 12),
+            children: [
+              Center(
+                child: SizedBox(
+                  width: contentWidth,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        L10n.translate(context, 'Successfully Exported!'),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: Color(0xFFF4F4F4),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          height: 18 / 15,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      ExportSuccessPreviewPlayer(
+                        key: ValueKey('tablet_export_preview_$previewPath'),
+                        filePath: previewPath,
+                        displayName: displayName,
+                        isVideo: false,
+                        figmaCompact: true,
+                      ),
+                      const SizedBox(height: 16),
+                      if (buttonsCanFit)
+                        Column(
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(child: shareButton),
+                                const SizedBox(width: 10),
+                                Expanded(child: openButton),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            exportAgainButton,
+                          ],
+                        )
+                      else
+                        Column(
+                          children: [
+                            shareButton,
+                            const SizedBox(height: 10),
+                            openButton,
+                            const SizedBox(height: 10),
+                            exportAgainButton,
+                          ],
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      );
+    }
+
+    Widget containedExportSettingsPanel() {
+      final highQualityExport = _canUseSubscriptionCapability(
+        SubscriptionCapability.highQualityExport,
+        fallback: widget.isProEntitled ?? true,
+      );
+      final nativeWavOnly = _desktopNativeWavOnlyExport;
+      var settings = _normalizeAudioExportSettings(_audioExportSettings);
+      if (nativeWavOnly && settings.format != _ExportAudioFormat.wav) {
+        settings = _AudioExportSettings(
+          format: _ExportAudioFormat.wav,
+          sampleRate: settings.sampleRate,
+          wavBitDepth: settings.wavBitDepth,
+          wavDithering: settings.wavDithering,
+          mp3BitrateKbps: settings.mp3BitrateKbps,
+          mp3Mode: settings.mp3Mode,
+          mp3VbrQuality: settings.mp3VbrQuality,
+          channelMode: _ExportChannelMode.stereo,
+          normalize: false,
+          normalizeTargetDb: settings.normalizeTargetDb,
+          resampleQuality: _ExportResampleQuality.best,
+        );
+      }
+      const exportBlue = Color(0xFF258AE6);
+      final mutedText = Colors.white.withValues(alpha: 0.78);
+      final sampleRateOptions = highQualityExport
+          ? _exportSampleRatesForFormat(settings.format)
+          : const <int>[44100];
+
+      void applySettings({
+        _ExportAudioFormat? format,
+        int? sampleRate,
+        int? wavBitDepth,
+        bool? wavDithering,
+        int? mp3BitrateKbps,
+        _ExportMp3Mode? mp3Mode,
+        int? mp3VbrQuality,
+        _ExportChannelMode? channelMode,
+        bool? normalize,
+        double? normalizeTargetDb,
+        _ExportResampleQuality? resampleQuality,
+      }) {
+        final current = _audioExportSettings;
+        final nextFormat = nativeWavOnly
+            ? _ExportAudioFormat.wav
+            : (format ??
+                (highQualityExport ? current.format : _ExportAudioFormat.mp3));
+        final nextSampleRate = highQualityExport
+            ? _normalizeExportSampleRateForFormat(
+                nextFormat,
+                sampleRate ?? current.sampleRate,
+              )
+            : 44100;
+        setState(() {
+          _audioExportSettings = _AudioExportSettings(
+            format: nextFormat,
+            sampleRate: nextSampleRate,
+            wavBitDepth:
+                highQualityExport ? (wavBitDepth ?? current.wavBitDepth) : 16,
+            wavDithering: wavDithering ?? current.wavDithering,
+            mp3BitrateKbps: mp3BitrateKbps ?? current.mp3BitrateKbps,
+            mp3Mode: mp3Mode ?? current.mp3Mode,
+            mp3VbrQuality: mp3VbrQuality ?? current.mp3VbrQuality,
+            channelMode: nativeWavOnly || !highQualityExport
+                ? _ExportChannelMode.stereo
+                : (channelMode ?? current.channelMode),
+            normalize: nativeWavOnly || !highQualityExport
+                ? false
+                : (normalize ?? current.normalize),
+            normalizeTargetDb: (normalizeTargetDb ?? current.normalizeTargetDb)
+                .clamp(
+                  _kExportNormalizeTargetDbMin,
+                  _kExportNormalizeTargetDbMax,
+                )
+                .toDouble(),
+            resampleQuality: nativeWavOnly || !highQualityExport
+                ? _ExportResampleQuality.best
+                : (resampleQuality ?? current.resampleQuality),
+          );
+        });
+      }
+
+      Widget dropdownField<T>({
+        required String label,
+        required T value,
+        required List<T> options,
+        required ValueChanged<T?> onChanged,
+        required String Function(T) textBuilder,
+      }) {
+        return _buildMixroomDropdownField<T>(
+          label: label,
+          value: value,
+          options: options,
+          textBuilder: textBuilder,
+          onChanged: onChanged,
+          height: 50,
+          radius: 18,
+          accentColor: exportBlue,
+        );
+      }
+
+      Widget formatOption({
+        required _ExportAudioFormat format,
+        required String label,
+        required BorderRadius borderRadius,
+        required bool enabled,
+      }) {
+        final selected = settings.format == format;
+        return Expanded(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: enabled
+                ? () => applySettings(format: format)
+                : () {
+                    if (!highQualityExport &&
+                        format != _ExportAudioFormat.mp3) {
+                      _showUpgradeRequired(
+                        title: format == _ExportAudioFormat.flac
+                            ? 'Upgrade to export FLAC'
+                            : 'Upgrade to export WAV',
+                        message:
+                            'WAV, FLAC, and 24-bit / 48 kHz quality are available on Starter and higher plans.',
+                        icon: format == _ExportAudioFormat.flac
+                            ? Icons.lock_outline_rounded
+                            : Icons.audio_file_outlined,
+                      );
+                    }
+                  },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 140),
+              height: 44,
+              decoration: BoxDecoration(
+                color: selected
+                    ? const Color.fromRGBO(244, 244, 244, 0.26)
+                    : (enabled
+                        ? Colors.transparent
+                        : Colors.white.withValues(alpha: 0.025)),
+                borderRadius: borderRadius,
+                border: Border.all(
+                  color: selected
+                      ? Colors.white.withValues(alpha: 0.34)
+                      : (enabled
+                          ? Colors.transparent
+                          : Colors.white.withValues(alpha: 0.08)),
+                  width: 1.2,
+                ),
+              ),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (!enabled &&
+                          !nativeWavOnly &&
+                          format != _ExportAudioFormat.mp3) ...[
+                        Icon(
+                          Icons.lock_outline_rounded,
+                          size: 14,
+                          color: Colors.white.withValues(alpha: 0.52),
+                        ),
+                        const SizedBox(width: 4),
+                      ],
+                      Text(
+                        label,
+                        style: TextStyle(
+                          fontFamily: 'Pretendard',
+                          fontSize: 12,
+                          fontWeight:
+                              selected ? FontWeight.w900 : FontWeight.w800,
+                          color: !enabled
+                              ? Colors.white38
+                              : (selected
+                                  ? const Color(0xFFF4F4F4)
+                                  : mutedText),
+                        ),
+                      ),
+                      if (selected) ...[
+                        const SizedBox(width: 5),
+                        Icon(
+                          Icons.check_circle_rounded,
+                          size: 15,
+                          color: Colors.white.withValues(alpha: 0.92),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+
+      Widget lockedUpgradeRow(String label, IconData icon) {
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _showUpgradeRequired(
+            title: 'Upgrade for higher quality export',
+            message:
+                'WAV export and 24-bit / 48 kHz quality are available on Starter and higher plans.',
+            icon: Icons.lock_outline_rounded,
+          ),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.035),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            ),
+            child: Row(
+              children: [
+                Icon(icon,
+                    color: Colors.white.withValues(alpha: 0.44), size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    L10n.translate(context, label),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.48),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                Icon(
+                  Icons.lock_outline_rounded,
+                  color: Colors.white.withValues(alpha: 0.52),
+                  size: 15,
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+
+      Widget advancedOptions() {
+        final isWav =
+            settings.format == _ExportAudioFormat.wav || nativeWavOnly;
+        return AnimatedSize(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: ClipRect(
+            child: Align(
+              alignment: Alignment.topCenter,
+              heightFactor: _tabletExportAdvancedOpen ? 1.0 : 0.0,
+              child: IgnorePointer(
+                ignoring: !_tabletExportAdvancedOpen,
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 160),
+                  opacity: _tabletExportAdvancedOpen ? 1.0 : 0.0,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const SizedBox(height: 10),
+                      dropdownField<int>(
+                        label: 'Sample rate',
+                        value: settings.sampleRate,
+                        options: sampleRateOptions,
+                        textBuilder: (value) => '$value Hz',
+                        onChanged: (value) {
+                          if (value != null) applySettings(sampleRate: value);
+                        },
+                      ),
+                      if (!nativeWavOnly && !highQualityExport) ...[
+                        const SizedBox(height: 10),
+                        lockedUpgradeRow(
+                          '48 kHz export',
+                          Icons.graphic_eq_rounded,
+                        ),
+                        const SizedBox(height: 10),
+                        lockedUpgradeRow(
+                          '24-bit WAV export',
+                          Icons.audio_file_outlined,
+                        ),
+                        const SizedBox(height: 10),
+                        lockedUpgradeRow(
+                          'FLAC export',
+                          Icons.lock_outline_rounded,
+                        ),
+                      ],
+                      if (!nativeWavOnly && highQualityExport) ...[
+                        const SizedBox(height: 10),
+                        dropdownField<_ExportChannelMode>(
+                          label: 'Channels',
+                          value: settings.channelMode,
+                          options: _ExportChannelMode.values,
+                          textBuilder: (value) =>
+                              value == _ExportChannelMode.stereo
+                                  ? L10n.translate(context, 'Stereo')
+                                  : L10n.translate(context, 'Mono'),
+                          onChanged: (value) {
+                            if (value != null) {
+                              applySettings(channelMode: value);
+                            }
+                          },
+                        ),
+                        const SizedBox(height: 10),
+                        dropdownField<_ExportResampleQuality>(
+                          label: 'Resample quality',
+                          value: settings.resampleQuality,
+                          options: _ExportResampleQuality.values,
+                          textBuilder: (value) {
+                            switch (value) {
+                              case _ExportResampleQuality.draft:
+                                return L10n.translate(context, 'Draft (fast)');
+                              case _ExportResampleQuality.good:
+                                return L10n.translate(context, 'Good');
+                              case _ExportResampleQuality.best:
+                                return L10n.translate(context, 'Best');
+                            }
+                          },
+                          onChanged: (value) {
+                            if (value != null) {
+                              applySettings(resampleQuality: value);
+                            }
+                          },
+                        ),
+                        const SizedBox(height: 2),
+                        SwitchListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            L10n.translate(context, 'Normalize loudness'),
+                            style: TextStyle(
+                              color: mutedText,
+                              fontFamily: 'Pretendard',
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          value: settings.normalize,
+                          activeColor: exportBlue,
+                          onChanged: (value) => applySettings(normalize: value),
+                        ),
+                      ],
+                      if (!nativeWavOnly &&
+                          highQualityExport &&
+                          settings.normalize) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          L10n.translate(context, 'Limiter ceiling (dBTP)'),
+                          style: TextStyle(color: mutedText, fontSize: 11.5),
+                        ),
+                        SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            activeTrackColor: exportBlue,
+                            inactiveTrackColor:
+                                Colors.white.withValues(alpha: 0.14),
+                            thumbColor: Colors.white,
+                            overlayColor: exportBlue.withValues(alpha: 0.16),
+                            trackHeight: 4,
+                          ),
+                          child: Slider(
+                            value: settings.normalizeTargetDb,
+                            min: _kExportNormalizeTargetDbMin,
+                            max: _kExportNormalizeTargetDbMax,
+                            divisions: 17,
+                            label:
+                                '${settings.normalizeTargetDb.toStringAsFixed(1)} dB',
+                            onChanged: (value) => applySettings(
+                              normalizeTargetDb:
+                                  double.parse(value.toStringAsFixed(1)),
+                            ),
+                          ),
+                        ),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: _kExportNormalizeTargetsDb
+                              .map(
+                                (preset) => ChoiceChip(
+                                  label:
+                                      Text('${preset.toStringAsFixed(1)} dB'),
+                                  selected:
+                                      (settings.normalizeTargetDb - preset)
+                                              .abs() <
+                                          0.05,
+                                  labelStyle: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                  backgroundColor:
+                                      Colors.white.withValues(alpha: 0.05),
+                                  selectedColor:
+                                      exportBlue.withValues(alpha: 0.26),
+                                  side: BorderSide(
+                                    color: Colors.white.withValues(alpha: 0.16),
+                                  ),
+                                  onSelected: (_) => applySettings(
+                                    normalizeTargetDb: preset,
+                                  ),
+                                ),
+                              )
+                              .toList(growable: false),
+                        ),
+                      ],
+                      const SizedBox(height: 10),
+                      if (isWav) ...[
+                        dropdownField<int>(
+                          label: 'Bit depth',
+                          value: settings.wavBitDepth,
+                          options: _kExportWavBitDepths,
+                          textBuilder: (value) => '$value-bit',
+                          onChanged: (value) {
+                            if (value != null) {
+                              applySettings(wavBitDepth: value);
+                            }
+                          },
+                        ),
+                        const SizedBox(height: 2),
+                        SwitchListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            L10n.translate(context, 'Enable dithering'),
+                            style: TextStyle(
+                              color: mutedText,
+                              fontFamily: 'Pretendard',
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          value: settings.wavDithering,
+                          activeColor: exportBlue,
+                          onChanged: (value) =>
+                              applySettings(wavDithering: value),
+                        ),
+                      ] else ...[
+                        dropdownField<_ExportMp3Mode>(
+                          label: 'Encoding mode',
+                          value: settings.mp3Mode,
+                          options: _ExportMp3Mode.values,
+                          textBuilder: (value) =>
+                              value == _ExportMp3Mode.cbr ? 'CBR' : 'VBR',
+                          onChanged: (value) {
+                            if (value != null) applySettings(mp3Mode: value);
+                          },
+                        ),
+                        const SizedBox(height: 10),
+                        if (settings.mp3Mode == _ExportMp3Mode.cbr)
+                          dropdownField<int>(
+                            label: 'Bit rate',
+                            value: settings.mp3BitrateKbps,
+                            options: _kExportMp3Bitrates,
+                            textBuilder: (value) => '$value kbps',
+                            onChanged: (value) {
+                              if (value != null) {
+                                applySettings(mp3BitrateKbps: value);
+                              }
+                            },
+                          )
+                        else
+                          dropdownField<int>(
+                            label: 'VBR quality',
+                            value: settings.mp3VbrQuality,
+                            options: _kExportMp3VbrQualities,
+                            textBuilder: (value) =>
+                                'V$value (${L10n.translate(context, value == 0 ? "highest" : "smaller file")})',
+                            onChanged: (value) {
+                              if (value != null) {
+                                applySettings(mp3VbrQuality: value);
+                              }
+                            },
+                          ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+
+      return ListView(
+        physics: const ClampingScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(10, 14, 10, 12),
+        children: [
+          Text(
+            L10n.translate(context, 'Export'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontFamily: 'Pretendard',
+              color: Color(0xFFF4F4F4),
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+              color: const Color.fromRGBO(244, 244, 244, 0.10),
+            ),
+            child: Row(
+              children: [
+                formatOption(
+                  format: _ExportAudioFormat.wav,
+                  label: 'WAV',
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(22),
+                    bottomLeft: Radius.circular(22),
+                  ),
+                  enabled: highQualityExport || nativeWavOnly,
+                ),
+                Container(
+                  width: 1,
+                  height: 44,
+                  color: Colors.white.withValues(alpha: 0.12),
+                ),
+                formatOption(
+                  format: _ExportAudioFormat.mp3,
+                  label: 'MP3',
+                  borderRadius: BorderRadius.zero,
+                  enabled: !nativeWavOnly,
+                ),
+                Container(
+                  width: 1,
+                  height: 44,
+                  color: Colors.white.withValues(alpha: 0.12),
+                ),
+                formatOption(
+                  format: _ExportAudioFormat.flac,
+                  label: 'FLAC',
+                  borderRadius: const BorderRadius.only(
+                    topRight: Radius.circular(22),
+                    bottomRight: Radius.circular(22),
+                  ),
+                  enabled: highQualityExport && !nativeWavOnly,
+                ),
+              ],
+            ),
+          ),
+          if (nativeWavOnly) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color.fromRGBO(244, 244, 244, 0.10),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.09)),
+              ),
+              child: Text(
+                L10n.translate(
+                  context,
+                  'Windows desktop currently exports with native WAV render only. MP3 and post-processing controls are disabled.',
+                ),
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.86),
+                  fontSize: 11.5,
+                  height: 1.25,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              setState(() {
+                _tabletExportAdvancedOpen = !_tabletExportAdvancedOpen;
+              });
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              child: Row(
+                children: [
+                  Text(
+                    L10n.translate(context, 'Advanced options'),
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.82),
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const Spacer(),
+                  AnimatedRotation(
+                    turns: _tabletExportAdvancedOpen ? 0.5 : 0.0,
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOutCubic,
+                    child: Icon(Icons.keyboard_arrow_down, color: mutedText),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          advancedOptions(),
+          const SizedBox(height: 14),
+          exportPanelButton(
+            label: L10n.translate(context, 'Start export'),
+            primary: true,
+            onTap: () {
+              final selectedSettings = _normalizeAudioExportSettings(
+                _audioExportSettings,
+              );
+              unawaited(
+                _exportAndNavigate(
+                  selectedSettingsOverride: selectedSettings,
+                ),
+              );
+            },
+          ),
+        ],
+      );
+    }
+
+    Widget containedExportPanel() {
+      if (_containedExportPanelStage == _ContainedExportPanelStage.exporting) {
+        return containedExportProgressPanel();
+      }
+      if (_containedExportPanelStage == _ContainedExportPanelStage.success) {
+        return containedExportSuccessPanel();
+      }
+      return containedExportSettingsPanel();
+    }
+
+    Widget masterRackHeader() {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 58),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: <Color>[
+                const Color(0xFF123D62).withValues(alpha: 0.78),
+                const Color(0xFF163246).withValues(alpha: 0.70),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: const Color(0xFF62D8FF).withValues(alpha: 0.20),
+            ),
+            boxShadow: <BoxShadow>[
+              BoxShadow(
+                color: const Color(0xFF06243A).withValues(alpha: 0.28),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF62D8FF).withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: const Color(0xFF62D8FF).withValues(alpha: 0.24),
+                  ),
+                ),
+                child: Icon(
+                  Icons.surround_sound_outlined,
+                  size: 19,
+                  color: Colors.white.withValues(alpha: 0.92),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  L10n.translate(context, 'Master Rack'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: Color(0xFFF4F4F4),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                    height: 1.0,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    Widget masterRackMeterSurface({
+      required double peakDb,
+      required bool expanded,
+      required VoidCallback onToggle,
+      bool compact = false,
+    }) {
+      final levelLabel = _technicalLevelLabel(peakDb);
+      final levelColor = _technicalLevelColor(peakDb);
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final narrow =
+              constraints.maxWidth.isFinite && constraints.maxWidth < 250.0;
+          final tight =
+              constraints.maxWidth.isFinite && constraints.maxWidth < 190.0;
+          final horizontalPad = narrow ? 8.0 : 12.0;
+          final iconSize = tight ? 24.0 : (compact ? 26.0 : 30.0);
+          final gap = narrow ? 6.0 : 8.0;
+          final toggleLabel = L10n.translate(
+            context,
+            expanded ? 'Collapse Master Rack' : 'Expand Master Rack',
+          );
+
+          return Semantics(
+            button: true,
+            toggled: expanded,
+            label: toggleLabel,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onToggle,
+              onVerticalDragUpdate: (details) {
+                if (details.delta.dy < -2.0 && !expanded) {
+                  onToggle();
+                } else if (details.delta.dy > 3.0 && expanded) {
+                  onToggle();
+                }
+              },
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOutCubic,
+                    padding: EdgeInsets.fromLTRB(
+                      horizontalPad,
+                      compact ? 18 : 20,
+                      horizontalPad,
+                      11,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color.fromRGBO(95, 108, 126, 0.24),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: expanded
+                            ? const Color(0xFF1194FF).withValues(alpha: 0.34)
+                            : Colors.white.withValues(alpha: 0.10),
+                      ),
+                      boxShadow: <BoxShadow>[
+                        BoxShadow(
+                          color: Colors.black
+                              .withValues(alpha: expanded ? 0.28 : 0.18),
+                          blurRadius: expanded ? 18 : 12,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            if (!tight) ...[
+                              Container(
+                                width: iconSize,
+                                height: iconSize,
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.10),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Icon(
+                                  Icons.surround_sound_outlined,
+                                  size: compact ? 16 : 18,
+                                  color: Colors.white.withValues(alpha: 0.90),
+                                ),
+                              ),
+                              SizedBox(width: gap),
+                            ],
+                            Expanded(
+                              child: Text(
+                                L10n.translate(context, 'Master'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Colors.white.withValues(alpha: 0.92),
+                                  fontSize: compact ? 12 : 13,
+                                  fontWeight: FontWeight.w800,
+                                  height: 1.0,
+                                ),
+                              ),
+                            ),
+                            SizedBox(width: gap),
+                            Container(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: narrow ? 6 : 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: levelColor.withValues(alpha: 0.17),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: levelColor.withValues(alpha: 0.48),
+                                ),
+                              ),
+                              child: Text(
+                                levelLabel,
+                                maxLines: 1,
+                                overflow: TextOverflow.fade,
+                                softWrap: false,
+                                style: TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: levelColor,
+                                  fontSize: compact ? 9.5 : 10,
+                                  fontWeight: FontWeight.w800,
+                                  height: 1.0,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          width: double.infinity,
+                          height: compact ? 26 : 30,
+                          child: TrackGainStagingDbMeter(
+                            frame: _meters.master,
+                            showClipIndicator: false,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Positioned(
+                    top: -12,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: Tooltip(
+                        message: toggleLabel,
+                        waitDuration: const Duration(milliseconds: 450),
+                        child: Container(
+                          width: 36,
+                          height: 28,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: expanded
+                                ? const Color(0xFFF4F4F4)
+                                    .withValues(alpha: 0.90)
+                                : const Color.fromRGBO(63, 84, 104, 0.96),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: expanded
+                                  ? const Color(0xFF1194FF)
+                                      .withValues(alpha: 0.30)
+                                  : Colors.white.withValues(alpha: 0.16),
+                            ),
+                            boxShadow: <BoxShadow>[
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.24),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: Icon(
+                            expanded
+                                ? Icons.keyboard_arrow_down_rounded
+                                : Icons.keyboard_arrow_up_rounded,
+                            color: expanded
+                                ? const Color(0xFF15436C)
+                                : Colors.white.withValues(alpha: 0.88),
+                            size: 23,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    }
+
+    Widget masterRackControlsCard() {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 13),
+          decoration: panelCardDecoration(
+            accent: const Color(0xFF62D8FF),
+            alpha: 0.70,
+          ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final showStepButtons = constraints.maxWidth >= 252.0;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    L10n.translate(context, 'Master'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.82),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                      height: 1.0,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Builder(
+                    builder: (context) {
+                      Widget child = PrettyGainSlider(
+                        value: _masterGain,
+                        showStepButtons: showStepButtons,
+                        onLongPress: () => _showMasterMixAutomationSheet(
+                          paramId: 'gain',
+                          label: 'Master Gain',
+                          haloKeys: <String>[
+                            'master:gain',
+                            'master:param:gain',
+                          ],
+                        ),
+                        onChangeStart: (v) {
+                          _masterGainDragStart = v;
+                        },
+                        onChanged: (v) {
+                          setState(() => _masterGain = v);
+                          JuceAudioEngine.setMasterGain(v);
+                        },
+                        onChangeEnd: (v) {
+                          final oldGain = _masterGainDragStart ?? v;
+                          final newGain = _masterGain;
+                          if ((newGain - oldGain).abs() < 0.00001) {
+                            _masterGainDragStart = null;
+                            return;
+                          }
+                          _undoManager.execute(
+                            SetMasterGainAction(
+                              oldGain: oldGain,
+                              newGain: newGain,
+                              applyToState: (g) {
+                                setState(() {
+                                  _masterGain = g;
+                                });
+                              },
+                            ),
+                          );
+                          _recordProducerManualEdit('master_gain', {
+                            'old_gain': oldGain,
+                            'new_gain': newGain,
+                          });
+                          _masterGainDragStart = null;
+                        },
+                      );
+                      child = MultiHalo(
+                        highlighter: _mixHighlighter,
+                        haloKeys: const <HaloKey>[
+                          HaloKey('master:gain'),
+                          HaloKey('master:param:gain'),
+                        ],
+                        borderRadius: BorderRadius.circular(10),
+                        child: child,
+                      );
+                      return child;
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  Builder(
+                    builder: (context) {
+                      Widget child = PrettyStereoSlider(
+                        value: _masterPan,
+                        showStepButtons: showStepButtons,
+                        onLongPress: () => _showMasterMixAutomationSheet(
+                          paramId: 'pan',
+                          label: 'Master Pan',
+                          haloKeys: <String>[
+                            'master:pan',
+                            'master:param:pan',
+                          ],
+                        ),
+                        onChangeStart: (v) {
+                          _masterPanDragStart = v;
+                        },
+                        onChanged: (v) {
+                          setState(() => _masterPan = v);
+                          JuceAudioEngine.setMasterPan(v);
+                        },
+                        onChangeEnd: (v) {
+                          final oldPan = _masterPanDragStart ?? v;
+                          final newPan = _masterPan;
+                          if ((newPan - oldPan).abs() < 0.00001) {
+                            _masterPanDragStart = null;
+                            return;
+                          }
+                          _undoManager.execute(
+                            SetMasterPanAction(
+                              oldPan: oldPan,
+                              newPan: newPan,
+                              applyToState: (p) {
+                                setState(() {
+                                  _masterPan = p;
+                                });
+                              },
+                            ),
+                          );
+                          _recordProducerManualEdit('master_pan', {
+                            'old_pan': oldPan,
+                            'new_pan': newPan,
+                          });
+                          _masterPanDragStart = null;
+                        },
+                      );
+                      child = MultiHalo(
+                        highlighter: _mixHighlighter,
+                        haloKeys: const <HaloKey>[
+                          HaloKey('master:pan'),
+                          HaloKey('master:param:pan'),
+                        ],
+                        borderRadius: BorderRadius.circular(10),
+                        child: child,
+                      );
+                      return child;
+                    },
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      );
+    }
+
+    Widget tabletMasterPanel() {
+      return Column(
+        children: [
+          masterRackHeader(),
+          masterRackControlsCard(),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
+                    child: Text(
+                      L10n.translate(context, 'Master FX'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontFamily: 'Pretendard',
+                        color: Colors.white.withValues(alpha: 0.74),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                        height: 1.0,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: _buildMasterEffectsPage(
+                      addEffectTileFollowsEffectsInline: true,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    Widget panelBody() {
+      if (_tabletRightPanelTab == 'export' ||
+          _containedExportPanelStage == _ContainedExportPanelStage.exporting) {
+        return containedExportPanel();
+      }
+      if (_masterMeterExpanded) {
+        return tabletMasterPanel();
+      }
+      if (_tabletRightPanelTab == 'inspector') {
+        return selectedRowInspector();
+      }
+      if (_tabletRightPanelTab == 'fx') {
+        return selectedRowEffects();
+      }
+      return AnimatedBuilder(
+        animation: _meters,
+        builder: (context, _) {
+          return ListView.separated(
+            physics: const ClampingScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
+            itemCount: rowCount,
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            itemBuilder: (_, row) => rowPanel(row),
+          );
+        },
+      );
+    }
+
+    Widget animatedPanelBody() {
+      final bodyKey = _masterMeterExpanded
+          ? 'master'
+          : '${_tabletRightPanelTab}_${_containedExportPanelStage.name}';
+      return AnimatedSwitcher(
+        duration: const Duration(milliseconds: 220),
+        reverseDuration: const Duration(milliseconds: 190),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        layoutBuilder: (currentChild, previousChildren) {
+          return Stack(
+            fit: StackFit.expand,
+            alignment: Alignment.topCenter,
+            children: <Widget>[
+              ...previousChildren,
+              if (currentChild != null) currentChild,
+            ],
+          );
+        },
+        transitionBuilder: (child, animation) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          return ClipRect(
+            child: FadeTransition(
+              opacity: curved,
+              child: SizeTransition(
+                sizeFactor: curved,
+                alignment: const AlignmentDirectional(-1.0, -1.0),
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0, -0.03),
+                    end: Offset.zero,
+                  ).animate(curved),
+                  child: child,
+                ),
+              ),
+            ),
+          );
+        },
+        child: KeyedSubtree(
+          key: ValueKey<String>(bodyKey),
+          child: panelBody(),
+        ),
+      );
+    }
+
+    Widget panelSecondaryStrip() {
+      return const SizedBox(height: 2);
+    }
+
+    Widget masterMeterFooter() {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
+        child: AnimatedBuilder(
+          animation: _meters,
+          builder: (context, _) {
+            final masterPeak = _heldPeakDbForRow(-1, _meters.master);
+            final masterActive = _masterMeterExpanded;
+            void expandMasterPocket() {
+              final willOpen = !masterActive;
+              _trackUiClick(
+                controlId: willOpen
+                    ? 'tablet_master_meter_expand'
+                    : 'tablet_master_meter_collapse',
+                surface: 'right_panel',
+              );
+              setState(() {
+                _tabletRightPanelTab = 'fx';
+                _tabletRightPanelCollapsed = false;
+                _masterMeterExpanded = willOpen;
+              });
+              if (willOpen) {
+                _handleDawOnboardingMasterOpened();
+              }
+            }
+
+            Widget child = masterRackMeterSurface(
+              peakDb: masterPeak,
+              expanded: masterActive,
+              onToggle: expandMasterPocket,
+              compact: true,
+            );
+            child = MultiHalo(
+              highlighter: _mixHighlighter,
+              haloKeys: const <HaloKey>[
+                HaloKey('tutorial:master_button'),
+              ],
+              borderRadius: BorderRadius.circular(16),
+              child: child,
+            );
+            return child;
+          },
+        ),
+      );
+    }
+
+    Widget collapseEdgeHandle() {
+      final dragging = _tabletRightPanelHandleDragging;
+      const handleTapSlop = 12.0;
+      const handleResizeSlop = 7.0;
+
+      void resetHandlePointerState() {
+        _tabletRightPanelHandleDragging = false;
+        _tabletRightPanelHandleDownGlobalPosition = null;
+        _tabletRightPanelHandleLastGlobalPosition = null;
+        _tabletRightPanelHandleMovedPastTapSlop = false;
+        _tabletRightPanelHandleResized = false;
+      }
+
+      void collapseRightPanelFromHandle() {
+        _trackUiClick(
+          controlId: 'tablet_right_panel_edge_collapse',
+          surface: 'right_panel',
+        );
+        setState(() {
+          _tabletRightPanelCollapsed = true;
+          _masterMeterExpanded = false;
+          resetHandlePointerState();
+        });
+      }
+
+      return Semantics(
+        button: true,
+        label: L10n.translate(context, 'Resize or collapse right panel'),
+        child: MouseRegion(
+          cursor: SystemMouseCursors.resizeLeftRight,
+          child: Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerDown: (event) {
+              setState(() {
+                _tabletRightPanelHandleDragging = true;
+                _tabletRightPanelHandleDownGlobalPosition = event.position;
+                _tabletRightPanelHandleLastGlobalPosition = event.position;
+                _tabletRightPanelHandleMovedPastTapSlop = false;
+                _tabletRightPanelHandleResized = false;
+              });
+            },
+            onPointerMove: (event) {
+              final down = _tabletRightPanelHandleDownGlobalPosition;
+              final last = _tabletRightPanelHandleLastGlobalPosition;
+              if (down == null || last == null) return;
+
+              final totalOffset = event.position - down;
+              if (totalOffset.distance > handleTapSlop) {
+                _tabletRightPanelHandleMovedPastTapSlop = true;
+              }
+
+              final horizontalTravel = totalOffset.dx.abs();
+              final verticalTravel = totalOffset.dy.abs();
+              final shouldResize = _tabletRightPanelHandleResized ||
+                  (horizontalTravel > handleResizeSlop &&
+                      horizontalTravel >= verticalTravel);
+              if (!shouldResize) {
+                _tabletRightPanelHandleLastGlobalPosition = event.position;
+                return;
+              }
+
+              _tabletRightPanelHandleResized = true;
+              _resizeTabletRightPanelBy(
+                event.position.dx - last.dx,
+                availableWidth,
+              );
+              _tabletRightPanelHandleLastGlobalPosition = event.position;
+            },
+            onPointerUp: (_) {
+              final shouldCollapse = !_tabletRightPanelHandleResized &&
+                  !_tabletRightPanelHandleMovedPastTapSlop;
+              if (shouldCollapse) {
+                collapseRightPanelFromHandle();
+                return;
+              }
+              if (_tabletRightPanelHandleDragging ||
+                  _tabletRightPanelHandleDownGlobalPosition != null) {
+                setState(() {
+                  resetHandlePointerState();
+                });
+              }
+            },
+            onPointerCancel: (_) {
+              if (_tabletRightPanelHandleDragging ||
+                  _tabletRightPanelHandleDownGlobalPosition != null) {
+                setState(() {
+                  resetHandlePointerState();
+                });
+              }
+            },
+            child: SizedBox(
+              width: 46,
+              height: 90,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 90),
+                  curve: Curves.easeOutCubic,
+                  width: dragging ? 35 : 34,
+                  height: dragging ? 78 : 76,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      CustomPaint(
+                        painter: _TabletRightPanelEdgeHandleTabPainter(
+                          active: dragging,
+                        ),
+                      ),
+                      CustomPaint(
+                        painter: _TabletRightPanelEdgeHandleMarkPainter(
+                          active: dragging,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Positioned(
+      top: topInset,
+      right: 0,
+      bottom: 0,
+      width: panelWidth + 32,
+      child: IgnorePointer(
+        ignoring: false,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned(
+              left: 32,
+              top: 0,
+              right: 0,
+              bottom: 0,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 0),
+                child: ClipRRect(
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(34),
+                    bottomLeft: Radius.circular(34),
+                  ),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: surface,
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(34),
+                          bottomLeft: Radius.circular(34),
+                        ),
+                        border: Border(
+                          left: BorderSide(
+                            color: Colors.white.withValues(alpha: 0.10),
+                          ),
+                        ),
+                        boxShadow: const <BoxShadow>[
+                          BoxShadow(
+                            color: Color.fromRGBO(0, 0, 0, 0.25),
+                            blurRadius: 15,
+                            spreadRadius: 8,
+                            offset: Offset.zero,
+                          ),
+                        ],
+                      ),
+                      child: Material(
+                        type: MaterialType.transparency,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            if (masterPanelActive)
+                              IgnorePointer(
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: <Color>[
+                                        const Color(0xFF0E4D72)
+                                            .withValues(alpha: 0.20),
+                                        const Color(0xFF071B2A)
+                                            .withValues(alpha: 0.10),
+                                        Colors.transparent,
+                                      ],
+                                      stops: const <double>[0.0, 0.46, 1.0],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            Column(
+                              children: [
+                                panelHeader(),
+                                panelSecondaryStrip(),
+                                Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 2),
+                                    child: animatedPanelBody(),
+                                  ),
+                                ),
+                                masterMeterFooter(),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              child: Center(child: collapseEdgeHandle()),
+            ),
+          ],
         ),
       ),
     );
@@ -25167,7 +29933,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return clamped;
   }
 
-  Widget _buildMasterEffectsPage() {
+  Widget _buildMasterEffectsPage({
+    bool addEffectTileFollowsEffectsInline = false,
+  }) {
     void onMasterFxGraphChanged() {
       _refreshAudioEditorView();
     }
@@ -25322,16 +30090,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       registerParameterRevealer: (reveal) {
         _masterParameterRevealer = reveal;
       },
+      addTileFollowsEffectsInline: addEffectTileFollowsEffectsInline,
     );
   }
 
   BoxDecoration _dawConnectedShellDecoration({
     required BorderRadius borderRadius,
     bool active = false,
+    double inactiveAlpha = 0.16,
   }) {
     return BoxDecoration(
       borderRadius: borderRadius,
-      color: Color.fromRGBO(244, 244, 244, active ? 0.20 : 0.16),
+      color: Color.fromRGBO(244, 244, 244, active ? 0.20 : inactiveAlpha),
       border: Border.all(
         color: Colors.white.withValues(alpha: active ? 0.14 : 0.10),
       ),
@@ -25353,6 +30123,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool active = false,
     bool showOverlay = true,
     double blur = 18,
+    double inactiveAlpha = 0.16,
   }) {
     return ClipRRect(
       borderRadius: borderRadius,
@@ -25363,6 +30134,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           decoration: _dawConnectedShellDecoration(
             borderRadius: borderRadius,
             active: active,
+            inactiveAlpha: inactiveAlpha,
           ),
           child: Stack(
             children: [
@@ -25412,29 +30184,78 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final overlayContext = context;
+    final tabletDaw = mixroomUsesTabletLandscapeShell(overlayContext);
     final androidOverlayPanelLift =
         Platform.isAndroid ? _kAndroidOverlayPanelLift : 0.0;
     const transportVisualBottomInset = 0.0;
     final keyboardLift = _chatKeyboardLiftForOverlay(overlayContext);
     final chatOverlayInsets = _desktopChatOverlayInsets(overlayContext);
+    final mediaHeight = MediaQuery.sizeOf(overlayContext).height;
+    final alignToChatBar = tabletDaw || PlatformCapabilities.current.isDesktop;
+    final stackRenderObject =
+        _editorContentStackKey.currentContext?.findRenderObject();
+    final stackSize =
+        stackRenderObject is RenderBox && stackRenderObject.hasSize
+            ? stackRenderObject.size
+            : null;
+    final rawChatBarRect =
+        alignToChatBar ? _topPopupAnchorRect(_bottomChatBarAnchorKey) : null;
+    final canUseChatBarAnchor = rawChatBarRect != null &&
+        stackSize != null &&
+        rawChatBarRect.width > 0.0 &&
+        rawChatBarRect.top > 0.0;
+    final anchoredChatBarRect = canUseChatBarAnchor
+        ? _displayedBottomChatBarRectForOverlay(
+            baseRect: rawChatBarRect,
+            stackSize: stackSize,
+            overlayContext: overlayContext,
+          )
+        : null;
+    final useChatBarAnchor = anchoredChatBarRect != null && stackSize != null;
     final chatHistoryBaseBottom = _kChatBarStackHeight +
-        _kTransportBarHeight +
+        (tabletDaw ? 0.0 : _kTransportBarHeight) +
         transportVisualBottomInset +
         _chatHistoryBottomGap +
         androidOverlayPanelLift;
+    final anchoredChatGap =
+        PlatformCapabilities.current.isDesktop || tabletDaw ? 12.0 : 0.0;
+    final anchoredAvailableHeight = useChatBarAnchor
+        ? math.max(0.0, anchoredChatBarRect.top - 64.0)
+        : mediaHeight - chatHistoryBaseBottom - 136.0;
+    final chatHistoryHeight = tabletDaw
+        ? math.min(320.0, math.max(180.0, anchoredAvailableHeight)).toDouble()
+        : PlatformCapabilities.current.isDesktop
+            ? math
+                .min(380.0, math.max(240.0, anchoredAvailableHeight))
+                .toDouble()
+            : _kChatHistoryHeight;
     final canClearChatHistory =
         !_isThinking && _chatController.messages.isNotEmpty;
 
-    return Positioned(
-      left: chatOverlayInsets.left,
-      right: chatOverlayInsets.right,
-      bottom: chatHistoryBaseBottom + keyboardLift,
+    return AnimatedPositioned(
+      duration: const Duration(milliseconds: 190),
+      curve: Curves.easeOutCubic,
+      left:
+          useChatBarAnchor ? anchoredChatBarRect.left : chatOverlayInsets.left,
+      right: useChatBarAnchor
+          ? math.max(0.0, stackSize.width - anchoredChatBarRect.right)
+          : chatOverlayInsets.right,
+      bottom: useChatBarAnchor
+          ? math.max(
+              0.0,
+              stackSize.height - anchoredChatBarRect.top + anchoredChatGap,
+            )
+          : chatHistoryBaseBottom + keyboardLift,
       child: RepaintBoundary(
         child: SizedBox(
-          height: _kChatHistoryHeight,
-          child: Container(
+          height: chatHistoryHeight,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 170),
+            curve: Curves.easeOutCubic,
             margin: EdgeInsets.symmetric(
-              horizontal: PlatformCapabilities.current.isDesktop ? 0.0 : 12.0,
+              horizontal: PlatformCapabilities.current.isDesktop || tabletDaw
+                  ? 0.0
+                  : 12.0,
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(29),
@@ -25481,6 +30302,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             _buildChatHeaderActionButton(
                               label: L10n.translate(context, 'Feedback'),
                               icon: Icons.feedback_outlined,
+                              iconOnly: true,
                               onPressed: _feedbackSubmissionInFlight
                                   ? null
                                   : _openDawFeedbackComposer,
@@ -25492,6 +30314,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               onPressed: canClearChatHistory
                                   ? _confirmClearChatHistory
                                   : null,
+                            ),
+                            const SizedBox(width: 8),
+                            _buildChatHeaderActionButton(
+                              label: L10n.translate(context, 'Close'),
+                              icon: Icons.close_rounded,
+                              onPressed: _collapseChatWindow,
                             ),
                           ],
                         ),
@@ -25935,11 +30763,60 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       ? _chatFocusNode.hasFocus
       : (_chatFocusNode.hasFocus || _chatInputActive);
 
+  bool _chatShouldTrackKeyboardInset(BuildContext overlayContext) {
+    final keyboardVisible = MediaQuery.viewInsetsOf(overlayContext).bottom > 0;
+    if (!keyboardVisible) return false;
+    if (mixroomUsesTabletLandscapeShell(overlayContext)) {
+      return _chatExpanded &&
+          (_chatInputActive || _chatFocusNode.hasFocus || _isThinking);
+    }
+    return _isChatTypingActive;
+  }
+
+  bool _tabletChatKeyboardBackdropActive(BuildContext overlayContext) {
+    return mixroomUsesTabletLandscapeShell(overlayContext) &&
+        MediaQuery.viewInsetsOf(overlayContext).bottom > 0.0 &&
+        _chatExpanded &&
+        (_chatInputActive || _chatFocusNode.hasFocus);
+  }
+
+  static const double _kTabletChatKeyboardGap = 4.0;
+
+  double _tabletChatKeyboardLiftFromInset({
+    required double keyboardInset,
+  }) {
+    // iOS includes the prediction/suggestion bar in viewInsets.bottom.
+    // The chatbar already has 10 px of app chrome below it in the bottom row,
+    // so lift by the system obstruction minus that padding plus a small gap.
+    const chatBarBottomChrome = 10.0;
+    return math.max(
+      0.0,
+      keyboardInset - chatBarBottomChrome + _kTabletChatKeyboardGap,
+    );
+  }
+
   EdgeInsets _desktopChatOverlayInsets(BuildContext overlayContext) {
+    final width = MediaQuery.sizeOf(overlayContext).width;
+    if (mixroomUsesTabletLandscapeShell(overlayContext)) {
+      final panelReserve = _tabletReservedRightPanelWidthFor(
+        width,
+        collapsed: _tabletRightPanelCollapsed,
+      );
+      final maxContentWidth = math.min(
+        TabletDawPanelLayout.bottomTabletChatMaxWidthForScreen(width),
+        width - 32.0,
+      );
+      final centeredInset = math.max(16.0, (width - maxContentWidth) / 2.0);
+      return EdgeInsets.fromLTRB(
+        centeredInset,
+        0,
+        math.max(centeredInset, panelReserve + 12.0),
+        0,
+      );
+    }
     if (!PlatformCapabilities.current.isDesktop) {
       return EdgeInsets.zero;
     }
-    final width = MediaQuery.sizeOf(overlayContext).width;
     const reservedLeft = 16.0 + 372.0 + 12.0;
     const reservedRight = 16.0 + 48.0 + 10.0;
     final maxContentWidth = math.min(920.0, width - 32.0);
@@ -25952,16 +30829,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   double _chatKeyboardLiftForOverlay(BuildContext overlayContext) {
     final keyboardInset = MediaQuery.viewInsetsOf(overlayContext).bottom;
-    final keyboardVisible = keyboardInset > 0.0;
-    final chatKeyboardActive = keyboardVisible && _isChatTypingActive;
+    final chatKeyboardActive = _chatShouldTrackKeyboardInset(overlayContext);
     final fixedTransportFootprint =
         _kTransportBarHeight + _androidTransportBottomInset(overlayContext);
+    final tabletDaw = mixroomUsesTabletLandscapeShell(overlayContext);
     final rawKeyboardLift = chatKeyboardActive
-        ? math.max(
-            0.0,
-            keyboardInset - MediaQuery.paddingOf(overlayContext).bottom + 8.0,
-          )
+        ? (tabletDaw
+            ? _tabletChatKeyboardLiftFromInset(
+                keyboardInset: keyboardInset,
+              )
+            : math.max(
+                0.0,
+                keyboardInset -
+                    MediaQuery.paddingOf(overlayContext).bottom +
+                    8.0,
+              ))
         : 0.0;
+    if (tabletDaw) {
+      return rawKeyboardLift;
+    }
     return math.max(0.0, rawKeyboardLift - fixedTransportFootprint);
   }
 
@@ -25969,6 +30855,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required bool chatTypingActive,
     required double chatLift,
   }) {
+    if (mixroomUsesTabletLandscapeShell(context)) {
+      return chatLift +
+          _kChatBarStackHeight +
+          (_isProducerCaptureUiVisible && !chatTypingActive
+              ? _kProducerBannerHeightEstimate
+              : 0.0) +
+          _kSamplePanelBottomGap;
+    }
     if (!PlatformCapabilities.current.isDesktop) {
       return chatLift +
           _kChatBarStackHeight +
@@ -25991,6 +30885,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required Widget child,
     required VoidCallback? onTap,
     Key? key,
+    String? semanticLabel,
+    String? semanticIdentifier,
     bool active = false,
     double size = 52,
     bool drawShell = true,
@@ -26026,22 +30922,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       ),
     );
     return Semantics(
+      identifier: semanticIdentifier,
       button: true,
       enabled: onTap != null,
+      label: semanticLabel,
       child: showPressFeedback
           ? Material(
               type: MaterialType.transparency,
-              child: InkResponse(
+              child: InkWell(
                 key: key,
                 onTap: onTap,
                 onHighlightChanged: onHighlightChanged,
-                containedInkWell: true,
-                highlightShape: BoxShape.circle,
                 customBorder: const CircleBorder(),
-                radius: size * 0.62,
                 splashColor: Colors.white.withValues(alpha: 0.18),
                 highlightColor: Colors.white.withValues(alpha: 0.10),
-                child: ClipOval(child: body),
+                child: SizedBox(
+                  width: size,
+                  height: size,
+                  child: ClipOval(child: body),
+                ),
               ),
             )
           : GestureDetector(
@@ -26110,6 +31009,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  Widget _buildDawTopShareIcon({double size = 16.0}) {
+    return SizedBox.square(
+      dimension: size,
+      child: ClipRect(
+        child: SvgPicture.asset(
+          kMixroomDawTopShareIconAsset,
+          width: size,
+          height: size,
+          fit: BoxFit.contain,
+        ),
+      ),
+    );
+  }
+
   Widget _buildToolbarSegment({
     required Widget child,
     required bool active,
@@ -26137,114 +31050,370 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
-  Widget _buildTopBar(Duration currentClock, _EditorLayoutSpec layoutSpec) {
-    final pluginAffordanceEnabled =
-        _platformCapabilities.supportsExternalPluginAffordances;
-    final connectedTopPanelVisible = _activeTopPopup != _TopPopupType.none;
-    final isMacDesktop =
-        PlatformCapabilities.current.isDesktop && !kIsWeb && Platform.isMacOS;
-    final showDesktopAnalyzer = PlatformCapabilities.current.isDesktop;
-    return Halo(
-      highlighter: _mixHighlighter,
-      haloKey: const HaloKey('tutorial:toolbar'),
-      borderRadius: BorderRadius.circular(26),
-      child: Padding(
-        padding: layoutSpec.topBarPadding,
-        child: Row(
-          crossAxisAlignment: isMacDesktop
-              ? CrossAxisAlignment.start
-              : CrossAxisAlignment.center,
-          children: [
-            isMacDesktop
-                ? Padding(
-                    padding: const EdgeInsets.only(top: 18),
-                    child: SizedBox(
-                      width: 116,
-                      child: Align(
-                        alignment: Alignment.topLeft,
-                        child: _buildDesktopBackButtonShell(layoutSpec),
+  Widget _buildMixroomDropdownField<T>({
+    required String label,
+    required T value,
+    required List<T> options,
+    required ValueChanged<T?> onChanged,
+    required String Function(T) textBuilder,
+    double height = 50.0,
+    double radius = 18.0,
+    double menuMaxHeight = 360.0,
+    double? menuMinWidth,
+    double? menuMaxWidth,
+    Color accentColor = const Color(0xFF258AE6),
+  }) {
+    if (options.isEmpty) {
+      return Container(
+        height: height,
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.055),
+          borderRadius: BorderRadius.circular(radius),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        ),
+        child: Text(
+          L10n.translate(context, label),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontFamily: 'Pretendard',
+            color: Colors.white.withValues(alpha: 0.42),
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      );
+    }
+
+    final effectiveValue = options.contains(value) ? value : options.first;
+    final selectedText = textBuilder(effectiveValue);
+    const fieldTextStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      color: Color(0xFFF4F4F4),
+      fontSize: 12.5,
+      fontWeight: FontWeight.w700,
+      height: 1.0,
+    );
+    final menuTextStyle = fieldTextStyle.copyWith(
+      color: Colors.white.withValues(alpha: 0.76),
+      fontWeight: FontWeight.w600,
+      height: 1.1,
+    );
+    final selectedMenuTextStyle = fieldTextStyle.copyWith(
+      color: Colors.white.withValues(alpha: 0.94),
+      fontWeight: FontWeight.w700,
+      height: 1.1,
+    );
+    final menuPreferredHeight = math
+        .min(
+          menuMaxHeight,
+          2.0 + (options.length * 35.0) + math.max(0, options.length - 1),
+        )
+        .toDouble();
+
+    return Builder(
+      builder: (anchorContext) {
+        return Semantics(
+          button: true,
+          label: L10n.translate(context, label),
+          value: selectedText,
+          child: Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(radius),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(radius),
+              onTap: () async {
+                final selected = await showMixroomGlassDropdown<T>(
+                  anchorContext: anchorContext,
+                  verticalGap: -1.0,
+                  minWidth: menuMinWidth,
+                  maxWidth: menuMaxWidth,
+                  preferredHeight: menuPreferredHeight,
+                  radius: radius,
+                  color: const Color.fromRGBO(244, 244, 244, 0.105),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 1,
+                  ),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: menuMaxHeight),
+                    child: ListView.separated(
+                      padding: EdgeInsets.zero,
+                      shrinkWrap: true,
+                      physics: const ClampingScrollPhysics(),
+                      itemCount: options.length,
+                      separatorBuilder: (_, __) => Divider(
+                        height: 1,
+                        thickness: 1,
+                        indent: 10,
+                        endIndent: 10,
+                        color: Colors.white.withValues(alpha: 0.045),
                       ),
-                    ),
-                  )
-                : _buildTopCircleButtonShell(
-                    key: _editorBackButtonKey,
-                    onTap: _handleBackButtonTap,
-                    active: connectedTopPanelVisible,
-                    size: layoutSpec.topBarActionButtonSize,
-                    showPressFeedback: true,
-                    pressed: _backButtonPressed || _backButtonTapFeedbackActive,
-                    onHighlightChanged: (pressed) {
-                      if (!mounted || _backButtonPressed == pressed) return;
-                      setState(() {
-                        _backButtonPressed = pressed;
-                      });
-                    },
-                    child: Center(
-                      child: SvgPicture.asset(
-                        kMixroomDawTopBackIconAsset,
-                        width: 10,
-                        height: 18,
-                      ),
+                      itemBuilder: (menuContext, index) {
+                        final option = options[index];
+                        final isSelected = option == effectiveValue;
+                        return Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(13),
+                            onTap: () => Navigator.of(menuContext).pop(option),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 110),
+                              curve: Curves.easeOutCubic,
+                              constraints: const BoxConstraints(minHeight: 34),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? const Color(0xFF258AE6)
+                                        .withValues(alpha: 0.16)
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(13),
+                                border: isSelected
+                                    ? Border.all(
+                                        color: const Color(0xFF258AE6)
+                                            .withValues(alpha: 0.20),
+                                      )
+                                    : null,
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      textBuilder(option),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: isSelected
+                                          ? selectedMenuTextStyle
+                                          : menuTextStyle,
+                                    ),
+                                  ),
+                                  if (isSelected) ...[
+                                    const SizedBox(width: 8),
+                                    Icon(
+                                      Icons.check_rounded,
+                                      color: accentColor,
+                                      size: 17,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ),
-            SizedBox(width: layoutSpec.topBarClusterGap),
-            Expanded(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Center(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: _buildToolbarPill(
-                          current: _formatDuration(currentClock),
-                          total: _formatDuration(_audioOnlyOverallDuration),
-                          pluginAffordanceEnabled: pluginAffordanceEnabled,
-                          connected: false,
-                        ),
-                      ),
-                    ),
+                );
+                if (selected != null) {
+                  onChanged(selected);
+                }
+              },
+              child: Ink(
+                height: height,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: const Color.fromRGBO(244, 244, 244, 0.10),
+                  borderRadius: BorderRadius.circular(radius),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.13),
                   ),
-                  if (showDesktopAnalyzer) ...[
-                    const SizedBox(width: 14),
-                    SizedBox(
-                      width: 236,
-                      height: 52,
-                      child: _TopBarMasterVisualizer(meters: _meters),
+                  boxShadow: <BoxShadow>[
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.08),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
                     ),
                   ],
-                ],
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            L10n.translate(context, label),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontFamily: 'Pretendard',
+                              color: Colors.white.withValues(alpha: 0.56),
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w800,
+                              height: 1.0,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            selectedText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: fieldTextStyle,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      color: Colors.white.withValues(alpha: 0.72),
+                      size: 20,
+                    ),
+                  ],
+                ),
               ),
             ),
-            SizedBox(width: layoutSpec.topBarClusterGap * 0.8),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Row(
-                children: [
-                  Halo(
-                    highlighter: _mixHighlighter,
-                    haloKey: const HaloKey('tutorial:export'),
-                    borderRadius: BorderRadius.circular(24),
-                    child: _buildTopCircleButtonShell(
-                      key: _exportButtonKey,
-                      onTap: () {
-                        _trackUiClick(
-                          controlId: 'export_button',
-                          surface: 'top_bar',
-                        );
-                        _exportAndNavigate();
-                      },
-                      active: _isExportSheetOpen || connectedTopPanelVisible,
-                      size: layoutSpec.topBarActionButtonSize,
-                      child: Center(
-                        child: SvgPicture.asset(
-                          kMixroomDawTopShareIconAsset,
-                          width: 16,
-                          height: 16,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildTabletRightPanelSelector({double? width}) {
+    final panelWidth = _tabletExpandedRightPanelWidthFor(
+      MediaQuery.sizeOf(context).width,
+    );
+    final compact = TabletDawPanelLayout.usesCompactRightPanelHeader(
+      panelWidth,
+    );
+    final selectorWidth = width ??
+        TabletDawPanelLayout.rightPanelHeaderSelectorWidth(
+          panelWidth: panelWidth,
+          compact: compact,
+        );
+    Widget segment(
+      String label,
+      String tabId, {
+      int flex = 1,
+      required BorderRadius selectedRadius,
+    }) {
+      final selected =
+          !_tabletRightPanelCollapsed && _tabletRightPanelTab == tabId;
+      final translatedLabel = L10n.translate(context, label);
+      final semanticLabel = selected
+          ? 'Hide $translatedLabel panel'
+          : 'Show $translatedLabel panel';
+      return Expanded(
+        flex: flex,
+        child: Semantics(
+          button: true,
+          selected: selected,
+          label: semanticLabel,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(22),
+              onTap: () {
+                if (selected) {
+                  setState(() {
+                    _tabletRightPanelCollapsed = true;
+                  });
+                  return;
+                }
+                _selectTabletRightPanelTab(tabId);
+              },
+              child: SizedBox.expand(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  curve: Curves.easeOutCubic,
+                  margin: const EdgeInsets.all(1.5),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? const Color(0xFFF4F4F4).withValues(alpha: 0.54)
+                        : Colors.transparent,
+                    borderRadius: selected ? selectedRadius : BorderRadius.zero,
+                    border: selected
+                        ? Border.all(
+                            color: Colors.white.withValues(alpha: 0.26),
+                          )
+                        : null,
+                    boxShadow: selected
+                        ? <BoxShadow>[
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.12),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ]
+                        : const <BoxShadow>[],
+                  ),
+                  alignment: Alignment.center,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        translatedLabel,
+                        maxLines: 1,
+                        softWrap: false,
+                        style: TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: selected
+                              ? const Color(0xFF15436C)
+                              : const Color(0xFFF4F4F4).withValues(alpha: 0.78),
+                          fontSize: compact ? 10.5 : 11.5,
+                          fontWeight:
+                              selected ? FontWeight.w900 : FontWeight.w700,
+                          height: 1.0,
                         ),
                       ),
                     ),
                   ),
-                ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return _buildDawConnectedSurface(
+      borderRadius: BorderRadius.circular(24),
+      child: SizedBox(
+        width: selectorWidth,
+        height: 48,
+        child: Row(
+          children: [
+            segment(
+              'Track',
+              'inspector',
+              selectedRadius: const BorderRadius.only(
+                topLeft: Radius.circular(22),
+                bottomLeft: Radius.circular(22),
+                topRight: Radius.circular(10),
+                bottomRight: Radius.circular(10),
+              ),
+            ),
+            Container(
+              width: 1,
+              height: 32,
+              color: Colors.white.withValues(alpha: 0.16),
+            ),
+            segment(
+              'FX',
+              'fx',
+              selectedRadius: BorderRadius.circular(10),
+            ),
+            Container(
+              width: 1,
+              height: 32,
+              color: Colors.white.withValues(alpha: 0.16),
+            ),
+            segment(
+              'Mix',
+              'mixer',
+              selectedRadius: const BorderRadius.only(
+                topLeft: Radius.circular(10),
+                bottomLeft: Radius.circular(10),
+                topRight: Radius.circular(22),
+                bottomRight: Radius.circular(22),
               ),
             ),
           ],
@@ -26253,7 +31422,912 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  Widget _buildTabletProjectHeader({required double width}) {
+    final title =
+        _projectName.trim().isEmpty ? 'Untitled Project' : _projectName;
+    final compact = width < 236.0;
+    const headerHeight = 48.0;
+    final actionSize = compact ? 40.0 : 48.0;
+    final settingsSize = compact ? 40.0 : 48.0;
+    final gap = compact ? 6.0 : 9.0;
+    final trailingInset = compact ? 0.0 : 10.0;
+    final titleSurfaceWidth =
+        math.max(0.0, width - actionSize - gap - trailingInset);
+    final titleInset = compact ? 8.0 : 12.0;
+    return SizedBox(
+      width: width,
+      height: headerHeight,
+      child: Row(
+        children: [
+          Align(
+            alignment: Alignment.center,
+            child: _buildTopCircleButtonShell(
+              key: _editorBackButtonKey,
+              semanticLabel: L10n.translate(context, 'Back'),
+              semanticIdentifier: 'daw.navigation.back',
+              onTap: _handleBackButtonTap,
+              active: _activeTopPopup != _TopPopupType.none,
+              size: actionSize,
+              showPressFeedback: true,
+              pressed: _backButtonPressed || _backButtonTapFeedbackActive,
+              onHighlightChanged: (pressed) {
+                if (!mounted || _backButtonPressed == pressed) return;
+                setState(() {
+                  _backButtonPressed = pressed;
+                });
+              },
+              child: Center(
+                child: SvgPicture.asset(
+                  kMixroomDawTopBackIconAsset,
+                  width: compact ? 9 : 10,
+                  height: compact ? 16 : 18,
+                ),
+              ),
+            ),
+          ),
+          SizedBox(width: gap),
+          SizedBox(
+            key: _projectNamePillKey,
+            width: titleSurfaceWidth,
+            height: headerHeight,
+            child: _buildDawConnectedSurface(
+              borderRadius: BorderRadius.circular(24),
+              active: _isProjectSettingsOpen,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.only(
+                        left: titleInset,
+                        right: compact ? 4.0 : 6.0,
+                      ),
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: const Color(0xFFF4F4F4),
+                          fontSize: compact ? 10.6 : 11.6,
+                          fontWeight: FontWeight.w700,
+                          height: 1.0,
+                        ),
+                      ),
+                    ),
+                  ),
+                  Semantics(
+                    identifier: 'daw.project_settings',
+                    label: L10n.translate(context, 'Project Settings'),
+                    button: true,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        key: _projectSettingsButtonKey,
+                        borderRadius: BorderRadius.circular(24),
+                        onTap: () {
+                          _trackUiClick(
+                            controlId: 'project_settings_button',
+                            surface: 'top_bar',
+                            controlType: 'toggle',
+                            value: !_isProjectSettingsOpen,
+                          );
+                          if (_isProjectSettingsOpen) {
+                            unawaited(_closeProjectSettings());
+                            return;
+                          }
+                          _openProjectSettings();
+                        },
+                        child: SizedBox(
+                          width: settingsSize,
+                          height: headerHeight,
+                          child: Center(
+                            child: SvgPicture.asset(
+                              kMixroomDawTopSettingsIconAsset,
+                              width: compact ? 15 : 17,
+                              height: compact ? 15 : 17,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (trailingInset > 0.0) SizedBox(width: trailingInset),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTabletLeftDawBackdrop({required double width}) {
+    return IgnorePointer(
+      child: ClipRRect(
+        borderRadius: const BorderRadius.only(
+          topRight: Radius.circular(34),
+          bottomRight: Radius.circular(34),
+        ),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: _kTabletDawPanelFill,
+            border: Border(
+              right: BorderSide(
+                color: Colors.white.withValues(alpha: 0.08),
+              ),
+            ),
+            boxShadow: const <BoxShadow>[
+              BoxShadow(
+                color: Color.fromRGBO(0, 0, 0, 0.25),
+                blurRadius: 15,
+                spreadRadius: 8,
+              ),
+            ],
+          ),
+          child: SizedBox(width: width, height: double.infinity),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTabletDesktopTopControlPill({
+    double? widthOverride,
+    double? heightOverride,
+    bool embedded = false,
+  }) {
+    final compactTablet = widthOverride == null
+        ? mixroomUsesTabletLandscapeShell(context) &&
+            MediaQuery.sizeOf(context).width < 1100.0
+        : widthOverride < 236.0;
+    final pillWidth = widthOverride ??
+        TabletDawPanelLayout.topBarControlPillWidth(
+          compactTablet: compactTablet,
+        );
+    final pillHeight = heightOverride ?? 48.0;
+    final pillRadius = BorderRadius.circular(embedded ? 0 : pillHeight / 2.0);
+    final segmentBasisWidth = math.max(0.0, pillWidth - 2.0);
+    final magnetWidth =
+        TabletDawPanelLayout.topControlMagnetWidth(segmentBasisWidth);
+    final toolWidth = TabletDawPanelLayout.topControlToolWidth(
+      segmentBasisWidth,
+    );
+    final quantizeWidth =
+        TabletDawPanelLayout.topControlQuantizeWidth(segmentBasisWidth);
+    Widget divider() {
+      return Container(
+        width: 1,
+        height: compactTablet ? 28 : 30,
+        color: Colors.white.withValues(alpha: 0.14),
+      );
+    }
+
+    return ValueListenableBuilder<TimelineTopControlsState>(
+      valueListenable: _timelineController.topControlsListenable,
+      builder: (context, controls, _) {
+        final rawQuantizeLabel = controls.quantizeLabel.trim();
+        final quantizePrimary = rawQuantizeLabel.isEmpty
+            ? controls.quantizeLabel
+            : rawQuantizeLabel
+                .replaceFirst(RegExp(r'\s+beat$', caseSensitive: false), '')
+                .trim();
+        final quantizeSecondary =
+            quantizePrimary.contains('/') || quantizePrimary.contains('T')
+                ? 'Beat'
+                : '';
+        return Container(
+          width: pillWidth,
+          height: pillHeight,
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            color: embedded
+                ? const Color(0xFF485660).withValues(alpha: 0.88)
+                : const Color.fromRGBO(244, 244, 244, 0.10),
+            borderRadius: pillRadius,
+            border: embedded
+                ? Border(
+                    right: BorderSide(
+                      color: Colors.white.withValues(alpha: 0.08),
+                    ),
+                    bottom: BorderSide(
+                      color: Colors.white.withValues(alpha: 0.08),
+                    ),
+                  )
+                : Border.all(
+                    color:
+                        Colors.white.withValues(alpha: embedded ? 0.09 : 0.12),
+                  ),
+            boxShadow: embedded
+                ? const <BoxShadow>[]
+                : [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.25),
+                      blurRadius: 15,
+                      spreadRadius: 8,
+                      offset: Offset.zero,
+                    ),
+                  ],
+          ),
+          child: Row(
+            children: [
+              _buildTabletDesktopTopControlButton(
+                height: pillHeight,
+                width: magnetWidth,
+                semanticLabel: L10n.translate(context, 'Snap to grid'),
+                active: controls.magnetEnabled,
+                embedded: embedded,
+                onTap: _timelineController.toggleMagnet,
+                child: SvgPicture.asset(
+                  'assets/magnet-solid-full.svg',
+                  width: 17,
+                  height: 17,
+                  colorFilter: ColorFilter.mode(
+                    controls.magnetEnabled
+                        ? const Color(0xFF1194FF)
+                        : Colors.white.withValues(alpha: 0.78),
+                    BlendMode.srcIn,
+                  ),
+                ),
+              ),
+              divider(),
+              _buildTabletDesktopTopControlButton(
+                key: _tabletTopToolButtonKey,
+                height: pillHeight,
+                width: toolWidth,
+                semanticLabel: L10n.translate(context, 'Timeline tool'),
+                embedded: embedded,
+                onTap: () {
+                  _timelineController.showToolMenu(
+                    anchorRect: _globalAnchorRect(_tabletTopToolButtonKey),
+                  );
+                },
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Transform(
+                      alignment: Alignment.center,
+                      transform: controls.toolIconFlipHorizontally
+                          ? Matrix4.diagonal3Values(-1.0, 1.0, 1.0)
+                          : Matrix4.identity(),
+                      child: Icon(
+                        controls.toolIcon,
+                        color: Colors.white.withValues(alpha: 0.86),
+                        size: 16,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        L10n.translate(context, controls.toolLabel),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: Colors.white.withValues(alpha: 0.86),
+                          fontSize: compactTablet ? 11.5 : 12,
+                          fontWeight: FontWeight.w800,
+                          height: 1.0,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 3),
+                    Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      size: 16,
+                      color: Colors.white.withValues(alpha: 0.58),
+                    ),
+                  ],
+                ),
+              ),
+              divider(),
+              _buildTabletDesktopTopControlButton(
+                key: _tabletTopQuantizeButtonKey,
+                height: pillHeight,
+                width: quantizeWidth,
+                semanticLabel: L10n.translate(context, 'Quantize'),
+                embedded: embedded,
+                onTap: () {
+                  _timelineController.showQuantizeMenu(
+                    anchorRect: _globalAnchorRect(_tabletTopQuantizeButtonKey),
+                  );
+                },
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    left: compactTablet || embedded ? 3 : 5,
+                    right: compactTablet || embedded ? 1 : 3,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                quantizePrimary.isEmpty
+                                    ? rawQuantizeLabel
+                                    : quantizePrimary,
+                                maxLines: 1,
+                                overflow: TextOverflow.visible,
+                                softWrap: false,
+                                style: TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: const Color(0xFFF4F4F4),
+                                  fontSize: embedded
+                                      ? 11.5
+                                      : compactTablet
+                                          ? 12.5
+                                          : 13,
+                                  fontWeight: FontWeight.w900,
+                                  height: 1.0,
+                                  fontFeatures: <FontFeature>[
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            if (quantizeSecondary.isNotEmpty) ...[
+                              SizedBox(height: embedded ? 1 : 2),
+                              FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  quantizeSecondary,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.visible,
+                                  softWrap: false,
+                                  style: TextStyle(
+                                    fontFamily: 'Pretendard',
+                                    color: Colors.white.withValues(alpha: 0.58),
+                                    fontSize: embedded
+                                        ? 8.2
+                                        : compactTablet
+                                            ? 9
+                                            : 9.5,
+                                    fontWeight: FontWeight.w800,
+                                    height: 1.0,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 1),
+                      Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        size: compactTablet ? 14 : 15,
+                        color: Colors.white.withValues(alpha: 0.62),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildTabletDesktopTopControlButton({
+    Key? key,
+    required double width,
+    double height = 48.0,
+    required String semanticLabel,
+    required Widget child,
+    required VoidCallback onTap,
+    bool active = false,
+    bool embedded = false,
+  }) {
+    return Semantics(
+      label: semanticLabel,
+      button: true,
+      selected: active,
+      child: GestureDetector(
+        key: key,
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+          width: width,
+          height: height,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: active
+                ? const Color(0xFFF4F4F4).withValues(alpha: 0.86)
+                : Colors.transparent,
+            borderRadius:
+                embedded ? BorderRadius.zero : BorderRadius.circular(12),
+            boxShadow: active
+                ? <BoxShadow>[
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.16),
+                      blurRadius: 10,
+                      spreadRadius: 1,
+                    ),
+                  ]
+                : const <BoxShadow>[],
+          ),
+          child: IconTheme.merge(
+            data: IconThemeData(
+              color: active
+                  ? const Color(0xFF15436C)
+                  : Colors.white.withValues(alpha: 0.86),
+            ),
+            child: DefaultTextStyle.merge(
+              style: TextStyle(
+                color: active
+                    ? const Color(0xFF15436C)
+                    : Colors.white.withValues(alpha: 0.86),
+              ),
+              child: child,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTabletDesktopTopCenterBar({
+    required String current,
+    required String total,
+    required Size analyzerSize,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final availableWidth = constraints.maxWidth;
+        final compact = TabletDawPanelLayout.usesCompactTopBar(availableWidth);
+        final gap = TabletDawPanelLayout.topBarGap(compact: compact);
+        final showControlPill = !mixroomUsesTabletLandscapeShell(context);
+        final compactTablet = mixroomUsesTabletLandscapeShell(context) &&
+            MediaQuery.sizeOf(context).width < 1100.0;
+        final controlPillWidth = TabletDawPanelLayout.topBarControlPillWidth(
+          compactTablet: compactTablet,
+        );
+        final tempoPillWidth = TabletDawPanelLayout.topBarTempoPillWidth(
+          compactTablet: compactTablet,
+        );
+        final minAnalyzerWidth =
+            TabletDawPanelLayout.topBarMinAnalyzerWidth(compact: compact);
+        final fixedWithoutAnalyzer =
+            (showControlPill ? controlPillWidth + gap : 0.0) + tempoPillWidth;
+        final analyzerCanFit = !availableWidth.isFinite ||
+            availableWidth >= fixedWithoutAnalyzer + gap + minAnalyzerWidth;
+        final showAnalyzer =
+            PlatformCapabilities.current.isDesktop || analyzerCanFit;
+        final requiredFixedWidth =
+            fixedWithoutAnalyzer + (showAnalyzer ? gap : 0);
+        final pillScale = !availableWidth.isFinite || requiredFixedWidth <= 0
+            ? 1.0
+            : math.min(1.0, availableWidth / requiredFixedWidth);
+        final fixedPillScale =
+            analyzerCanFit || PlatformCapabilities.current.isDesktop
+                ? 1.0
+                : pillScale;
+        final fixedGap = gap * fixedPillScale;
+        return Row(
+          children: [
+            if (showControlPill) ...[
+              SizedBox(
+                width: controlPillWidth * fixedPillScale,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: _buildTabletDesktopTopControlPill(),
+                  ),
+                ),
+              ),
+              SizedBox(width: fixedGap),
+            ],
+            SizedBox(
+              width: tempoPillWidth * fixedPillScale,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: _buildTabletCenterTempoPill(
+                    current: current,
+                    total: total,
+                  ),
+                ),
+              ),
+            ),
+            if (showAnalyzer) ...[
+              SizedBox(width: fixedGap),
+              Expanded(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minWidth: minAnalyzerWidth,
+                    maxHeight: analyzerSize.height,
+                  ),
+                  child: SizedBox(
+                    height: analyzerSize.height,
+                    child: _TopBarMasterVisualizer(meters: _meters),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildTabletLeftRailTopControlPill({
+    required double panelWidth,
+    required double topBarReservedHeight,
+  }) {
+    final pillWidth = math.max(0.0, panelWidth).toDouble();
+    if (pillWidth <= 0.0) return const SizedBox.shrink();
+    const pillHeight = TabletDawPanelLayout.tabletRulerHeight;
+    const pillLeft = 0.0;
+    final pillTop = topBarReservedHeight +
+        ((TabletDawPanelLayout.tabletRulerHeight - pillHeight) / 2.0);
+    return Positioned(
+      left: pillLeft,
+      top: pillTop,
+      width: pillWidth,
+      height: pillHeight,
+      child: RepaintBoundary(
+        child: _buildTabletDesktopTopControlPill(
+          widthOverride: pillWidth,
+          heightOverride: pillHeight,
+          embedded: true,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTabletCenterTempoPill({
+    required String current,
+    required String total,
+  }) {
+    final keyLabel = _projectKey.isEmpty
+        ? L10n.translate(context, 'No key')
+        : projectKeyShortLabel(_projectKey);
+    final compactTablet = mixroomUsesTabletLandscapeShell(context) &&
+        MediaQuery.sizeOf(context).width < 1100.0;
+    final pillWidth = TabletDawPanelLayout.topBarTempoPillWidth(
+      compactTablet: compactTablet,
+    );
+    final tempoWidth = compactTablet ? 56.0 : 78.0;
+    final timeWidth = compactTablet ? 94.0 : 118.0;
+    final keyWidth = compactTablet ? 68.0 : 84.0;
+    Widget segment({
+      required String primary,
+      required String secondary,
+      required double width,
+      bool emphasize = false,
+    }) {
+      return SizedBox(
+        width: width,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: SizedBox(
+                width: math.max(0.0, width - 10.0),
+                child: Text(
+                  primary,
+                  maxLines: 1,
+                  overflow: TextOverflow.visible,
+                  softWrap: false,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: const Color(0xFFF4F4F4),
+                    fontSize: emphasize ? 17 : 16,
+                    fontWeight: FontWeight.w800,
+                    height: 1.0,
+                    fontFeatures: const <FontFeature>[
+                      FontFeature.tabularFigures(),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 3),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                secondary,
+                maxLines: 1,
+                style: TextStyle(
+                  fontFamily: 'Pretendard',
+                  color: Colors.white.withValues(alpha: 0.58),
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w600,
+                  height: 1.0,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    Widget divider() {
+      return Container(
+        width: 1,
+        height: 34,
+        color: Colors.white.withValues(alpha: 0.16),
+      );
+    }
+
+    return Semantics(
+      identifier: 'daw.tempo_settings',
+      label: L10n.translate(context, 'Tempo and time settings'),
+      button: true,
+      child: GestureDetector(
+        key: _tempoButtonKey,
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          final willOpen = _activeTopPopup != _TopPopupType.tempo;
+          _trackUiClick(
+            controlId: 'tempo_button',
+            surface: 'top_bar',
+            controlType: 'toggle',
+            value: willOpen,
+          );
+          _toggleTopPopup(_TopPopupType.tempo);
+        },
+        onLongPress: _promptTempoInput,
+        child: _buildDawConnectedSurface(
+          borderRadius: BorderRadius.circular(24),
+          active: _showTempoRollDown,
+          inactiveAlpha: 0.20,
+          child: SizedBox(
+            key: _toolbarPillKey,
+            width: pillWidth,
+            height: 48,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                segment(
+                  primary: _formatTempoBpm(_tempo),
+                  secondary: 'BPM',
+                  width: tempoWidth,
+                ),
+                divider(),
+                segment(
+                  primary: current,
+                  secondary: total,
+                  width: timeWidth,
+                  emphasize: true,
+                ),
+                divider(),
+                segment(
+                  primary: keyLabel,
+                  secondary: _timeSignatureLabel(),
+                  width: keyWidth,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTopBar(Duration currentClock, _EditorLayoutSpec layoutSpec) {
+    final pluginAffordanceEnabled =
+        _platformCapabilities.supportsExternalPluginAffordances;
+    final connectedTopPanelVisible = _activeTopPopup != _TopPopupType.none;
+    final isMacDesktop =
+        PlatformCapabilities.current.isDesktop && !kIsWeb && Platform.isMacOS;
+    final usesTabletDawLayout = mixroomUsesTabletLandscapeShell(context);
+    final usesTabletDesktopDawLayout =
+        usesTabletDawLayout || PlatformCapabilities.current.isDesktop;
+    final availableWidth = MediaQuery.sizeOf(context).width;
+    final tabletSidePanelWidth = TabletDawPanelLayout.expandedLeftPanelWidth(
+      availableWidth: availableWidth,
+    );
+    final topBarPadding = usesTabletDawLayout
+        ? EdgeInsets.fromLTRB(
+            12.0,
+            TabletDawPanelLayout.topBarTabletTopInset,
+            layoutSpec.topBarPadding.right,
+            TabletDawPanelLayout.topBarTabletBottomInset,
+          )
+        : layoutSpec.topBarPadding;
+    final showMasterAnalyzer =
+        PlatformCapabilities.current.isDesktop || usesTabletDawLayout;
+    final analyzerSize = PlatformCapabilities.current.isDesktop
+        ? const Size(276, 58)
+        : const Size(252, 48);
+    final tabletProjectHeaderWidth =
+        math.max(0.0, tabletSidePanelWidth - topBarPadding.left);
+    final currentLabel = _formatDuration(currentClock);
+    final totalLabel = _formatDuration(_audioOnlyOverallDuration);
+    return Halo(
+      highlighter: _mixHighlighter,
+      haloKey: const HaloKey('tutorial:toolbar'),
+      borderRadius: BorderRadius.circular(26),
+      child: Padding(
+        padding: topBarPadding,
+        child: Row(
+          crossAxisAlignment: isMacDesktop
+              ? CrossAxisAlignment.start
+              : CrossAxisAlignment.center,
+          children: [
+            usesTabletDawLayout
+                ? _buildTabletProjectHeader(
+                    width: tabletProjectHeaderWidth,
+                  )
+                : isMacDesktop
+                    ? Padding(
+                        padding: const EdgeInsets.only(top: 18),
+                        child: SizedBox(
+                          width: 116,
+                          child: Align(
+                            alignment: Alignment.topLeft,
+                            child: _buildDesktopBackButtonShell(layoutSpec),
+                          ),
+                        ),
+                      )
+                    : _buildTopCircleButtonShell(
+                        key: _editorBackButtonKey,
+                        semanticLabel: L10n.translate(context, 'Back'),
+                        semanticIdentifier: 'daw.navigation.back',
+                        onTap: _handleBackButtonTap,
+                        active: connectedTopPanelVisible,
+                        size: layoutSpec.topBarActionButtonSize,
+                        showPressFeedback: true,
+                        pressed:
+                            _backButtonPressed || _backButtonTapFeedbackActive,
+                        onHighlightChanged: (pressed) {
+                          if (!mounted || _backButtonPressed == pressed) return;
+                          setState(() {
+                            _backButtonPressed = pressed;
+                          });
+                        },
+                        child: Center(
+                          child: SvgPicture.asset(
+                            kMixroomDawTopBackIconAsset,
+                            width: 10,
+                            height: 18,
+                          ),
+                        ),
+                      ),
+            SizedBox(
+              width: usesTabletDawLayout
+                  ? TabletDawPanelLayout.topBarProjectGap
+                  : layoutSpec.topBarClusterGap,
+            ),
+            Expanded(
+              child: usesTabletDesktopDawLayout
+                  ? _buildTabletDesktopTopCenterBar(
+                      current: currentLabel,
+                      total: totalLabel,
+                      analyzerSize: analyzerSize,
+                    )
+                  : Row(
+                      children: [
+                        Expanded(
+                          child: Center(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: _buildToolbarPill(
+                                current: currentLabel,
+                                total: totalLabel,
+                                pluginAffordanceEnabled:
+                                    pluginAffordanceEnabled,
+                                connected: false,
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (showMasterAnalyzer) ...[
+                          const SizedBox(width: 14),
+                          SizedBox(
+                            width: analyzerSize.width,
+                            height: analyzerSize.height,
+                            child: _TopBarMasterVisualizer(meters: _meters),
+                          ),
+                        ],
+                      ],
+                    ),
+            ),
+            if (!usesTabletDawLayout || _tabletRightPanelCollapsed)
+              SizedBox(width: layoutSpec.topBarClusterGap * 0.8),
+            if (!usesTabletDawLayout || _tabletRightPanelCollapsed)
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  children: [
+                    if (usesTabletDawLayout) ...[
+                      _buildTabletRightPanelSelector(),
+                      const SizedBox(width: 12),
+                    ],
+                    if (usesTabletDawLayout)
+                      Halo(
+                        highlighter: _mixHighlighter,
+                        haloKey: const HaloKey('tutorial:export'),
+                        borderRadius: BorderRadius.circular(24),
+                        child: _buildTopCircleButtonShell(
+                          key: _exportButtonKey,
+                          semanticLabel: L10n.translate(context, 'Export'),
+                          semanticIdentifier: 'daw.export',
+                          onTap: () {
+                            _trackUiClick(
+                              controlId: 'export_button',
+                              surface: 'top_bar',
+                            );
+                            if (_tabletRightPanelTab == 'export' &&
+                                !_tabletRightPanelCollapsed &&
+                                _containedExportPanelStage !=
+                                    _ContainedExportPanelStage.exporting) {
+                              setState(() {
+                                _tabletRightPanelCollapsed = true;
+                                _masterMeterExpanded = false;
+                              });
+                              return;
+                            }
+                            if (_containedExportPanelStage ==
+                                _ContainedExportPanelStage.exporting) {
+                              setState(() {
+                                _tabletRightPanelTab = 'export';
+                                _tabletRightPanelCollapsed = false;
+                                _masterMeterExpanded = false;
+                              });
+                              return;
+                            }
+                            _openTabletExportPanel();
+                          },
+                          active: _isExportSheetOpen ||
+                              _tabletRightPanelTab == 'export' ||
+                              _containedExportPanelStage !=
+                                  _ContainedExportPanelStage.idle,
+                          size: layoutSpec.topBarActionButtonSize,
+                          child: Center(
+                            child: _buildDawTopShareIcon(),
+                          ),
+                        ),
+                      )
+                    else
+                      Halo(
+                        highlighter: _mixHighlighter,
+                        haloKey: const HaloKey('tutorial:export'),
+                        borderRadius: BorderRadius.circular(24),
+                        child: _buildTopCircleButtonShell(
+                          key: _exportButtonKey,
+                          semanticLabel: L10n.translate(context, 'Export'),
+                          semanticIdentifier: 'daw.export',
+                          onTap: () {
+                            _trackUiClick(
+                              controlId: 'export_button',
+                              surface: 'top_bar',
+                            );
+                            _exportAndNavigate();
+                          },
+                          active:
+                              _isExportSheetOpen || connectedTopPanelVisible,
+                          size: layoutSpec.topBarActionButtonSize,
+                          child: Center(
+                            child: _buildDawTopShareIcon(),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   double _topBarReservedHeight(_EditorLayoutSpec layoutSpec) {
+    if (mixroomUsesTabletLandscapeShell(context)) {
+      const projectHeaderTopRowHeight = 48.0;
+      return TabletDawPanelLayout.topBarTabletTopInset +
+          projectHeaderTopRowHeight +
+          TabletDawPanelLayout.topBarTabletBottomInset;
+    }
     return layoutSpec.topBarPadding.vertical +
         math.max(layoutSpec.topBarActionButtonSize, 48) +
         layoutSpec.topBarBottomGap;
@@ -26295,33 +32369,38 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             highlighter: _mixHighlighter,
             haloKey: const HaloKey('tutorial:project_settings'),
             borderRadius: BorderRadius.circular(24),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                key: _projectSettingsButtonKey,
-                borderRadius: BorderRadius.circular(24),
-                onTap: () {
-                  _trackUiClick(
-                    controlId: 'project_settings_button',
-                    surface: 'top_bar',
-                    controlType: 'toggle',
-                    value: !_isProjectSettingsOpen,
-                  );
-                  if (_isProjectSettingsOpen) {
-                    unawaited(_closeProjectSettings());
-                    return;
-                  }
-                  _openProjectSettings();
-                },
-                child: _buildToolbarSegment(
-                  active: false,
-                  borderRadius: BorderRadius.circular(22),
-                  width: 47,
-                  child: Center(
-                    child: SvgPicture.asset(
-                      kMixroomDawTopSettingsIconAsset,
-                      width: 17,
-                      height: 17,
+            child: Semantics(
+              identifier: 'daw.project_settings',
+              label: L10n.translate(context, 'Project Settings'),
+              button: true,
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  key: _projectSettingsButtonKey,
+                  borderRadius: BorderRadius.circular(24),
+                  onTap: () {
+                    _trackUiClick(
+                      controlId: 'project_settings_button',
+                      surface: 'top_bar',
+                      controlType: 'toggle',
+                      value: !_isProjectSettingsOpen,
+                    );
+                    if (_isProjectSettingsOpen) {
+                      unawaited(_closeProjectSettings());
+                      return;
+                    }
+                    _openProjectSettings();
+                  },
+                  child: _buildToolbarSegment(
+                    active: false,
+                    borderRadius: BorderRadius.circular(22),
+                    width: 47,
+                    child: Center(
+                      child: SvgPicture.asset(
+                        kMixroomDawTopSettingsIconAsset,
+                        width: 17,
+                        height: 17,
+                      ),
                     ),
                   ),
                 ),
@@ -26515,6 +32594,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   void _openProjectSettings() {
     if (!mounted) return;
+    final showAudioRouting = PlatformCapabilities.current.isDesktop ||
+        mixroomUsesTabletLandscapeShell(context);
     setState(() {
       _projectSettingsDraftName = _projectName;
       _setActiveTopPopup(_TopPopupType.projectSettings);
@@ -26522,7 +32603,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     unawaited(() async {
       await Future<void>.delayed(const Duration(milliseconds: 180));
       if (!mounted || !_isProjectSettingsOpen) return;
-      if (!PlatformCapabilities.current.isDesktop) return;
+      if (!showAudioRouting) return;
       await _refreshMicrophonePermissionState();
       if (_inputDevices.isEmpty && !_loadingDevices) {
         await _loadInputDevicesFromJuce(scheduleRecordingPrewarm: true);
@@ -26553,13 +32634,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final showRecoveryLauncher =
         PlatformCapabilities.current.isDesktop || _projectLoadIssues.isNotEmpty;
     final showProjectSettingsAudioRouting =
-        PlatformCapabilities.current.isDesktop;
+        PlatformCapabilities.current.isDesktop ||
+            mixroomUsesTabletLandscapeShell(context);
+    final usesTabletDawLayout = mixroomUsesTabletLandscapeShell(context);
+    final usesTabletDesktopLayout =
+        usesTabletDawLayout || PlatformCapabilities.current.isDesktop;
     final _TopPopupLayout popupLayout = _resolveTopPopupLayout(
-      anchorKey: _projectSettingsButtonKey,
-      desiredWidth: 232,
-      connectorWidth: 104,
-      centerOnToolbarPill: true,
-      matchToolbarWidth: true,
+      anchorKey:
+          usesTabletDawLayout ? _projectNamePillKey : _projectSettingsButtonKey,
+      desiredWidth: usesTabletDesktopLayout ? 340 : 232,
+      connectorWidth: usesTabletDesktopLayout ? 136 : 104,
+      centerOnToolbarPill: !usesTabletDawLayout,
+      matchToolbarWidth: !usesTabletDawLayout,
+      alignLeftToAnchor: usesTabletDawLayout,
     );
     return Positioned(
       top: popupLayout.top,
@@ -26649,14 +32736,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               const SizedBox(height: 10),
                               if (showProjectSettingsAudioRouting) ...[
                                 _buildInputSelector(),
-                                if (_numInputChannels > 0) ...[
+                                if (_shouldShowInputChannelRouteSelector()) ...[
                                   const SizedBox(height: 9),
                                   _buildInputChannelRouteSelector(),
                                 ],
-                                if (!Platform.isIOS) ...[
-                                  const SizedBox(height: 9),
-                                  _buildOutputSelector(),
-                                ],
+                                const SizedBox(height: 9),
+                                _buildOutputSelector(),
                                 if (_supportsNativeBluetoothMonitorPolicy() &&
                                     (_audioRouteInfo.isBluetoothOutput ||
                                         _audioRouteInfo
@@ -28362,6 +34447,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return math.max(1, math.min(_numInputChannels, desiredInputs));
   }
 
+  int _effectiveInputChannelCountForSettings() {
+    var count = _numInputChannels;
+    if (_isValidRowIndex(_selectedRow)) {
+      final row = _rows[_selectedRow];
+      count = math.max(count, row.inputChannelStart + row.inputChannelCount);
+    }
+    count = math.max(count, _selectedChannelStart + _selectedChannelCount);
+    return count;
+  }
+
+  bool _shouldShowInputChannelRouteSelector() {
+    return _inputDevices.isNotEmpty &&
+        _effectiveInputChannelCountForSettings() > 0;
+  }
+
   bool _recordingInputsPreparedFor({
     required String selectedDevice,
     required int desiredInputChannels,
@@ -28369,6 +34469,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return _lastPreparedRecordingDevice == selectedDevice &&
         _lastPreparedRecordingInputOpenChannels == desiredInputChannels;
   }
+
+  bool get _recordButtonVisuallyActive =>
+      _isRecording || _recordStartVisualPending;
 
   bool _supportsNativeBluetoothMonitorPolicy() {
     return Platform.isAndroid || Platform.isIOS;
@@ -28379,6 +34482,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         a.outputRouteName == b.outputRouteName &&
         a.inputDeviceName == b.inputDeviceName &&
         a.inputIsBluetoothHeadset == b.inputIsBluetoothHeadset;
+  }
+
+  bool _inputDeviceCacheIsFresh({
+    Duration maxAge = const Duration(seconds: 45),
+  }) {
+    if (_lastInputDevicesLoadedElapsed == Duration.zero) return false;
+    return _transportUiStopwatch.elapsed - _lastInputDevicesLoadedElapsed <=
+        maxAge;
+  }
+
+  bool _audioRouteInfoIsKnown(AudioRouteInfo info) {
+    return info.outputRouteKind != AudioRouteKind.unknown ||
+        info.outputRouteName.trim().isNotEmpty ||
+        info.inputDeviceName.trim().isNotEmpty ||
+        info.inputIsBluetoothHeadset;
+  }
+
+  bool _audioRouteInfoCacheIsFresh({
+    Duration maxAge = const Duration(seconds: 45),
+  }) {
+    if (_lastAudioRouteInfoRefreshElapsed == Duration.zero) return false;
+    return _transportUiStopwatch.elapsed - _lastAudioRouteInfoRefreshElapsed <=
+        maxAge;
   }
 
   String _normalizeBluetoothRouteKeyToken(String raw) {
@@ -28486,7 +34612,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final routeLabel = info.outputRouteName.trim();
     final changed = !_sameAudioRouteInfo(_audioRouteInfo, info) ||
         _androidOutputRouteName != (routeLabel.isEmpty ? null : routeLabel);
+    _lastAudioRouteInfoRefreshElapsed = _transportUiStopwatch.elapsed;
     if (changed) {
+      _lastPreparedRecordingDevice = null;
+      _lastPreparedRecordingInputOpenChannels = null;
       _setStateAndRefreshProjectSettings(() {
         _audioRouteInfo = info;
         if (Platform.isAndroid) {
@@ -28499,6 +34628,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (_isRecording && !_isMidiClipRecording) {
       await _applyCurrentLiveMonitoringPolicy(info: info);
+    } else if (changed) {
+      _scheduleRecordingInputPrewarm(reason: 'routeChanged');
     }
   }
 
@@ -28689,6 +34820,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (identical(_recordingInputPrewarmFuture, future)) {
           _recordingInputPrewarmFuture = null;
         }
+        if (preparedForRequestedConfig && mounted) {
+          final channels = await JuceAudioEngine.getNumInputChannels();
+          if (channels > 0 && mounted) {
+            _setStateAndRefreshProjectSettings(() {
+              _numInputChannels = channels;
+              _normalizeInputChannelSelection();
+            });
+          }
+        }
         // Only chain another prewarm when the current prewarm succeeded.
         // This prevents infinite retry loops on persistent native-route errors.
         if (rescheduleOnConfigChange && mounted && preparedForRequestedConfig) {
@@ -28710,40 +34850,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     _recordingInputPrewarmFuture = future;
     return future;
-  }
-
-  Future<void> _ensureMobileRecordingRouteReady() async {
-    if (!mounted || _isRecording) return;
-    if (!(Platform.isAndroid || Platform.isIOS)) return;
-
-    final desiredInputChannels = _desiredRecordingInputOpenChannels();
-    if (desiredInputChannels <= 0) return;
-
-    final selectedDevice = (_selectedDevice ?? '').trim();
-    if (_recordingInputsPreparedFor(
-      selectedDevice: selectedDevice,
-      desiredInputChannels: desiredInputChannels,
-    )) {
-      return;
-    }
-
-    final inFlight = _recordingInputPrewarmFuture;
-    if (inFlight != null) {
-      final prepared = await inFlight;
-      if (prepared &&
-          _recordingInputsPreparedFor(
-            selectedDevice: selectedDevice,
-            desiredInputChannels: desiredInputChannels,
-          )) {
-        return;
-      }
-    }
-
-    await _prepareRecordingInputs(
-      desiredInputChannels: desiredInputChannels,
-      selectedDevice: selectedDevice,
-      reason: 'recordStart',
-    );
   }
 
   void _scheduleRecordingInputPrewarm({required String reason}) {
@@ -28802,7 +34908,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final devices = await JuceAudioEngine.getInputDevices();
       final current = await JuceAudioEngine.getCurrentDeviceName();
       final channels = await JuceAudioEngine.getNumInputChannels();
+      _lastInputDevicesLoadedElapsed = _transportUiStopwatch.elapsed;
       _setStateAndRefreshProjectSettings(() {
+        final resolvedChannels = channels > 0
+            ? channels
+            : (devices.isNotEmpty ? _numInputChannels : 0);
         final currentDeviceName = current.trim();
         _microphonePermissionStatus = micStatus;
         _microphoneAccessBlocked = micBlocked;
@@ -28812,7 +34922,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             : (devices.isNotEmpty ? devices.first : null);
         _macOutputDeviceName =
             currentDeviceName.isEmpty ? null : currentDeviceName;
-        _numInputChannels = channels;
+        _numInputChannels = resolvedChannels;
         _normalizeInputChannelSelection();
         _loadingDevices = false;
       });
@@ -28836,6 +34946,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       });
       _lastPreparedRecordingDevice = null;
       _lastPreparedRecordingInputOpenChannels = null;
+      _lastInputDevicesLoadedElapsed = Duration.zero;
+      _lastAudioRouteInfoRefreshElapsed = Duration.zero;
       _audioRouteInfo = AudioRouteInfo.unknown;
       if (Platform.isAndroid) {
         unawaited(JuceAudioEngine.prepareRecordingInputs(
@@ -28978,16 +35090,43 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
     }
 
-    final selector = DropdownButtonFormField<String>(
-      value: _selectedDevice,
-      isExpanded: true,
-      dropdownColor: kMixroomGlassDropdownMenuColor,
-      style: const TextStyle(color: Colors.white),
-      selectedItemBuilder: (context) {
-        return _inputDevices
+    final selector = Semantics(
+      identifier: 'daw.input_device',
+      label: L10n.translate(context, 'Input Device'),
+      child: DropdownButtonFormField<String>(
+        initialValue: _selectedDevice,
+        isExpanded: true,
+        dropdownColor: kMixroomGlassDropdownMenuColor,
+        style: const TextStyle(color: Colors.white),
+        selectedItemBuilder: (context) {
+          return _inputDevices
+              .map(
+                (d) => Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    d,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              )
+              .toList(growable: false);
+        },
+        decoration: _projectSettingsFieldDecoration(
+          labelText: L10n.translate(context, 'Input Device'),
+          suffixIcon: IconButton(
+            tooltip: L10n.translate(context, 'Refresh audio devices'),
+            icon: const Icon(Icons.refresh, color: Colors.white70),
+            onPressed: () async {
+              _loadInputDevicesFromJuce(scheduleRecordingPrewarm: true);
+              print("audio devices reloaded from JUCE");
+            },
+          ),
+        ),
+        items: _inputDevices
             .map(
-              (d) => Align(
-                alignment: Alignment.centerLeft,
+              (d) => DropdownMenuItem(
+                value: d,
                 child: Text(
                   d,
                   maxLines: 1,
@@ -28995,62 +35134,39 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 ),
               ),
             )
-            .toList(growable: false);
-      },
-      decoration: _projectSettingsFieldDecoration(
-        labelText: L10n.translate(context, 'Input Device'),
-        suffixIcon: IconButton(
-          tooltip: L10n.translate(context, 'Refresh audio devices'),
-          icon: const Icon(Icons.refresh, color: Colors.white70),
-          onPressed: () async {
-            _loadInputDevicesFromJuce(scheduleRecordingPrewarm: true);
-            print("audio devices reloaded from JUCE");
-          },
-        ),
-      ),
-      items: _inputDevices
-          .map(
-            (d) => DropdownMenuItem(
-              value: d,
-              child: Text(
-                d,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          )
-          .toList(),
-      onChanged: (name) async {
-        if (name == null) return;
+            .toList(),
+        onChanged: (name) async {
+          if (name == null) return;
 
-        final ok = await JuceAudioEngine.selectInputDevice(name);
-        if (!ok) return;
+          final ok = await JuceAudioEngine.selectInputDevice(name);
+          if (!ok) return;
 
-        final channels = await JuceAudioEngine.getNumInputChannels();
+          final channels = await JuceAudioEngine.getNumInputChannels();
 
-        _setStateAndRefreshProjectSettings(() {
-          _selectedDevice = name;
-          _numInputChannels = channels;
-          _normalizeInputChannelSelection();
+          _setStateAndRefreshProjectSettings(() {
+            _selectedDevice = name;
+            _numInputChannels = channels;
+            _normalizeInputChannelSelection();
+            if (_isValidRowIndex(_selectedRow)) {
+              _rows[_selectedRow] = _rows[_selectedRow].copyWith(
+                inputDeviceName: name,
+                inputChannelStart: _selectedChannelStart,
+                inputChannelCount: _selectedChannelCount,
+              );
+            }
+          });
           if (_isValidRowIndex(_selectedRow)) {
-            _rows[_selectedRow] = _rows[_selectedRow].copyWith(
+            unawaited(JuceAudioEngine.setRowMonitorTarget(
+              row: _selectedRow,
               inputDeviceName: name,
-              inputChannelStart: _selectedChannelStart,
-              inputChannelCount: _selectedChannelCount,
-            );
+              channelStart: _selectedChannelStart,
+              channelCount: _selectedChannelCount,
+            ));
           }
-        });
-        if (_isValidRowIndex(_selectedRow)) {
-          unawaited(JuceAudioEngine.setRowMonitorTarget(
-            row: _selectedRow,
-            inputDeviceName: name,
-            channelStart: _selectedChannelStart,
-            channelCount: _selectedChannelCount,
-          ));
-        }
-        _scheduleRecordingInputPrewarm(reason: 'selectInputDevice');
-        unawaited(_refreshAndroidOutputRouteLabel());
-      },
+          _scheduleRecordingInputPrewarm(reason: 'selectInputDevice');
+          unawaited(_refreshAndroidOutputRouteLabel());
+        },
+      ),
     );
 
     if (!_microphoneAccessBlocked) {
@@ -29068,57 +35184,63 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Widget _buildInputChannelRouteSelector() {
-    final options = _buildInputChannelRouteOptions(_numInputChannels);
+    final options = _buildInputChannelRouteOptions(
+      _effectiveInputChannelCountForSettings(),
+    );
     if (options.isEmpty) return const SizedBox.shrink();
 
     final selected =
         _findSelectedInputChannelRouteOption(options) ?? options.first;
 
-    return DropdownButtonFormField<_InputChannelRouteOption>(
-      key: ValueKey(_numInputChannels),
-      value: selected,
-      isExpanded: true,
-      dropdownColor: kMixroomGlassDropdownMenuColor,
-      style: const TextStyle(color: Colors.white),
-      decoration: _projectSettingsFieldDecoration(
-        labelText: L10n.translate(context, 'Input Channel'),
-      ),
-      items: options
-          .map(
-            (option) => DropdownMenuItem<_InputChannelRouteOption>(
-              value: option,
-              child: Text(
-                option.label,
-                style: const TextStyle(color: Colors.white),
+    return Semantics(
+      identifier: 'daw.input_channel',
+      label: L10n.translate(context, 'Input Channel'),
+      child: DropdownButtonFormField<_InputChannelRouteOption>(
+        key: ValueKey('input-channel:$_numInputChannels:${options.length}'),
+        initialValue: selected,
+        isExpanded: true,
+        dropdownColor: kMixroomGlassDropdownMenuColor,
+        style: const TextStyle(color: Colors.white),
+        decoration: _projectSettingsFieldDecoration(
+          labelText: L10n.translate(context, 'Input Channel'),
+        ),
+        items: options
+            .map(
+              (option) => DropdownMenuItem<_InputChannelRouteOption>(
+                value: option,
+                child: Text(
+                  option.label,
+                  style: const TextStyle(color: Colors.white),
+                ),
               ),
-            ),
-          )
-          .toList(),
-      onChanged: _isRecording
-          ? null
-          : (option) {
-              if (option == null) return;
-              _setStateAndRefreshProjectSettings(() {
-                _selectedChannelStart = option.channelStart;
-                _selectedChannelCount = option.channelCount;
+            )
+            .toList(),
+        onChanged: _isRecording
+            ? null
+            : (option) {
+                if (option == null) return;
+                _setStateAndRefreshProjectSettings(() {
+                  _selectedChannelStart = option.channelStart;
+                  _selectedChannelCount = option.channelCount;
+                  if (_isValidRowIndex(_selectedRow)) {
+                    _rows[_selectedRow] = _rows[_selectedRow].copyWith(
+                      inputDeviceName: _selectedDevice ?? '',
+                      inputChannelStart: option.channelStart,
+                      inputChannelCount: option.channelCount,
+                    );
+                  }
+                });
                 if (_isValidRowIndex(_selectedRow)) {
-                  _rows[_selectedRow] = _rows[_selectedRow].copyWith(
+                  unawaited(JuceAudioEngine.setRowMonitorTarget(
+                    row: _selectedRow,
                     inputDeviceName: _selectedDevice ?? '',
-                    inputChannelStart: option.channelStart,
-                    inputChannelCount: option.channelCount,
-                  );
+                    channelStart: option.channelStart,
+                    channelCount: option.channelCount,
+                  ));
                 }
-              });
-              if (_isValidRowIndex(_selectedRow)) {
-                unawaited(JuceAudioEngine.setRowMonitorTarget(
-                  row: _selectedRow,
-                  inputDeviceName: _selectedDevice ?? '',
-                  channelStart: option.channelStart,
-                  channelCount: option.channelCount,
-                ));
-              }
-              _scheduleRecordingInputPrewarm(reason: 'selectInputChannels');
-            },
+                _scheduleRecordingInputPrewarm(reason: 'selectInputChannels');
+              },
+      ),
     );
   }
 
@@ -29138,20 +35260,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               'System default (speaker / Bluetooth / audio interface)',
             )
           : routeLabel;
-      return InputDecorator(
-        decoration: _projectSettingsFieldDecoration(
-          labelText: L10n.translate(context, 'Output Route'),
-          suffixIcon: IconButton(
-            tooltip: L10n.translate(context, 'Refresh output route'),
-            icon: const Icon(Icons.refresh, color: Colors.white70),
-            onPressed: () {
-              unawaited(_refreshAndroidOutputRouteLabel());
-            },
+      return Semantics(
+        identifier: 'daw.output_route',
+        label: L10n.translate(context, 'Output Route'),
+        child: InputDecorator(
+          decoration: _projectSettingsFieldDecoration(
+            labelText: L10n.translate(context, 'Output Route'),
+            suffixIcon: IconButton(
+              tooltip: L10n.translate(context, 'Refresh output route'),
+              icon: const Icon(Icons.refresh, color: Colors.white70),
+              onPressed: () {
+                unawaited(_refreshAndroidOutputRouteLabel());
+              },
+            ),
           ),
-        ),
-        child: Text(
-          effectiveLabel,
-          style: const TextStyle(color: Colors.white),
+          child: Text(
+            effectiveLabel,
+            style: const TextStyle(color: Colors.white),
+          ),
         ),
       );
     }
@@ -29164,20 +35290,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               'System default (speaker / Bluetooth / audio interface)',
             )
           : routeLabel;
-      return InputDecorator(
-        decoration: _projectSettingsFieldDecoration(
-          labelText: L10n.translate(context, 'Output Route'),
-          suffixIcon: IconButton(
-            tooltip: L10n.translate(context, 'Refresh output route'),
-            icon: const Icon(Icons.refresh, color: Colors.white70),
-            onPressed: () {
-              unawaited(_refreshAudioRouteInfo());
-            },
+      return Semantics(
+        identifier: 'daw.output_route',
+        label: L10n.translate(context, 'Output Route'),
+        child: InputDecorator(
+          decoration: _projectSettingsFieldDecoration(
+            labelText: L10n.translate(context, 'Output Route'),
+            suffixIcon: IconButton(
+              tooltip: L10n.translate(context, 'Refresh output route'),
+              icon: const Icon(Icons.refresh, color: Colors.white70),
+              onPressed: () {
+                unawaited(_refreshAudioRouteInfo());
+              },
+            ),
           ),
-        ),
-        child: Text(
-          effectiveLabel,
-          style: const TextStyle(color: Colors.white),
+          child: Text(
+            effectiveLabel,
+            style: const TextStyle(color: Colors.white),
+          ),
         ),
       );
     }
@@ -29538,7 +35668,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         _buildInputMeterStrip(),
                         const SizedBox(height: 10),
                         _buildInputSelector(),
-                        if (_numInputChannels > 0) ...[
+                        if (_shouldShowInputChannelRouteSelector()) ...[
                           const SizedBox(height: 9),
                           _buildInputChannelRouteSelector(),
                         ],
@@ -29591,20 +35721,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Widget _buildAudioRoutingLauncher() {
-    return TextButton.icon(
-      onPressed: () {
-        unawaited(_closeProjectSettings());
-        unawaited(_showAudioRoutingSheet());
-      },
-      icon: const Icon(Icons.settings_input_component_rounded, size: 18),
-      label: Text(L10n.translate(context, 'Audio Routing')),
-      style: TextButton.styleFrom(
-        foregroundColor: Colors.white,
-        backgroundColor: Colors.white.withValues(alpha: 0.08),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+    return Semantics(
+      identifier: 'daw.audio_routing',
+      label: L10n.translate(context, 'Audio Routing'),
+      button: true,
+      child: TextButton.icon(
+        onPressed: () {
+          unawaited(_closeProjectSettings());
+          unawaited(_showAudioRoutingSheet());
+        },
+        icon: const Icon(Icons.settings_input_component_rounded, size: 18),
+        label: Text(L10n.translate(context, 'Audio Routing')),
+        style: TextButton.styleFrom(
+          foregroundColor: Colors.white,
+          backgroundColor: Colors.white.withValues(alpha: 0.08),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+          ),
         ),
       ),
     );
@@ -29948,6 +36083,57 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Widget _buildTempoRollDownPanel() {
     final panelRadius = BorderRadius.circular(29);
     final selectedChipColor = const Color(0xFFF4F4F4).withValues(alpha: 0.20);
+    Widget timeSignatureChip(List<int> option) {
+      final numerator = option[0];
+      final denominator = option[1];
+      final label = _timeSignatureLabel(numerator, denominator);
+      final selected = numerator == _timeSignatureNumerator &&
+          denominator == _timeSignatureDenominator;
+      return Semantics(
+        button: true,
+        selected: selected,
+        label: '${L10n.translate(context, 'Time Signature')} $label',
+        child: InkWell(
+          borderRadius: BorderRadius.circular(15),
+          onTap: () => _setProjectTimeSignatureFromUi(numerator, denominator),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 130),
+            curve: Curves.easeOutCubic,
+            width: 48,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: selected
+                  ? selectedChipColor
+                  : const Color.fromRGBO(244, 244, 244, 0.075),
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(
+                color: Colors.white.withValues(
+                  alpha: selected ? 0.22 : 0.09,
+                ),
+              ),
+            ),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.visible,
+              style: TextStyle(
+                fontFamily: 'Pretendard',
+                color: const Color(0xFFF4F4F4).withValues(
+                  alpha: selected ? 1.0 : 0.74,
+                ),
+                fontSize: 12,
+                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                height: 1.0,
+                fontFeatures: const <FontFeature>[
+                  FontFeature.tabularFigures(),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     final _TopPopupLayout popupLayout = _resolveTopPopupLayout(
       anchorKey: _tempoButtonKey,
       desiredWidth: 232,
@@ -30135,6 +36321,49 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           Row(
                             children: [
                               Text(
+                                L10n.translate(context, 'Time Signature'),
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Color(0xB8F4F4F4),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                _timeSignatureLabel(),
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Color(0xFFF4F4F4),
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  fontFeatures: <FontFeature>[
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          SizedBox(
+                            height: 34,
+                            child: ListView.separated(
+                              padding: EdgeInsets.zero,
+                              scrollDirection: Axis.horizontal,
+                              physics: const BouncingScrollPhysics(),
+                              itemCount: _kProjectTimeSignatureOptions.length,
+                              separatorBuilder: (context, index) =>
+                                  const SizedBox(width: 6),
+                              itemBuilder: (context, index) =>
+                                  timeSignatureChip(
+                                _kProjectTimeSignatureOptions[index],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Text(
                                 L10n.translate(context, 'Tempo Mode'),
                                 style: TextStyle(
                                   fontFamily: 'Pretendard',
@@ -30312,6 +36541,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _onRecordPressed() async {
+    if (_recordStartVisualPending && !_isRecording) {
+      _recordStartCancelRequested = true;
+      if (mounted) {
+        setState(() {
+          _recordStartVisualPending = false;
+        });
+      }
+      return;
+    }
     if (_isRecording) {
       // Second press of record stops recording and leaves playback alone
       // await _stopRecording(keepPlaying: false); // true);
@@ -30894,6 +37132,95 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return row.clamp(0, _rowCount - 1);
   }
 
+  List<int> _resolveRowIndicesFromActionTarget(
+    Map<String, dynamic> data, {
+    bool includeSelectionFallback = true,
+  }) {
+    if (_rowCount <= 0) return const <int>[];
+    final target = _actionTarget(data);
+    final rows = LinkedHashSet<int>();
+
+    void addRow(dynamic raw, {bool preferOneBased = false}) {
+      final row = _parseRowIndexValue(raw, preferOneBased: preferOneBased);
+      if (row != null && row >= 0 && row < _rowCount) {
+        rows.add(row);
+      }
+    }
+
+    void addRowList(dynamic raw, {bool preferOneBased = false}) {
+      if (raw is List) {
+        for (final item in raw) {
+          addRow(item, preferOneBased: preferOneBased);
+        }
+      }
+    }
+
+    addRowList(data['row_indices']);
+    addRowList(target['row_indices']);
+    addRowList(data['track_indices']);
+    addRowList(target['track_indices']);
+    addRowList(data['rows']);
+    addRowList(target['rows']);
+    addRowList(data['tracks']);
+    addRowList(target['tracks']);
+    addRowList(data['row_numbers'], preferOneBased: true);
+    addRowList(target['row_numbers'], preferOneBased: true);
+    addRowList(data['track_numbers'], preferOneBased: true);
+    addRowList(target['track_numbers'], preferOneBased: true);
+
+    final single = _resolveActionRowIndexFromData(
+      data,
+      includeSelectionFallback: false,
+    );
+    if (single != null && single >= 0 && single < _rowCount) {
+      rows.add(single);
+    }
+
+    final scope = (data['scope'] ?? target['scope'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    if (scope == 'group' || scope == 'track_group' || scope == 'track-group') {
+      final groupId = _resolveRowGroupIdFromAction(data);
+      if (groupId != null && groupId.isNotEmpty) {
+        for (int row = 0; row < _rows.length; row++) {
+          if (_rows[row].groupId.trim() == groupId) {
+            rows.add(row);
+          }
+        }
+        for (final group in _trackGroups) {
+          if (group.id != groupId) continue;
+          final rowIds = group.rowIds.toSet();
+          for (int row = 0; row < _rows.length; row++) {
+            if (rowIds.contains(_rows[row].rowId)) {
+              rows.add(row);
+            }
+          }
+        }
+      }
+    }
+    if (scope == 'selected' || scope == 'selection') {
+      for (final clipIndex in _timelineSelectedClipIndices) {
+        if (clipIndex >= 0 && clipIndex < _audioTracks.length) {
+          final row = _audioTracks[clipIndex].rowIndex;
+          if (row >= 0 && row < _rowCount) rows.add(row);
+        }
+      }
+      if (_timelinePrimarySelectedClipIndex >= 0 &&
+          _timelinePrimarySelectedClipIndex < _audioTracks.length) {
+        final row = _audioTracks[_timelinePrimarySelectedClipIndex].rowIndex;
+        if (row >= 0 && row < _rowCount) rows.add(row);
+      }
+    }
+
+    if (rows.isEmpty && includeSelectionFallback) {
+      rows.add(_selectedRow.clamp(0, _rowCount - 1).toInt());
+    }
+
+    final out = rows.toList(growable: false)..sort();
+    return out;
+  }
+
   int _resolveInsertionRowIndexFromActionTarget(
     Map<String, dynamic> data, {
     int? fallbackClipIndex,
@@ -31237,6 +37564,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               _throwIfChatFlowStopped(chatFlowId);
             }
             break;
+          case 'row_group_edit':
+            await _applyRowGroupEditAction(data);
+            if (chatFlowId != null) {
+              _throwIfChatFlowStopped(chatFlowId);
+            }
+            break;
+          case 'row_color_edit':
+            await _applyRowColorEditAction(data);
+            if (chatFlowId != null) {
+              _throwIfChatFlowStopped(chatFlowId);
+            }
+            break;
           case 'sample_insert':
             await _applySampleInsertAction(data);
             if (chatFlowId != null) {
@@ -31308,6 +37647,228 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     }
     return !hadFailure;
+  }
+
+  String _normalizeRowGroupEditOperation(String raw) {
+    switch (raw.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_')) {
+      case 'create':
+      case 'create_group':
+      case 'group':
+      case 'group_rows':
+        return 'create';
+      case 'remove_row':
+      case 'ungroup_row':
+      case 'remove_from_group':
+        return 'remove_row';
+      case 'toggle':
+      case 'toggle_collapsed':
+      case 'fold':
+      case 'unfold':
+      case 'collapse':
+      case 'expand':
+        return 'toggle_collapsed';
+      default:
+        return raw.trim().toLowerCase();
+    }
+  }
+
+  String? _resolveRowGroupIdFromAction(Map<String, dynamic> data) {
+    final target = _actionTarget(data);
+    final candidates = <String>[
+      (data['group_id'] ?? '').toString(),
+      (target['group_id'] ?? '').toString(),
+    ]
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toList(growable: false);
+    for (final candidate in candidates) {
+      for (final group in _trackGroups) {
+        if (group.id == candidate) return group.id;
+      }
+    }
+
+    final nameCandidates = <String>[
+      (data['group_name'] ?? '').toString(),
+      (target['group_name'] ?? '').toString(),
+      (data['name'] ?? '').toString(),
+    ]
+        .map((value) => value.trim().toLowerCase())
+        .where((value) => value.isNotEmpty)
+        .toList(growable: false);
+    for (final candidate in nameCandidates) {
+      for (final group in _trackGroups) {
+        final name = group.name.trim().toLowerCase();
+        if (name == candidate ||
+            (name.isNotEmpty && name.contains(candidate)) ||
+            (candidate.contains('group') && candidate.contains(name))) {
+          return group.id;
+        }
+      }
+    }
+
+    final row = _resolveActionRowIndexFromData(
+      data,
+      includeSelectionFallback: false,
+    );
+    if (row != null && row >= 0 && row < _rows.length) {
+      final groupId = _rows[row].groupId.trim();
+      if (groupId.isNotEmpty) return groupId;
+    }
+    return null;
+  }
+
+  Future<void> _applyRowGroupEditAction(Map<String, dynamic> data) async {
+    final operation = _normalizeRowGroupEditOperation(
+      (data['operation'] ?? '').toString(),
+    );
+    switch (operation) {
+      case 'create':
+        {
+          final rows = _resolveRowIndicesFromActionTarget(
+            data,
+            includeSelectionFallback: false,
+          );
+          if (rows.length < 2) {
+            _insertAssistantChatText(
+              'Select or specify at least two rows to group.',
+            );
+            return;
+          }
+          final name =
+              (data['group_name'] ?? data['name'] ?? '').toString().trim();
+          final color = _toActionInt(data['color']);
+          await _createRowGroup(
+            rows,
+            name: name.isEmpty ? null : name,
+            color: color,
+          );
+          _insertSystemChatText(
+            '• Created ${name.isEmpty ? 'row group' : name} from ${rows.length} rows •',
+          );
+          return;
+        }
+      case 'remove_row':
+        {
+          final row = _resolveRowIndexFromActionTarget(data);
+          if (row == null) {
+            _insertAssistantChatText(
+                "I couldn't resolve which row to ungroup.");
+            return;
+          }
+          await _removeRowFromGroup(row);
+          _insertSystemChatText(
+            '• Removed ${_rowDisplayName(row)} from its group •',
+          );
+          return;
+        }
+      case 'toggle_collapsed':
+        {
+          final groupId = _resolveRowGroupIdFromAction(data);
+          if (groupId == null || groupId.isEmpty) {
+            _insertAssistantChatText(
+              "I couldn't resolve which group to fold or unfold.",
+            );
+            return;
+          }
+          await _toggleRowGroupCollapsed(groupId);
+          return;
+        }
+      default:
+        _insertAssistantChatText("I couldn't apply that row group edit.");
+    }
+  }
+
+  int? _resolveRowColorFromAction(Map<String, dynamic> data) {
+    final target = _actionTarget(data);
+    final explicit = _toActionInt(
+      data['color'] ??
+          target['color'] ??
+          data['argb'] ??
+          target['argb'] ??
+          data['value'] ??
+          target['value'],
+    );
+    if (explicit != null) return explicit < 0 ? 0 : explicit;
+
+    final rawName = (data['color_name'] ??
+            target['color_name'] ??
+            data['name'] ??
+            target['name'] ??
+            data['color'])
+        ?.toString()
+        .trim()
+        .toLowerCase();
+    if (rawName == null || rawName.isEmpty) return null;
+    switch (rawName.replaceAll(RegExp(r'[^a-z0-9]+'), '_')) {
+      case 'none':
+      case 'clear':
+      case 'default':
+      case 'unset':
+        return 0;
+      case 'red':
+      case 'pink':
+      case 'coral':
+        return const Color(0xFFFF6F7D).toARGB32();
+      case 'orange':
+      case 'amber':
+        return const Color(0xFFFFA654).toARGB32();
+      case 'yellow':
+      case 'gold':
+        return const Color(0xFFFFDD66).toARGB32();
+      case 'green':
+      case 'lime':
+        return const Color(0xFF69E080).toARGB32();
+      case 'cyan':
+      case 'aqua':
+      case 'teal':
+        return const Color(0xFF6BD7F0).toARGB32();
+      case 'blue':
+        return const Color(0xFF79A8FF).toARGB32();
+      case 'purple':
+      case 'violet':
+        return const Color(0xFFC78DFF).toARGB32();
+      case 'magenta':
+      case 'fuchsia':
+        return const Color(0xFFFF7FE3).toARGB32();
+      default:
+        return null;
+    }
+  }
+
+  Future<void> _applyRowColorEditAction(Map<String, dynamic> data) async {
+    final operation = (data['operation'] ?? 'set')
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+    if (operation != 'set' && operation != 'clear') {
+      _insertAssistantChatText("I couldn't apply that row color edit.");
+      return;
+    }
+
+    final rows = _resolveRowIndicesFromActionTarget(
+      data,
+      includeSelectionFallback: true,
+    );
+    if (rows.isEmpty) {
+      _insertAssistantChatText("I couldn't resolve which row to color.");
+      return;
+    }
+
+    final color = operation == 'clear' ? 0 : _resolveRowColorFromAction(data);
+    if (color == null) {
+      _insertAssistantChatText("I couldn't resolve which color to use.");
+      return;
+    }
+
+    for (final row in rows) {
+      await _setRowColor(row, color);
+    }
+    _insertSystemChatText(
+      color == 0
+          ? '• Cleared row color on ${rows.length} ${rows.length == 1 ? 'row' : 'rows'} •'
+          : '• Changed row color on ${rows.length} ${rows.length == 1 ? 'row' : 'rows'} •',
+    );
   }
 
   String _normalizeEffectEditOperation(String raw) {
@@ -31415,13 +37976,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         scope == 'master_bus' ||
         scope == 'master-bus' ||
         scope == 'masterbus';
+    final groupId = isMaster ? null : _resolveRowGroupIdFromAction(data);
+    final groupBusRow =
+        groupId == null ? null : _trackGroupLeadRowIndexForId(groupId);
 
-    final row = isMaster ? null : _resolveRowIndexFromActionTarget(data);
+    final row =
+        isMaster ? null : groupBusRow ?? _resolveRowIndexFromActionTarget(data);
     if (!isMaster && row == null) {
       _insertAssistantChatText(
           "I couldn't resolve which track plugin to edit.");
       return;
     }
+    final groupBusName =
+        groupId == null ? null : _trackGroupDisplayName(groupId);
+    final targetDisplayName =
+        groupBusName ?? (row == null ? '' : _rowDisplayName(row));
 
     final effects = isMaster
         ? await JuceAudioEngine.getMasterEffects()
@@ -31430,7 +37999,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (operation == 'remove') {
       if (effectIndex == null) {
-        final rowName = row == null ? 'this track' : _rowDisplayName(row);
+        final rowName =
+            targetDisplayName.isEmpty ? 'this track' : targetDisplayName;
         _insertAssistantChatText(
           isMaster
               ? "I couldn't resolve which master plugin to remove."
@@ -31491,7 +38061,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _insertSystemChatText(
         isMaster
             ? '• Removed $effectName from Master Bus •'
-            : '• Removed $effectName from ${_rowDisplayName(row!)} •',
+            : '• Removed $effectName from $targetDisplayName •',
       );
       return;
     }
@@ -31606,7 +38176,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _insertSystemChatText(
         isMaster
             ? '• Added $effectName to Master Bus •'
-            : '• Added $effectName to ${_rowDisplayName(row!)} •',
+            : '• Added $effectName to $targetDisplayName •',
       );
       return;
     }
@@ -31615,7 +38185,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         operation == 'unbypass' ||
         operation == 'toggle_bypass') {
       if (effectIndex == null) {
-        final rowName = row == null ? 'this track' : _rowDisplayName(row);
+        final rowName =
+            targetDisplayName.isEmpty ? 'this track' : targetDisplayName;
         _insertAssistantChatText(
           isMaster
               ? "I couldn't resolve which master plugin to toggle."
@@ -31666,7 +38237,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _insertSystemChatText(
         isMaster
             ? '• ${nextState ? 'Bypassed' : 'Enabled'} $effectName on Master Bus •'
-            : '• ${nextState ? 'Bypassed' : 'Enabled'} $effectName on ${_rowDisplayName(row!)} •',
+            : '• ${nextState ? 'Bypassed' : 'Enabled'} $effectName on $targetDisplayName •',
       );
       return;
     }
@@ -36923,6 +43494,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         applySnapshot: (snap) => _applyCopiedRowEffectsEntry(row, snap),
       ),
     );
+    _clearTabletRowFxSelectionForRow(row);
     _recordProducerManualEdit('row_fx_clear', <String, Object?>{
       'row': row,
       'effect_count': before.effects.effects.length,
@@ -41985,10 +48557,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       skippedReasons.add(reason.trim());
     }
 
+    bool isGroupScopedAction(Map<String, dynamic> data) {
+      final target = _toActionMap(data['target']);
+      final rawScope = (data['scope'] ?? target['scope'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      return rawScope == 'group' ||
+          rawScope == 'track_group' ||
+          rawScope == 'track-group' ||
+          data.containsKey('group_id') ||
+          target.containsKey('group_id') ||
+          data.containsKey('group_name') ||
+          target.containsKey('group_name');
+    }
+
     List<int> rowCandidatesFromAction(Map<String, dynamic> data) {
       if (_rowCount <= 0) return const <int>[];
       final target = _toActionMap(data['target']);
       final candidates = LinkedHashSet<int>();
+      final groupCandidates = LinkedHashSet<int>();
 
       void add(dynamic raw, {bool preferOneBased = false}) {
         final parsed = _toActionInt(raw);
@@ -42028,7 +48616,88 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       add(data['track'], preferOneBased: true);
       add(target['track'], preferOneBased: true);
 
+      final groupScoped = isGroupScopedAction(data);
+
+      void addGroupRows(TrackGroup group) {
+        final memberIds = group.rowIds.toSet();
+        final groupId = group.id.trim();
+        for (int row = 0; row < _rows.length; row++) {
+          final item = _rows[row];
+          if (memberIds.contains(item.rowId) ||
+              (groupId.isNotEmpty && item.groupId == groupId)) {
+            groupCandidates.add(row);
+          }
+        }
+      }
+
+      void addMatchingGroup(dynamic raw) {
+        final token = (raw ?? '').toString().trim().toLowerCase();
+        if (token.isEmpty) return;
+        for (final group in _trackGroups) {
+          final id = group.id.trim().toLowerCase();
+          final name = group.name.trim().toLowerCase();
+          if (id == token ||
+              name == token ||
+              (name.isNotEmpty && name.contains(token)) ||
+              (name.isNotEmpty &&
+                  token.contains('group') &&
+                  token.contains(name))) {
+            addGroupRows(group);
+          }
+        }
+      }
+
+      if (groupScoped) {
+        addMatchingGroup(data['group_id']);
+        addMatchingGroup(target['group_id']);
+        addMatchingGroup(data['group_name']);
+        addMatchingGroup(target['group_name']);
+        for (final row in candidates) {
+          if (row < 0 || row >= _rows.length) continue;
+          final groupId = _rows[row].groupId.trim();
+          if (groupId.isEmpty) continue;
+          for (final group in _trackGroups) {
+            if (group.id == groupId) {
+              addGroupRows(group);
+              break;
+            }
+          }
+        }
+      }
+
+      if (groupCandidates.isNotEmpty) {
+        return groupCandidates.toList(growable: false);
+      }
       return candidates.toList(growable: false);
+    }
+
+    List<int> groupBusRowCandidatesFromAction(
+      Map<String, dynamic> data, {
+      List<int> fallbackRows = const <int>[],
+    }) {
+      final groupId = _resolveRowGroupIdFromAction(data);
+      if (groupId != null && groupId.isNotEmpty) {
+        final leadRow = _trackGroupLeadRowIndexForId(groupId);
+        if (leadRow != null) return <int>[leadRow];
+      }
+      final candidates =
+          fallbackRows.isEmpty ? rowCandidatesFromAction(data) : fallbackRows;
+      for (final row in candidates) {
+        if (row < 0 || row >= _rows.length) continue;
+        final groupId = _rows[row].groupId.trim();
+        if (groupId.isEmpty) continue;
+        final leadRow = _trackGroupLeadRowIndexForId(groupId);
+        if (leadRow != null) return <int>[leadRow];
+      }
+      return candidates;
+    }
+
+    TrackGroup? groupForBusRow(int row) => _trackGroupForLeadRowIndex(row);
+
+    String targetDisplayNameForRow(int row) {
+      final group = groupForBusRow(row);
+      if (group == null) return _rowDisplayName(row);
+      return _trackGroupDisplayName(group.id);
     }
 
     for (final a in mix.actions) {
@@ -42039,54 +48708,72 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             skipAction('No target track for gain change.');
             continue;
           }
-          final row = rowCandidates.first;
+          final rowTargets = isGroupScopedAction(a.data)
+              ? groupBusRowCandidatesFromAction(
+                  a.data,
+                  fallbackRows: rowCandidates,
+                )
+              : <int>[rowCandidates.first];
           final mode = a.data['mode'] ?? 'delta';
 
-          final oldGain = _rowGain[row];
-          double newGain;
+          for (final row in rowTargets) {
+            final group = groupForBusRow(row);
+            final oldGain = group?.gain ?? _rowGain[row];
+            double newGain;
 
-          if (mode == 'set') {
-            newGain = (a.data['value'] as num).toDouble().clamp(0.0, 3.0);
-          } else {
-            final delta = (a.data['delta'] as num).toDouble();
-            newGain = (oldGain + delta).clamp(0.0, 3.0);
+            if (mode == 'set') {
+              newGain = (a.data['value'] as num).toDouble().clamp(0.0, 3.0);
+            } else {
+              final delta = (a.data['delta'] as num).toDouble();
+              newGain = (oldGain + delta).clamp(0.0, 3.0);
+            }
+
+            // _undoManager.execute(
+            //   SetRowGainAction(
+            //     row: row,
+            //     oldGain: oldGain,
+            //     newGain: newGain,
+            //     applyToState: (r, g) {
+            //       setState(() {
+            //         _rowGain[r] = g;
+            //       });
+            //     },
+            //   ),
+            // );
+
+            final EditorUndoAction finalAct = group == null
+                ? SetRowGainAction(
+                    row: row,
+                    oldGain: oldGain,
+                    newGain: newGain,
+                    applyToState: (r, g) {
+                      setState(() {
+                        _rowGain[r] = g;
+                      });
+                    },
+                  )
+                : SetRowGainAction(
+                    row: row,
+                    oldGain: oldGain,
+                    newGain: newGain,
+                    applyToState: (_, g) =>
+                        _applyTrackGroupGainState(group.id, g),
+                    applyNative: (_, g) =>
+                        _setTrackGroupGainNative(group.id, g),
+                  );
+
+            await _undoManager.executeWithoutAdd(
+              finalAct,
+            ); // need this so that you can make a compound undo action while preserving execute order
+            groupedActions.add(finalAct);
+
+            _mixHighlighter
+                .trigger([HaloKey('row:$row'), HaloKey('row:$row:mixer')]);
+
+            final summary =
+                '• Adjusted Gain from ${_gainToDb(oldGain)} to ${_gainToDb(newGain)} on ${targetDisplayNameForRow(row)} •';
+            emitActionSummary(summary);
           }
-
-          // _undoManager.execute(
-          //   SetRowGainAction(
-          //     row: row,
-          //     oldGain: oldGain,
-          //     newGain: newGain,
-          //     applyToState: (r, g) {
-          //       setState(() {
-          //         _rowGain[r] = g;
-          //       });
-          //     },
-          //   ),
-          // );
-
-          EditorUndoAction finalAct = SetRowGainAction(
-            row: row,
-            oldGain: oldGain,
-            newGain: newGain,
-            applyToState: (r, g) {
-              setState(() {
-                _rowGain[r] = g;
-              });
-            },
-          );
-
-          _undoManager.executeWithoutAdd(
-            finalAct,
-          ); // need this so that you can make a compound undo action while preserving execute order
-          groupedActions.add(finalAct);
-
-          _mixHighlighter
-              .trigger([HaloKey('row:$row'), HaloKey('row:$row:mixer')]);
-
-          final summary =
-              '• Adjusted Gain from ${_gainToDb(oldGain)} to ${_gainToDb(newGain)} on ${_rowDisplayName(row)} •';
-          emitActionSummary(summary);
 
           continue;
 
@@ -42096,56 +48783,74 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             skipAction('No target track for pan change.');
             continue;
           }
-          final row = rowCandidates.first;
+          final rowTargets = isGroupScopedAction(a.data)
+              ? groupBusRowCandidatesFromAction(
+                  a.data,
+                  fallbackRows: rowCandidates,
+                )
+              : <int>[rowCandidates.first];
 
-          final oldPan01 = _rowPan[row]; // 0..1
+          for (final row in rowTargets) {
+            final group = groupForBusRow(row);
+            final oldPan01 = group?.pan ?? _rowPan[row]; // 0..1
 
-          double newPan01;
+            double newPan01;
 
-          if (a.data.containsKey('value')) {
-            // ABSOLUTE SET (0..1, center = 0.5)
-            newPan01 = (a.data['value'] as num).toDouble().clamp(0.0, 1.0);
-          } else {
-            // DELTA in signed space (-1..+1)
-            final deltaSigned = (a.data['delta'] as num).toDouble();
+            if (a.data.containsKey('value')) {
+              // ABSOLUTE SET (0..1, center = 0.5)
+              newPan01 = (a.data['value'] as num).toDouble().clamp(0.0, 1.0);
+            } else {
+              // DELTA in signed space (-1..+1)
+              final deltaSigned = (a.data['delta'] as num).toDouble();
 
-            final oldPanSigned = (oldPan01 * 2.0) - 1.0;
-            final newPanSigned = (oldPanSigned + deltaSigned).clamp(-1.0, 1.0);
-            newPan01 = ((newPanSigned + 1.0) * 0.5).clamp(0.0, 1.0);
+              final oldPanSigned = (oldPan01 * 2.0) - 1.0;
+              final newPanSigned =
+                  (oldPanSigned + deltaSigned).clamp(-1.0, 1.0);
+              newPan01 = ((newPanSigned + 1.0) * 0.5).clamp(0.0, 1.0);
+            }
+
+            // _undoManager.execute(
+            //   SetRowPanAction(
+            //     row: row,
+            //     oldPan: oldPan01,
+            //     newPan: newPan01,
+            //     applyToState: (r, p) {
+            //       setState(() {
+            //         _rowPan[r] = p;
+            //       });
+            //     },
+            //   ),
+            // );
+
+            final EditorUndoAction finalAct = group == null
+                ? SetRowPanAction(
+                    row: row,
+                    oldPan: oldPan01,
+                    newPan: newPan01,
+                    applyToState: (r, p) {
+                      setState(() {
+                        _rowPan[r] = p;
+                      });
+                    },
+                  )
+                : SetRowPanAction(
+                    row: row,
+                    oldPan: oldPan01,
+                    newPan: newPan01,
+                    applyToState: (_, p) =>
+                        _applyTrackGroupPanState(group.id, p),
+                    applyNative: (_, p) => _setTrackGroupPanNative(group.id, p),
+                  );
+
+            await _undoManager.executeWithoutAdd(
+              finalAct,
+            ); // need this so that you can make a compound undo action while preserving execute order
+            groupedActions.add(finalAct);
+
+            final summary =
+                '• Adjusted pan from ${panToText(oldPan01)} to ${panToText(newPan01)} on ${targetDisplayNameForRow(row)} •';
+            emitActionSummary(summary);
           }
-
-          // _undoManager.execute(
-          //   SetRowPanAction(
-          //     row: row,
-          //     oldPan: oldPan01,
-          //     newPan: newPan01,
-          //     applyToState: (r, p) {
-          //       setState(() {
-          //         _rowPan[r] = p;
-          //       });
-          //     },
-          //   ),
-          // );
-
-          EditorUndoAction finalAct = SetRowPanAction(
-            row: row,
-            oldPan: oldPan01,
-            newPan: newPan01,
-            applyToState: (r, p) {
-              setState(() {
-                _rowPan[r] = p;
-              });
-            },
-          );
-
-          _undoManager.executeWithoutAdd(
-            finalAct,
-          ); // need this so that you can make a compound undo action while preserving execute order
-          groupedActions.add(finalAct);
-
-          final summary =
-              '• Adjusted pan from ${panToText(oldPan01)} to ${panToText(newPan01)} on ${_rowDisplayName(row)} •';
-          emitActionSummary(summary);
           continue;
 
         case 'set_master_gain':
@@ -42221,6 +48926,55 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final rowCandidates = rowCandidatesFromAction(a.data);
             if (rowCandidates.isEmpty) {
               skipAction('No target track for removing an effect.');
+              continue;
+            }
+
+            if (isGroupScopedAction(a.data)) {
+              final rowTargets = groupBusRowCandidatesFromAction(
+                a.data,
+                fallbackRows: rowCandidates,
+              );
+              var removedCount = 0;
+              for (final row in rowTargets) {
+                final effects =
+                    await JuceAudioEngine.getTrackEffectsForRow(row);
+                final idx = effects
+                    .indexWhere((e) => e.toLowerCase().contains(contains));
+                if (idx == -1) continue;
+                final effectName = effects[idx];
+                final beforeCount = effects.length;
+                final act = RemoveEffectAction(
+                  row: row,
+                  effectIndex: idx,
+                  pathOrName: effectName,
+                  onChange: () {
+                    setState(() {});
+                    _refreshRowFx(row);
+                    unawaited(_refreshAutomationTargetsForRow(row));
+                  },
+                );
+                await _undoManager.executeWithoutAdd(act);
+                final afterEffects =
+                    await JuceAudioEngine.getTrackEffectsForRow(row);
+                final removed = afterEffects.length < beforeCount ||
+                    !afterEffects.any(
+                        (e) => e.toLowerCase() == effectName.toLowerCase());
+                if (!removed) continue;
+                groupedActions.add(act);
+                removedCount += 1;
+                _mixHighlighter.trigger([
+                  HaloKey('row:$row'),
+                  HaloKey('row:$row:effects_tab'),
+                  HaloKey('row:$row:fx_list'),
+                  HaloKey('row:$row:fx_contains:$contains'),
+                ]);
+                emitActionSummary(
+                  '• Removed $effectName from ${targetDisplayNameForRow(row)} •',
+                );
+              }
+              if (removedCount == 0) {
+                skipAction('Could not find the requested effect to remove.');
+              }
               continue;
             }
 
@@ -42324,6 +49078,66 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             emitActionSummary(
               '• $effectName is available on Starter and higher plans •',
             );
+            continue;
+          }
+
+          if (isGroupScopedAction(a.data)) {
+            final rowTargets = groupBusRowCandidatesFromAction(
+              a.data,
+              fallbackRows: rowCandidates,
+            );
+            var appliedCount = 0;
+            for (final row in rowTargets) {
+              final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
+              final already =
+                  effects.indexWhere((e) => e.toLowerCase().contains(contains));
+              if (already != -1) {
+                appliedCount += 1;
+                groupedActions.addAll(
+                  await _ensureAiCanonicalChainOrderOnRow(row),
+                );
+                continue;
+              }
+              final beforeCount = effects.length;
+              final act = InsertEffectAction(
+                row: row,
+                pathOrName: effectName,
+                onChange: () {
+                  setState(() {});
+                  _refreshRowFx(row);
+                  unawaited(_refreshAutomationTargetsForRow(row));
+                },
+              );
+              await _undoManager.executeWithoutAdd(act);
+              final afterEffects =
+                  await JuceAudioEngine.getTrackEffectsForRow(row);
+              final inserted = afterEffects.length > beforeCount &&
+                  afterEffects.any(
+                    (e) =>
+                        e.toLowerCase().contains(contains) ||
+                        e.toLowerCase().contains(effectName.toLowerCase()),
+                  );
+              if (!inserted) {
+                continue;
+              }
+              groupedActions.add(act);
+              groupedActions.addAll(
+                await _ensureAiCanonicalChainOrderOnRow(row),
+              );
+              appliedCount += 1;
+              _mixHighlighter.trigger([
+                HaloKey('row:$row'),
+                HaloKey('row:$row:effects_tab'),
+                HaloKey('row:$row:fx_list'),
+                HaloKey('row:$row:fx_contains:$contains'),
+              ]);
+              emitActionSummary(
+                '• Added $effectName to ${targetDisplayNameForRow(row)} •',
+              );
+            }
+            if (appliedCount == 0) {
+              skipAction('Could not add the requested effect to that group.');
+            }
             continue;
           }
 
@@ -42440,153 +49254,164 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               skipAction('No target track for plugin parameter change.');
               continue;
             }
-            final row = rowCandidates.first;
+            final rowTargets = isGroupScopedAction(a.data)
+                ? groupBusRowCandidatesFromAction(
+                    a.data,
+                    fallbackRows: rowCandidates,
+                  )
+                : <int>[rowCandidates.first];
             final effectContains =
                 (a.data['effect_name_contains'] as String).toLowerCase();
 
             final skipIfMissing =
                 (a.data['skip_if_missing_effect'] as bool?) ?? true;
 
-            final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
-            final fxIndex = effects
-                .indexWhere((e) => e.toLowerCase().contains(effectContains));
-            if (fxIndex == -1) {
-              if (skipIfMissing) continue;
-              // else: you could ensure_effect first; but typically model emits ensure_effect already
-              continue;
-            }
-
-            final paramsRaw =
-                await JuceAudioEngine.getTrackPluginParameters(row, fxIndex);
-            final params = exposedEffectParameters(
-              effects[fxIndex],
-              paramsRaw.map((e) => Map<String, dynamic>.from(e)).toList(),
-            );
-
-            final exactParamName = a.data['param_name'] as String?;
-            final containsAny = (a.data['param_name_contains_any'] as List?)
-                ?.map((e) => e.toString())
-                .toList();
-
-            final picked = _pickParam(params,
-                exactName: exactParamName, containsAny: containsAny);
-            if (picked == null) {
-              skipAction('Could not resolve the requested plugin parameter.');
-              continue;
-            }
-
-            final paramId = (picked['id'] as String?) ??
-                (picked['name'] as String); // robust
-            final paramName = (picked['name'] as String?) ?? paramId;
-            final current = (picked['value'] as num).toDouble();
-
-            final double? pMin =
-                picked['min'] is num ? (picked['min'] as num).toDouble() : null;
-            final double? pMax =
-                picked['max'] is num ? (picked['max'] as num).toDouble() : null;
-
-            final clamp01 = (a.data['clamp_0_1'] as bool?) ?? false;
-
-            final mode = (a.data['mode'] as String?) ?? 'delta';
-
-            double next = current;
-
-            if (mode == 'set') {
-              if (a.data.containsKey('value_norm') &&
-                  pMin != null &&
-                  pMax != null) {
-                final vn =
-                    (a.data['value_norm'] as num).toDouble().clamp(0.0, 1.0);
-                next = pMin + (pMax - pMin) * vn;
-              } else {
-                next = (a.data['value'] as num).toDouble();
+            var adjustedCount = 0;
+            for (final row in rowTargets) {
+              final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
+              final fxIndex = effects
+                  .indexWhere((e) => e.toLowerCase().contains(effectContains));
+              if (fxIndex == -1) {
+                continue;
               }
-            } else {
-              // delta mode
-              double delta;
-              if (a.data.containsKey('delta_norm')) {
-                final dn = (a.data['delta_norm'] as num).toDouble();
-                if (pMin != null && pMax != null) {
-                  delta = dn * (pMax - pMin);
+
+              final paramsRaw =
+                  await JuceAudioEngine.getTrackPluginParameters(row, fxIndex);
+              final params = exposedEffectParameters(
+                effects[fxIndex],
+                paramsRaw.map((e) => Map<String, dynamic>.from(e)).toList(),
+              );
+
+              final exactParamName = a.data['param_name'] as String?;
+              final containsAny = (a.data['param_name_contains_any'] as List?)
+                  ?.map((e) => e.toString())
+                  .toList();
+
+              final picked = _pickParam(params,
+                  exactName: exactParamName, containsAny: containsAny);
+              if (picked == null) {
+                continue;
+              }
+
+              final paramId = (picked['id'] as String?) ??
+                  (picked['name'] as String); // robust
+              final paramName = (picked['name'] as String?) ?? paramId;
+              final current = (picked['value'] as num).toDouble();
+
+              final double? pMin = picked['min'] is num
+                  ? (picked['min'] as num).toDouble()
+                  : null;
+              final double? pMax = picked['max'] is num
+                  ? (picked['max'] as num).toDouble()
+                  : null;
+
+              final clamp01 = (a.data['clamp_0_1'] as bool?) ?? false;
+
+              final mode = (a.data['mode'] as String?) ?? 'delta';
+
+              double next = current;
+
+              if (mode == 'set') {
+                if (a.data.containsKey('value_norm') &&
+                    pMin != null &&
+                    pMax != null) {
+                  final vn =
+                      (a.data['value_norm'] as num).toDouble().clamp(0.0, 1.0);
+                  next = pMin + (pMax - pMin) * vn;
                 } else {
-                  delta = dn;
+                  next = (a.data['value'] as num).toDouble();
                 }
               } else {
-                delta = (a.data['delta'] as num).toDouble();
+                // delta mode
+                double delta;
+                if (a.data.containsKey('delta_norm')) {
+                  final dn = (a.data['delta_norm'] as num).toDouble();
+                  if (pMin != null && pMax != null) {
+                    delta = dn * (pMax - pMin);
+                  } else {
+                    delta = dn;
+                  }
+                } else {
+                  delta = (a.data['delta'] as num).toDouble();
+                }
+                next = current + delta;
               }
-              next = current + delta;
+
+              // -----------------------------
+              // HARD SAFETY CLAMPS (action-level)
+              // -----------------------------
+              final double? hardMin = a.data['clamp_min'] is num
+                  ? (a.data['clamp_min'] as num).toDouble()
+                  : null;
+              final double? hardMax = a.data['clamp_max'] is num
+                  ? (a.data['clamp_max'] as num).toDouble()
+                  : null;
+
+              // Apply hard clamps FIRST (authoritative)
+              if (hardMin != null || hardMax != null) {
+                final lo = hardMin ?? double.negativeInfinity;
+                final hi = hardMax ?? double.infinity;
+                next = next.clamp(lo, hi);
+              }
+
+              // -----------------------------
+              // Plugin range clamp
+              // -----------------------------
+              if (pMin != null && pMax != null) {
+                next = next.clamp(pMin, pMax);
+              } else if (clamp01) {
+                next = next.clamp(0.0, 1.0);
+              }
+
+              // await _undoManager.execute(
+              //   SetEffectParamAction(
+              //     row: row,
+              //     effectIndex: fxIndex,
+              //     paramId: paramName, // if your engine needs name instead, use paramName
+              //     oldValue: current,
+              //     newValue: next,
+              //     onChange: () {
+              //       setState(() {});
+              //       _refreshRowFx(row);
+              //     },
+              //   ),
+              // );
+
+              EditorUndoAction finalAct = SetEffectParamAction(
+                row: row,
+                effectIndex: fxIndex,
+                paramId:
+                    paramName, // if your engine needs name instead, use paramName
+                oldValue: current,
+                newValue: next,
+                onChange: () {
+                  setState(() {});
+                  _refreshRowFx(row);
+                },
+              );
+
+              await _undoManager.executeWithoutAdd(
+                finalAct,
+              ); // need this so that you can make a compound undo action while preserving execute order
+              groupedActions.add(finalAct);
+              adjustedCount += 1;
+
+              _mixHighlighter.trigger([
+                HaloKey('row:$row'),
+                HaloKey('row:$row:effects_tab'),
+                HaloKey('row:$row:fx_list'),
+                HaloKey('row:$row:fx_index:$fxIndex'),
+                HaloKey(
+                    'row:$row:fx_index:$fxIndex:param:$paramId'), // TODO: put paramName instead of paramId maybe
+              ]);
+
+              emitActionSummary(
+                '• Adjusted $paramName from ${current.toStringAsFixed(2)} to ${next.toStringAsFixed(2)} on ${effects[fxIndex]} (${targetDisplayNameForRow(row)}) •',
+              );
             }
-
-            // -----------------------------
-            // HARD SAFETY CLAMPS (action-level)
-            // -----------------------------
-            final double? hardMin = a.data['clamp_min'] is num
-                ? (a.data['clamp_min'] as num).toDouble()
-                : null;
-            final double? hardMax = a.data['clamp_max'] is num
-                ? (a.data['clamp_max'] as num).toDouble()
-                : null;
-
-            // Apply hard clamps FIRST (authoritative)
-            if (hardMin != null || hardMax != null) {
-              final lo = hardMin ?? double.negativeInfinity;
-              final hi = hardMax ?? double.infinity;
-              next = next.clamp(lo, hi);
+            if (adjustedCount == 0 && !skipIfMissing) {
+              skipAction('Could not resolve the requested plugin parameter.');
             }
-
-            // -----------------------------
-            // Plugin range clamp
-            // -----------------------------
-            if (pMin != null && pMax != null) {
-              next = next.clamp(pMin, pMax);
-            } else if (clamp01) {
-              next = next.clamp(0.0, 1.0);
-            }
-
-            // await _undoManager.execute(
-            //   SetEffectParamAction(
-            //     row: row,
-            //     effectIndex: fxIndex,
-            //     paramId: paramName, // if your engine needs name instead, use paramName
-            //     oldValue: current,
-            //     newValue: next,
-            //     onChange: () {
-            //       setState(() {});
-            //       _refreshRowFx(row);
-            //     },
-            //   ),
-            // );
-
-            EditorUndoAction finalAct = SetEffectParamAction(
-              row: row,
-              effectIndex: fxIndex,
-              paramId:
-                  paramName, // if your engine needs name instead, use paramName
-              oldValue: current,
-              newValue: next,
-              onChange: () {
-                setState(() {});
-                _refreshRowFx(row);
-              },
-            );
-
-            await _undoManager.executeWithoutAdd(
-              finalAct,
-            ); // need this so that you can make a compound undo action while preserving execute order
-            groupedActions.add(finalAct);
-
-            _mixHighlighter.trigger([
-              HaloKey('row:$row'),
-              HaloKey('row:$row:effects_tab'),
-              HaloKey('row:$row:fx_list'),
-              HaloKey('row:$row:fx_index:$fxIndex'),
-              HaloKey(
-                  'row:$row:fx_index:$fxIndex:param:$paramId'), // TODO: put paramName instead of paramId maybe
-            ]);
-
-            emitActionSummary(
-              '• Adjusted $paramName from ${current.toStringAsFixed(2)} to ${next.toStringAsFixed(2)} on ${effects[fxIndex]} (${_rowDisplayName(row)}) •',
-            );
             continue;
           }
 
@@ -42711,35 +49536,47 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               skipAction('No target track for resetting effects.');
               continue;
             }
-            final row = rowCandidates.first;
+            final rowTargets = isGroupScopedAction(a.data)
+                ? groupBusRowCandidatesFromAction(
+                    a.data,
+                    fallbackRows: rowCandidates,
+                  )
+                : <int>[rowCandidates.first];
 
             // Query actual FX list
-            final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
+            var resetCount = 0;
+            for (final row in rowTargets) {
+              final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
 
-            if (effects.isEmpty) continue;
+              if (effects.isEmpty) continue;
 
-            // IMPORTANT: delete back-to-front to keep indices valid
-            for (int fxIndex = effects.length - 1; fxIndex >= 0; fxIndex--) {
-              final fxName = effects[fxIndex];
+              // IMPORTANT: delete back-to-front to keep indices valid
+              for (int fxIndex = effects.length - 1; fxIndex >= 0; fxIndex--) {
+                final fxName = effects[fxIndex];
 
-              EditorUndoAction act = RemoveEffectAction(
-                row: row,
-                effectIndex: fxIndex,
-                pathOrName: fxName,
-                onChange: () {
-                  setState(() {});
-                  _refreshRowFx(row);
-                  unawaited(_refreshAutomationTargetsForRow(row));
-                },
+                EditorUndoAction act = RemoveEffectAction(
+                  row: row,
+                  effectIndex: fxIndex,
+                  pathOrName: fxName,
+                  onChange: () {
+                    setState(() {});
+                    _refreshRowFx(row);
+                    unawaited(_refreshAutomationTargetsForRow(row));
+                  },
+                );
+
+                await _undoManager.executeWithoutAdd(act);
+                groupedActions.add(act);
+              }
+              resetCount += 1;
+
+              emitActionSummary(
+                '• Removed all effects on ${targetDisplayNameForRow(row)} •',
               );
-
-              await _undoManager.executeWithoutAdd(act);
-              groupedActions.add(act);
             }
-
-            emitActionSummary(
-              '• Removed all effects on ${_rowDisplayName(row)} •',
-            );
+            if (resetCount == 0) {
+              skipAction('No effects found on the target track or group.');
+            }
 
             continue;
           }
@@ -43513,6 +50350,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     final builder =
         ProjectStateBuilder(classifier: _classifier, maxRows: maxRows);
+    final aiTrackGroups = await _trackGroupsForAiProjectState();
     final projectState = await builder.build(
       audioTracks: _audioTracks,
       bpmFallback: _tempo,
@@ -43523,6 +50361,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       masterGain0to3: _masterGain,
       masterPan0to1: _masterPan,
       timelineRows: _visibleAiRows(),
+      trackGroups: aiTrackGroups,
     );
 
     final masterEffects = await JuceAudioEngine.getMasterEffects();
@@ -45582,6 +52421,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         await _ensureAiModelsLoaded();
         _throwIfChatFlowStopped(chatFlowId);
         final librarySnapshot = await _buildAiLibrarySnapshot();
+        final aiTrackGroups = await _trackGroupsForAiProjectState();
         _throwIfChatFlowStopped(chatFlowId);
         reply = await _chatPipeline.handleUserText(
           text: trimmed,
@@ -45590,6 +52430,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           projectKey: _projectKey,
           rowNames: _visibleAiRowNames(),
           timelineRows: _visibleAiRows(),
+          trackGroups: aiTrackGroups,
           librarySnapshot: librarySnapshot,
           clientContext: _buildAiClientContext(),
           rowGain: _rowGain,
@@ -45810,219 +52651,137 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
-  Future<bool> _confirmOneButtonMix() async {
+  Future<bool> _confirmOneButtonMix({BuildContext? anchorContext}) async {
     var selectedProfile = _selectedOneButtonMixProfile;
-    final shouldRun = await showDialog<bool>(
-      context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.58),
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return Dialog(
-              backgroundColor: Colors.transparent,
-              surfaceTintColor: Colors.transparent,
-              shadowColor: Colors.transparent,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(24),
-              ),
-              clipBehavior: Clip.antiAlias,
-              elevation: 0,
-              insetPadding: const EdgeInsets.symmetric(horizontal: 16),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 360),
-                child: MixroomShellSurface(
-                  radius: 24,
-                  strong: true,
-                  color: const Color.fromRGBO(244, 244, 244, 0.14),
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Center(
-                        child: Text(
-                          L10n.translate(context, 'One-Button Mix'),
-                          style: const TextStyle(
-                            fontFamily: 'Pretendard',
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                            height: 22 / 18,
-                            color: Color(0xFFF4F4F4),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.12),
-                          ),
-                        ),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<String>(
-                            value: selectedProfile,
-                            isExpanded: true,
-                            dropdownColor: kMixroomGlassDropdownMenuColor,
-                            borderRadius: BorderRadius.circular(18),
-                            iconEnabledColor:
-                                Colors.white.withValues(alpha: 0.82),
-                            style: const TextStyle(
-                              fontFamily: 'Pretendard',
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: Color(0xFFF4F4F4),
-                            ),
-                            selectedItemBuilder: (context) {
-                              return _kOneButtonMixProfiles
-                                  .map(
-                                    (profile) => Align(
-                                      alignment: Alignment.centerLeft,
-                                      child: RichText(
-                                        text: TextSpan(
-                                          children: <InlineSpan>[
-                                            TextSpan(
-                                              text:
-                                                  '${L10n.translate(context, 'Profile')}  ',
-                                              style: TextStyle(
-                                                fontFamily: 'Pretendard',
-                                                fontSize: 13,
-                                                fontWeight: FontWeight.w500,
-                                                color: Colors.white.withValues(
-                                                  alpha: 0.68,
-                                                ),
-                                              ),
-                                            ),
-                                            TextSpan(
-                                              text:
-                                                  _localizedOneButtonMixProfile(
-                                                context,
-                                                profile,
-                                              ),
-                                              style: const TextStyle(
-                                                fontFamily: 'Pretendard',
-                                                fontSize: 13,
-                                                fontWeight: FontWeight.w600,
-                                                color: Color(0xFFF4F4F4),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  )
-                                  .toList(growable: false);
-                            },
-                            items: _kOneButtonMixProfiles
-                                .map(
-                                  (profile) => DropdownMenuItem<String>(
-                                    value: profile,
-                                    child: Text(
-                                      _localizedOneButtonMixProfile(
-                                        context,
-                                        profile,
-                                      ),
-                                    ),
-                                  ),
-                                )
-                                .toList(growable: false),
-                            onChanged: (value) {
-                              if (value == null) return;
-                              setDialogState(() {
-                                selectedProfile = value;
-                              });
-                            },
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      Text(
-                        L10n.translate(
-                          context,
-                          'Balance levels, reduce masking, and improve clarity.\nYou can undo everything after it runs.',
-                        ),
-                        style: TextStyle(
-                          fontFamily: 'Pretendard',
-                          fontSize: 14,
-                          fontWeight: FontWeight.w400,
-                          height: 1.4,
-                          color: Colors.white.withValues(alpha: 0.86),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        L10n.translate(
-                          context,
-                          'Run sends project context to Mixroom and the active AI provider. Current provider: OpenAI. Raw audio is not sent.',
-                        ),
-                        style: TextStyle(
-                          fontFamily: 'Pretendard',
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          height: 1.35,
-                          color: Colors.white.withValues(alpha: 0.66),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextButton(
-                              onPressed: () {
-                                Navigator.pop(context, false);
-                              },
-                              style: TextButton.styleFrom(
-                                minimumSize: const Size(0, 46),
-                                foregroundColor: const Color(0xFFF4F4F4),
-                                backgroundColor:
-                                    Colors.white.withValues(alpha: 0.12),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(18),
-                                  side: BorderSide(
-                                    color: Colors.white.withValues(alpha: 0.12),
-                                  ),
-                                ),
-                              ),
-                              child: Text(L10n.translate(context, 'Cancel')),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: TextButton(
-                              onPressed: () {
-                                _selectedOneButtonMixProfile = selectedProfile;
-                                Navigator.pop(context, true);
-                              },
-                              style: TextButton.styleFrom(
-                                minimumSize: const Size(0, 46),
-                                foregroundColor: const Color(0xFFF4F4F4),
-                                backgroundColor: _kOneButtonMixAccentColor,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(18),
-                                ),
-                              ),
-                              child: Text(
-                                L10n.translate(context, 'Run'),
-                                style: const TextStyle(
-                                  fontFamily: 'Pretendard',
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+    final routeAnchorContext = anchorContext ?? context;
+    final shouldRun = await showMixroomGlassDropdown<bool>(
+      anchorContext: routeAnchorContext,
+      preferAbove: true,
+      preferredHeight: 336,
+      verticalGap: 8,
+      minWidth: 320,
+      maxWidth: 360,
+      radius: 24,
+      color: const Color.fromRGBO(244, 244, 244, 0.14),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+      child: StatefulBuilder(
+        builder: (context, setDialogState) {
+          return ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Text(
+                    L10n.translate(context, 'One-Button Mix'),
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      height: 22 / 18,
+                      color: Color(0xFFF4F4F4),
+                    ),
                   ),
                 ),
-              ),
-            );
-          },
-        );
-      },
+                const SizedBox(height: 14),
+                _buildMixroomDropdownField<String>(
+                  label: 'Profile',
+                  value: selectedProfile,
+                  options: _kOneButtonMixProfiles,
+                  textBuilder: (profile) =>
+                      _localizedOneButtonMixProfile(context, profile),
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setDialogState(() {
+                      selectedProfile = value;
+                    });
+                  },
+                  height: 52,
+                  radius: 18,
+                  accentColor: _kOneButtonMixAccentColor,
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  L10n.translate(
+                    context,
+                    'Balance levels, reduce masking, and improve clarity.\nYou can undo everything after it runs.',
+                  ),
+                  style: TextStyle(
+                    fontFamily: 'Pretendard',
+                    fontSize: 14,
+                    fontWeight: FontWeight.w400,
+                    height: 1.4,
+                    color: Colors.white.withValues(alpha: 0.86),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  L10n.translate(
+                    context,
+                    'Run sends project context to Mixroom and the active AI provider. Current provider: OpenAI. Raw audio is not sent.',
+                  ),
+                  style: TextStyle(
+                    fontFamily: 'Pretendard',
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    height: 1.35,
+                    color: Colors.white.withValues(alpha: 0.66),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        onPressed: () {
+                          Navigator.pop(context, false);
+                        },
+                        style: TextButton.styleFrom(
+                          minimumSize: const Size(0, 46),
+                          foregroundColor: const Color(0xFFF4F4F4),
+                          backgroundColor: Colors.white.withValues(alpha: 0.12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                            side: BorderSide(
+                              color: Colors.white.withValues(alpha: 0.12),
+                            ),
+                          ),
+                        ),
+                        child: Text(L10n.translate(context, 'Cancel')),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextButton(
+                        onPressed: () {
+                          _selectedOneButtonMixProfile = selectedProfile;
+                          Navigator.pop(context, true);
+                        },
+                        style: TextButton.styleFrom(
+                          minimumSize: const Size(0, 46),
+                          foregroundColor: const Color(0xFFF4F4F4),
+                          backgroundColor: _kOneButtonMixAccentColor,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                        ),
+                        child: Text(
+                          L10n.translate(context, 'Run'),
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        },
+      ),
     );
     return shouldRun ?? false;
   }
@@ -46228,6 +52987,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     try {
       await _ensureAiModelsLoaded();
       final librarySnapshot = await _buildAiLibrarySnapshot();
+      final aiTrackGroups = await _trackGroupsForAiProjectState();
       reply = await _chatPipeline.handleUserText(
         text: prompt,
         audioTracks: _audioTracks,
@@ -46235,6 +52995,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         projectKey: _projectKey,
         rowNames: _visibleAiRowNames(),
         timelineRows: _visibleAiRows(),
+        trackGroups: aiTrackGroups,
         librarySnapshot: librarySnapshot,
         clientContext: _buildAiClientContext(),
         rowGain: _rowGain,
@@ -46406,7 +53167,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required String label,
     required IconData icon,
     required VoidCallback? onPressed,
+    bool iconOnly = false,
   }) {
+    if (iconOnly) {
+      return Tooltip(
+        message: label,
+        child: IconButton(
+          onPressed: onPressed,
+          tooltip: label,
+          constraints: const BoxConstraints.tightFor(width: 34, height: 34),
+          padding: EdgeInsets.zero,
+          style: IconButton.styleFrom(
+            foregroundColor: Colors.white70,
+            backgroundColor: const Color.fromRGBO(73, 84, 96, 0.56),
+            disabledForegroundColor: Colors.white.withValues(alpha: 0.32),
+            disabledBackgroundColor: const Color.fromRGBO(73, 84, 96, 0.34),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(999),
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
+            ),
+          ),
+          icon: Icon(icon, size: 16),
+        ),
+      );
+    }
     return TextButton.icon(
       onPressed: onPressed,
       style: TextButton.styleFrom(
@@ -46448,8 +53232,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool includeTransport = true,
     double chatBarKeyboardOffset = 0.0,
   }) {
-    final inlineDesktopTransport =
-        PlatformCapabilities.current.isDesktop && includeTransport;
+    final usesTabletDesktopBottomRow = PlatformCapabilities.current.isDesktop ||
+        mixroomUsesTabletLandscapeShell(context);
+    final inlineDesktopTransport = PlatformCapabilities.current.isDesktop &&
+        includeTransport &&
+        !usesTabletDesktopBottomRow;
     final effectiveTransportInset =
         includeTransport ? _androidTransportBottomInset(context) : 0.0;
     return Column(
@@ -46623,6 +53410,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               ),
             ),
           ),
+        if (usesTabletDesktopBottomRow && includeChatBar)
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              16,
+              10,
+              16,
+              10,
+            ),
+            child: _buildTabletDesktopBottomControlRow(
+              includeTransport: includeTransport,
+              chatBarKeyboardOffset: chatBarKeyboardOffset,
+            ),
+          ),
         // === Chat Field Section WITH padding ===
         // Padding(
         //   padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
@@ -46654,7 +53454,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         //     ),
         //   ),
         // ),
-        if (includeChatBar)
+        if (includeChatBar && !usesTabletDesktopBottomRow)
           Padding(
             padding: EdgeInsets.only(bottom: chatBarKeyboardOffset),
             child: Row(
@@ -46825,81 +53625,90 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       highlighter: _mixHighlighter,
                       haloKey: const HaloKey('tutorial:add_button'),
                       borderRadius: BorderRadius.circular(999),
-                      child: ClipOval(
-                        child: AnimatedScale(
-                          duration: const Duration(milliseconds: 120),
-                          curve: Curves.easeOutCubic,
-                          scale: _addButtonPressed ? 0.94 : 1.0,
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 140),
-                            width: 48,
-                            height: 48,
-                            decoration: BoxDecoration(
-                              gradient: _kChatBarGradient,
-                              shape: BoxShape.circle,
-                              boxShadow: const <BoxShadow>[
-                                BoxShadow(
-                                  color: Color.fromRGBO(0, 0, 0, 0.25),
-                                  blurRadius: 15,
-                                  spreadRadius: 8,
-                                  offset: Offset.zero,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          ClipOval(
+                            child: AnimatedScale(
+                              duration: const Duration(milliseconds: 120),
+                              curve: Curves.easeOutCubic,
+                              scale: _addButtonPressed ? 0.94 : 1.0,
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 140),
+                                width: 48,
+                                height: 48,
+                                decoration: BoxDecoration(
+                                  gradient: _kChatBarGradient,
+                                  shape: BoxShape.circle,
+                                  boxShadow: const <BoxShadow>[
+                                    BoxShadow(
+                                      color: Color.fromRGBO(0, 0, 0, 0.25),
+                                      blurRadius: 15,
+                                      spreadRadius: 8,
+                                      offset: Offset.zero,
+                                    ),
+                                  ],
                                 ),
-                              ],
-                            ),
-                            child: InkWell(
-                              customBorder: const CircleBorder(),
-                              onHighlightChanged: (pressed) {
-                                if (!mounted) return;
-                                setState(() {
-                                  _addButtonPressed = pressed;
-                                });
-                              },
-                              onTap: () {
-                                _trackUiClick(
-                                  controlId: 'add_button',
-                                  surface: 'bottom_bar',
-                                  controlType: 'toggle',
-                                  value: !_showAddActionsPanel &&
-                                      !_chatExpanded &&
-                                      !_sampleBrowserVisible,
-                                );
-                                if (_chatExpanded) {
-                                  _collapseChatWindow();
-                                  return;
-                                }
-                                if (_sampleBrowserVisible) {
-                                  _closeAddActionsPanel();
-                                  unawaited(_closeSampleBrowser());
-                                  return;
-                                }
-                                if (_showAddActionsPanel) {
-                                  _closeAddActionsPanel();
-                                } else {
-                                  _openAddActionsPanel(userInitiated: true);
-                                }
-                              },
-                              child: AnimatedRotation(
-                                duration: const Duration(milliseconds: 180),
-                                curve: Curves.easeOutCubic,
-                                turns: (_chatExpanded || _showAddActionsPanel)
-                                    ? 0.125
-                                    : 0.0,
-                                child: AnimatedScale(
-                                  duration: const Duration(milliseconds: 180),
-                                  curve: Curves.easeOutCubic,
-                                  scale: (_chatExpanded || _showAddActionsPanel)
-                                      ? 1.0
-                                      : 0.96,
-                                  child: const Icon(
-                                    Icons.add_rounded,
-                                    color: Color(0xFFF4F4F4),
-                                    size: 22,
+                                child: InkWell(
+                                  customBorder: const CircleBorder(),
+                                  onHighlightChanged: (pressed) {
+                                    if (!mounted) return;
+                                    setState(() {
+                                      _addButtonPressed = pressed;
+                                    });
+                                  },
+                                  onTap: () {
+                                    _trackUiClick(
+                                      controlId: 'add_button',
+                                      surface: 'bottom_bar',
+                                      controlType: 'toggle',
+                                      value: !_showAddActionsPanel &&
+                                          !_chatExpanded &&
+                                          !_sampleBrowserVisible,
+                                    );
+                                    if (_chatExpanded) {
+                                      _collapseChatWindow();
+                                      return;
+                                    }
+                                    if (_sampleBrowserVisible) {
+                                      _closeAddActionsPanel();
+                                      unawaited(_closeSampleBrowser());
+                                      return;
+                                    }
+                                    if (_showAddActionsPanel) {
+                                      _closeAddActionsPanel();
+                                    } else {
+                                      _openAddActionsPanel(userInitiated: true);
+                                    }
+                                  },
+                                  child: AnimatedRotation(
+                                    duration: const Duration(milliseconds: 180),
+                                    curve: Curves.easeOutCubic,
+                                    turns:
+                                        (_chatExpanded || _showAddActionsPanel)
+                                            ? 0.125
+                                            : 0.0,
+                                    child: AnimatedScale(
+                                      duration:
+                                          const Duration(milliseconds: 180),
+                                      curve: Curves.easeOutCubic,
+                                      scale: (_chatExpanded ||
+                                              _showAddActionsPanel)
+                                          ? 1.0
+                                          : 0.96,
+                                      child: const Icon(
+                                        Icons.add_rounded,
+                                        color: Color(0xFFF4F4F4),
+                                        size: 22,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
+                          _buildRowGroupingAddButtonBadge(),
+                        ],
                       ),
                     ),
                   ),
@@ -46908,7 +53717,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ),
 
         // ==== Transport Drawer =============================================
-        if (includeTransport && !PlatformCapabilities.current.isDesktop)
+        if (includeTransport &&
+            !PlatformCapabilities.current.isDesktop &&
+            !usesTabletDesktopBottomRow)
           Padding(
             padding: EdgeInsets.zero,
             child: Halo(
@@ -47019,6 +53830,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               children: [
                                                 _transportSegment(
                                                   icon: Icons.undo,
+                                                  semanticIdentifier:
+                                                      'daw.transport.undo',
+                                                  semanticLabel: 'Undo',
                                                   onTap: canUndo
                                                       ? () => unawaited(
                                                             _performEditorUndo(),
@@ -47053,6 +53867,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                 _verticalDivider(48),
                                                 _transportSegment(
                                                   icon: Icons.redo,
+                                                  semanticIdentifier:
+                                                      'daw.transport.redo',
+                                                  semanticLabel: 'Redo',
                                                   onTap: canRedo
                                                       ? () => unawaited(
                                                             _performEditorRedo(),
@@ -47114,8 +53931,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           children: [
                                             _transportSegment(
                                               icon: Icons.skip_previous,
+                                              semanticIdentifier:
+                                                  'daw.transport.restart',
+                                              semanticLabel: 'Restart',
                                               onTap: () async {
-                                                if (_isRecording) return;
+                                                if (_recordButtonVisuallyActive) {
+                                                  return;
+                                                }
                                                 await _restartAudio(
                                                   _safeAudioEditorStateSetter,
                                                 );
@@ -47133,6 +53955,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               icon: _isPlaying
                                                   ? Icons.pause
                                                   : Icons.play_arrow,
+                                              semanticIdentifier:
+                                                  'daw.transport.play_pause',
+                                              semanticLabel:
+                                                  _isPlaying ? 'Pause' : 'Play',
                                               onTap: () async {
                                                 if (_isRecording) {
                                                   await _stopRecordingJuce(
@@ -47148,9 +53974,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             ),
                                             _verticalDivider(48),
                                             _transportSegment(
-                                              icon: _isRecording
+                                              icon: _recordButtonVisuallyActive
                                                   ? Icons.stop_circle
                                                   : Icons.fiber_manual_record,
+                                              semanticIdentifier:
+                                                  'daw.transport.record',
+                                              semanticLabel:
+                                                  _recordButtonVisuallyActive
+                                                      ? 'Stop recording'
+                                                      : 'Record',
                                               onTap: _onRecordPressed,
                                               radius: const BorderRadius.only(
                                                 topRight: Radius.circular(24),
@@ -47158,12 +53990,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                     Radius.circular(24),
                                               ),
                                               iconSize: 19,
-                                              iconColor: _isRecording
-                                                  ? Colors.white
-                                                  : const Color(0xFFE53C31),
-                                              backgroundColor: _isRecording
-                                                  ? const Color(0x66E53C31)
-                                                  : Colors.transparent,
+                                              iconColor:
+                                                  _recordButtonVisuallyActive
+                                                      ? Colors.white
+                                                      : const Color(0xFFE53C31),
+                                              backgroundColor:
+                                                  _recordButtonVisuallyActive
+                                                      ? const Color(0x66E53C31)
+                                                      : Colors.transparent,
                                               haloKey:
                                                   'tutorial:transport:record',
                                             ),
@@ -47175,110 +54009,116 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     SizedBox(
                                       width: mixWidth,
                                       height: 48,
-                                      child: Halo(
-                                        highlighter: _mixHighlighter,
-                                        haloKey: const HaloKey(
-                                          'tutorial:one_button_mix',
-                                        ),
-                                        borderRadius: BorderRadius.circular(24),
-                                        child: Material(
-                                          color: Colors.transparent,
+                                      child: Builder(
+                                        builder: (mixAnchorContext) => Halo(
+                                          highlighter: _mixHighlighter,
+                                          haloKey: const HaloKey(
+                                            'tutorial:one_button_mix',
+                                          ),
                                           borderRadius:
                                               BorderRadius.circular(24),
-                                          clipBehavior: Clip.antiAlias,
-                                          child: InkWell(
+                                          child: Material(
+                                            color: Colors.transparent,
                                             borderRadius:
                                                 BorderRadius.circular(24),
-                                            splashFactory:
-                                                InkRipple.splashFactory,
-                                            splashColor:
-                                                Colors.white.withValues(
-                                              alpha: 0.14,
-                                            ),
-                                            highlightColor:
-                                                Colors.white.withValues(
-                                              alpha: 0.06,
-                                            ),
-                                            overlayColor: WidgetStateProperty
-                                                .resolveWith<Color?>(
-                                              (states) {
-                                                if (states.contains(
-                                                  WidgetState.pressed,
-                                                )) {
-                                                  return Colors.white
-                                                      .withValues(
-                                                    alpha: 0.18,
-                                                  );
-                                                }
-                                                if (states.contains(
-                                                  WidgetState.hovered,
-                                                )) {
-                                                  return Colors.white
-                                                      .withValues(
-                                                    alpha: 0.08,
-                                                  );
-                                                }
-                                                if (states.contains(
-                                                  WidgetState.focused,
-                                                )) {
-                                                  return Colors.white
-                                                      .withValues(
-                                                    alpha: 0.10,
-                                                  );
-                                                }
-                                                return Colors.transparent;
-                                              },
-                                            ),
-                                            onTap: () async {
-                                              final run =
-                                                  await _confirmOneButtonMix();
-                                              if (!run) return;
-
-                                              ScaffoldMessenger.of(context)
-                                                  .showSnackBar(
-                                                SnackBar(
-                                                  content: Text(
-                                                    L10n.translate(
-                                                      context,
-                                                      'Mixing…',
-                                                    ),
-                                                  ),
-                                                ),
-                                              );
-
-                                              await runOneButtonMix();
-
-                                              ScaffoldMessenger.of(context)
-                                                  .showSnackBar(
-                                                SnackBar(
-                                                  content: Text(
-                                                    L10n.translate(
-                                                      context,
-                                                      'One-Button Mix executed. Open chat for details.',
-                                                    ),
-                                                  ),
-                                                  duration: const Duration(
-                                                    seconds: 3,
-                                                  ),
-                                                ),
-                                              );
-                                            },
-                                            child: Ink(
-                                              decoration: BoxDecoration(
-                                                color:
-                                                    _kOneButtonMixAccentColor,
-                                                borderRadius:
-                                                    BorderRadius.circular(24),
+                                            clipBehavior: Clip.antiAlias,
+                                            child: InkWell(
+                                              borderRadius:
+                                                  BorderRadius.circular(24),
+                                              splashFactory:
+                                                  InkRipple.splashFactory,
+                                              splashColor:
+                                                  Colors.white.withValues(
+                                                alpha: 0.14,
                                               ),
-                                              child: Center(
-                                                child: SizedBox(
-                                                  width: 35,
-                                                  height: 22,
-                                                  child: Image.asset(
-                                                    kMixroomDawTransportWaveIconAsset,
-                                                    fit: BoxFit.contain,
-                                                    filterQuality:
-                                                        FilterQuality.high,
+                                              highlightColor:
+                                                  Colors.white.withValues(
+                                                alpha: 0.06,
+                                              ),
+                                              overlayColor: WidgetStateProperty
+                                                  .resolveWith<Color?>(
+                                                (states) {
+                                                  if (states.contains(
+                                                    WidgetState.pressed,
+                                                  )) {
+                                                    return Colors.white
+                                                        .withValues(
+                                                      alpha: 0.18,
+                                                    );
+                                                  }
+                                                  if (states.contains(
+                                                    WidgetState.hovered,
+                                                  )) {
+                                                    return Colors.white
+                                                        .withValues(
+                                                      alpha: 0.08,
+                                                    );
+                                                  }
+                                                  if (states.contains(
+                                                    WidgetState.focused,
+                                                  )) {
+                                                    return Colors.white
+                                                        .withValues(
+                                                      alpha: 0.10,
+                                                    );
+                                                  }
+                                                  return Colors.transparent;
+                                                },
+                                              ),
+                                              onTap: () async {
+                                                final run =
+                                                    await _confirmOneButtonMix(
+                                                  anchorContext:
+                                                      mixAnchorContext,
+                                                );
+                                                if (!run) return;
+
+                                                ScaffoldMessenger.of(context)
+                                                    .showSnackBar(
+                                                  SnackBar(
+                                                    content: Text(
+                                                      L10n.translate(
+                                                        context,
+                                                        'Mixing…',
+                                                      ),
+                                                    ),
+                                                  ),
+                                                );
+
+                                                await runOneButtonMix();
+
+                                                ScaffoldMessenger.of(context)
+                                                    .showSnackBar(
+                                                  SnackBar(
+                                                    content: Text(
+                                                      L10n.translate(
+                                                        context,
+                                                        'One-Button Mix executed. Open chat for details.',
+                                                      ),
+                                                    ),
+                                                    duration: const Duration(
+                                                      seconds: 3,
+                                                    ),
+                                                  ),
+                                                );
+                                              },
+                                              child: Ink(
+                                                decoration: BoxDecoration(
+                                                  color:
+                                                      _kOneButtonMixAccentColor,
+                                                  borderRadius:
+                                                      BorderRadius.circular(24),
+                                                ),
+                                                child: Center(
+                                                  child: SizedBox(
+                                                    width: 35,
+                                                    height: 22,
+                                                    child: Image.asset(
+                                                      kMixroomDawTransportWaveIconAsset,
+                                                      fit: BoxFit.contain,
+                                                      filterQuality:
+                                                          FilterQuality.high,
+                                                    ),
                                                   ),
                                                 ),
                                               ),
@@ -47302,6 +54142,718 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ),
       ],
     );
+  }
+
+  Future<void> _toggleMetronomeFromBottomBar() async {
+    final next = !_metronomeEnabled;
+    _trackUiClick(
+      controlId: 'bottom_metronome',
+      surface: 'bottom_bar',
+      controlType: 'toggle',
+      value: next,
+    );
+    setState(() {
+      _metronomeEnabled = next;
+    });
+    await JuceAudioEngine.setMetronomeEnabled(next);
+    _scheduleProjectAutosave();
+  }
+
+  void _toggleLoopFromBottomBar() {
+    final next = !_loopEnabled;
+    _trackUiClick(
+      controlId: 'bottom_loop',
+      surface: 'bottom_bar',
+      controlType: 'toggle',
+      value: next,
+    );
+    setState(() {
+      _loopEnabled = next;
+      if (next) {
+        final start = math.max(0, _globalAudioClock.inMilliseconds).toInt();
+        final existingLength = _loopEndMs > _loopStartMs
+            ? _loopEndMs - _loopStartMs
+            : _defaultBottomLoopLengthMs();
+        final loopLengthMs = math.max(50, existingLength).toInt();
+        final end = start + loopLengthMs;
+        _loopStartMs = start;
+        _loopEndMs = end;
+      }
+    });
+    _scheduleProjectAutosave();
+  }
+
+  int _defaultBottomLoopLengthMs() {
+    final beatMs = _tempo <= 0 ? 500.0 : 60000.0 / _tempo;
+    const loopBars = 4;
+    final beats = _projectBarLengthQuarterBeats * loopBars;
+    return math.max(50, (beatMs * beats).round()).toInt();
+  }
+
+  void _handleBottomChatBarTap() {
+    _trackUiClick(
+      controlId: 'chat_bar',
+      surface: 'bottom_bar',
+      controlType: 'toggle',
+      value: !_chatExpanded || !_chatInputActive,
+    );
+    unawaited(_refreshPromptRateLimitStatus(silent: true));
+    if (_sampleBrowserVisible) {
+      unawaited(_stopSampleAudition());
+    }
+    if (!_chatExpanded) {
+      setState(() {
+        _showAddActionsPanel = false;
+        _sampleBrowserVisible = false;
+        _sampleBrowserExpanded = false;
+        _sampleDragActive = false;
+        _reopenSampleBrowserAfterDrag = false;
+        _reopenSampleBrowserExpanded = false;
+        _chatExpanded = true;
+        _chatInputActive = Platform.isMacOS && !_isThinking;
+      });
+      _setDawPanelVisible('add_actions', false);
+      _setDawPanelVisible('sample_browser', false);
+      _setDawPanelVisible('chat_panel', true);
+      if (Platform.isMacOS && !_isThinking) {
+        _setDawPanelVisible('chat_input', true);
+      }
+      _handleDawOnboardingChatOpened();
+      if (Platform.isMacOS && !_isThinking) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _chatFocusNode.requestFocus();
+        });
+      }
+      if (!_hasTrackedAiAssistantScreen) {
+        _hasTrackedAiAssistantScreen = true;
+        unawaited(
+          AnalyticsService.instance.trackScreen(
+            AnalyticsScreenNames.aiAssistant,
+            properties: <String, Object?>{'project_id': _projectId},
+          ),
+        );
+        unawaited(
+          AnalyticsService.instance.track(
+            AnalyticsEvents.aiFeatureViewed(featureName: 'assistant_chat'),
+          ),
+        );
+      }
+      return;
+    }
+    if (!_chatInputActive) {
+      if (_isThinking) return;
+      setState(() {
+        _showAddActionsPanel = false;
+        _sampleBrowserVisible = false;
+        _sampleBrowserExpanded = false;
+        _sampleDragActive = false;
+        _reopenSampleBrowserAfterDrag = false;
+        _reopenSampleBrowserExpanded = false;
+        _chatInputActive = true;
+      });
+      _setDawPanelVisible('add_actions', false);
+      _setDawPanelVisible('sample_browser', false);
+      _setDawPanelVisible('chat_panel', true);
+      _setDawPanelVisible('chat_input', true);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _chatFocusNode.requestFocus();
+      });
+      return;
+    }
+    if (!_chatFocusNode.hasFocus) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _chatFocusNode.requestFocus();
+      });
+    }
+  }
+
+  Future<void> _submitBottomChatPrompt() async {
+    if (_isThinking) {
+      _stopActiveChatFlow();
+      return;
+    }
+    final text = _chatTextController.text.trim();
+    if (text.isEmpty) return;
+    _chatTextController.clear();
+    if (mounted) {
+      setState(() {
+        _chatInputActive = false;
+      });
+    }
+    _chatFocusNode.unfocus();
+    await _submitChatPrompt(text);
+  }
+
+  Widget _buildBottomChatBarSurface() {
+    final chatBarExpanded = _chatExpanded && (_chatInputActive || _isThinking);
+    final useTabletDesktopChrome = mixroomUsesTabletLandscapeShell(context) ||
+        PlatformCapabilities.current.isDesktop;
+    Widget chatBar = _ChatBar(
+      expanded: chatBarExpanded,
+      hasText: _chatHasText,
+      isThinking: _isThinking,
+      controller: _chatTextController,
+      focusNode: _chatFocusNode,
+      barGradient: useTabletDesktopChrome
+          ? _kTabletDawControlFlatGradient
+          : _kChatBarGradient,
+      readOnly: _dawTutorialChatPromptLocked || _isThinking,
+      tutorialHighlighter: _mixHighlighter,
+      promptRateLimitStatus: _promptRateLimitStatus,
+      promptRateLimitLoading: _promptRateLimitLoading,
+      onShowPromptRateLimits: () {
+        unawaited(_showPromptRateLimitDialog());
+      },
+      onShowCapabilities: () {
+        unawaited(_showChatCapabilitiesDialog());
+      },
+      onTapBar: _handleBottomChatBarTap,
+      onSubmit: _submitBottomChatPrompt,
+      onStop: _stopActiveChatFlow,
+    );
+    if (_showDawOnboarding) {
+      chatBar = Halo(
+        highlighter: _mixHighlighter,
+        haloKey: const HaloKey('tutorial:chatbar'),
+        borderRadius: BorderRadius.circular(18),
+        child: chatBar,
+      );
+    }
+    return chatBar;
+  }
+
+  bool _shouldFloatTabletDesktopChatBar(BuildContext context) {
+    final usesTabletDesktopBottomRow = PlatformCapabilities.current.isDesktop ||
+        mixroomUsesTabletLandscapeShell(context);
+    return usesTabletDesktopBottomRow &&
+        _chatExpanded &&
+        (_chatInputActive || _isThinking);
+  }
+
+  Rect _expandedBottomChatBarRect(Rect baseRect, Size stackSize) {
+    if (stackSize.width <= 0 || !stackSize.width.isFinite) {
+      return baseRect;
+    }
+    final tabletDaw = mixroomUsesTabletLandscapeShell(context);
+    final usesTabletDesktopBottomRow =
+        PlatformCapabilities.current.isDesktop || tabletDaw;
+    if (!usesTabletDesktopBottomRow) return baseRect;
+
+    final maxWidth = tabletDaw
+        ? TabletDawPanelLayout.bottomTabletChatMaxWidthForScreen(
+            stackSize.width,
+          )
+        : _kDesktopDawChatBarMaxWidth;
+    final rightMargin = tabletDaw ? 16.0 : 12.0;
+    final availableRight =
+        math.max(baseRect.right, stackSize.width - rightMargin);
+    final targetRight = math.min(availableRight, baseRect.left + maxWidth);
+    final targetWidth = math.max(baseRect.width, targetRight - baseRect.left);
+    return Rect.fromLTWH(
+      baseRect.left,
+      baseRect.top,
+      targetWidth,
+      baseRect.height,
+    );
+  }
+
+  Rect _displayedBottomChatBarRectForOverlay({
+    required Rect baseRect,
+    required Size stackSize,
+    required BuildContext overlayContext,
+  }) {
+    final rect = _expandedBottomChatBarRect(baseRect, stackSize);
+    if (!mixroomUsesTabletLandscapeShell(overlayContext) ||
+        !_chatShouldTrackKeyboardInset(overlayContext)) {
+      return rect;
+    }
+    final keyboardInset = MediaQuery.viewInsetsOf(overlayContext).bottom;
+    if (keyboardInset <= 0.0 || !keyboardInset.isFinite) {
+      return rect;
+    }
+    final maxTop = math.max(0.0, stackSize.height - rect.height);
+    final targetTop = stackSize.height -
+        keyboardInset -
+        _kTabletChatKeyboardGap -
+        rect.height;
+    return Rect.fromLTWH(
+      rect.left,
+      targetTop.clamp(0.0, maxTop).toDouble(),
+      rect.width,
+      rect.height,
+    );
+  }
+
+  Widget _buildFloatingTabletDesktopChatBarOverlay() {
+    if (!_shouldFloatTabletDesktopChatBar(context)) {
+      return const SizedBox.shrink();
+    }
+    return Positioned.fill(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final baseRect = _topPopupAnchorRect(_bottomChatBarAnchorKey);
+          if (baseRect == null || baseRect.width <= 0 || baseRect.height <= 0) {
+            return const SizedBox.shrink();
+          }
+          final stackSize = Size(constraints.maxWidth, constraints.maxHeight);
+          final rect = _displayedBottomChatBarRectForOverlay(
+            baseRect: baseRect,
+            stackSize: stackSize,
+            overlayContext: context,
+          );
+          final tabletChatKeyboardFocused =
+              _tabletChatKeyboardBackdropActive(context);
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 190),
+                curve: Curves.easeOutCubic,
+                left: rect.left,
+                top: rect.top,
+                width: rect.width,
+                height: rect.height,
+                child: RepaintBoundary(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      if (tabletChatKeyboardFocused)
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(24),
+                          child: BackdropFilter(
+                            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.0001),
+                                borderRadius: BorderRadius.circular(24),
+                              ),
+                            ),
+                          ),
+                        ),
+                      _buildBottomChatBarSurface(),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _handleBottomAddButtonTap() {
+    _trackUiClick(
+      controlId: 'add_button',
+      surface: 'bottom_bar',
+      controlType: 'toggle',
+      value: !_showAddActionsPanel && !_chatExpanded && !_sampleBrowserVisible,
+    );
+    if (_chatExpanded) {
+      _collapseChatWindow();
+      return;
+    }
+    if (_sampleBrowserVisible) {
+      _closeAddActionsPanel();
+      unawaited(_closeSampleBrowser());
+      return;
+    }
+    if (_showAddActionsPanel) {
+      _closeAddActionsPanel();
+    } else {
+      _openAddActionsPanel(userInitiated: true);
+    }
+  }
+
+  Future<void> _runOneButtonMixFromBottomBar({
+    BuildContext? anchorContext,
+  }) async {
+    final run = await _confirmOneButtonMix(anchorContext: anchorContext);
+    if (!run) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(L10n.translate(context, 'Mixing…'))),
+    );
+    await runOneButtonMix();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          L10n.translate(
+            context,
+            'One-Button Mix executed. Open chat for details.',
+          ),
+        ),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  Widget _buildTabletDesktopBottomControlRow({
+    required bool includeTransport,
+    double chatBarKeyboardOffset = 0.0,
+  }) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final usesTabletDawLayout = mixroomUsesTabletLandscapeShell(context);
+        final floatChatBar = _shouldFloatTabletDesktopChatBar(context);
+        final screenWidth = MediaQuery.sizeOf(context).width;
+        final available = constraints.maxWidth;
+        final compact = usesTabletDawLayout
+            ? screenWidth.isFinite && screenWidth < 860.0
+            : available.isFinite && available < 860.0;
+        final chatMaxWidth = usesTabletDawLayout
+            ? TabletDawPanelLayout.bottomTabletChatMaxWidthForScreen(
+                screenWidth,
+              )
+            : _kDesktopDawChatBarMaxWidth;
+        final controlGap = compact ? 8.0 : 10.0;
+        final transportGap = compact ? 10.0 : 16.0;
+        final tabletMetronomeRailInset = compact ? 4.0 : 6.0;
+        final tabletRailTransport = usesTabletDawLayout && includeTransport;
+        final transportGroup = Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildTabletDesktopUndoRedoPill(),
+            SizedBox(width: controlGap),
+            _buildTabletDesktopTransportPill(
+              width: tabletRailTransport ? 148.0 : 168.0,
+            ),
+          ],
+        );
+        final utilityControls = <Widget>[
+          _buildTabletDesktopRoundButton(
+            semanticLabel:
+                _metronomeEnabled ? 'Disable metronome' : 'Enable metronome',
+            active: _metronomeEnabled,
+            onTap: () => unawaited(_toggleMetronomeFromBottomBar()),
+            child: const _TabletMetronomeIcon(
+              color: Color(0xFFF4F4F4),
+              size: 24,
+            ),
+          ),
+          SizedBox(width: controlGap),
+          _buildTabletDesktopRoundButton(
+            semanticLabel: _loopEnabled ? 'Disable loop' : 'Enable loop',
+            active: _loopEnabled,
+            onTap: _toggleLoopFromBottomBar,
+            child: const Icon(
+              Icons.repeat_rounded,
+              color: Color(0xFFF4F4F4),
+              size: 24,
+            ),
+          ),
+          SizedBox(width: controlGap),
+          Expanded(
+            child: Align(
+              alignment:
+                  usesTabletDawLayout ? Alignment.centerLeft : Alignment.center,
+              child: Transform.translate(
+                offset: Offset(0, floatChatBar ? 0.0 : -chatBarKeyboardOffset),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minWidth: math.min(
+                      chatMaxWidth,
+                      TabletDawPanelLayout.bottomTabletChatMinWidth,
+                    ),
+                    maxWidth: chatMaxWidth,
+                  ),
+                  child: SizedBox(
+                    key: _bottomChatBarAnchorKey,
+                    width: double.infinity,
+                    height: _kChatBarFixedHeight,
+                    child: floatChatBar
+                        ? const SizedBox.expand()
+                        : _buildBottomChatBarSurface(),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          SizedBox(width: controlGap),
+          Builder(
+            builder: (mixAnchorContext) => _buildTabletDesktopRoundButton(
+              semanticLabel: 'One-Button Mix',
+              active: true,
+              haloKey: const HaloKey('tutorial:one_button_mix'),
+              onTap: () => unawaited(
+                _runOneButtonMixFromBottomBar(
+                  anchorContext: mixAnchorContext,
+                ),
+              ),
+              child: SizedBox(
+                width: 35,
+                height: 22,
+                child: Image.asset(
+                  kMixroomDawTransportWaveIconAsset,
+                  fit: BoxFit.contain,
+                  filterQuality: FilterQuality.high,
+                ),
+              ),
+            ),
+          ),
+          SizedBox(width: controlGap),
+          Container(
+            key: _addButtonAnchorKey,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                _buildTabletDesktopRoundButton(
+                  semanticLabel: 'Add',
+                  active: _showAddActionsPanel,
+                  haloKey: const HaloKey('tutorial:add_button'),
+                  onTap: _handleBottomAddButtonTap,
+                  onHighlightChanged: (pressed) {
+                    if (!mounted) return;
+                    setState(() {
+                      _addButtonPressed = pressed;
+                    });
+                  },
+                  child: AnimatedRotation(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOutCubic,
+                    turns:
+                        (_chatExpanded || _showAddActionsPanel) ? 0.125 : 0.0,
+                    child: const Icon(
+                      Icons.add_rounded,
+                      color: Color(0xFFF4F4F4),
+                      size: 27,
+                    ),
+                  ),
+                ),
+                _buildRowGroupingAddButtonBadge(),
+              ],
+            ),
+          ),
+        ];
+        if (tabletRailTransport) {
+          final leftPanelWidth = TabletDawPanelLayout.expandedLeftPanelWidth(
+            availableWidth: screenWidth,
+          );
+          final leftLaneWidth = math.max(0.0, leftPanelWidth - 28.0);
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: leftLaneWidth,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: transportGroup,
+                ),
+              ),
+              SizedBox(width: transportGap + tabletMetronomeRailInset),
+              ...utilityControls,
+            ],
+          );
+        }
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            if (includeTransport) ...[
+              transportGroup,
+              SizedBox(width: transportGap),
+            ],
+            ...utilityControls,
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildTabletDesktopUndoRedoPill() {
+    return AnimatedBuilder(
+      animation: _undoManager,
+      builder: (context, _) {
+        final canUndo = _undoManager.canUndo || _pendingTempoUndoBefore != null;
+        final canRedo = _undoManager.canRedo && _pendingTempoUndoBefore == null;
+        return _buildTabletDesktopPill(
+          width: 96,
+          children: [
+            _transportSegment(
+              icon: Icons.undo,
+              semanticIdentifier: 'daw.transport.undo',
+              semanticLabel: 'Undo',
+              onTap: canUndo ? () => unawaited(_performEditorUndo()) : null,
+              onLongPress: canUndo ? () => _showUndoHistorySheet() : null,
+              onSecondaryTap: PlatformCapabilities.current.isDesktop && canUndo
+                  ? () => _showUndoHistorySheet()
+                  : null,
+              radius: const BorderRadius.only(
+                topLeft: Radius.circular(24),
+                bottomLeft: Radius.circular(24),
+              ),
+              iconSize: 20,
+              iconColor:
+                  canUndo ? Colors.white : Colors.white.withValues(alpha: 0.32),
+            ),
+            _verticalDivider(48),
+            _transportSegment(
+              icon: Icons.redo,
+              semanticIdentifier: 'daw.transport.redo',
+              semanticLabel: 'Redo',
+              onTap: canRedo ? () => unawaited(_performEditorRedo()) : null,
+              onLongPress: canRedo ? () => _showRedoHistorySheet() : null,
+              onSecondaryTap: PlatformCapabilities.current.isDesktop && canRedo
+                  ? () => _showRedoHistorySheet()
+                  : null,
+              radius: const BorderRadius.only(
+                topRight: Radius.circular(24),
+                bottomRight: Radius.circular(24),
+              ),
+              iconSize: 20,
+              iconColor:
+                  canRedo ? Colors.white : Colors.white.withValues(alpha: 0.32),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildTabletDesktopTransportPill({double width = 168.0}) {
+    return _buildTabletDesktopPill(
+      width: width,
+      children: [
+        _transportSegment(
+          icon: Icons.skip_previous,
+          semanticIdentifier: 'daw.transport.restart',
+          semanticLabel: 'Restart',
+          onTap: () async {
+            if (_recordButtonVisuallyActive) {
+              return;
+            }
+            await _restartAudio(_safeAudioEditorStateSetter);
+          },
+          radius: const BorderRadius.only(
+            topLeft: Radius.circular(24),
+            bottomLeft: Radius.circular(24),
+          ),
+          iconSize: 21,
+          haloKey: 'tutorial:transport:restart',
+        ),
+        _verticalDivider(48),
+        _transportSegment(
+          icon: _isPlaying ? Icons.pause : Icons.play_arrow,
+          semanticIdentifier: 'daw.transport.play_pause',
+          semanticLabel: _isPlaying ? 'Pause' : 'Play',
+          onTap: () async {
+            if (_isRecording) {
+              await _stopRecordingJuce(keepPlaying: false);
+            } else {
+              await _togglePlayPause();
+            }
+          },
+          iconSize: 21,
+          haloKey: 'tutorial:transport:play',
+        ),
+        _verticalDivider(48),
+        _transportSegment(
+          icon: _recordButtonVisuallyActive
+              ? Icons.stop_circle
+              : Icons.fiber_manual_record,
+          semanticIdentifier: 'daw.transport.record',
+          semanticLabel:
+              _recordButtonVisuallyActive ? 'Stop recording' : 'Record',
+          onTap: _onRecordPressed,
+          radius: const BorderRadius.only(
+            topRight: Radius.circular(24),
+            bottomRight: Radius.circular(24),
+          ),
+          iconSize: 19,
+          iconColor: _recordButtonVisuallyActive
+              ? Colors.white
+              : const Color(0xFFE53C31),
+          backgroundColor: _recordButtonVisuallyActive
+              ? const Color(0x66E53C31)
+              : Colors.transparent,
+          haloKey: 'tutorial:transport:record',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTabletDesktopPill({
+    required double width,
+    required List<Widget> children,
+  }) {
+    return SizedBox(
+      width: width,
+      height: 48,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: _kTabletDawControlFill,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+          boxShadow: const <BoxShadow>[
+            BoxShadow(
+              color: Color.fromRGBO(0, 0, 0, 0.25),
+              blurRadius: 15,
+              spreadRadius: 8,
+            ),
+          ],
+        ),
+        child: Row(children: children),
+      ),
+    );
+  }
+
+  Widget _buildTabletDesktopRoundButton({
+    required String semanticLabel,
+    required Widget child,
+    required VoidCallback? onTap,
+    bool active = false,
+    HaloKey? haloKey,
+    ValueChanged<bool>? onHighlightChanged,
+  }) {
+    Widget button = Semantics(
+      button: true,
+      label: semanticLabel,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(24),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(24),
+          onTap: onTap,
+          onHighlightChanged: onHighlightChanged,
+          splashFactory: InkRipple.splashFactory,
+          splashColor: Colors.white.withValues(alpha: 0.14),
+          highlightColor: Colors.white.withValues(alpha: 0.06),
+          child: Ink(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: active
+                  ? _kTabletDawControlActiveFill
+                  : _kTabletDawControlFill,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+              boxShadow: const <BoxShadow>[
+                BoxShadow(
+                  color: Color.fromRGBO(0, 0, 0, 0.25),
+                  blurRadius: 15,
+                  spreadRadius: 8,
+                ),
+              ],
+            ),
+            child: Center(child: child),
+          ),
+        ),
+      ),
+    );
+    if (haloKey != null) {
+      button = Halo(
+        highlighter: _mixHighlighter,
+        haloKey: haloKey,
+        borderRadius: BorderRadius.circular(24),
+        child: button,
+      );
+    }
+    return button;
   }
 
   Widget _buildDesktopInlineTransportBar() {
@@ -47338,6 +54890,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     children: [
                       _transportSegment(
                         icon: Icons.undo,
+                        semanticIdentifier: 'daw.transport.undo',
+                        semanticLabel: 'Undo',
                         onTap: canUndo
                             ? () => unawaited(_performEditorUndo())
                             : null,
@@ -47359,6 +54913,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       _verticalDivider(42),
                       _transportSegment(
                         icon: Icons.redo,
+                        semanticIdentifier: 'daw.transport.redo',
+                        semanticLabel: 'Redo',
                         onTap: canRedo
                             ? () => unawaited(_performEditorRedo())
                             : null,
@@ -47387,8 +54943,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 children: [
                   _transportSegment(
                     icon: Icons.skip_previous,
+                    semanticIdentifier: 'daw.transport.restart',
+                    semanticLabel: 'Restart',
                     onTap: () async {
-                      if (_isRecording) return;
+                      if (_recordButtonVisuallyActive) {
+                        return;
+                      }
                       await _restartAudio(_safeAudioEditorStateSetter);
                     },
                     radius: const BorderRadius.only(
@@ -47400,6 +54960,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   _verticalDivider(42),
                   _transportSegment(
                     icon: _isPlaying ? Icons.pause : Icons.play_arrow,
+                    semanticIdentifier: 'daw.transport.play_pause',
+                    semanticLabel: _isPlaying ? 'Pause' : 'Play',
                     onTap: () async {
                       if (_isRecording) {
                         await _stopRecordingJuce(keepPlaying: false);
@@ -47411,18 +54973,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   ),
                   _verticalDivider(42),
                   _transportSegment(
-                    icon: _isRecording
+                    icon: _recordButtonVisuallyActive
                         ? Icons.stop_circle
                         : Icons.fiber_manual_record,
+                    semanticIdentifier: 'daw.transport.record',
+                    semanticLabel: _recordButtonVisuallyActive
+                        ? 'Stop recording'
+                        : 'Record',
                     onTap: _onRecordPressed,
                     radius: const BorderRadius.only(
                       topRight: Radius.circular(18),
                       bottomRight: Radius.circular(18),
                     ),
                     iconSize: 17,
-                    iconColor:
-                        _isRecording ? Colors.white : const Color(0xFFE53C31),
-                    backgroundColor: _isRecording
+                    iconColor: _recordButtonVisuallyActive
+                        ? Colors.white
+                        : const Color(0xFFE53C31),
+                    backgroundColor: _recordButtonVisuallyActive
                         ? const Color(0x66E53C31)
                         : Colors.transparent,
                   ),
@@ -47432,50 +54999,54 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               SizedBox(
                 width: 48,
                 height: 42,
-                child: Halo(
-                  highlighter: _mixHighlighter,
-                  haloKey: const HaloKey('tutorial:one_button_mix'),
-                  borderRadius: BorderRadius.circular(18),
-                  child: Material(
-                    color: Colors.transparent,
+                child: Builder(
+                  builder: (mixAnchorContext) => Halo(
+                    highlighter: _mixHighlighter,
+                    haloKey: const HaloKey('tutorial:one_button_mix'),
                     borderRadius: BorderRadius.circular(18),
-                    clipBehavior: Clip.antiAlias,
-                    child: InkWell(
+                    child: Material(
+                      color: Colors.transparent,
                       borderRadius: BorderRadius.circular(18),
-                      onTap: () async {
-                        final run = await _confirmOneButtonMix();
-                        if (!run) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(L10n.translate(context, 'Mixing…')),
-                          ),
-                        );
-                        await runOneButtonMix();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              L10n.translate(
-                                context,
-                                'One-Button Mix executed. Open chat for details.',
-                              ),
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(18),
+                        onTap: () async {
+                          final run = await _confirmOneButtonMix(
+                            anchorContext: mixAnchorContext,
+                          );
+                          if (!run) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(L10n.translate(context, 'Mixing…')),
                             ),
-                            duration: const Duration(seconds: 3),
+                          );
+                          await runOneButtonMix();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                L10n.translate(
+                                  context,
+                                  'One-Button Mix executed. Open chat for details.',
+                                ),
+                              ),
+                              duration: const Duration(seconds: 3),
+                            ),
+                          );
+                        },
+                        child: Ink(
+                          decoration: BoxDecoration(
+                            color: _kOneButtonMixAccentColor,
+                            borderRadius: BorderRadius.circular(18),
                           ),
-                        );
-                      },
-                      child: Ink(
-                        decoration: BoxDecoration(
-                          color: _kOneButtonMixAccentColor,
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                        child: Center(
-                          child: SizedBox(
-                            width: 28,
-                            height: 18,
-                            child: Image.asset(
-                              kMixroomDawTransportWaveIconAsset,
-                              fit: BoxFit.contain,
-                              filterQuality: FilterQuality.high,
+                          child: Center(
+                            child: SizedBox(
+                              width: 28,
+                              height: 18,
+                              child: Image.asset(
+                                kMixroomDawTransportWaveIconAsset,
+                                fit: BoxFit.contain,
+                                filterQuality: FilterQuality.high,
+                              ),
                             ),
                           ),
                         ),
@@ -47520,6 +55091,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Color? borderColor,
     List<BoxShadow>? boxShadow,
     String? haloKey,
+    String? semanticIdentifier,
+    String? semanticLabel,
   }) {
     final resolvedRadius = radius ?? BorderRadius.zero;
     Widget segmentChild = Material(
@@ -47574,7 +55147,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     return Expanded(
-      child: segmentChild,
+      child: Semantics(
+        identifier: semanticIdentifier,
+        label: semanticLabel,
+        button: true,
+        enabled: onTap != null,
+        child: segmentChild,
+      ),
     );
   }
 
@@ -48315,8 +55894,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         String? errorText;
 
         void setBpmFromBars(StateSetter setInnerState, int bars) {
-          const beatsPerBar = 4;
-          final beats = math.max(1, bars * beatsPerBar);
+          final beats = math.max(1.0, bars * _projectBarLengthQuarterBeats);
           final next = _clampTempo((beats * 60.0) / rawSec);
           setInnerState(() {
             chosenWarpEnabled = true;
@@ -50290,7 +57868,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<_RowLayoutSnapshot> _captureRowLayoutSnapshot() async {
     final rows = _rows.map(_cloneTimelineRow).toList();
-    return _RowLayoutSnapshot(rows: rows);
+    final trackGroups = _trackGroups.map(_cloneTrackGroup).toList();
+    return _RowLayoutSnapshot(rows: rows, trackGroups: trackGroups);
   }
 
   Future<void> _applyRowLayoutSnapshot(_RowLayoutSnapshot snap) async {
@@ -50350,6 +57929,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               ),
       );
     }
+    _trackGroups
+      ..clear()
+      ..addAll(snap.trackGroups.map(_cloneTrackGroup));
     await _applyRowsToEditorState(
       restoredRows,
       refreshAutomationTargets: false,
@@ -51165,6 +58747,43 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  Future<bool> _renameRowGroupImpl(String groupId, String name) async {
+    final normalizedGroupId = groupId.trim();
+    final normalizedName = name.trim();
+    if (normalizedGroupId.isEmpty || normalizedName.isEmpty) return false;
+    var changed = false;
+    final nextGroups = _trackGroups.map((group) {
+      if (group.id != normalizedGroupId) return _cloneTrackGroup(group);
+      if (group.name == normalizedName) return _cloneTrackGroup(group);
+      changed = true;
+      return TrackGroup(
+        id: group.id,
+        name: normalizedName,
+        color: group.color,
+        rowIds: group.rowIds,
+        gain: group.gain,
+        pan: group.pan,
+        muted: group.muted,
+        soloed: group.soloed,
+        collapsed: group.collapsed,
+        effects: group.effects,
+      );
+    }).toList(growable: false);
+    if (!changed) return false;
+    _trackGroups
+      ..clear()
+      ..addAll(nextGroups);
+    setState(() {});
+    return true;
+  }
+
+  Future<void> _renameRowGroup(String groupId, String name) async {
+    await _runRowLayoutActionWithUndo(
+      description: 'Rename row group',
+      perform: () => _renameRowGroupImpl(groupId, name),
+    );
+  }
+
   Future<bool> _setRowIconImpl(int row, int iconId) async {
     if (row < 0 || row >= _rowCount) return false;
     final ok = await JuceAudioEngine.setRowIcon(_rowIdAt(row), iconId);
@@ -51188,16 +58807,249 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  Future<bool> _setRowColorImpl(int row, int color) async {
+    if (row < 0 || row >= _rowCount) return false;
+    final nextRows = List<TimelineRow>.from(_rows);
+    final normalizedColor = color < 0 ? 0 : color;
+    if (nextRows[row].color == normalizedColor) return false;
+    nextRows[row] = nextRows[row].copyWith(color: normalizedColor);
+    await _applyRowsToEditorState(
+      nextRows,
+      refreshAutomationTargets: false,
+      syncClipRows: false,
+    );
+    return true;
+  }
+
+  Future<void> _setRowColor(int row, int color) async {
+    await _runRowLayoutActionWithUndo(
+      description: 'Change row color',
+      perform: () => _setRowColorImpl(row, color),
+    );
+  }
+
+  Future<bool> _createRowGroupImpl(
+    List<int> rows, {
+    String? name,
+    int? color,
+  }) async {
+    final orderedRows = rows
+        .where((row) => row >= 0 && row < _rowCount)
+        .toSet()
+        .toList()
+      ..sort();
+    if (orderedRows.length < 2) return false;
+
+    final groupedRowIdList = orderedRows.map(_rowIdAt).toList(growable: false);
+    final groupedRowIds = groupedRowIdList.toSet();
+    final groupedRowsPacked = List<TimelineRow>.from(_rows);
+    final insertIndex = orderedRows.first;
+    for (int i = 0; i < groupedRowIdList.length; i++) {
+      final rowId = groupedRowIdList[i];
+      final fromIndex =
+          groupedRowsPacked.indexWhere((candidate) => candidate.rowId == rowId);
+      final toIndex = insertIndex + i;
+      if (fromIndex < 0 || fromIndex == toIndex) continue;
+      final movedInEngine = await JuceAudioEngine.moveRowOrder(
+        fromIndex,
+        toIndex,
+      );
+      if (!movedInEngine) {
+        return false;
+      }
+      final movedRow = groupedRowsPacked.removeAt(fromIndex);
+      groupedRowsPacked.insert(toIndex, movedRow);
+    }
+
+    final groupId =
+        'group_${DateTime.now().microsecondsSinceEpoch}_${const Uuid().v4()}';
+    final nextRows = groupedRowsPacked
+        .map((row) => groupedRowIds.contains(row.rowId)
+            ? row.copyWith(groupId: groupId)
+            : _cloneTimelineRow(row))
+        .toList(growable: false);
+    final existingGroups = _trackGroups
+        .map((group) {
+          final rowIds = group.rowIds
+              .where((rowId) => !groupedRowIds.contains(rowId))
+              .toList(growable: false);
+          if (rowIds.length < 2) return null;
+          return TrackGroup(
+            id: group.id,
+            name: group.name,
+            color: group.color,
+            rowIds: rowIds,
+            gain: group.gain,
+            pan: group.pan,
+            muted: group.muted,
+            soloed: group.soloed,
+            collapsed: group.collapsed,
+            effects: group.effects,
+          );
+        })
+        .whereType<TrackGroup>()
+        .toList(growable: true);
+    final normalizedName = (name ?? '').trim();
+    final groupColor = color != null && color > 0
+        ? color
+        : orderedRows
+            .map((row) => _rows[row].color)
+            .firstWhere((color) => color != 0, orElse: () => 0);
+    existingGroups.add(
+      TrackGroup(
+        id: groupId,
+        name: normalizedName.isEmpty
+            ? 'Group ${_trackGroups.length + 1}'
+            : normalizedName,
+        color: groupColor,
+        rowIds: groupedRowIdList,
+      ),
+    );
+
+    _trackGroups
+      ..clear()
+      ..addAll(existingGroups);
+    await _applyRowsToEditorState(
+      nextRows,
+      refreshAutomationTargets: false,
+      syncClipRows: true,
+    );
+    return true;
+  }
+
+  Future<void> _createRowGroup(
+    List<int> rows, {
+    String? name,
+    int? color,
+  }) async {
+    await _runRowLayoutActionWithUndo(
+      description: 'Create row group',
+      perform: () => _createRowGroupImpl(rows, name: name, color: color),
+    );
+  }
+
+  Future<bool> _removeRowFromGroupImpl(int row) async {
+    if (row < 0 || row >= _rowCount) return false;
+    final rowId = _rowIdAt(row);
+    final currentGroupId = _rows[row].groupId.trim();
+    if (currentGroupId.isEmpty) return false;
+    final nextRows = _rows
+        .map((item) => item.rowId == rowId
+            ? item.copyWith(groupId: '')
+            : _cloneTimelineRow(item))
+        .toList(growable: false);
+    final nextGroups = _trackGroups
+        .map((group) {
+          if (group.id != currentGroupId) return _cloneTrackGroup(group);
+          final rowIds = group.rowIds
+              .where((candidateId) => candidateId != rowId)
+              .toList(growable: false);
+          if (rowIds.isEmpty) return null;
+          return TrackGroup(
+            id: group.id,
+            name: group.name,
+            color: group.color,
+            rowIds: rowIds,
+            gain: group.gain,
+            pan: group.pan,
+            muted: group.muted,
+            soloed: group.soloed,
+            collapsed: group.collapsed,
+            effects: group.effects,
+          );
+        })
+        .whereType<TrackGroup>()
+        .toList(growable: false);
+    _trackGroups
+      ..clear()
+      ..addAll(nextGroups);
+    await _applyRowsToEditorState(
+      nextRows,
+      refreshAutomationTargets: false,
+      syncClipRows: false,
+    );
+    return true;
+  }
+
+  Future<void> _removeRowFromGroup(int row) async {
+    await _runRowLayoutActionWithUndo(
+      description: 'Remove row from group',
+      perform: () => _removeRowFromGroupImpl(row),
+    );
+  }
+
+  Future<bool> _toggleRowGroupCollapsedImpl(String groupId) async {
+    final normalizedGroupId = groupId.trim();
+    if (normalizedGroupId.isEmpty) return false;
+    var changed = false;
+    final nextGroups = _trackGroups.map((group) {
+      if (group.id != normalizedGroupId) return _cloneTrackGroup(group);
+      changed = true;
+      return TrackGroup(
+        id: group.id,
+        name: group.name,
+        color: group.color,
+        rowIds: group.rowIds,
+        gain: group.gain,
+        pan: group.pan,
+        muted: group.muted,
+        soloed: group.soloed,
+        collapsed: !group.collapsed,
+        effects: group.effects,
+      );
+    }).toList(growable: false);
+    if (!changed) return false;
+    _trackGroups
+      ..clear()
+      ..addAll(nextGroups);
+    setState(() {});
+    return true;
+  }
+
+  Future<void> _toggleRowGroupCollapsed(String groupId) async {
+    await _runRowLayoutActionWithUndo(
+      description: 'Fold row group',
+      perform: () => _toggleRowGroupCollapsedImpl(groupId),
+    );
+  }
+
+  Future<bool> _applyEngineRowOrder(List<TimelineRow> targetRows) async {
+    if (targetRows.length != _rows.length) return false;
+    final currentRowIds = _rows.map((row) => row.rowId).toList(growable: true);
+    final targetRowIds = targetRows.map((row) => row.rowId).toList();
+    if (currentRowIds.length != targetRowIds.length) return false;
+
+    for (var targetIndex = 0;
+        targetIndex < targetRowIds.length;
+        targetIndex++) {
+      final targetRowId = targetRowIds[targetIndex];
+      final fromIndex = currentRowIds.indexOf(targetRowId);
+      if (fromIndex < 0) return false;
+      if (fromIndex == targetIndex) continue;
+      final ok = await JuceAudioEngine.moveRowOrder(fromIndex, targetIndex);
+      if (!ok) return false;
+      final moved = currentRowIds.removeAt(fromIndex);
+      currentRowIds.insert(targetIndex, moved);
+    }
+    return true;
+  }
+
   Future<bool> _moveRowImpl(int fromIndex, int toIndex) async {
     if (fromIndex < 0 ||
         fromIndex >= _rowCount ||
         toIndex < 0 ||
         toIndex >= _rowCount) return false;
-    final ok = await JuceAudioEngine.moveRowOrder(fromIndex, toIndex);
+    final nextRows = reorderRowsMovingGroupLeadAsUnit(
+      rows: _rows,
+      groups: _trackGroups,
+      fromIndex: fromIndex,
+      toIndex: toIndex,
+    );
+    final currentOrder = _rows.map((row) => row.rowId).toList();
+    final nextOrder = nextRows.map((row) => row.rowId).toList();
+    if (listEquals(currentOrder, nextOrder)) return false;
+    final ok = await _applyEngineRowOrder(nextRows);
     if (!ok) return false;
-    final nextRows = List<TimelineRow>.from(_rows);
-    final moved = nextRows.removeAt(fromIndex);
-    nextRows.insert(toIndex, moved);
     await _applyRowsToEditorState(
       nextRows,
       refreshAutomationTargets: false,
@@ -51237,32 +59089,60 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       builder: (context, localeProvider, child) {
         final editorLayoutSpec =
             _EditorLayoutSpec.fromSize(MediaQuery.of(context).size);
-        final snackBottomInset = _kTransportBarHeight +
-            (_isProducerCaptureUiVisible
-                ? _kProducerBannerHeightEstimate
-                : 0.0) +
-            _androidTransportBottomInset(context) +
-            (Platform.isAndroid ? _kAndroidOverlayPanelLift : 0.0) +
-            (Platform.isIOS ? _kIosSnackBarExtraLift : 0.0) +
-            18.0;
         final fixedTransportFootprint =
             _kTransportBarHeight + _androidTransportBottomInset(context);
         final keyboardBottomInset = MediaQuery.viewInsetsOf(context).bottom;
-        final chatKeyboardActive =
-            keyboardBottomInset > 0.0 && _isChatTypingActive;
+        final chatKeyboardActive = _chatShouldTrackKeyboardInset(context);
+        final usesTabletDawLayout = mixroomUsesTabletLandscapeShell(context);
         final rawKeyboardLift = chatKeyboardActive
-            ? math.max(
+            ? (usesTabletDawLayout
+                ? _tabletChatKeyboardLiftFromInset(
+                    keyboardInset: keyboardBottomInset,
+                  )
+                : math.max(
+                    0.0,
+                    keyboardBottomInset -
+                        MediaQuery.paddingOf(context).bottom +
+                        8.0,
+                  ))
+            : 0.0;
+        final topBarReservedHeight = _topBarReservedHeight(editorLayoutSpec);
+        final usesBottomControlRow =
+            usesTabletDawLayout || PlatformCapabilities.current.isDesktop;
+        final keyboardLift = usesTabletDawLayout
+            ? rawKeyboardLift
+            : math.max(
                 0.0,
-                keyboardBottomInset -
-                    MediaQuery.paddingOf(context).bottom +
-                    8.0,
+                rawKeyboardLift - fixedTransportFootprint,
+              );
+        final snackBottomInset = usesBottomControlRow
+            ? _kChatBarStackHeight +
+                (_isProducerCaptureUiVisible
+                    ? _kProducerBannerHeightEstimate
+                    : 0.0) +
+                keyboardLift +
+                10.0
+            : _kTransportBarHeight +
+                (_isProducerCaptureUiVisible
+                    ? _kProducerBannerHeightEstimate
+                    : 0.0) +
+                _androidTransportBottomInset(context) +
+                (Platform.isAndroid ? _kAndroidOverlayPanelLift : 0.0) +
+                (Platform.isIOS ? _kIosSnackBarExtraLift : 0.0) +
+                18.0;
+        final mediaSize = MediaQuery.of(context).size;
+        final tabletSidePanelWidth =
+            TabletDawPanelLayout.expandedLeftPanelWidth(
+          availableWidth: mediaSize.width,
+        );
+        final tabletRightPanelReservedWidth = usesTabletDawLayout
+            ? _tabletReservedRightPanelWidthFor(
+                mediaSize.width,
+                collapsed: _tabletRightPanelCollapsed,
               )
             : 0.0;
-        final keyboardLift = math.max(
-          0.0,
-          rawKeyboardLift - fixedTransportFootprint,
-        );
-        final topBarReservedHeight = _topBarReservedHeight(editorLayoutSpec);
+        final tabletBottomDockRightInset =
+            usesTabletDawLayout ? tabletRightPanelReservedWidth : 0.0;
         final chatTypingActive = _isChatTypingActive;
         final showProducerCapture =
             _isProducerCaptureUiVisible && !chatTypingActive;
@@ -51387,6 +59267,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             fit: StackFit.expand,
                             clipBehavior: Clip.none,
                             children: [
+                              if (usesTabletDawLayout)
+                                Positioned(
+                                  left: 0,
+                                  top: 0,
+                                  bottom: 0,
+                                  width: tabletSidePanelWidth,
+                                  child: _buildTabletLeftDawBackdrop(
+                                    width: tabletSidePanelWidth,
+                                  ),
+                                ),
                               Column(
                                 children: [
                                   // TOP ROW OF BUTTONS
@@ -51394,937 +59284,1081 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
                                   Flexible(
                                     fit: FlexFit.loose,
-                                    child: Halo(
-                                      highlighter: _mixHighlighter,
-                                      haloKey:
-                                          const HaloKey('tutorial:timeline'),
-                                      borderRadius: BorderRadius.circular(12),
-                                      child: AudioCanvasTimeline(
-                                        allPluginsEntitled: allPluginsEntitled,
-                                        onUpgradeRequested:
-                                            widget.onUpgradeRequested,
-                                        controller: _timelineController,
-                                        transportClockListenable:
-                                            _transportClock,
-                                        rows: _rows,
-                                        clips: _audioTracks, // your list
-                                        clipOverlapMode: _projectCrossfadeMode,
-                                        rowGain: _rowGain,
-                                        rowPan: _rowPan,
-                                        rowVolumeAutomation:
-                                            _rowVolumeAutomation,
-                                        getAutomationTargetsForRow:
-                                            _automationTargetsForRowUi,
-                                        getSelectedAutomationTargetId:
-                                            _selectedAutomationTargetIdForRow,
-                                        setSelectedAutomationTargetId:
-                                            (row, targetId) {
-                                          _setSelectedAutomationTargetIdForRow(
+                                    child: Padding(
+                                      padding: EdgeInsets.only(
+                                        right: tabletRightPanelReservedWidth,
+                                        bottom:
+                                            usesTabletDawLayout ? 68.0 : 0.0,
+                                      ),
+                                      child: Halo(
+                                        highlighter: _mixHighlighter,
+                                        haloKey:
+                                            const HaloKey('tutorial:timeline'),
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: AudioCanvasTimeline(
+                                          useTabletDawLayout:
+                                              usesTabletDawLayout,
+                                          tabletSidePanelWidth:
+                                              tabletSidePanelWidth,
+                                          allPluginsEntitled:
+                                              allPluginsEntitled,
+                                          onUpgradeRequested:
+                                              widget.onUpgradeRequested,
+                                          controller: _timelineController,
+                                          transportClockListenable:
+                                              _transportClock,
+                                          rows: _rows,
+                                          trackGroups: _trackGroups,
+                                          clips: _audioTracks, // your list
+                                          clipOverlapMode:
+                                              _projectCrossfadeMode,
+                                          rowGain: _rowGain,
+                                          rowPan: _rowPan,
+                                          rowVolumeAutomation:
+                                              _rowVolumeAutomation,
+                                          getAutomationTargetsForRow:
+                                              _automationTargetsForRowUi,
+                                          getSelectedAutomationTargetId:
+                                              _selectedAutomationTargetIdForRow,
+                                          setSelectedAutomationTargetId:
+                                              (row, targetId) {
+                                            _setSelectedAutomationTargetIdForRow(
+                                              row,
+                                              targetId,
+                                            );
+                                            unawaited(
+                                                _syncAutomationTargetToCurrentTime(
+                                              row,
+                                              targetId,
+                                            ));
+                                          },
+                                          getAutomationPointsForTarget:
+                                              (row, targetId) =>
+                                                  _pointsForAutomationTarget(
                                             row,
                                             targetId,
-                                          );
-                                          unawaited(
-                                              _syncAutomationTargetToCurrentTime(
-                                            row,
-                                            targetId,
-                                          ));
-                                        },
-                                        getAutomationPointsForTarget:
-                                            (row, targetId) =>
-                                                _pointsForAutomationTarget(
-                                          row,
-                                          targetId,
-                                        )
-                                                    .map((p) => p.copy())
-                                                    .toList(growable: false),
-                                        setAutomationPointsForTarget:
-                                            (row, targetId, points) {
-                                          if (row < 0 || row >= _rowCount)
-                                            return;
-                                          final safePoints =
-                                              _sanitizeAutomationPointsForTarget(
-                                            row,
-                                            targetId,
-                                            points,
-                                          );
-                                          if (targetId == 'volume') {
-                                            setState(() {
-                                              _rowVolumeAutomation[row] =
-                                                  safePoints
+                                          )
                                                       .map((p) => p.copy())
-                                                      .toList(growable: false);
+                                                      .toList(growable: false),
+                                          setAutomationPointsForTarget:
+                                              (row, targetId, points) {
+                                            if (row < 0 || row >= _rowCount)
+                                              return;
+                                            final safePoints =
+                                                _sanitizeAutomationPointsForTarget(
+                                              row,
+                                              targetId,
+                                              points,
+                                            );
+                                            if (targetId == 'volume') {
+                                              setState(() {
+                                                _rowVolumeAutomation[row] =
+                                                    safePoints
+                                                        .map((p) => p.copy())
+                                                        .toList(
+                                                            growable: false);
+                                              });
+                                              unawaited(
+                                                  _syncNativeAutomationForRow(
+                                                      row));
+                                              return;
+                                            }
+                                            setState(() {
+                                              final rowMap =
+                                                  _rowPluginAutomation
+                                                      .putIfAbsent(
+                                                row,
+                                                () => <String,
+                                                    List<AutomationPoint>>{},
+                                              );
+                                              rowMap[targetId] = safePoints
+                                                  .map((p) => p.copy())
+                                                  .toList(growable: false);
+                                            });
+                                            unawaited(
+                                                _syncNativePluginAutomationForRow(
+                                                    row));
+                                          },
+                                          getAutomationClipsForTarget:
+                                              (row, targetId) =>
+                                                  _copyAutomationClipList(
+                                            _clipsForAutomationTarget(
+                                                row, targetId),
+                                          ),
+                                          setAutomationClipsForTarget:
+                                              (row, targetId, clips) {
+                                            if (row < 0 || row >= _rowCount)
+                                              return;
+                                            final safeClips =
+                                                _sanitizeAutomationClipsForTarget(
+                                              row,
+                                              targetId,
+                                              clips,
+                                            );
+                                            setState(() {
+                                              final rowMap = _rowAutomationClips
+                                                  .putIfAbsent(
+                                                row,
+                                                () => <String,
+                                                    List<
+                                                        AutomationClipSnapshot>>{},
+                                              );
+                                              rowMap[targetId] =
+                                                  _copyAutomationClipList(
+                                                      safeClips);
                                             });
                                             unawaited(
                                                 _syncNativeAutomationForRow(
-                                                    row));
-                                            return;
-                                          }
-                                          setState(() {
-                                            final rowMap = _rowPluginAutomation
-                                                .putIfAbsent(
                                               row,
-                                              () => <String,
-                                                  List<AutomationPoint>>{},
-                                            );
-                                            rowMap[targetId] = safePoints
-                                                .map((p) => p.copy())
-                                                .toList(growable: false);
-                                          });
-                                          unawaited(
-                                              _syncNativePluginAutomationForRow(
-                                                  row));
-                                        },
-                                        getAutomationClipsForTarget:
-                                            (row, targetId) =>
-                                                _copyAutomationClipList(
-                                          _clipsForAutomationTarget(
-                                              row, targetId),
-                                        ),
-                                        setAutomationClipsForTarget:
-                                            (row, targetId, clips) {
-                                          if (row < 0 || row >= _rowCount)
-                                            return;
-                                          final safeClips =
-                                              _sanitizeAutomationClipsForTarget(
-                                            row,
-                                            targetId,
-                                            clips,
-                                          );
-                                          setState(() {
-                                            final rowMap =
-                                                _rowAutomationClips.putIfAbsent(
+                                            ));
+                                          },
+                                          onAutomationClipsCommit: (row,
+                                              targetId, oldClips, newClips) {
+                                            unawaited(
+                                                _setAutomationClipsForTargetWithUndo(
                                               row,
-                                              () => <String,
-                                                  List<
-                                                      AutomationClipSnapshot>>{},
-                                            );
-                                            rowMap[targetId] =
-                                                _copyAutomationClipList(
-                                                    safeClips);
-                                          });
-                                          unawaited(_syncNativeAutomationForRow(
-                                            row,
-                                          ));
-                                        },
-                                        onAutomationClipsCommit: (row, targetId,
-                                            oldClips, newClips) {
-                                          unawaited(
-                                              _setAutomationClipsForTargetWithUndo(
-                                            row,
-                                            targetId,
-                                            newClips,
-                                            oldClipsOverride: oldClips,
-                                          ));
-                                          _recordProducerManualEdit(
-                                              'row_automation_clips', {
-                                            'row': row,
-                                            'target_id': targetId,
-                                            'old_count': oldClips.length,
-                                            'new_count': newClips.length,
-                                          });
-                                        },
-                                        onAutomationTargetCommit: (row,
-                                            targetId, oldPoints, newPoints) {
-                                          unawaited(
-                                              _setAutomationTargetPointsWithUndo(
-                                            row,
-                                            targetId,
-                                            newPoints,
-                                            oldPointsOverride: oldPoints,
-                                          ));
-                                          _recordProducerManualEdit(
-                                              'row_automation_target', {
-                                            'row': row,
-                                            'target_id': targetId,
-                                            'old_count': oldPoints.length,
-                                            'new_count': newPoints.length,
-                                          });
-                                        },
-                                        onRevealAutomationTarget:
-                                            (row, targetId) async {
-                                          if (_parseAutomationTargetId(targetId)
-                                              .isMaster) {
-                                            await _revealMasterAutomationTarget(
                                               targetId,
+                                              newClips,
+                                              oldClipsOverride: oldClips,
+                                            ));
+                                            _recordProducerManualEdit(
+                                                'row_automation_clips', {
+                                              'row': row,
+                                              'target_id': targetId,
+                                              'old_count': oldClips.length,
+                                              'new_count': newClips.length,
+                                            });
+                                          },
+                                          onAutomationTargetCommit: (row,
+                                              targetId, oldPoints, newPoints) {
+                                            unawaited(
+                                                _setAutomationTargetPointsWithUndo(
+                                              row,
+                                              targetId,
+                                              newPoints,
+                                              oldPointsOverride: oldPoints,
+                                            ));
+                                            _recordProducerManualEdit(
+                                                'row_automation_target', {
+                                              'row': row,
+                                              'target_id': targetId,
+                                              'old_count': oldPoints.length,
+                                              'new_count': newPoints.length,
+                                            });
+                                          },
+                                          onRevealAutomationTarget:
+                                              (row, targetId) async {
+                                            if (_parseAutomationTargetId(
+                                                    targetId)
+                                                .isMaster) {
+                                              await _revealMasterAutomationTarget(
+                                                targetId,
+                                              );
+                                            }
+                                          },
+                                          // extractors
+                                          getStartMs: (t) =>
+                                              t.offset *
+                                              1000.0, // adjust to your model
+                                          getDurationMs: (t) =>
+                                              _clipTimelineDurationMs(t),
+                                          getTimelineDurationMs: (t) =>
+                                              _clipTimelineDurationMs(t),
+                                          getTrimStartMs: (t) => t
+                                              .trimStart.inMilliseconds
+                                              .toDouble(),
+                                          getTrimEndMs: (t) => t
+                                              .trimEnd.inMilliseconds
+                                              .toDouble(),
+                                          // getRowIndex: (t) => (t.rowIndex >= 0 && t.rowIndex < kNumRows) ? t.rowIndex : 0,
+                                          getPeaks: (c) {
+                                            return c.displayWaveformData;
+                                          },
+                                          getY: (c) => c
+                                              .y, // store a visual Y in your model
+                                          // commit (persist in your model, then setState)
+                                          onMoveClipCommit: (i, newStartMs,
+                                              newRowIndex) async {
+                                            await _handleMoveClips(
+                                              <TimelineClipMoveRequest>[
+                                                TimelineClipMoveRequest(
+                                                  clipIndex: i,
+                                                  newStartMs: newStartMs,
+                                                  newRowIndex: newRowIndex,
+                                                ),
+                                              ],
                                             );
-                                          }
-                                        },
-                                        // extractors
-                                        getStartMs: (t) =>
-                                            t.offset *
-                                            1000.0, // adjust to your model
-                                        getDurationMs: (t) =>
-                                            _clipTimelineDurationMs(t),
-                                        getTimelineDurationMs: (t) =>
-                                            _clipTimelineDurationMs(t),
-                                        getTrimStartMs: (t) => t
-                                            .trimStart.inMilliseconds
-                                            .toDouble(),
-                                        getTrimEndMs: (t) =>
-                                            t.trimEnd.inMilliseconds.toDouble(),
-                                        // getRowIndex: (t) => (t.rowIndex >= 0 && t.rowIndex < kNumRows) ? t.rowIndex : 0,
-                                        getPeaks: (c) {
-                                          return c.displayWaveformData;
-                                        },
-                                        getY: (c) => c
-                                            .y, // store a visual Y in your model
-                                        // commit (persist in your model, then setState)
-                                        onMoveClipCommit:
-                                            (i, newStartMs, newRowIndex) async {
-                                          await _handleMoveClips(
-                                            <TimelineClipMoveRequest>[
-                                              TimelineClipMoveRequest(
-                                                clipIndex: i,
-                                                newStartMs: newStartMs,
-                                                newRowIndex: newRowIndex,
+                                          },
+                                          onMoveClipsCommit: _handleMoveClips,
+                                          onTrimClip: (i, s, e,
+                                              {double? newStartMs}) async {
+                                            final clip = _audioTracks[i];
+
+                                            // 1. Update the internal trim values (where in the source file we start/end)
+                                            clip.trimStart = Duration(
+                                                milliseconds: s.round());
+                                            clip.trimEnd = Duration(
+                                                milliseconds: e.round());
+
+                                            // 2. === FIX: Use the calculated newStartMs for the timeline offset ===
+                                            // newStartMs is ONLY sent by the timeline widget during a 'trim-start' operation.
+                                            if (newStartMs != null) {
+                                              // newStartMs is the intended start time in milliseconds.
+                                              // Convert to seconds (assuming clip.offset is in seconds).
+                                              clip.offset = newStartMs / 1000.0;
+                                            }
+                                            // If newStartMs is null (during 'trim-end'), the clip.offset must not change.
+                                            // await _undoManager.execute(
+                                            //   TrimClipAction(
+                                            //     clip: clip,
+                                            //     oldTrimStart: clip.trimStart,
+                                            //     oldTrimEnd: clip.trimEnd,
+                                            //     oldOffset: clip.offset,
+                                            //     newTrimStart: Duration(milliseconds: s.round()),
+                                            //     newTrimEnd: Duration(milliseconds: e.round()),
+                                            //     newOffset: newStartMs != null ? newStartMs / 1000.0 : null,
+                                            //     onChange: _updateOverallDurationIfNeeded,
+                                            //   ),
+                                            // );
+                                            setState(() {});
+                                            _updateOverallDurationIfNeeded();
+                                            // Defer JUCE update until trim commit (pointer-up) to avoid UI lag.
+                                          },
+
+                                          // for the undo history
+                                          onTrimClipCommit:
+                                              (i, s, e, os, oe, oo,
+                                                  {double? newStartMs}) async {
+                                            // final clip = _audioTracks[i];
+                                            await _undoManager.execute(
+                                              TrimClipAction(
+                                                // clip: clip,
+                                                tracks: _audioTracks,
+                                                originalIndex: i,
+                                                oldTrimStart: Duration(
+                                                    milliseconds: os.round()),
+                                                oldTrimEnd: Duration(
+                                                    milliseconds: oe.round()),
+                                                oldOffset: oo / 1000.0,
+                                                newTrimStart: Duration(
+                                                    milliseconds: s.round()),
+                                                newTrimEnd: Duration(
+                                                    milliseconds: e.round()),
+                                                newOffset: newStartMs != null
+                                                    ? newStartMs / 1000.0
+                                                    : null,
+                                                onChange: () {
+                                                  _syncClipTimingToEngine(i);
+                                                  unawaited(
+                                                    _syncAllClipFadesToEngine(),
+                                                  );
+                                                  _updateOverallDurationIfNeeded();
+                                                },
                                               ),
-                                            ],
-                                          );
-                                        },
-                                        onMoveClipsCommit: _handleMoveClips,
-                                        onTrimClip: (i, s, e,
-                                            {double? newStartMs}) async {
-                                          final clip = _audioTracks[i];
+                                            );
+                                          },
 
-                                          // 1. Update the internal trim values (where in the source file we start/end)
-                                          clip.trimStart =
-                                              Duration(milliseconds: s.round());
-                                          clip.trimEnd =
-                                              Duration(milliseconds: e.round());
-
-                                          // 2. === FIX: Use the calculated newStartMs for the timeline offset ===
-                                          // newStartMs is ONLY sent by the timeline widget during a 'trim-start' operation.
-                                          if (newStartMs != null) {
-                                            // newStartMs is the intended start time in milliseconds.
-                                            // Convert to seconds (assuming clip.offset is in seconds).
-                                            clip.offset = newStartMs / 1000.0;
-                                          }
-                                          // If newStartMs is null (during 'trim-end'), the clip.offset must not change.
-                                          // await _undoManager.execute(
-                                          //   TrimClipAction(
-                                          //     clip: clip,
-                                          //     oldTrimStart: clip.trimStart,
-                                          //     oldTrimEnd: clip.trimEnd,
-                                          //     oldOffset: clip.offset,
-                                          //     newTrimStart: Duration(milliseconds: s.round()),
-                                          //     newTrimEnd: Duration(milliseconds: e.round()),
-                                          //     newOffset: newStartMs != null ? newStartMs / 1000.0 : null,
-                                          //     onChange: _updateOverallDurationIfNeeded,
-                                          //   ),
-                                          // );
-                                          setState(() {});
-                                          _updateOverallDurationIfNeeded();
-                                          // Defer JUCE update until trim commit (pointer-up) to avoid UI lag.
-                                        },
-
-                                        // for the undo history
-                                        onTrimClipCommit: (i, s, e, os, oe, oo,
-                                            {double? newStartMs}) async {
-                                          // final clip = _audioTracks[i];
-                                          await _undoManager.execute(
-                                            TrimClipAction(
-                                              // clip: clip,
-                                              tracks: _audioTracks,
-                                              originalIndex: i,
-                                              oldTrimStart: Duration(
-                                                  milliseconds: os.round()),
-                                              oldTrimEnd: Duration(
-                                                  milliseconds: oe.round()),
-                                              oldOffset: oo / 1000.0,
-                                              newTrimStart: Duration(
-                                                  milliseconds: s.round()),
-                                              newTrimEnd: Duration(
-                                                  milliseconds: e.round()),
-                                              newOffset: newStartMs != null
-                                                  ? newStartMs / 1000.0
-                                                  : null,
-                                              onChange: () {
-                                                _syncClipTimingToEngine(i);
-                                                unawaited(
-                                                  _syncAllClipFadesToEngine(),
-                                                );
-                                                _updateOverallDurationIfNeeded();
-                                              },
-                                            ),
-                                          );
-                                        },
-
-                                        // selection + headers
-                                        // numRows: kNumRows,
-                                        // selectedRowIndex: _selectedRow,
-                                        onSelectRow: (row) =>
-                                            setState(() => _selectedRow = row),
-                                        // rowMuted: _rowMuted,
-                                        // rowExpanded: _rowExpanded,
-                                        recordingInProgress: _isRecording,
-                                        onToggleExpanded: (row) => setState(
-                                            () => _rowExpanded[row] =
-                                                !_rowExpanded[row]),
-                                        onAddRow: _addRow,
-                                        onAddInstrumentLane:
-                                            _addInstrumentClipFromPicker,
-                                        onInsertRowAbove: _insertRowAbove,
-                                        onInsertRowBelow: _insertRowBelow,
-                                        onInsertInstrumentLaneAbove: (row) =>
-                                            _insertInstrumentLaneFromPicker(
-                                          row,
-                                          above: true,
-                                        ),
-                                        onInsertInstrumentLaneBelow: (row) =>
-                                            _insertInstrumentLaneFromPicker(
-                                          row,
-                                          above: false,
-                                        ),
-                                        onChangeInstrumentLane:
-                                            _changeInstrumentLaneFromPicker,
-                                        onDeleteRow: _deleteRow,
-                                        onMoveRow: _moveRow,
-                                        onRenameRow: _renameRow,
-                                        onSetRowIcon: _setRowIcon,
-
-                                        // transport
-                                        onScrubRequested: (ms) {
-                                          _scrubProjectTransport(ms);
-                                        },
-                                        maxDuration: _audioOnlyOverallDuration,
-                                        getFullDurationMs: (t) =>
-                                            _clipFullDurationMsForTrim(t),
-                                        isPlaying: _isPlaying,
-
-                                        // ruler/grid
-                                        bpm: _tempo,
-                                        beatsPerBar: 4,
-
-                                        // layout
-                                        // numRows: kNumRows,
-                                        height:
-                                            520, // THIS VALUE is effectively unused, the height is just natural now
-                                        // ============================
-                                        // NEW: Row FX callbacks
-                                        // ============================
-                                        getRowEffects: (row) => JuceAudioEngine
-                                            .getTrackEffectsForRow(row),
-                                        getRowEffectIds: (row) =>
-                                            JuceAudioEngine
-                                                .getTrackEffectIdsForRow(row),
-
-                                        getRowEffectBypassState:
-                                            (row, effectIndex) =>
-                                                JuceAudioEngine
-                                                    .getRowEffectBypassState(
-                                                        row, effectIndex),
-
-                                        insertRowEffect:
-                                            (row, pathOrName) async {
-                                          final action = InsertEffectAction(
-                                            row: row,
-                                            pathOrName: pathOrName,
-                                            onChange: () {
-                                              _refreshAudioEditorView();
-                                              _refreshRowFx(row);
-                                            },
-                                          );
-                                          await _undoManager.execute(
-                                            action,
-                                          );
-                                          if (!action.inserted) {
-                                            _showSmallNotice(
-                                                'Could not load this effect plugin.');
-                                            return;
-                                          }
-                                          _recordProducerManualEdit(
-                                              'row_fx_insert', {
-                                            'row': row,
-                                            'effect': pathOrName
-                                          });
-                                          _trackPluginInserted(
-                                            pluginName: pathOrName,
-                                            scope: 'track',
-                                            rowIndex: row,
-                                          );
-                                          _scheduleAutomationTargetsRefreshForRow(
+                                          // selection + headers
+                                          // numRows: kNumRows,
+                                          // selectedRowIndex: _selectedRow,
+                                          onSelectRow: (row) => setState(
+                                              () => _selectedRow = row),
+                                          // rowMuted: _rowMuted,
+                                          // rowExpanded: _rowExpanded,
+                                          recordingInProgress: _isRecording,
+                                          onToggleExpanded: (row) => setState(
+                                              () => _rowExpanded[row] =
+                                                  !_rowExpanded[row]),
+                                          onAddRow: _addRow,
+                                          onAddInstrumentLane:
+                                              _addInstrumentClipFromPicker,
+                                          onGroupRowsPressed: () =>
+                                              _handleAddActionSelection(
+                                            'group_rows',
+                                          ),
+                                          onCancelRowGroupingPressed:
+                                              _exitRowGroupingSelectionMode,
+                                          onInsertRowAbove: _insertRowAbove,
+                                          onInsertRowBelow: _insertRowBelow,
+                                          onInsertInstrumentLaneAbove: (row) =>
+                                              _insertInstrumentLaneFromPicker(
                                             row,
-                                          );
-                                        }, //=> JuceAudioEngine.insertTrackEffect(row, pathOrName),
-                                        // need name of effects so undo action can add it back later
-                                        removeRowEffect: (row, effectIndex,
-                                            name, applyingPreset) async {
-                                          if (applyingPreset) {
-                                            await JuceAudioEngine
-                                                .removeTrackEffect(
-                                                    row, effectIndex);
-                                            return;
-                                          }
-                                          await _undoManager.execute(
-                                            RemoveEffectAction(
+                                            above: true,
+                                          ),
+                                          onInsertInstrumentLaneBelow: (row) =>
+                                              _insertInstrumentLaneFromPicker(
+                                            row,
+                                            above: false,
+                                          ),
+                                          onChangeInstrumentLane:
+                                              _changeInstrumentLaneFromPicker,
+                                          onDeleteRow: _deleteRow,
+                                          onMoveRow: _moveRow,
+                                          onRenameRow: _renameRow,
+                                          onRenameRowGroup: _renameRowGroup,
+                                          onSetRowIcon: _setRowIcon,
+                                          onSetRowColor: _setRowColor,
+                                          onCreateRowGroup: _createRowGroup,
+                                          onRemoveRowFromGroup:
+                                              _removeRowFromGroup,
+                                          onToggleRowGroupCollapsed:
+                                              _toggleRowGroupCollapsed,
+                                          rowGroupingSelectionMode:
+                                              _rowGroupingSelectionMode,
+                                          groupingSelectedRows:
+                                              _rowGroupingSelection,
+                                          onToggleGroupingRowSelection:
+                                              _toggleRowGroupingSelection,
+
+                                          // transport
+                                          onScrubRequested: (ms) {
+                                            _scrubProjectTransport(ms);
+                                          },
+                                          maxDuration:
+                                              _audioOnlyOverallDuration,
+                                          getFullDurationMs: (t) =>
+                                              _clipFullDurationMsForTrim(t),
+                                          isPlaying: _isPlaying,
+
+                                          // ruler/grid
+                                          bpm: _tempo,
+                                          beatsPerBar: _timeSignatureNumerator,
+                                          beatUnit: _timeSignatureDenominator,
+
+                                          // layout
+                                          // numRows: kNumRows,
+                                          height:
+                                              520, // THIS VALUE is effectively unused, the height is just natural now
+                                          // ============================
+                                          // NEW: Row FX callbacks
+                                          // ============================
+                                          getRowEffects: (row) =>
+                                              JuceAudioEngine
+                                                  .getTrackEffectsForRow(row),
+                                          getRowEffectIds: (row) =>
+                                              JuceAudioEngine
+                                                  .getTrackEffectIdsForRow(row),
+
+                                          getRowEffectBypassState:
+                                              (row, effectIndex) =>
+                                                  JuceAudioEngine
+                                                      .getRowEffectBypassState(
+                                                          row, effectIndex),
+
+                                          insertRowEffect:
+                                              (row, pathOrName) async {
+                                            final action = InsertEffectAction(
                                               row: row,
-                                              effectIndex: effectIndex,
-                                              pathOrName: name,
+                                              pathOrName: pathOrName,
                                               onChange: () {
                                                 _refreshAudioEditorView();
                                                 _refreshRowFx(row);
                                               },
-                                            ),
-                                          );
-                                          _recordProducerManualEdit(
-                                              'row_fx_remove', {
-                                            'row': row,
-                                            'index': effectIndex,
-                                            'effect': name,
-                                          });
-                                          _trackPluginRemoved(
-                                            pluginName: name,
-                                            scope: 'track',
-                                            rowIndex: row,
-                                          );
-                                          _scheduleAutomationTargetsRefreshForRow(
-                                            row,
-                                          );
-                                        }, //=> JuceAudioEngine.removeTrackEffect(row, effectIndex),
-
-                                        reorderRowEffects:
-                                            (row, from, to) async {
-                                          await _undoManager.execute(
-                                            ReorderEffectAction(
-                                              row: row,
-                                              from: from,
-                                              to: to,
-                                              onChange: () {
-                                                _refreshAudioEditorView();
-                                                _refreshRowFx(row);
-                                              },
-                                            ),
-                                          );
-                                          _recordProducerManualEdit(
-                                              'row_fx_reorder', {
-                                            'row': row,
-                                            'from': from,
-                                            'to': to
-                                          });
-                                          _scheduleAutomationTargetsRefreshForRow(
-                                            row,
-                                          );
-                                        }, //JuceAudioEngine.reorderTrackEffects(row, from, to),
-
-                                        setRowEffectBypassed:
-                                            (row, effectIndex, bypass) async {
-                                          await _undoManager.execute(
-                                            BypassEffectAction(
-                                              row: row,
-                                              effectIndex: effectIndex,
-                                              oldState: !bypass,
-                                              newState: bypass,
-                                              onChange: () {
-                                                _refreshAudioEditorView();
-                                                _refreshRowFx(row);
-                                              },
-                                            ),
-                                          );
-                                          _recordProducerManualEdit(
-                                              'row_fx_bypass', {
-                                            'row': row,
-                                            'index': effectIndex,
-                                            'bypassed': bypass,
-                                          });
-                                        }, //=> JuceAudioEngine.bypassRowEffect(row, effectIndex, bypass),
-
-                                        getRowPluginParameters:
-                                            (row, effectIndex) =>
-                                                JuceAudioEngine
-                                                    .getTrackPluginParameters(
-                                                        row, effectIndex),
-
-                                        setRowEffectParam: (row, effectIndex,
-                                            paramId, value) async {
-                                          await JuceAudioEngine.setTrackEffect(
-                                            row,
-                                            effectIndex,
-                                            paramId,
-                                            value,
-                                          );
-                                          _updateAutomationTargetBaselineForEffectParameter(
-                                            row: row,
-                                            effectIndex: effectIndex,
-                                            paramId: paramId,
-                                            value: value,
-                                            master: false,
-                                          );
-                                        },
-
-                                        // for commiting to undo history
-                                        onPluginParamCommit: (row, idx, paramId,
-                                            oldValue, newValue) async {
-                                          await _undoManager.execute(
-                                            SetEffectParamAction(
-                                              row: row,
-                                              effectIndex: idx,
-                                              paramId: paramId,
-                                              oldValue: oldValue,
-                                              newValue: newValue,
-                                              onChange: () {
-                                                _refreshAudioEditorView();
-                                                _refreshRowFx(row);
-                                              },
-                                            ),
-                                          );
-                                          _recordProducerManualEdit(
-                                              'row_fx_param', {
-                                            'row': row,
-                                            'index': idx,
-                                            'param_id': paramId,
-                                            'old_value': oldValue,
-                                            'new_value': newValue,
-                                          });
-                                          unawaited(
-                                            _trackPluginParameterCommitted(
+                                            );
+                                            await _undoManager.execute(
+                                              action,
+                                            );
+                                            if (!action.inserted) {
+                                              _showSmallNotice(
+                                                  'Could not load this effect plugin.');
+                                              return;
+                                            }
+                                            _recordProducerManualEdit(
+                                                'row_fx_insert', {
+                                              'row': row,
+                                              'effect': pathOrName
+                                            });
+                                            _trackPluginInserted(
+                                              pluginName: pathOrName,
                                               scope: 'track',
                                               rowIndex: row,
-                                              effectIndex: idx,
-                                              paramId: paramId,
-                                              oldValue: oldValue,
-                                              newValue: newValue,
-                                            ),
-                                          );
-                                        },
-
-                                        onPresetCommit: (before, after) async {
-                                          await _undoManager.execute(
-                                            TrackPresetChangeAction(
-                                              before: before,
-                                              after: after,
-                                              onChange: () {
-                                                _refreshAudioEditorView();
-                                                unawaited(
-                                                    _refreshAutomationTargetsForRow(
-                                                        before.row));
-                                              },
-                                            ),
-                                          );
-                                          _recordProducerManualEdit(
-                                              'row_preset_commit', {
-                                            'row': before.row,
-                                            'before_count':
-                                                before.effects.length,
-                                            'after_count': after.effects.length,
-                                          });
-                                          _scheduleAutomationTargetsRefreshForRow(
-                                            before.row,
-                                          );
-                                        },
-                                        onCopyRowEffects: () {
-                                          unawaited(
-                                            _copyRowEffects(_selectedRow),
-                                          );
-                                        },
-                                        onPasteRowEffects: (row) =>
-                                            _pasteRowEffects(row),
-                                        onClearRowEffects: (row) =>
-                                            _clearRowEffects(row),
-                                        hasCopiedRowEffects:
-                                            _copiedEffects != null,
-
-                                        scanPlugins: () =>
-                                            _scanDesktopPlugins(),
-                                        openTrackPluginEditor:
-                                            PlatformCapabilities
-                                                        .current.isDesktop &&
-                                                    _platformCapabilities
-                                                        .nativePluginEditor
-                                                ? (row, effectIndex) =>
-                                                    JuceAudioEngine
-                                                        .openTrackPluginEditor(
-                                                      row,
-                                                      effectIndex,
-                                                    )
-                                                : null,
-
-                                        setTrackAutomationPoints: (row,
-                                                points) =>
-                                            _syncNativeAutomationForRow(row),
-
-                                        onAutomationCommit:
-                                            (row, oldPoints, newPoints) {
-                                          _undoManager.execute(
-                                            SetAutomationPointsAction(
-                                              row: row,
-                                              oldPoints: oldPoints,
-                                              newPoints: newPoints,
-                                              applyToState: (r, points) {
-                                                setState(() {
-                                                  _rowVolumeAutomation[r] =
-                                                      points
-                                                          .map((p) =>
-                                                              AutomationPoint(
-                                                                  x: p.x,
-                                                                  volume:
-                                                                      p.volume))
-                                                          .toList();
-                                                });
-                                              },
-                                              onApplied: (r, _) async {
-                                                await _syncNativeAutomationForRow(
-                                                    r);
-                                              },
-                                            ),
-                                          );
-                                          _recordProducerManualEdit(
-                                              'row_automation', {
-                                            'row': row,
-                                            'old_count': oldPoints.length,
-                                            'new_count': newPoints.length,
-                                          });
-                                        },
-
-                                        setRowGain: _setRowGainLive,
-                                        onRowGainCommit:
-                                            (row, oldGain, newGain) {
-                                          unawaited(_commitRowGainFromUi(
-                                            row,
-                                            oldGain,
-                                            newGain,
-                                          ));
-                                        },
-
-                                        muteRow: (row, mute) async {
-                                          // await JuceAudioEngine.muteRow(row, mute);
-                                          setState(() => _rowMuted[row] = mute);
-                                          await _recomputeAudibleState(); // this handles all mute/solo logic
-
-                                          // mute not counted in the undo history
-                                          // await _undoManager.execute(
-                                          //   MuteRowAction(row, !mute, mute, () => setState(() => _rowMuted[row] = mute)),
-                                          // );
-                                        },
-
-                                        // isRowMuted: (row) => JuceAudioEngine.isRowMuted(row),
-                                        rowMuted: _rowMuted,
-
-                                        soloRow: (row, solo) async {
-                                          // await JuceAudioEngine.muteRow(row, mute);
-                                          setState(
-                                              () => _rowSoloed[row] = solo);
-                                          await _recomputeAudibleState(); // this handles all mute/solo logic
-                                        },
-
-                                        // isRowMuted: (row) => JuceAudioEngine.isRowMuted(row),
-                                        rowSoloed: _rowSoloed,
-
-                                        setRowPan: (row, newPan) =>
-                                            JuceAudioEngine.setRowPan(
-                                                row, newPan),
-                                        onRowPanCommit: (row, oldPan, newPan) {
-                                          _undoManager.execute(
-                                            SetRowPanAction(
-                                              row: row,
-                                              oldPan: oldPan,
-                                              newPan: newPan,
-                                              applyToState: (r, p) {
-                                                setState(() {
-                                                  _rowPan[r] = p;
-                                                });
-                                              },
-                                            ),
-                                          );
-                                          _recordProducerManualEdit('row_pan', {
-                                            'row': row,
-                                            'old_pan': oldPan,
-                                            'new_pan': newPan,
-                                          });
-                                        },
-
-                                        setClipGain: _setClipGainLive,
-                                        onClipGainCommit:
-                                            (clipIndex, oldGain, newGain) {
-                                          _undoManager.execute(
-                                            SetClipGainAction(
-                                              tracks: _audioTracks,
-                                              originalIndex: clipIndex,
-                                              oldGain: oldGain,
-                                              newGain: newGain,
-                                              applyToState: (clip, gain) {
-                                                clip.gain = gain;
-                                                setState(() {});
-                                              },
-                                            ),
-                                          );
-                                          _recordProducerManualEdit(
-                                              'clip_gain', {
-                                            'clip': clipIndex,
-                                            'old_gain': oldGain,
-                                            'new_gain': newGain,
-                                          });
-                                        },
-                                        onToggleClipNormalize:
-                                            _handleToggleClipNormalize,
-                                        setClipPitch: _setClipPitchLive,
-                                        onClipPitchCommit:
-                                            (clipIndex, oldPitch, newPitch) {
-                                          _undoManager.execute(
-                                            SetClipPitchAction(
-                                              tracks: _audioTracks,
-                                              originalIndex: clipIndex,
-                                              oldPitch: oldPitch,
-                                              newPitch: newPitch,
-                                              applyToState: (clip, pitch) {
-                                                clip.pitchSemitones = pitch;
-                                                setState(() {});
-                                              },
-                                            ),
-                                          );
-                                          _recordProducerManualEdit(
-                                              'clip_pitch', {
-                                            'clip': clipIndex,
-                                            'old_pitch': oldPitch,
-                                            'new_pitch': newPitch,
-                                          });
-                                        },
-                                        onSetClipReversed:
-                                            (clipIndex, reversed) async {
-                                          if (clipIndex < 0 ||
-                                              clipIndex >=
-                                                  _audioTracks.length) {
-                                            return;
-                                          }
-                                          final clip = _audioTracks[clipIndex];
-                                          if (clip.isMidi ||
-                                              clip.isReversed == reversed) {
-                                            return;
-                                          }
-                                          await _undoManager.execute(
-                                            SetClipReverseAction(
-                                              tracks: _audioTracks,
-                                              originalIndex: clipIndex,
-                                              oldReversed: clip.isReversed,
-                                              newReversed: reversed,
-                                              applyToState: (target, value) {
-                                                target.isReversed = value;
-                                                setState(() {});
-                                              },
-                                            ),
-                                          );
-                                          _recordProducerManualEdit(
-                                              'clip_reverse', {
-                                            'clip': clipIndex,
-                                            'reversed': reversed,
-                                          });
-                                        },
-                                        onAdjustClipToTempo:
-                                            _handleAdjustClipToTempo,
-                                        onStretchClipToTempoPreservePitch:
-                                            _handleStretchClipToTempoPreservePitch,
-                                        onDisableClipTempoFollow:
-                                            _handleDisableClipTempoFollow,
-                                        onDetectClipTempoAndSetProjectTempo:
-                                            _handleDetectClipTempoAndSetProjectTempo,
-                                        onOpenClipWarpEditor:
-                                            _openClipWarpEditor,
-                                        onOpenPitchLab:
-                                            _openAudioPitchLabForClip,
-                                        onStartClipLoopPreview:
-                                            _startClipLoopPreview,
-                                        onSeekClipLoopPreview:
-                                            _seekClipLoopPreview,
-                                        onStopClipLoopPreview:
-                                            _stopClipLoopPreview,
-                                        onStretchClip: _handleStretchClipResize,
-                                        onStretchClipCommit:
-                                            _handleStretchClipResizeCommit,
-                                        onRenameClip:
-                                            (clipIndex, newLabel) async {
-                                          if (clipIndex < 0 ||
-                                              clipIndex >=
-                                                  _audioTracks.length) {
-                                            return;
-                                          }
-                                          final oldLabel =
-                                              _audioTracks[clipIndex].label;
-                                          final nextLabel = newLabel.trim();
-                                          if (nextLabel.isEmpty ||
-                                              oldLabel == nextLabel) {
-                                            return;
-                                          }
-
-                                          await _undoManager.execute(
-                                            SetClipLabelAction(
-                                              tracks: _audioTracks,
-                                              originalIndex: clipIndex,
-                                              oldLabel: oldLabel,
-                                              newLabel: nextLabel,
-                                              applyToState: (clip, label) {
-                                                clip.label = label;
-                                                setState(() {});
-                                              },
-                                            ),
-                                          );
-
-                                          _recordProducerManualEdit(
-                                              'clip_rename', {
-                                            'clip': clipIndex,
-                                            'old_label': oldLabel,
-                                            'new_label': nextLabel,
-                                          });
-                                        },
-
-                                        onCopyClip: _handleCopyClip,
-                                        onCreateSamplerFromClip:
-                                            _createSamplerFromAudioClip,
-                                        canReplaceSamplerSource:
-                                            _canReplaceSamplerSource,
-                                        onReplaceSamplerSource:
-                                            _replaceSamplerSourceForClip,
-                                        onDeleteClip: _handleDeleteClip,
-                                        onCopyClips: _handleCopyClips,
-                                        onDeleteClips: _handleDeleteClips,
-                                        onCutClipAt: _handleCutClipAt,
-                                        onGlueClips: _handleGlueClips,
-                                        hasCopiedClip: _copiedClip != null ||
-                                            (_copiedClipGroup?.isNotEmpty ??
-                                                false),
-                                        canPasteClipAtRow:
-                                            _canPasteCopiedClipAtRow,
-                                        onPasteClipAt: _handlePasteClipAt,
-                                        onClearCopiedClip: _clearCopiedClip,
-                                        onOpenMidiClip: _openMidiClipEditor,
-                                        onCreateMidiClipInInstrumentLane:
-                                            _createMidiClipInInstrumentLane,
-                                        onStemSeparation:
-                                            _handleStemSeparationForClip,
-                                        onSelectionChanged:
-                                            (selectedClipIndices,
-                                                primaryClipIndex) {
-                                          _timelineSelectedClipIndices =
-                                              List<int>.from(
-                                                  selectedClipIndices);
-                                          _timelinePrimarySelectedClipIndex =
-                                              primaryClipIndex;
-                                          _retargetOpenMidiClipEditorToSelection(
-                                            primaryClipIndex,
-                                          );
-                                          _retargetOpenPitchLabEditorToSelection(
-                                            primaryClipIndex,
-                                          );
-                                          unawaited(
-                                            _syncLiveMidiInputTargetClip(),
-                                          );
-                                        },
-                                        onSnapSettingsChanged: (magnetEnabled,
-                                            quantizeDivisionsPerBar) {
-                                          if (_timelineMagnetEnabled ==
-                                                  magnetEnabled &&
-                                              _timelineQuantizeDivisionsPerBar ==
-                                                  quantizeDivisionsPerBar) {
-                                            return;
-                                          }
-                                          setState(() {
-                                            _timelineMagnetEnabled =
-                                                magnetEnabled;
-                                            _timelineQuantizeDivisionsPerBar =
-                                                quantizeDivisionsPerBar;
-                                          });
-                                        },
-                                        onLoopToggle: (enabled) {
-                                          setState(
-                                              () => _loopEnabled = enabled);
-                                          _scheduleProjectAutosave();
-                                        },
-
-                                        onLoopRegionChanged: (start, end) {
-                                          setState(() {
-                                            _loopStartMs = start;
-                                            _loopEndMs = end;
-                                          });
-                                          _scheduleProjectAutosave();
-                                        },
-                                        isRecording: _isRecording,
-                                        recordingRowIndex: _selectedRow,
-                                        recordingStartMs: _recordingStartMs,
-                                        recordingPeaks:
-                                            _recordingPeaks, // TODO: FIX TO USE WITH JUCE
-                                        selectedClipIndex:
-                                            _timelinePrimarySelectedClipIndex,
-                                        selectedClipIndices:
-                                            _timelineSelectedClipIndices,
-                                        registerRowFxRefresher: (fn) {
-                                          _refreshRowFx = fn;
-                                          WidgetsBinding.instance
-                                              .addPostFrameCallback((_) {
-                                            if (!mounted) return;
-                                            for (int row = 0;
-                                                row < _rowCount;
-                                                row++) {
-                                              _refreshRowFx(row);
+                                            );
+                                            _scheduleAutomationTargetsRefreshForRow(
+                                              row,
+                                            );
+                                          }, //=> JuceAudioEngine.insertTrackEffect(row, pathOrName),
+                                          // need name of effects so undo action can add it back later
+                                          removeRowEffect: (row, effectIndex,
+                                              name, applyingPreset) async {
+                                            if (applyingPreset) {
+                                              await JuceAudioEngine
+                                                  .removeTrackEffect(
+                                                      row, effectIndex);
+                                              _syncTabletRowFxSelectionAfterRemove(
+                                                row,
+                                                effectIndex,
+                                              );
+                                              return;
                                             }
-                                          });
-                                        },
-                                        registerRowFxPlaybackRefresher: (fn) {
-                                          _refreshRowFxPlayback = fn;
-                                        },
-                                        meters: _meters,
-                                        getRowCompressorMeter: (row, fx) =>
-                                            JuceAudioEngine
-                                                .getRowCompressorMeter(row, fx),
-                                        getRowEqWaveform: (row, fx,
-                                                sampleCount) =>
-                                            JuceAudioEngine.getRowEqWaveform(
-                                                row, fx,
-                                                sampleCount: sampleCount),
-                                        getRowStereoScope: (row, fx,
-                                                pointCount) =>
-                                            JuceAudioEngine.getRowStereoScope(
-                                                row, fx,
-                                                pointCount: pointCount),
-                                        onExternalSampleDrop:
-                                            (data, row, timeMs) async {
-                                          await _insertAudioFileAtTimeline(
-                                            data.filePath,
-                                            row: row,
-                                            timeMs: timeMs,
-                                            uploadMethod: 'dragdrop',
-                                          );
-                                        },
-                                        onExternalSampleDragEntered: () {
-                                          _handleSampleDragExitedBrowserPanel();
-                                        },
-                                        externalSampleDragActive:
-                                            _sampleDragActive,
-                                        onTutorialTimelineScrolled:
-                                            _handleDawOnboardingTimelineScrolled,
-                                        onTutorialTimelineZoomed:
-                                            _handleDawOnboardingTimelineZoomed,
-                                        onRowExpansionChanged:
-                                            _handleTimelineRowExpansionChanged,
-                                        onRowTabSelected:
-                                            _handleTimelineRowTabSelected,
-                                        onTutorialRowExpansionChanged:
-                                            _handleDawOnboardingRowExpansionChanged,
-                                        onTutorialRowTabSelected:
-                                            _handleDawOnboardingRowTabSelected,
-                                        onTutorialRowEffectAdded:
-                                            _handleDawOnboardingEffectAdded,
-                                        onTutorialRowEffectOpened:
-                                            _handleDawOnboardingEffectOpened,
-                                        tutorialHighlighter: _mixHighlighter,
-                                        bottomDockInset: _kChatBarStackHeight +
-                                            _kTransportBarHeight +
-                                            (_isProducerCaptureUiVisible
-                                                ? _kProducerBannerHeightEstimate
-                                                : 0.0),
+                                            await _undoManager.execute(
+                                              RemoveEffectAction(
+                                                row: row,
+                                                effectIndex: effectIndex,
+                                                pathOrName: name,
+                                                onChange: () {
+                                                  _refreshAudioEditorView();
+                                                  _refreshRowFx(row);
+                                                },
+                                              ),
+                                            );
+                                            _syncTabletRowFxSelectionAfterRemove(
+                                              row,
+                                              effectIndex,
+                                            );
+                                            _recordProducerManualEdit(
+                                                'row_fx_remove', {
+                                              'row': row,
+                                              'index': effectIndex,
+                                              'effect': name,
+                                            });
+                                            _trackPluginRemoved(
+                                              pluginName: name,
+                                              scope: 'track',
+                                              rowIndex: row,
+                                            );
+                                            _scheduleAutomationTargetsRefreshForRow(
+                                              row,
+                                            );
+                                          }, //=> JuceAudioEngine.removeTrackEffect(row, effectIndex),
 
-                                        mode: _resolvedMode,
+                                          reorderRowEffects:
+                                              (row, from, to) async {
+                                            await _undoManager.execute(
+                                              ReorderEffectAction(
+                                                row: row,
+                                                from: from,
+                                                to: to,
+                                                onChange: () {
+                                                  _refreshAudioEditorView();
+                                                  _refreshRowFx(row);
+                                                },
+                                              ),
+                                            );
+                                            _recordProducerManualEdit(
+                                                'row_fx_reorder', {
+                                              'row': row,
+                                              'from': from,
+                                              'to': to
+                                            });
+                                            _scheduleAutomationTargetsRefreshForRow(
+                                              row,
+                                            );
+                                          }, //JuceAudioEngine.reorderTrackEffects(row, from, to),
+
+                                          setRowEffectBypassed:
+                                              (row, effectIndex, bypass) async {
+                                            await _undoManager.execute(
+                                              BypassEffectAction(
+                                                row: row,
+                                                effectIndex: effectIndex,
+                                                oldState: !bypass,
+                                                newState: bypass,
+                                                onChange: () {
+                                                  _refreshAudioEditorView();
+                                                  _refreshRowFx(row);
+                                                },
+                                              ),
+                                            );
+                                            _recordProducerManualEdit(
+                                                'row_fx_bypass', {
+                                              'row': row,
+                                              'index': effectIndex,
+                                              'bypassed': bypass,
+                                            });
+                                          }, //=> JuceAudioEngine.bypassRowEffect(row, effectIndex, bypass),
+
+                                          getRowPluginParameters:
+                                              (row, effectIndex) =>
+                                                  JuceAudioEngine
+                                                      .getTrackPluginParameters(
+                                                          row, effectIndex),
+
+                                          setRowEffectParam: (row, effectIndex,
+                                              paramId, value) async {
+                                            await JuceAudioEngine
+                                                .setTrackEffect(
+                                              row,
+                                              effectIndex,
+                                              paramId,
+                                              value,
+                                            );
+                                            _updateAutomationTargetBaselineForEffectParameter(
+                                              row: row,
+                                              effectIndex: effectIndex,
+                                              paramId: paramId,
+                                              value: value,
+                                              master: false,
+                                            );
+                                          },
+
+                                          // for commiting to undo history
+                                          onPluginParamCommit: (row,
+                                              idx,
+                                              paramId,
+                                              oldValue,
+                                              newValue) async {
+                                            await _undoManager.execute(
+                                              SetEffectParamAction(
+                                                row: row,
+                                                effectIndex: idx,
+                                                paramId: paramId,
+                                                oldValue: oldValue,
+                                                newValue: newValue,
+                                                onChange: () {
+                                                  _refreshAudioEditorView();
+                                                  _refreshRowFx(row);
+                                                },
+                                              ),
+                                            );
+                                            _recordProducerManualEdit(
+                                                'row_fx_param', {
+                                              'row': row,
+                                              'index': idx,
+                                              'param_id': paramId,
+                                              'old_value': oldValue,
+                                              'new_value': newValue,
+                                            });
+                                            unawaited(
+                                              _trackPluginParameterCommitted(
+                                                scope: 'track',
+                                                rowIndex: row,
+                                                effectIndex: idx,
+                                                paramId: paramId,
+                                                oldValue: oldValue,
+                                                newValue: newValue,
+                                              ),
+                                            );
+                                          },
+
+                                          onPresetCommit:
+                                              (before, after) async {
+                                            await _undoManager.execute(
+                                              TrackPresetChangeAction(
+                                                before: before,
+                                                after: after,
+                                                onChange: () {
+                                                  _refreshAudioEditorView();
+                                                  unawaited(
+                                                      _refreshAutomationTargetsForRow(
+                                                          before.row));
+                                                },
+                                              ),
+                                            );
+                                            _recordProducerManualEdit(
+                                                'row_preset_commit', {
+                                              'row': before.row,
+                                              'before_count':
+                                                  before.effects.length,
+                                              'after_count':
+                                                  after.effects.length,
+                                            });
+                                            _scheduleAutomationTargetsRefreshForRow(
+                                              before.row,
+                                            );
+                                          },
+                                          onRowEffectSelected:
+                                              (row, effectIndex) {
+                                            if (!usesTabletDawLayout) return;
+                                            final tappedSelectedEffect =
+                                                _tabletSelectedRowFxRow ==
+                                                        row &&
+                                                    _tabletSelectedRowFxIndex ==
+                                                        effectIndex &&
+                                                    _tabletRightPanelTab ==
+                                                        'fx' &&
+                                                    !_tabletRightPanelCollapsed;
+                                            setState(() {
+                                              if (tappedSelectedEffect) {
+                                                _tabletSelectedRowFxRow = null;
+                                                _tabletSelectedRowFxIndex =
+                                                    null;
+                                                _tabletRightPanelCollapsed =
+                                                    true;
+                                                _masterMeterExpanded = false;
+                                                return;
+                                              }
+                                              _selectedRow = row
+                                                  .clamp(
+                                                    0,
+                                                    math.max(0, _rowCount - 1),
+                                                  )
+                                                  .toInt();
+                                              _tabletSelectedRowFxRow = row;
+                                              _tabletSelectedRowFxIndex =
+                                                  effectIndex;
+                                              _tabletRowDetailTab = 1;
+                                              _tabletRightPanelTab = 'fx';
+                                              _tabletRightPanelCollapsed =
+                                                  false;
+                                            });
+                                            if (!tappedSelectedEffect) {
+                                              _handleDawOnboardingEffectOpened(
+                                                row,
+                                                effectIndex,
+                                                '',
+                                              );
+                                            }
+                                          },
+                                          selectedRowEffectRow:
+                                              _tabletSelectedRowFxRow,
+                                          selectedRowEffectIndex:
+                                              _tabletSelectedRowFxIndex,
+                                          onCopyRowEffects: () {
+                                            unawaited(
+                                              _copyRowEffects(_selectedRow),
+                                            );
+                                          },
+                                          onPasteRowEffects: (row) =>
+                                              _pasteRowEffects(row),
+                                          onClearRowEffects: (row) =>
+                                              _clearRowEffects(row),
+                                          hasCopiedRowEffects:
+                                              _copiedEffects != null,
+
+                                          scanPlugins: () =>
+                                              _scanDesktopPlugins(),
+                                          openTrackPluginEditor:
+                                              PlatformCapabilities
+                                                          .current.isDesktop &&
+                                                      _platformCapabilities
+                                                          .nativePluginEditor
+                                                  ? (row, effectIndex) =>
+                                                      JuceAudioEngine
+                                                          .openTrackPluginEditor(
+                                                        row,
+                                                        effectIndex,
+                                                      )
+                                                  : null,
+
+                                          setTrackAutomationPoints: (row,
+                                                  points) =>
+                                              _syncNativeAutomationForRow(row),
+
+                                          onAutomationCommit:
+                                              (row, oldPoints, newPoints) {
+                                            _undoManager.execute(
+                                              SetAutomationPointsAction(
+                                                row: row,
+                                                oldPoints: oldPoints,
+                                                newPoints: newPoints,
+                                                applyToState: (r, points) {
+                                                  setState(() {
+                                                    _rowVolumeAutomation[r] =
+                                                        points
+                                                            .map((p) =>
+                                                                AutomationPoint(
+                                                                    x: p.x,
+                                                                    volume: p
+                                                                        .volume))
+                                                            .toList();
+                                                  });
+                                                },
+                                                onApplied: (r, _) async {
+                                                  await _syncNativeAutomationForRow(
+                                                      r);
+                                                },
+                                              ),
+                                            );
+                                            _recordProducerManualEdit(
+                                                'row_automation', {
+                                              'row': row,
+                                              'old_count': oldPoints.length,
+                                              'new_count': newPoints.length,
+                                            });
+                                          },
+
+                                          setRowGain: _setRowGainLive,
+                                          onRowGainCommit:
+                                              (row, oldGain, newGain) {
+                                            unawaited(_commitRowGainFromUi(
+                                              row,
+                                              oldGain,
+                                              newGain,
+                                            ));
+                                          },
+
+                                          muteRow: (row, mute) async {
+                                            // await JuceAudioEngine.muteRow(row, mute);
+                                            final group =
+                                                _trackGroupForLeadRowIndex(row);
+                                            if (group != null) {
+                                              _applyTrackGroupMuteSoloState(
+                                                group.id,
+                                                muted: mute,
+                                              );
+                                            }
+                                            setState(
+                                                () => _rowMuted[row] = mute);
+                                            await _recomputeAudibleState(); // this handles all mute/solo logic
+                                            if (group != null) {
+                                              await _setTrackGroupMuteSoloNative(
+                                                group.id,
+                                                muted: mute,
+                                              );
+                                            }
+
+                                            // mute not counted in the undo history
+                                            // await _undoManager.execute(
+                                            //   MuteRowAction(row, !mute, mute, () => setState(() => _rowMuted[row] = mute)),
+                                            // );
+                                          },
+
+                                          // isRowMuted: (row) => JuceAudioEngine.isRowMuted(row),
+                                          rowMuted: _rowMuted,
+
+                                          soloRow: (row, solo) async {
+                                            // await JuceAudioEngine.muteRow(row, mute);
+                                            final group =
+                                                _trackGroupForLeadRowIndex(row);
+                                            if (group != null) {
+                                              _applyTrackGroupMuteSoloState(
+                                                group.id,
+                                                soloed: solo,
+                                              );
+                                            }
+                                            setState(
+                                                () => _rowSoloed[row] = solo);
+                                            await _recomputeAudibleState(); // this handles all mute/solo logic
+                                            if (group != null) {
+                                              await _setTrackGroupMuteSoloNative(
+                                                group.id,
+                                                soloed: solo,
+                                              );
+                                            }
+                                          },
+
+                                          // isRowMuted: (row) => JuceAudioEngine.isRowMuted(row),
+                                          rowSoloed: _rowSoloed,
+
+                                          setRowPan: (row, newPan) {
+                                            final group =
+                                                _trackGroupForLeadRowIndex(row);
+                                            if (group != null) {
+                                              _applyTrackGroupPanState(
+                                                  group.id, newPan);
+                                              return _setTrackGroupPanNative(
+                                                  group.id, newPan);
+                                            }
+                                            return JuceAudioEngine.setRowPan(
+                                                row, newPan);
+                                          },
+                                          onRowPanCommit:
+                                              (row, oldPan, newPan) {
+                                            unawaited(_commitRowPanFromUi(
+                                              row,
+                                              oldPan,
+                                              newPan,
+                                            ));
+                                          },
+
+                                          setClipGain: _setClipGainLive,
+                                          onClipGainCommit:
+                                              (clipIndex, oldGain, newGain) {
+                                            _undoManager.execute(
+                                              SetClipGainAction(
+                                                tracks: _audioTracks,
+                                                originalIndex: clipIndex,
+                                                oldGain: oldGain,
+                                                newGain: newGain,
+                                                applyToState: (clip, gain) {
+                                                  clip.gain = gain;
+                                                  setState(() {});
+                                                },
+                                              ),
+                                            );
+                                            _recordProducerManualEdit(
+                                                'clip_gain', {
+                                              'clip': clipIndex,
+                                              'old_gain': oldGain,
+                                              'new_gain': newGain,
+                                            });
+                                          },
+                                          onToggleClipNormalize:
+                                              _handleToggleClipNormalize,
+                                          setClipPitch: _setClipPitchLive,
+                                          onClipPitchCommit:
+                                              (clipIndex, oldPitch, newPitch) {
+                                            _undoManager.execute(
+                                              SetClipPitchAction(
+                                                tracks: _audioTracks,
+                                                originalIndex: clipIndex,
+                                                oldPitch: oldPitch,
+                                                newPitch: newPitch,
+                                                applyToState: (clip, pitch) {
+                                                  clip.pitchSemitones = pitch;
+                                                  setState(() {});
+                                                },
+                                              ),
+                                            );
+                                            _recordProducerManualEdit(
+                                                'clip_pitch', {
+                                              'clip': clipIndex,
+                                              'old_pitch': oldPitch,
+                                              'new_pitch': newPitch,
+                                            });
+                                          },
+                                          onSetClipReversed:
+                                              (clipIndex, reversed) async {
+                                            if (clipIndex < 0 ||
+                                                clipIndex >=
+                                                    _audioTracks.length) {
+                                              return;
+                                            }
+                                            final clip =
+                                                _audioTracks[clipIndex];
+                                            if (clip.isMidi ||
+                                                clip.isReversed == reversed) {
+                                              return;
+                                            }
+                                            await _undoManager.execute(
+                                              SetClipReverseAction(
+                                                tracks: _audioTracks,
+                                                originalIndex: clipIndex,
+                                                oldReversed: clip.isReversed,
+                                                newReversed: reversed,
+                                                applyToState: (target, value) {
+                                                  target.isReversed = value;
+                                                  setState(() {});
+                                                },
+                                              ),
+                                            );
+                                            _recordProducerManualEdit(
+                                                'clip_reverse', {
+                                              'clip': clipIndex,
+                                              'reversed': reversed,
+                                            });
+                                          },
+                                          onAdjustClipToTempo:
+                                              _handleAdjustClipToTempo,
+                                          onStretchClipToTempoPreservePitch:
+                                              _handleStretchClipToTempoPreservePitch,
+                                          onDisableClipTempoFollow:
+                                              _handleDisableClipTempoFollow,
+                                          onDetectClipTempoAndSetProjectTempo:
+                                              _handleDetectClipTempoAndSetProjectTempo,
+                                          onOpenClipWarpEditor:
+                                              _openClipWarpEditor,
+                                          onOpenPitchLab:
+                                              _openAudioPitchLabForClip,
+                                          onStartClipLoopPreview:
+                                              _startClipLoopPreview,
+                                          onSeekClipLoopPreview:
+                                              _seekClipLoopPreview,
+                                          onStopClipLoopPreview:
+                                              _stopClipLoopPreview,
+                                          onStretchClip:
+                                              _handleStretchClipResize,
+                                          onStretchClipCommit:
+                                              _handleStretchClipResizeCommit,
+                                          onRenameClip:
+                                              (clipIndex, newLabel) async {
+                                            if (clipIndex < 0 ||
+                                                clipIndex >=
+                                                    _audioTracks.length) {
+                                              return;
+                                            }
+                                            final oldLabel =
+                                                _audioTracks[clipIndex].label;
+                                            final nextLabel = newLabel.trim();
+                                            if (nextLabel.isEmpty ||
+                                                oldLabel == nextLabel) {
+                                              return;
+                                            }
+
+                                            await _undoManager.execute(
+                                              SetClipLabelAction(
+                                                tracks: _audioTracks,
+                                                originalIndex: clipIndex,
+                                                oldLabel: oldLabel,
+                                                newLabel: nextLabel,
+                                                applyToState: (clip, label) {
+                                                  clip.label = label;
+                                                  setState(() {});
+                                                },
+                                              ),
+                                            );
+
+                                            _recordProducerManualEdit(
+                                                'clip_rename', {
+                                              'clip': clipIndex,
+                                              'old_label': oldLabel,
+                                              'new_label': nextLabel,
+                                            });
+                                          },
+                                          onOpenAudioClipOptionsPanel:
+                                              _openTabletAudioClipOptions,
+
+                                          onCopyClip: _handleCopyClip,
+                                          onCreateSamplerFromClip:
+                                              _createSamplerFromAudioClip,
+                                          canReplaceSamplerSource:
+                                              _canReplaceSamplerSource,
+                                          onReplaceSamplerSource:
+                                              _replaceSamplerSourceForClip,
+                                          onDeleteClip: _handleDeleteClip,
+                                          onCopyClips: _handleCopyClips,
+                                          onDeleteClips: _handleDeleteClips,
+                                          onCutClipAt: _handleCutClipAt,
+                                          onGlueClips: _handleGlueClips,
+                                          hasCopiedClip: _copiedClip != null ||
+                                              (_copiedClipGroup?.isNotEmpty ??
+                                                  false),
+                                          canPasteClipAtRow:
+                                              _canPasteCopiedClipAtRow,
+                                          onPasteClipAt: _handlePasteClipAt,
+                                          onClearCopiedClip: _clearCopiedClip,
+                                          onOpenMidiClip: _openMidiClipEditor,
+                                          onCreateMidiClipInInstrumentLane:
+                                              _createMidiClipInInstrumentLane,
+                                          onStemSeparation:
+                                              _handleStemSeparationForClip,
+                                          onSelectionChanged:
+                                              (selectedClipIndices,
+                                                  primaryClipIndex) {
+                                            _timelineSelectedClipIndices =
+                                                List<int>.from(
+                                                    selectedClipIndices);
+                                            _timelinePrimarySelectedClipIndex =
+                                                primaryClipIndex;
+                                            _retargetOpenMidiClipEditorToSelection(
+                                              primaryClipIndex,
+                                            );
+                                            _retargetOpenPitchLabEditorToSelection(
+                                              primaryClipIndex,
+                                            );
+                                            unawaited(
+                                              _syncLiveMidiInputTargetClip(),
+                                            );
+                                          },
+                                          onSnapSettingsChanged: (magnetEnabled,
+                                              quantizeDivisionsPerBar) {
+                                            if (_timelineMagnetEnabled ==
+                                                    magnetEnabled &&
+                                                _timelineQuantizeDivisionsPerBar ==
+                                                    quantizeDivisionsPerBar) {
+                                              return;
+                                            }
+                                            setState(() {
+                                              _timelineMagnetEnabled =
+                                                  magnetEnabled;
+                                              _timelineQuantizeDivisionsPerBar =
+                                                  quantizeDivisionsPerBar;
+                                            });
+                                          },
+                                          onLoopToggle: (enabled) {
+                                            setState(
+                                                () => _loopEnabled = enabled);
+                                            _scheduleProjectAutosave();
+                                          },
+                                          loopEnabled: _loopEnabled,
+                                          loopStartMs: _loopStartMs,
+                                          loopEndMs: _loopEndMs,
+
+                                          onLoopRegionChanged: (start, end) {
+                                            setState(() {
+                                              _loopStartMs = start;
+                                              _loopEndMs = end;
+                                            });
+                                            _scheduleProjectAutosave();
+                                          },
+                                          isRecording: _isRecording,
+                                          recordingRowIndex: _selectedRow,
+                                          recordingStartMs: _recordingStartMs,
+                                          recordingPeaks:
+                                              _recordingPeaks, // TODO: FIX TO USE WITH JUCE
+                                          selectedClipIndex:
+                                              _timelinePrimarySelectedClipIndex,
+                                          selectedClipIndices:
+                                              _timelineSelectedClipIndices,
+                                          registerRowFxRefresher: (fn) {
+                                            _refreshRowFx = fn;
+                                            WidgetsBinding.instance
+                                                .addPostFrameCallback((_) {
+                                              if (!mounted) return;
+                                              for (int row = 0;
+                                                  row < _rowCount;
+                                                  row++) {
+                                                _refreshRowFx(row);
+                                              }
+                                            });
+                                          },
+                                          registerRowFxPlaybackRefresher: (fn) {
+                                            _refreshRowFxPlayback = fn;
+                                          },
+                                          meters: _meters,
+                                          getRowCompressorMeter: (row, fx) =>
+                                              JuceAudioEngine
+                                                  .getRowCompressorMeter(
+                                                      row, fx),
+                                          getRowEqWaveform: (row, fx,
+                                                  sampleCount) =>
+                                              JuceAudioEngine.getRowEqWaveform(
+                                                  row, fx,
+                                                  sampleCount: sampleCount),
+                                          getRowStereoScope: (row, fx,
+                                                  pointCount) =>
+                                              JuceAudioEngine.getRowStereoScope(
+                                                  row, fx,
+                                                  pointCount: pointCount),
+                                          onExternalSampleDrop:
+                                              (data, row, timeMs) async {
+                                            await _insertAudioFileAtTimeline(
+                                              data.filePath,
+                                              row: row,
+                                              timeMs: timeMs,
+                                              uploadMethod: 'dragdrop',
+                                            );
+                                          },
+                                          onExternalSampleDragEntered: () {
+                                            _handleSampleDragExitedBrowserPanel();
+                                          },
+                                          externalSampleDragActive:
+                                              _sampleDragActive,
+                                          onTutorialTimelineScrolled:
+                                              _handleDawOnboardingTimelineScrolled,
+                                          onTutorialTimelineZoomed:
+                                              _handleDawOnboardingTimelineZoomed,
+                                          onRowExpansionChanged:
+                                              _handleTimelineRowExpansionChanged,
+                                          onRowTabSelected:
+                                              _handleTimelineRowTabSelected,
+                                          onTutorialRowExpansionChanged:
+                                              _handleDawOnboardingRowExpansionChanged,
+                                          onTutorialRowTabSelected:
+                                              _handleDawOnboardingRowTabSelected,
+                                          onTutorialRowEffectAdded:
+                                              _handleDawOnboardingEffectAdded,
+                                          onTutorialRowEffectOpened:
+                                              _handleDawOnboardingEffectOpened,
+                                          tutorialHighlighter: _mixHighlighter,
+                                          bottomDockInset: _kChatBarStackHeight +
+                                              _kTransportBarHeight +
+                                              (_isProducerCaptureUiVisible
+                                                  ? _kProducerBannerHeightEstimate
+                                                  : 0.0),
+
+                                          mode: _resolvedMode,
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ],
                               ),
+                              if (usesTabletDawLayout)
+                                _buildTabletRightDawPanel(
+                                  topInset: 0,
+                                  availableWidth: mediaSize.width,
+                                ),
                               Builder(
                                 builder: (overlayContext) {
                                   final keyboardInset =
                                       MediaQuery.viewInsetsOf(overlayContext)
                                           .bottom;
-                                  final keyboardVisible = keyboardInset > 0.0;
                                   final chatTypingActive = _isChatTypingActive;
                                   final chatKeyboardActive =
-                                      keyboardVisible && chatTypingActive;
+                                      _chatShouldTrackKeyboardInset(
+                                    overlayContext,
+                                  );
                                   final fixedTransportFootprint =
                                       _kTransportBarHeight +
                                           _androidTransportBottomInset(
@@ -52332,19 +60366,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           );
                                   const transportVisualBottomInset = 0.0;
                                   final rawKeyboardLift = chatKeyboardActive
-                                      ? math.max(
-                                          0.0,
-                                          keyboardInset -
-                                              MediaQuery.paddingOf(
-                                                overlayContext,
-                                              ).bottom +
-                                              8.0,
-                                        )
+                                      ? (usesTabletDawLayout
+                                          ? _tabletChatKeyboardLiftFromInset(
+                                              keyboardInset: keyboardInset,
+                                            )
+                                          : math.max(
+                                              0.0,
+                                              keyboardInset -
+                                                  MediaQuery.paddingOf(
+                                                    overlayContext,
+                                                  ).bottom +
+                                                  8.0,
+                                            ))
                                       : 0.0;
-                                  final keyboardLift = math.max(
-                                    0.0,
-                                    rawKeyboardLift - fixedTransportFootprint,
-                                  );
+                                  final keyboardLift = usesTabletDawLayout
+                                      ? rawKeyboardLift
+                                      : math.max(
+                                          0.0,
+                                          rawKeyboardLift -
+                                              fixedTransportFootprint,
+                                        );
                                   final chatLift = keyboardLift;
                                   final mediaSize =
                                       MediaQuery.sizeOf(overlayContext);
@@ -52371,10 +60412,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       .clamp(
                                           _kSamplePanelExpandedTop, maxPanelTop)
                                       .toDouble();
+                                  final usesTabletAddMenu =
+                                      mixroomUsesTabletLandscapeShell(
+                                          overlayContext);
+                                  final addMenuUsesAnchoredDesktopStyle =
+                                      usesTabletAddMenu ||
+                                          PlatformCapabilities
+                                              .current.isDesktop;
                                   var addActionsBottom = chatLift +
                                       transportVisualBottomInset +
                                       _kTransportBarHeight +
                                       6.0;
+                                  var addActionsRight = 10.0;
                                   if (_showAddActionsPanel) {
                                     final addButtonAnchorContext =
                                         _addButtonAnchorKey.currentContext;
@@ -52386,26 +60435,81 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         addButtonAnchorObject is RenderBox &&
                                         addButtonAnchorObject.attached &&
                                         addButtonAnchorObject.hasSize) {
-                                      final addButtonTop = addButtonAnchorObject
-                                          .localToGlobal(Offset.zero)
-                                          .dy;
-                                      final anchoredBottom =
-                                          mediaSize.height - addButtonTop + 4.0;
+                                      final addButtonTopLeft =
+                                          addButtonAnchorObject.localToGlobal(
+                                        Offset.zero,
+                                      );
+                                      final addButtonRect = addButtonTopLeft &
+                                          addButtonAnchorObject.size;
+                                      final anchorGap =
+                                          addMenuUsesAnchoredDesktopStyle
+                                              ? 8.0
+                                              : 4.0;
+                                      final minAddActionsBottom =
+                                          addMenuUsesAnchoredDesktopStyle
+                                              ? chatLift +
+                                                  transportVisualBottomInset +
+                                                  _kTransportBarHeight +
+                                                  2.0
+                                              : chatLift +
+                                                  transportVisualBottomInset +
+                                                  _kTransportBarHeight +
+                                                  4.0;
+                                      final anchoredBottom = mediaSize.height -
+                                          addButtonRect.top +
+                                          anchorGap;
                                       addActionsBottom = anchoredBottom
                                           .clamp(
-                                            chatLift +
-                                                transportVisualBottomInset +
-                                                _kTransportBarHeight +
-                                                4.0,
+                                            minAddActionsBottom,
                                             mediaSize.height - 48.0,
+                                          )
+                                          .toDouble();
+                                      addActionsRight = (mediaSize.width -
+                                              addButtonRect.right)
+                                          .clamp(
+                                            _kOverlayPanelHorizontalInset,
+                                            mediaSize.width -
+                                                _kOverlayPanelHorizontalInset,
                                           )
                                           .toDouble();
                                     }
                                   }
-                                  final addActionsRight = 10.0;
-                                  final addActionsWidth = math.min(
-                                      _kAddActionsPanelWidth,
-                                      mediaSize.width - 20.0);
+                                  final addActionsWidth =
+                                      resolveDawAddMenuWidth(
+                                    usesTabletAddMenu: usesTabletAddMenu,
+                                    defaultWidth: _kAddActionsPanelWidth,
+                                    availableWidth: mediaSize.width - 20.0,
+                                  );
+                                  final groupRows =
+                                      _rowsForActiveGroupingAction();
+                                  final selectedGroupRowCount =
+                                      groupRows.length;
+                                  final canGroupRows =
+                                      selectedGroupRowCount >= 2;
+                                  final addMenuActions = buildDawAddMenuActions(
+                                    usesTabletAddMenu: usesTabletAddMenu,
+                                    selectedGroupRowCount:
+                                        selectedGroupRowCount,
+                                    rowGroupingSelectionMode:
+                                        _rowGroupingSelectionMode,
+                                  );
+                                  IconData addMenuActionIcon(String id) {
+                                    switch (id) {
+                                      case 'instrument':
+                                        return Icons.piano;
+                                      case 'group_rows':
+                                        return canGroupRows
+                                            ? Icons.folder_special_outlined
+                                            : Icons.folder_outlined;
+                                      case 'sample_browser':
+                                        return Icons.folder_open;
+                                      case 'audio':
+                                      case 'audio_row':
+                                      default:
+                                        return Icons.audiotrack;
+                                    }
+                                  }
+
                                   return Stack(
                                     clipBehavior: Clip.none,
                                     children: [
@@ -52424,9 +60528,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           ignoring: !_showAddActionsPanel,
                                           child: TweenAnimationBuilder<double>(
                                             duration: const Duration(
-                                                milliseconds: 120),
+                                                milliseconds: 165),
                                             curve: _showAddActionsPanel
-                                                ? Curves.easeOutCubic
+                                                ? Curves.easeOutQuart
                                                 : Curves.easeInCubic,
                                             tween: Tween<double>(
                                               begin: 0.0,
@@ -52437,18 +60541,55 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             builder: (context, t, child) {
                                               final clampedT =
                                                   t.clamp(0.0, 1.0);
+                                              final eased = Curves.easeOutQuart
+                                                  .transform(clampedT);
+                                              final verticalReveal = math.max(
+                                                0.0001,
+                                                addMenuUsesAnchoredDesktopStyle
+                                                    ? eased
+                                                    : eased.clamp(0.0, 1.0),
+                                              );
+                                              final widthReveal =
+                                                  addMenuUsesAnchoredDesktopStyle
+                                                      ? math.max(0.0001, eased)
+                                                      : 1.0;
+                                              final scaleX =
+                                                  addMenuUsesAnchoredDesktopStyle
+                                                      ? 0.78 + eased * 0.22
+                                                      : 0.94 + eased * 0.06;
+                                              final scaleY =
+                                                  addMenuUsesAnchoredDesktopStyle
+                                                      ? 0.58 + eased * 0.42
+                                                      : 0.94 + eased * 0.06;
+                                              final slideY =
+                                                  addMenuUsesAnchoredDesktopStyle
+                                                      ? (1 - eased) * 18
+                                                      : (1 - clampedT) * 14;
                                               return Transform.translate(
-                                                offset: Offset(
-                                                    0, (1 - clampedT) * 22),
-                                                child: Opacity(
-                                                  opacity: clampedT,
-                                                  child: ClipRect(
-                                                    child: Align(
-                                                      alignment:
-                                                          Alignment.bottomRight,
-                                                      heightFactor: math.max(
-                                                          0.0001, clampedT),
-                                                      child: child,
+                                                offset: Offset(0, slideY),
+                                                child: Transform(
+                                                  alignment:
+                                                      Alignment.bottomRight,
+                                                  transform:
+                                                      Matrix4.diagonal3Values(
+                                                    scaleX.clamp(0.0, 1.04),
+                                                    scaleY.clamp(0.0, 1.04),
+                                                    1.0,
+                                                  ),
+                                                  child: Opacity(
+                                                    opacity: clampedT,
+                                                    child: ClipRect(
+                                                      child: Align(
+                                                        alignment: Alignment
+                                                            .bottomRight,
+                                                        heightFactor:
+                                                            verticalReveal,
+                                                        widthFactor:
+                                                            addMenuUsesAnchoredDesktopStyle
+                                                                ? widthReveal
+                                                                : 1.0,
+                                                        child: child,
+                                                      ),
                                                     ),
                                                   ),
                                                 ),
@@ -52471,25 +60612,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                         gradient:
                                                             const LinearGradient(
                                                           colors: <Color>[
-                                                            Color.fromRGBO(90,
-                                                                99, 110, 0.38),
-                                                            Color.fromRGBO(56,
-                                                                64, 75, 0.34),
-                                                            Color.fromRGBO(35,
-                                                                42, 52, 0.32),
+                                                            Color(0xFF5F6772),
+                                                            Color(0xFF434D59),
+                                                            Color(0xFF303946),
                                                           ],
                                                           begin: Alignment
                                                               .topCenter,
                                                           end: Alignment
                                                               .bottomCenter,
                                                         ),
-                                                        color: const Color
-                                                            .fromRGBO(
-                                                          52,
-                                                          60,
-                                                          70,
-                                                          0.22,
-                                                        ),
+                                                        color: const Color(
+                                                            0xFF3C4652),
                                                         borderRadius:
                                                             BorderRadius
                                                                 .circular(24),
@@ -52515,84 +60648,87 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                         mainAxisSize:
                                                             MainAxisSize.min,
                                                         children: [
-                                                          _buildAddActionTile(
-                                                            id: 'audio',
-                                                            icon: Icons
-                                                                .audiotrack,
-                                                            title:
-                                                                L10n.translate(
-                                                              context,
-                                                              'Add Audio Clip',
-                                                            ),
-                                                            onTap: () {
-                                                              unawaited(
-                                                                _handleAddActionSelection(
-                                                                    'audio'),
-                                                              );
-                                                            },
-                                                          ),
-                                                          Container(
-                                                            height: 1,
-                                                            margin:
-                                                                const EdgeInsets
+                                                          for (var index = 0;
+                                                              index <
+                                                                  addMenuActions
+                                                                      .length;
+                                                              index++) ...[
+                                                            if (index > 0)
+                                                              Container(
+                                                                height: 1,
+                                                                margin: const EdgeInsets
                                                                     .symmetric(
                                                                     horizontal:
                                                                         16),
-                                                            color: Colors.white
-                                                                .withValues(
-                                                                    alpha:
-                                                                        0.08),
-                                                          ),
-                                                          _buildAddActionTile(
-                                                            id: 'instrument',
-                                                            icon: Icons.piano,
-                                                            title:
-                                                                L10n.translate(
-                                                              context,
-                                                              'Add Instrument Lane',
+                                                                color: Colors
+                                                                    .white
+                                                                    .withValues(
+                                                                        alpha:
+                                                                            0.08),
+                                                              ),
+                                                            _buildAddActionTile(
+                                                              id: addMenuActions[
+                                                                      index]
+                                                                  .id,
+                                                              icon:
+                                                                  addMenuActionIcon(
+                                                                addMenuActions[
+                                                                        index]
+                                                                    .id,
+                                                              ),
+                                                              title: L10n
+                                                                  .translate(
+                                                                context,
+                                                                addMenuActions[
+                                                                        index]
+                                                                    .title,
+                                                              ),
+                                                              topPadding: addMenuActions[
+                                                                              index]
+                                                                          .id ==
+                                                                      'sample_browser'
+                                                                  ? 0
+                                                                  : 6,
+                                                              bottomPadding:
+                                                                  addMenuActions[index]
+                                                                              .id ==
+                                                                          'sample_browser'
+                                                                      ? 8
+                                                                      : 0,
+                                                              subtitle: addMenuActions[
+                                                                              index]
+                                                                          .subtitle ==
+                                                                      null
+                                                                  ? null
+                                                                  : L10n
+                                                                      .translate(
+                                                                      context,
+                                                                      addMenuActions[
+                                                                              index]
+                                                                          .subtitle!,
+                                                                    ),
+                                                              trailing: addMenuActions[
+                                                                          index]
+                                                                      .showSelectedCount
+                                                                  ? _buildAddActionCountPill(
+                                                                      selectedGroupRowCount,
+                                                                      active:
+                                                                          canGroupRows,
+                                                                    )
+                                                                  : null,
+                                                              plainSurface:
+                                                                  addMenuUsesAnchoredDesktopStyle,
+                                                              onTap: () {
+                                                                unawaited(
+                                                                  _handleAddActionSelection(
+                                                                    addMenuActions[
+                                                                            index]
+                                                                        .id,
+                                                                  ),
+                                                                );
+                                                              },
                                                             ),
-                                                            onTap: () {
-                                                              unawaited(
-                                                                _handleAddActionSelection(
-                                                                    'instrument'),
-                                                              );
-                                                            },
-                                                          ),
-                                                          Container(
-                                                            height: 1,
-                                                            margin:
-                                                                const EdgeInsets
-                                                                    .symmetric(
-                                                                    horizontal:
-                                                                        16),
-                                                            color: Colors.white
-                                                                .withValues(
-                                                                    alpha:
-                                                                        0.08),
-                                                          ),
-                                                          _buildAddActionTile(
-                                                            id: 'sample_browser',
-                                                            icon: Icons
-                                                                .folder_open,
-                                                            title:
-                                                                L10n.translate(
-                                                              context,
-                                                              'Open File Browser',
-                                                            ),
-                                                            topPadding: 0,
-                                                            bottomPadding: 8,
-                                                            subtitle:
-                                                                L10n.translate(
-                                                              context,
-                                                              'Audition folders and drag and drop',
-                                                            ),
-                                                            onTap: () {
-                                                              unawaited(
-                                                                _handleAddActionSelection(
-                                                                    'sample_browser'),
-                                                              );
-                                                            },
-                                                          ),
+                                                          ],
                                                         ],
                                                       ),
                                                     ),
@@ -52648,6 +60784,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                 child: SampleBrowserPanel(
                                                   rootFolders:
                                                       _sampleBrowserRoots,
+                                                  fixedRootFolders:
+                                                      _fixedSampleBrowserRootFolders,
                                                   auditioningPath:
                                                       _auditioningSamplePath,
                                                   onAuditionTap:
@@ -52699,6 +60837,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                 child: SampleBrowserPanel(
                                                   rootFolders:
                                                       _sampleBrowserRoots,
+                                                  fixedRootFolders:
+                                                      _fixedSampleBrowserRootFolders,
                                                   auditioningPath:
                                                       _auditioningSamplePath,
                                                   onAuditionTap:
@@ -52960,7 +61100,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           projectPlayheadMs:
                                               clock.inMilliseconds.toDouble(),
                                           isPlaying: _isPlaying,
-                                          beatsPerBar: 4,
+                                          beatsPerBar: _timeSignatureNumerator,
+                                          beatUnit: _timeSignatureDenominator,
                                           magnetEnabled: _timelineMagnetEnabled,
                                           quantizeDivisionsPerBar:
                                               _timelineQuantizeDivisionsPerBar,
@@ -53337,7 +61478,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     child: const SizedBox.expand(),
                                   ),
                                 ),
-                              _buildProjectSettingsPopup(),
                               _buildTempoRollDownPanel(),
                               // tap-away closing
                               if (_showMasterRack)
@@ -53379,7 +61519,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               Positioned(
                                 top: 0,
                                 left: 0,
-                                right: 0,
+                                right: tabletRightPanelReservedWidth,
                                 child: ValueListenableBuilder<Duration>(
                                   valueListenable: _transportClock,
                                   builder: (_, clock, __) => _buildTopBar(
@@ -53388,6 +61528,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   ),
                                 ),
                               ),
+                              if (usesTabletDawLayout &&
+                                  !_tabletOverlayWindowFullscreen)
+                                _buildTabletLeftRailTopControlPill(
+                                  panelWidth: tabletSidePanelWidth,
+                                  topBarReservedHeight: topBarReservedHeight,
+                                ),
+                              _buildProjectSettingsPopup(),
                               _buildExpandedChatHistoryOverlay(),
                             ],
                           );
@@ -53408,7 +61555,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 ),
                 Positioned(
                   left: 0,
-                  right: 0,
+                  right: usesTabletDawLayout ? tabletBottomDockRightInset : 0,
                   bottom: 0,
                   child: Material(
                     type: MaterialType.transparency,
@@ -53422,6 +61569,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     ),
                   ),
                 ),
+                _buildFloatingTabletDesktopChatBarOverlay(),
                 if (_isSyncing)
                   Positioned.fill(
                     child: Container(
@@ -53463,8 +61611,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 _buildAiBatchProcessingOverlay(),
                 if (_chatExpanded)
                   Positioned(
-                    left: 0,
-                    right: 0,
+                    left: usesTabletDawLayout ? tabletSidePanelWidth : 0,
+                    right:
+                        usesTabletDawLayout ? tabletRightPanelReservedWidth : 0,
                     top: 0,
                     bottom: chatTapAwayBottomInset,
                     child: GestureDetector(
@@ -53518,6 +61667,83 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  bool _useTabletDesktopDawOnboardingLayout() {
+    return mixroomUsesTabletLandscapeShell(context) ||
+        PlatformCapabilities.current.isDesktop;
+  }
+
+  Alignment _effectiveDawOnboardingCardAlignment(
+    _DawTutorialStepSpec step,
+  ) {
+    if (step.id == _DawTutorialStepId.rowAutomationTab &&
+        _useTabletDesktopDawOnboardingLayout()) {
+      return Alignment.centerLeft;
+    }
+    if (step.id == _DawTutorialStepId.rowExpand &&
+        _useTabletDesktopDawOnboardingLayout()) {
+      return Alignment.topLeft;
+    }
+    if (step.id == _DawTutorialStepId.rowEffectsTab &&
+        _useTabletDesktopDawOnboardingLayout()) {
+      return Alignment.topLeft;
+    }
+    if (step.id == _DawTutorialStepId.masterOpen &&
+        _useTabletDesktopDawOnboardingLayout()) {
+      return Alignment.bottomRight;
+    }
+    if (step.id == _DawTutorialStepId.chatOpen &&
+        _useTabletDesktopDawOnboardingLayout()) {
+      return Alignment.bottomCenter;
+    }
+    return _dawOnboardingCardAlignment(step.placement);
+  }
+
+  EdgeInsets _effectiveDawOnboardingCardPadding(
+    _DawTutorialStepSpec step,
+  ) {
+    if (step.id == _DawTutorialStepId.rowAutomationTab &&
+        _useTabletDesktopDawOnboardingLayout()) {
+      return const EdgeInsets.fromLTRB(178, 120, 16, 140);
+    }
+    if (step.id == _DawTutorialStepId.rowExpand &&
+        _useTabletDesktopDawOnboardingLayout()) {
+      return const EdgeInsets.fromLTRB(178, 148, 16, 16);
+    }
+    if (step.id == _DawTutorialStepId.rowEffectsTab &&
+        _useTabletDesktopDawOnboardingLayout()) {
+      return const EdgeInsets.fromLTRB(178, 206, 16, 16);
+    }
+    if (step.id == _DawTutorialStepId.masterOpen &&
+        _useTabletDesktopDawOnboardingLayout()) {
+      return const EdgeInsets.fromLTRB(16, 90, 18, 132);
+    }
+    if (step.id == _DawTutorialStepId.chatOpen &&
+        _useTabletDesktopDawOnboardingLayout()) {
+      return const EdgeInsets.fromLTRB(16, 90, 16, 92);
+    }
+    return step.cardPadding ?? _dawOnboardingCardPadding(step.placement);
+  }
+
+  double? _effectiveDawOnboardingCardMaxWidth(_DawTutorialStepSpec step) {
+    if (step.id == _DawTutorialStepId.rowAutomationTab &&
+        _useTabletDesktopDawOnboardingLayout()) {
+      return 248;
+    }
+    if (step.id == _DawTutorialStepId.rowExpand &&
+        _useTabletDesktopDawOnboardingLayout()) {
+      return 236;
+    }
+    if (step.id == _DawTutorialStepId.rowEffectsTab &&
+        _useTabletDesktopDawOnboardingLayout()) {
+      return 236;
+    }
+    if (step.id == _DawTutorialStepId.chatOpen &&
+        _useTabletDesktopDawOnboardingLayout()) {
+      return 320;
+    }
+    return step.cardMaxWidth;
+  }
+
   Widget _buildDawOnboardingOverlay() {
     final theme = Theme.of(context);
     final step = _currentDawOnboardingStep;
@@ -53539,9 +61765,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _advanceDawOnboardingStep();
     }
 
-    final cardAlignment = _dawOnboardingCardAlignment(step.placement);
-    final cardPadding =
-        step.cardPadding ?? _dawOnboardingCardPadding(step.placement);
+    final cardAlignment = _effectiveDawOnboardingCardAlignment(step);
+    final cardPadding = _effectiveDawOnboardingCardPadding(step);
+    final cardMaxWidth = _effectiveDawOnboardingCardMaxWidth(step);
     return Positioned.fill(
       child: Stack(
         children: [
@@ -53559,7 +61785,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   return const SizedBox.shrink();
                 }
                 final maxWidth = math.min(
-                  step.cardMaxWidth ?? 360.0,
+                  cardMaxWidth ?? 360.0,
                   availableWidth,
                 );
                 final skipButton = Tooltip(
@@ -54661,7 +62887,6 @@ class _ExportProgressPageState extends State<ExportProgressPage> {
   bool _cancelled = false;
   Timer? _ellipsisTimer;
   int _ellipsisStep = 0;
-  static const String _unicodeEllipsis = '\u2026';
 
   @override
   void initState() {
@@ -54698,16 +62923,11 @@ class _ExportProgressPageState extends State<ExportProgressPage> {
   @override
   Widget build(BuildContext context) {
     final progressValue = _progress.clamp(0.0, 1.0);
-    var exportingLabel = L10n.translate(context, 'Exporting...').trimRight();
-    while (exportingLabel.endsWith('.') ||
-        exportingLabel.endsWith(_unicodeEllipsis)) {
-      exportingLabel = exportingLabel.substring(0, exportingLabel.length - 1);
-      exportingLabel = exportingLabel.trimRight();
-    }
-    if (exportingLabel.isEmpty) {
-      exportingLabel = 'Exporting';
-    }
-    final exportingDots = '.' * ((_ellipsisStep % 3) + 1);
+    final exportingLabel = ExportProgressUi.normalizedExportingLabel(
+      L10n.translate(context, 'Exporting...'),
+    );
+    final exportingDots = ExportProgressUi.animatedDots(_ellipsisStep);
+    final progressLabel = ExportProgressUi.progressPercentLabel(progressValue);
     const exportingLabelStyle = TextStyle(
       fontFamily: 'Pretendard',
       fontSize: 18,
@@ -54790,49 +63010,59 @@ class _ExportProgressPageState extends State<ExportProgressPage> {
                             ],
                           ),
                           const SizedBox(height: 16),
-                          SizedBox(
-                            width: trackWidth,
-                            child: Stack(
-                              alignment: Alignment.center,
-                              children: [
-                                Container(
-                                  height: 10,
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFF4F4F4)
-                                        .withValues(alpha: 0.2),
-                                    borderRadius: BorderRadius.circular(24),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color:
-                                            Colors.black.withValues(alpha: 0.2),
-                                        blurRadius: 10,
-                                        spreadRadius: 0,
-                                      ),
-                                    ],
-                                  ),
-                                  child: Align(
-                                    alignment: Alignment.centerLeft,
-                                    child: FractionallySizedBox(
-                                      widthFactor: progressValue,
-                                      child: Container(
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFFF4F4F4),
-                                          borderRadius:
-                                              BorderRadius.circular(24),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: const Color(0xFF2596F9)
-                                                  .withValues(alpha: 0.28),
-                                              blurRadius: 10,
-                                              spreadRadius: 0,
-                                            ),
-                                          ],
+                          Semantics(
+                            label: L10n.translate(context, 'Export progress'),
+                            value: progressLabel,
+                            child: SizedBox(
+                              width: trackWidth,
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  Container(
+                                    key: const ValueKey(
+                                      'export_progress_track',
+                                    ),
+                                    height: 10,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF4F4F4)
+                                          .withValues(alpha: 0.2),
+                                      borderRadius: BorderRadius.circular(24),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black
+                                              .withValues(alpha: 0.2),
+                                          blurRadius: 10,
+                                          spreadRadius: 0,
+                                        ),
+                                      ],
+                                    ),
+                                    child: Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: FractionallySizedBox(
+                                        widthFactor: progressValue,
+                                        child: Container(
+                                          key: const ValueKey(
+                                            'export_progress_fill',
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFF4F4F4),
+                                            borderRadius:
+                                                BorderRadius.circular(24),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: const Color(0xFF2596F9)
+                                                    .withValues(alpha: 0.28),
+                                                blurRadius: 10,
+                                                spreadRadius: 0,
+                                              ),
+                                            ],
+                                          ),
                                         ),
                                       ),
                                     ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
                         ],
@@ -54874,7 +63104,7 @@ class _ExportProgressPageState extends State<ExportProgressPage> {
                             if (!_cancelSignal.isCompleted) {
                               _cancelSignal.complete();
                             }
-                            print("cancelling export progress");
+                            debugPrint('Cancelling export progress');
                             Navigator.of(context).pop("");
                           },
                           child: Text(L10n.translate(context, 'Cancel')),
@@ -55240,6 +63470,27 @@ class ExportSuccessScreen extends StatelessWidget {
   }
 
   Future<void> _openSavedFile(BuildContext context) async {
+    if (!kIsWeb && Platform.isAndroid) {
+      final saved = savedFilePath?.trim();
+      final target = (saved != null && saved.isNotEmpty)
+          ? saved
+          : _normalizedCandidatePath(filePath);
+      if (target.trim().isNotEmpty &&
+          await _openSavedExportViaNative(target)) {
+        return;
+      }
+
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            L10n.translate(context, 'Could not open the saved export.'),
+          ),
+        ),
+      );
+      return;
+    }
+
     final saved = savedFilePath?.trim();
     final savedLocalPath = _resolveSavedLocalPath();
     final candidates = <String>[
@@ -56146,9 +64397,11 @@ class _DeletedRowSnapshot {
 
 class _RowLayoutSnapshot {
   final List<TimelineRow> rows;
+  final List<TrackGroup> trackGroups;
 
   _RowLayoutSnapshot({
     required this.rows,
+    this.trackGroups = const <TrackGroup>[],
   });
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -56164,9 +64417,20 @@ class _RowLayoutSnapshot {
                   'instrumentName': row.instrumentName,
                   'instrumentParams': row.instrumentParams,
                 },
+                if (row.roleOverride.isNotEmpty)
+                  'roleOverride': row.roleOverride,
+                if (row.groupId.trim().isNotEmpty)
+                  'groupId': row.groupId.trim(),
+                if (row.color != 0) 'color': row.color,
+                if (row.inputDeviceName.trim().isNotEmpty)
+                  'inputDeviceName': row.inputDeviceName.trim(),
+                'inputChannelStart': row.inputChannelStart,
+                'inputChannelCount': row.inputChannelCount,
               },
             )
             .toList(growable: false),
+        'trackGroups':
+            trackGroups.map((group) => group.toJson()).toList(growable: false),
       };
 }
 
@@ -57659,6 +65923,8 @@ class MoveClipAction extends EditorUndoAction {
 
 class _ProjectTempoSnapshot {
   final double tempo;
+  final int timeSignatureNumerator;
+  final int timeSignatureDenominator;
   final List<double> clipOffsetsSec;
   final List<List<AutomationPoint>> clipVolumeAutomation;
   final List<List<AutomationPoint>> rowVolumeAutomation;
@@ -57670,6 +65936,8 @@ class _ProjectTempoSnapshot {
 
   const _ProjectTempoSnapshot({
     required this.tempo,
+    required this.timeSignatureNumerator,
+    required this.timeSignatureDenominator,
     required this.clipOffsetsSec,
     required this.clipVolumeAutomation,
     required this.rowVolumeAutomation,
@@ -57682,6 +65950,8 @@ class _ProjectTempoSnapshot {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'tempo': tempo,
+        'timeSignatureNumerator': timeSignatureNumerator,
+        'timeSignatureDenominator': timeSignatureDenominator,
         'clipOffsetsSec': clipOffsetsSec,
         'clipVolumeAutomation': clipVolumeAutomation
             .map((points) => points.map((point) => point.toJson()).toList())
@@ -57729,7 +65999,7 @@ class _ProjectTempoChangeAction extends EditorUndoAction {
   });
 
   @override
-  String get description => 'Change BPM';
+  String get description => 'Change tempo settings';
 
   @override
   Map<String, dynamic> toPersistedUndoCommand() => <String, dynamic>{
@@ -58175,12 +66445,14 @@ class SetRowGainAction extends EditorUndoAction {
   final double oldGain;
   final double newGain;
   final void Function(int row, double gain) applyToState;
+  final Future<void> Function(int row, double gain)? applyNative;
 
   SetRowGainAction(
       {required this.row,
       required this.oldGain,
       required this.newGain,
-      required this.applyToState});
+      required this.applyToState,
+      this.applyNative});
 
   @override
   String get description => 'Change track gain';
@@ -58195,13 +66467,23 @@ class SetRowGainAction extends EditorUndoAction {
 
   @override
   Future<void> redo() async {
-    await JuceAudioEngine.setRowGain(row, newGain);
+    final native = applyNative;
+    if (native != null) {
+      await native(row, newGain);
+    } else {
+      await JuceAudioEngine.setRowGain(row, newGain);
+    }
     applyToState(row, newGain);
   }
 
   @override
   Future<void> undo() async {
-    await JuceAudioEngine.setRowGain(row, oldGain);
+    final native = applyNative;
+    if (native != null) {
+      await native(row, oldGain);
+    } else {
+      await JuceAudioEngine.setRowGain(row, oldGain);
+    }
     applyToState(row, oldGain);
   }
 }
@@ -58211,12 +66493,14 @@ class SetRowPanAction extends EditorUndoAction {
   final double oldPan;
   final double newPan;
   final void Function(int row, double pan) applyToState;
+  final Future<void> Function(int row, double pan)? applyNative;
 
   SetRowPanAction(
       {required this.row,
       required this.oldPan,
       required this.newPan,
-      required this.applyToState});
+      required this.applyToState,
+      this.applyNative});
 
   @override
   String get description => 'Change track pan';
@@ -58231,13 +66515,23 @@ class SetRowPanAction extends EditorUndoAction {
 
   @override
   Future<void> redo() async {
-    await JuceAudioEngine.setRowPan(row, newPan);
+    final native = applyNative;
+    if (native != null) {
+      await native(row, newPan);
+    } else {
+      await JuceAudioEngine.setRowPan(row, newPan);
+    }
     applyToState(row, newPan);
   }
 
   @override
   Future<void> undo() async {
-    await JuceAudioEngine.setRowPan(row, oldPan);
+    final native = applyNative;
+    if (native != null) {
+      await native(row, oldPan);
+    } else {
+      await JuceAudioEngine.setRowPan(row, oldPan);
+    }
     applyToState(row, oldPan);
   }
 }
@@ -59463,12 +67757,13 @@ Widget _chatHelpButton({
   );
 }
 
-class _ChatBar extends StatelessWidget {
+class _ChatBar extends StatefulWidget {
   final bool expanded;
   final bool hasText;
   final bool isThinking;
   final TextEditingController controller;
   final FocusNode focusNode;
+  final Gradient barGradient;
   final bool readOnly;
   final MixChangeHighlighter? tutorialHighlighter;
   final AiPromptRateLimitStatus? promptRateLimitStatus;
@@ -59486,6 +67781,7 @@ class _ChatBar extends StatelessWidget {
     required this.isThinking,
     required this.controller,
     required this.focusNode,
+    this.barGradient = _AudioEditorScreenState2._kChatBarGradient,
     this.readOnly = false,
     this.tutorialHighlighter,
     required this.promptRateLimitStatus,
@@ -59497,21 +67793,36 @@ class _ChatBar extends StatelessWidget {
     required this.onStop,
   });
 
+  @override
+  State<_ChatBar> createState() => _ChatBarState();
+}
+
+class _ChatBarState extends State<_ChatBar> {
+  bool _pressed = false;
+
+  void _setPressed(bool pressed) {
+    if (_pressed == pressed) return;
+    setState(() {
+      _pressed = pressed;
+    });
+  }
+
   String _badgeLabel(BuildContext context) {
     return L10n.translate(context, 'Usage');
   }
 
   String _badgeTooltip(BuildContext context) {
-    if (promptRateLimitStatus == null) {
+    final status = widget.promptRateLimitStatus;
+    if (status == null) {
       return L10n.translate(context, 'Show prompt limits');
     }
-    final daily = promptRateLimitStatus!.daily;
-    final weekly = promptRateLimitStatus!.weekly;
-    final extraPromptBank = promptRateLimitStatus!.extraPromptBank;
+    final daily = status.daily;
+    final weekly = status.weekly;
+    final extraPromptBank = status.extraPromptBank;
     final extraBankCopy = extraPromptBank.available
         ? ' ${L10n.translate(context, 'Extra bank')}: ${L10n.translate(context, 'used first')}.'
         : '';
-    if (promptRateLimitStatus!.canSubmit) {
+    if (status.canSubmit) {
       return '${L10n.translate(context, 'Daily')} ${daily.remainingPercent}% ${L10n.translate(context, 'left')}, '
           '${L10n.translate(context, 'Weekly')} ${weekly.remainingPercent}% ${L10n.translate(context, 'left')}.$extraBankCopy';
     }
@@ -59520,7 +67831,7 @@ class _ChatBar extends StatelessWidget {
 
   Widget _buildPromptLimitBadge(BuildContext context) {
     Widget badge;
-    if (promptRateLimitLoading && promptRateLimitStatus == null) {
+    if (widget.promptRateLimitLoading && widget.promptRateLimitStatus == null) {
       badge = Container(
         width: 26,
         height: 26,
@@ -59540,43 +67851,50 @@ class _ChatBar extends StatelessWidget {
         ),
       );
     } else {
-      final status = promptRateLimitStatus;
+      final status = widget.promptRateLimitStatus;
       final backgroundColor = status == null
           ? const Color.fromRGBO(98, 128, 156, 0.38)
           : status.canSubmit
               ? const Color.fromRGBO(104, 134, 160, 0.40)
               : const Color.fromRGBO(152, 116, 110, 0.44);
 
-      badge = Tooltip(
-        message: _badgeTooltip(context),
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: onShowPromptRateLimits,
-          child: Container(
-            height: 34,
-            constraints: const BoxConstraints(minWidth: 66),
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            decoration: BoxDecoration(
-              color: backgroundColor,
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.07),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2),
+      badge = Semantics(
+        button: true,
+        label: _badgeTooltip(context),
+        child: Tooltip(
+          message: _badgeTooltip(context),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: widget.onShowPromptRateLimits,
+            child: ExcludeSemantics(
+              child: Container(
+                height: 34,
+                constraints: const BoxConstraints(minWidth: 66),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(
+                  color: backgroundColor,
+                  borderRadius: BorderRadius.circular(999),
+                  border:
+                      Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.07),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              _badgeLabel(context),
-              style: const TextStyle(
-                fontFamily: 'Pretendard',
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: Colors.white,
-                height: 1.0,
+                alignment: Alignment.center,
+                child: Text(
+                  _badgeLabel(context),
+                  style: const TextStyle(
+                    fontFamily: 'Pretendard',
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.white,
+                    height: 1.0,
+                  ),
+                ),
               ),
             ),
           ),
@@ -59584,9 +67902,9 @@ class _ChatBar extends StatelessWidget {
       );
     }
 
-    if (tutorialHighlighter != null) {
+    if (widget.tutorialHighlighter != null) {
       badge = Halo(
-        highlighter: tutorialHighlighter!,
+        highlighter: widget.tutorialHighlighter!,
         haloKey: const HaloKey('tutorial:prompt_limits'),
         borderRadius: BorderRadius.circular(999),
         child: badge,
@@ -59623,178 +67941,278 @@ class _ChatBar extends StatelessWidget {
       letterSpacing: -0.15,
       color: Color(0xB8F4F4F4),
     );
-    return Material(
-      type: MaterialType.transparency,
-      borderRadius: BorderRadius.circular(24),
-      child: InkWell(
-        onTap: expanded ? null : onTapBar,
-        borderRadius: BorderRadius.circular(24),
-        splashColor: Colors.white.withValues(alpha: 0.12),
-        highlightColor: Colors.white.withValues(alpha: 0.08),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(24),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-            child: Container(
-              height: barHeight,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              decoration: BoxDecoration(
-                gradient: _AudioEditorScreenState2._kChatBarGradient,
-                borderRadius: BorderRadius.circular(24),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.25),
-                    blurRadius: 15,
-                    spreadRadius: 8,
-                    offset: Offset.zero,
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: !expanded
-                        ? Row(
-                            children: [
-                              _chatHelpButton(
-                                context: context,
-                                onTap: onShowCapabilities,
-                                busy: isThinking,
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: isThinking
-                                    ? const _InlineThinkingLabel(
-                                        textStyle: collapsedTextStyle,
-                                      )
-                                    : Text(
-                                        typeHint,
-                                        style: collapsedTextStyle,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                              ),
-                              const SizedBox(width: 10),
-                              _buildPromptLimitBadge(context),
-                            ],
-                          )
-                        : Material(
-                            color: Colors.transparent,
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: TextField(
-                                    controller: controller,
-                                    focusNode: focusNode,
-                                    readOnly: readOnly || isThinking,
-                                    onTap: onTapBar,
-                                    style: inputTextStyle,
-                                    cursorColor: Colors.white,
-                                    decoration: InputDecoration(
-                                      hintText:
-                                          isThinking ? 'Thinking...' : typeHint,
-                                      hintStyle: hintTextStyle,
-                                      border: InputBorder.none,
-                                      isDense: true,
-                                      contentPadding:
-                                          EdgeInsets.symmetric(vertical: 7),
-                                    ),
-                                    textAlignVertical: TextAlignVertical.center,
-                                    textInputAction: isThinking
-                                        ? TextInputAction.none
-                                        : TextInputAction.send,
-                                    onSubmitted:
-                                        isThinking ? null : (_) => onSubmit(),
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                _buildPromptLimitBadge(context),
-                                const SizedBox(width: 10),
-                                SizedBox(
-                                  width: 34,
-                                  height: 34,
-                                  child: Builder(
-                                    builder: (context) {
-                                      final sendEnabled = isThinking || hasText;
-                                      Widget sendButton = Opacity(
-                                        opacity: sendEnabled ? 1 : 0.32,
-                                        child: Material(
-                                          color: Colors.transparent,
-                                          shape: const CircleBorder(),
-                                          child: InkResponse(
-                                            onTap: sendEnabled
-                                                ? (isThinking
-                                                    ? onStop
-                                                    : onSubmit)
-                                                : null,
-                                            containedInkWell: true,
-                                            customBorder: const CircleBorder(),
-                                            radius: 20,
-                                            splashColor: Colors.white
-                                                .withValues(alpha: 0.16),
-                                            highlightColor: Colors.white
-                                                .withValues(alpha: 0.10),
-                                            child: Container(
-                                              width: 34,
-                                              height: 34,
-                                              decoration: BoxDecoration(
-                                                gradient: LinearGradient(
-                                                  begin: Alignment.topCenter,
-                                                  end: Alignment.bottomCenter,
-                                                  colors: isThinking
-                                                      ? const <Color>[
-                                                          Color.fromRGBO(168,
-                                                              110, 110, 0.88),
-                                                          Color.fromRGBO(112,
-                                                              66, 66, 0.92),
-                                                        ]
-                                                      : const <Color>[
-                                                          Color.fromRGBO(111,
-                                                              133, 157, 0.80),
-                                                          Color.fromRGBO(72, 92,
-                                                              113, 0.84),
-                                                        ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compactCollapsed = !widget.expanded &&
+            constraints.maxWidth.isFinite &&
+            constraints.maxWidth < 190.0;
+        final horizontalPadding = compactCollapsed ? 10.0 : 16.0;
+        final collapsedGap = compactCollapsed ? 6.0 : 8.0;
+        final showTouchdown = _pressed && !widget.expanded;
+
+        return Semantics(
+          button: !widget.expanded,
+          enabled: !widget.expanded,
+          label: widget.expanded
+              ? L10n.translate(context, 'AI prompt')
+              : L10n.translate(context, 'AI help'),
+          child: Material(
+            type: MaterialType.transparency,
+            borderRadius: BorderRadius.circular(24),
+            child: AnimatedSlide(
+              duration: const Duration(milliseconds: 90),
+              curve: Curves.easeOutCubic,
+              offset: showTouchdown ? const Offset(0, 0.018) : Offset.zero,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 105),
+                curve: Curves.easeOutCubic,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: showTouchdown
+                      ? [
+                          BoxShadow(
+                            color: Colors.white.withValues(alpha: 0.075),
+                            blurRadius: 9,
+                            spreadRadius: 0.1,
+                          ),
+                        ]
+                      : null,
+                ),
+                child: InkWell(
+                  onTap: widget.expanded ? null : widget.onTapBar,
+                  onHighlightChanged: widget.expanded ? null : _setPressed,
+                  borderRadius: BorderRadius.circular(24),
+                  splashColor: Colors.white.withValues(alpha: 0.12),
+                  highlightColor: Colors.white.withValues(alpha: 0.08),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(24),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                      child: Container(
+                        height: barHeight,
+                        padding:
+                            EdgeInsets.symmetric(horizontal: horizontalPadding),
+                        decoration: BoxDecoration(
+                          gradient: widget.barGradient,
+                          borderRadius: BorderRadius.circular(24),
+                          border: showTouchdown
+                              ? Border.all(
+                                  color: Colors.white.withValues(alpha: 0.09),
+                                )
+                              : null,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.25),
+                              blurRadius: 15,
+                              spreadRadius: 8,
+                              offset: Offset.zero,
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: !widget.expanded
+                                  ? Row(
+                                      children: [
+                                        if (!compactCollapsed) ...[
+                                          _chatHelpButton(
+                                            context: context,
+                                            onTap: widget.onShowCapabilities,
+                                            busy: widget.isThinking,
+                                          ),
+                                          SizedBox(width: collapsedGap),
+                                        ],
+                                        Expanded(
+                                          child: widget.isThinking
+                                              ? const _InlineThinkingLabel(
+                                                  textStyle: collapsedTextStyle,
+                                                )
+                                              : Text(
+                                                  typeHint,
+                                                  style: collapsedTextStyle,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
                                                 ),
-                                                shape: BoxShape.circle,
-                                                border: Border.all(
-                                                  color: Colors.white
-                                                      .withValues(alpha: 0.24),
+                                        ),
+                                        SizedBox(width: collapsedGap),
+                                        _buildPromptLimitBadge(context),
+                                      ],
+                                    )
+                                  : Material(
+                                      color: Colors.transparent,
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: TextField(
+                                              controller: widget.controller,
+                                              focusNode: widget.focusNode,
+                                              readOnly: widget.readOnly ||
+                                                  widget.isThinking,
+                                              onTap: widget.onTapBar,
+                                              style: inputTextStyle,
+                                              cursorColor: Colors.white,
+                                              decoration: InputDecoration(
+                                                hintText: widget.isThinking
+                                                    ? 'Thinking...'
+                                                    : typeHint,
+                                                hintStyle: hintTextStyle,
+                                                border: InputBorder.none,
+                                                isDense: true,
+                                                contentPadding:
+                                                    const EdgeInsets.symmetric(
+                                                  vertical: 7,
                                                 ),
                                               ),
-                                              child: Icon(
-                                                isThinking
-                                                    ? Icons.stop_rounded
-                                                    : Icons.near_me_rounded,
-                                                color: Colors.white,
-                                                size: 18,
-                                              ),
+                                              textAlignVertical:
+                                                  TextAlignVertical.center,
+                                              textInputAction: widget.isThinking
+                                                  ? TextInputAction.none
+                                                  : TextInputAction.send,
+                                              onSubmitted: widget.isThinking
+                                                  ? null
+                                                  : (_) => widget.onSubmit(),
                                             ),
                                           ),
-                                        ),
-                                      );
-                                      if (tutorialHighlighter != null) {
-                                        sendButton = Halo(
-                                          highlighter: tutorialHighlighter!,
-                                          haloKey: const HaloKey(
-                                              'tutorial:chat_send'),
-                                          borderRadius:
-                                              BorderRadius.circular(999),
-                                          child: sendButton,
-                                        );
-                                      }
-                                      return sendButton;
-                                    },
-                                  ),
-                                ),
-                              ],
+                                          const SizedBox(width: 8),
+                                          _buildPromptLimitBadge(context),
+                                          const SizedBox(width: 8),
+                                          SizedBox(
+                                            width: 34,
+                                            height: 34,
+                                            child: Builder(
+                                              builder: (context) {
+                                                final sendEnabled =
+                                                    widget.isThinking ||
+                                                        widget.hasText;
+                                                Widget sendButton = Opacity(
+                                                  opacity:
+                                                      sendEnabled ? 1 : 0.32,
+                                                  child: Material(
+                                                    color: Colors.transparent,
+                                                    shape: const CircleBorder(),
+                                                    child: InkResponse(
+                                                      onTap: sendEnabled
+                                                          ? (widget.isThinking
+                                                              ? widget.onStop
+                                                              : widget.onSubmit)
+                                                          : null,
+                                                      containedInkWell: true,
+                                                      customBorder:
+                                                          const CircleBorder(),
+                                                      radius: 20,
+                                                      splashColor: Colors.white
+                                                          .withValues(
+                                                        alpha: 0.16,
+                                                      ),
+                                                      highlightColor: Colors
+                                                          .white
+                                                          .withValues(
+                                                        alpha: 0.10,
+                                                      ),
+                                                      child: Container(
+                                                        width: 34,
+                                                        height: 34,
+                                                        decoration:
+                                                            BoxDecoration(
+                                                          gradient:
+                                                              LinearGradient(
+                                                            begin: Alignment
+                                                                .topCenter,
+                                                            end: Alignment
+                                                                .bottomCenter,
+                                                            colors: widget
+                                                                    .isThinking
+                                                                ? const <Color>[
+                                                                    Color
+                                                                        .fromRGBO(
+                                                                      168,
+                                                                      110,
+                                                                      110,
+                                                                      0.88,
+                                                                    ),
+                                                                    Color
+                                                                        .fromRGBO(
+                                                                      112,
+                                                                      66,
+                                                                      66,
+                                                                      0.92,
+                                                                    ),
+                                                                  ]
+                                                                : const <Color>[
+                                                                    Color
+                                                                        .fromRGBO(
+                                                                      111,
+                                                                      133,
+                                                                      157,
+                                                                      0.80,
+                                                                    ),
+                                                                    Color
+                                                                        .fromRGBO(
+                                                                      72,
+                                                                      92,
+                                                                      113,
+                                                                      0.84,
+                                                                    ),
+                                                                  ],
+                                                          ),
+                                                          shape:
+                                                              BoxShape.circle,
+                                                          border: Border.all(
+                                                            color: Colors.white
+                                                                .withValues(
+                                                              alpha: 0.24,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                        child: Icon(
+                                                          widget.isThinking
+                                                              ? Icons
+                                                                  .stop_rounded
+                                                              : Icons
+                                                                  .near_me_rounded,
+                                                          color: Colors.white,
+                                                          size: 18,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                );
+                                                if (widget
+                                                        .tutorialHighlighter !=
+                                                    null) {
+                                                  sendButton = Halo(
+                                                    highlighter: widget
+                                                        .tutorialHighlighter!,
+                                                    haloKey: const HaloKey(
+                                                      'tutorial:chat_send',
+                                                    ),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                      999,
+                                                    ),
+                                                    child: sendButton,
+                                                  );
+                                                }
+                                                return sendButton;
+                                              },
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
                             ),
-                          ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
-                ],
+                ),
               ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -59998,6 +68416,78 @@ List<Map<String, dynamic>> _toMaps(List<AutomationPoint> points) {
   return points.map((p) => p.toMap()).toList();
 }
 
+class _TabletMetronomeIcon extends StatelessWidget {
+  const _TabletMetronomeIcon({
+    required this.color,
+    required this.size,
+  });
+
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      size: Size.square(size),
+      painter: _TabletMetronomeIconPainter(color),
+    );
+  }
+}
+
+class _TabletMetronomeIconPainter extends CustomPainter {
+  const _TabletMetronomeIconPainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final stroke = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = math.max(1.5, size.width * 0.075)
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final fill = Paint()
+      ..color = color.withValues(alpha: 0.18)
+      ..style = PaintingStyle.fill;
+
+    final body = Path()
+      ..moveTo(size.width * 0.34, size.height * 0.88)
+      ..lineTo(size.width * 0.66, size.height * 0.88)
+      ..lineTo(size.width * 0.57, size.height * 0.23)
+      ..quadraticBezierTo(
+        size.width * 0.50,
+        size.height * 0.13,
+        size.width * 0.43,
+        size.height * 0.23,
+      )
+      ..close();
+    canvas.drawPath(body, fill);
+    canvas.drawPath(body, stroke);
+
+    canvas.drawLine(
+      Offset(size.width * 0.50, size.height * 0.24),
+      Offset(size.width * 0.39, size.height * 0.73),
+      stroke,
+    );
+    canvas.drawCircle(
+      Offset(size.width * 0.39, size.height * 0.73),
+      size.width * 0.07,
+      Paint()..color = color,
+    );
+    canvas.drawLine(
+      Offset(size.width * 0.40, size.height * 0.88),
+      Offset(size.width * 0.60, size.height * 0.88),
+      stroke,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _TabletMetronomeIconPainter oldDelegate) {
+    return oldDelegate.color != color;
+  }
+}
+
 class _TopBarMasterVisualizer extends StatefulWidget {
   final MeterBus meters;
 
@@ -60008,22 +68498,21 @@ class _TopBarMasterVisualizer extends StatefulWidget {
       _TopBarMasterVisualizerState();
 }
 
-enum _TopBarVisualizerMode {
-  spectrum,
-  bars,
-  bloom,
-}
-
 class _TopBarMasterVisualizerState extends State<_TopBarMasterVisualizer> {
   static const int _waveformSampleCount = 2048;
   static const Duration _pollInterval = Duration(milliseconds: 33);
+  static const Duration _modeMenuPressDelay = Duration(milliseconds: 240);
+  List<double> _waveformSamples = const <double>[];
   List<double> _spectrumDb = const <double>[];
   double _sampleRate = 44100.0;
   double _level = 0.0;
+  MeterFrame _meterFrame = MeterFrame.zero;
   bool _clipped = false;
-  _TopBarVisualizerMode _mode = _TopBarVisualizerMode.spectrum;
+  TopBarVisualizerMode _mode = TopBarVisualizerMode.spectrum;
   Timer? _pollTimer;
+  Timer? _modeMenuPressTimer;
   bool _pollInFlight = false;
+  bool _modeMenuPressTriggered = false;
 
   @override
   void initState() {
@@ -60047,6 +68536,7 @@ class _TopBarMasterVisualizerState extends State<_TopBarMasterVisualizer> {
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _modeMenuPressTimer?.cancel();
     widget.meters.removeListener(_handleMetersChanged);
     super.dispose();
   }
@@ -60076,13 +68566,16 @@ class _TopBarMasterVisualizerState extends State<_TopBarMasterVisualizer> {
         sampleCount: _waveformSampleCount,
       );
       if (!mounted) return;
+      final waveformSamples = List<double>.from(waveform, growable: false);
       final nextSpectrum = _TopBarSpectrumAnalyzer.computeSpectrumDb(waveform);
       final smoothedSpectrum = _TopBarSpectrumAnalyzer.smoothSpectrum(
         current: _spectrumDb,
         next: nextSpectrum,
       );
-      if (!listEquals(smoothedSpectrum, _spectrumDb)) {
+      if (!listEquals(smoothedSpectrum, _spectrumDb) ||
+          !listEquals(waveformSamples, _waveformSamples)) {
         setState(() {
+          _waveformSamples = waveformSamples;
           _spectrumDb = smoothedSpectrum;
         });
       }
@@ -60099,11 +68592,13 @@ class _TopBarMasterVisualizerState extends State<_TopBarMasterVisualizer> {
         .clamp(0.0, 1.0);
     if (!forceSetState &&
         (nextLevel - _level).abs() < 0.01 &&
+        frame == _meterFrame &&
         frame.clip == _clipped) {
       return;
     }
     setState(() {
       _level = nextLevel;
+      _meterFrame = frame;
       _clipped = frame.clip;
     });
   }
@@ -60112,34 +68607,213 @@ class _TopBarMasterVisualizerState extends State<_TopBarMasterVisualizer> {
 
   void _cycleMode() {
     setState(() {
-      _mode = switch (_mode) {
-        _TopBarVisualizerMode.spectrum => _TopBarVisualizerMode.bars,
-        _TopBarVisualizerMode.bars => _TopBarVisualizerMode.bloom,
-        _TopBarVisualizerMode.bloom => _TopBarVisualizerMode.spectrum,
-      };
+      _mode = _mode.next;
+    });
+  }
+
+  void _startModeMenuPressTimer(BuildContext anchorContext) {
+    _modeMenuPressTimer?.cancel();
+    _modeMenuPressTriggered = false;
+    _modeMenuPressTimer = Timer(_modeMenuPressDelay, () {
+      if (!mounted) return;
+      _modeMenuPressTriggered = true;
+      unawaited(_showModeMenu(anchorContext));
+    });
+  }
+
+  void _cancelModeMenuPressTimer() {
+    _modeMenuPressTimer?.cancel();
+    _modeMenuPressTimer = null;
+  }
+
+  void _handleVisualizerTap() {
+    if (_modeMenuPressTriggered) {
+      _modeMenuPressTriggered = false;
+      return;
+    }
+    _cycleMode();
+  }
+
+  IconData _modeIcon(TopBarVisualizerMode mode) {
+    return switch (mode) {
+      TopBarVisualizerMode.spectrum => Icons.multiline_chart_rounded,
+      TopBarVisualizerMode.bars => Icons.bar_chart_rounded,
+      TopBarVisualizerMode.meter => Icons.speed_rounded,
+      TopBarVisualizerMode.scope => Icons.blur_circular_rounded,
+      TopBarVisualizerMode.waveform => Icons.show_chart_rounded,
+    };
+  }
+
+  String _modeLabel(BuildContext context, TopBarVisualizerMode mode) {
+    return L10n.translate(context, mode.label);
+  }
+
+  Future<void> _showModeMenu(BuildContext anchorContext) async {
+    unawaited(HapticFeedback.selectionClick());
+    final selected = await showMixroomGlassDropdown<TopBarVisualizerMode>(
+      anchorContext: anchorContext,
+      minWidth: 234,
+      maxWidth: 292,
+      preferredHeight: 262,
+      radius: 18,
+      color: kMixroomGlassDropdownMenuColor,
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 262),
+        child: ListView.separated(
+          padding: EdgeInsets.zero,
+          shrinkWrap: true,
+          physics: const ClampingScrollPhysics(),
+          itemCount: TopBarVisualizerMode.values.length,
+          separatorBuilder: (_, __) => Divider(
+            height: 1,
+            thickness: 1,
+            color: Colors.white.withValues(alpha: 0.06),
+          ),
+          itemBuilder: (menuContext, index) {
+            final option = TopBarVisualizerMode.values[index];
+            final isSelected = option == _mode;
+            final optionLabel = _modeLabel(anchorContext, option);
+            final foreground = isSelected
+                ? const Color(0xFFF4F4F4)
+                : Colors.white.withValues(alpha: 0.78);
+            return Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () => Navigator.of(menuContext).pop(option),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 110),
+                  curve: Curves.easeOutCubic,
+                  constraints: const BoxConstraints(minHeight: 46),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 9,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? const Color(0xFFF4F4F4).withValues(alpha: 0.14)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(14),
+                    border: isSelected
+                        ? Border.all(
+                            color: Colors.white.withValues(alpha: 0.14),
+                          )
+                        : null,
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 30,
+                        height: 30,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? const Color(0xFF62D8FF).withValues(alpha: 0.16)
+                              : Colors.white.withValues(alpha: 0.06),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: isSelected
+                                ? const Color(0xFF62D8FF)
+                                    .withValues(alpha: 0.28)
+                                : Colors.white.withValues(alpha: 0.08),
+                          ),
+                        ),
+                        child: Icon(
+                          _modeIcon(option),
+                          size: 17,
+                          color: isSelected
+                              ? const Color(0xFF62D8FF)
+                              : Colors.white.withValues(alpha: 0.62),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          optionLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: foreground,
+                            fontSize: 13,
+                            fontWeight:
+                                isSelected ? FontWeight.w900 : FontWeight.w700,
+                            height: 1.0,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      AnimatedOpacity(
+                        opacity: isSelected ? 1 : 0,
+                        duration: const Duration(milliseconds: 110),
+                        child: const Icon(
+                          Icons.check_rounded,
+                          color: Color(0xFF62D8FF),
+                          size: 18,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+    if (!mounted || selected == null || selected == _mode) return;
+    setState(() {
+      _mode = selected;
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: L10n.translate(context, 'Click to change analyzer view'),
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: _cycleMode,
-          child: RepaintBoundary(
-            child: CustomPaint(
-              painter: _TopBarMasterVisualizerPainter(
-                spectrumDb: _spectrumDb,
-                analyzerSampleRate: _sampleRate,
-                level: _level,
-                clipped: _clipped,
-                mode: _mode,
+    final label = L10n.translate(context, 'Master output analyzer');
+    final currentModeLabel = _modeLabel(context, _mode);
+    final nextModeLabel = _modeLabel(context, _mode.next);
+    final switchToLabel = L10n.translate(context, 'Switch to');
+    final holdToChooseAnalyzerLabel = L10n.translate(
+      context,
+      'Hold to choose analyzer.',
+    );
+    final hint = '$switchToLabel $nextModeLabel. $holdToChooseAnalyzerLabel';
+    return Semantics(
+      button: true,
+      label: label,
+      value: currentModeLabel,
+      hint: hint,
+      onTap: _cycleMode,
+      onLongPress: () => unawaited(_showModeMenu(context)),
+      child: Tooltip(
+        message: '$currentModeLabel • $switchToLabel $nextModeLabel',
+        child: Builder(
+          builder: (anchorContext) {
+            return MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _handleVisualizerTap,
+                onTapDown: (_) => _startModeMenuPressTimer(anchorContext),
+                onTapUp: (_) => _cancelModeMenuPressTimer(),
+                onTapCancel: _cancelModeMenuPressTimer,
+                child: RepaintBoundary(
+                  child: CustomPaint(
+                    painter: _TopBarMasterVisualizerPainter(
+                      waveformSamples: _waveformSamples,
+                      spectrumDb: _spectrumDb,
+                      analyzerSampleRate: _sampleRate,
+                      level: _level,
+                      meterFrame: _meterFrame,
+                      clipped: _clipped,
+                      mode: _mode,
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ),
+            );
+          },
         ),
       ),
     );
@@ -60147,16 +68821,20 @@ class _TopBarMasterVisualizerState extends State<_TopBarMasterVisualizer> {
 }
 
 class _TopBarMasterVisualizerPainter extends CustomPainter {
+  final List<double> waveformSamples;
   final List<double> spectrumDb;
   final double analyzerSampleRate;
   final double level;
+  final MeterFrame meterFrame;
   final bool clipped;
-  final _TopBarVisualizerMode mode;
+  final TopBarVisualizerMode mode;
 
   const _TopBarMasterVisualizerPainter({
+    required this.waveformSamples,
     required this.spectrumDb,
     required this.analyzerSampleRate,
     required this.level,
+    required this.meterFrame,
     required this.clipped,
     required this.mode,
   });
@@ -60164,84 +68842,109 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
-    final rrect = BorderRadius.circular(24).toRRect(rect);
+    final rrect = BorderRadius.circular(14).toRRect(rect);
 
     final bgPaint = Paint()
-      ..shader = LinearGradient(
+      ..shader = const LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
         colors: <Color>[
-          const Color(0xFF132030).withValues(alpha: 0.78),
-          const Color(0xFF21405D).withValues(alpha: 0.94),
-          const Color(0xFF0D1721).withValues(alpha: 0.84),
+          Color(0xFF101820),
+          Color(0xFF152231),
+          Color(0xFF081017),
         ],
+        stops: <double>[0.0, 0.54, 1.0],
       ).createShader(rect);
     canvas.drawRRect(rrect, bgPaint);
 
-    final borderPaint = Paint()
-      ..color = const Color(0xFFBDEBFF).withValues(alpha: 0.12)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-    canvas.drawRRect(rrect, borderPaint);
+    final innerGlow = Paint()
+      ..shader = RadialGradient(
+        center: const Alignment(0.66, -0.72),
+        radius: 1.18,
+        colors: <Color>[
+          const Color(0xFF48C7FF).withValues(alpha: 0.18 + (0.07 * level)),
+          Colors.transparent,
+        ],
+      ).createShader(rect);
+    canvas.drawRRect(rrect, innerGlow);
 
-    final drawRect = Rect.fromLTWH(8, 6, size.width - 16, size.height - 12);
-    final gridBounds =
-        RRect.fromRectAndRadius(drawRect, const Radius.circular(18));
+    final plotRect = Rect.fromLTWH(
+      8,
+      6,
+      size.width - 16,
+      math.max(26, size.height - 12),
+    );
+
     canvas.save();
-    canvas.clipRRect(gridBounds);
+    canvas.clipRRect(rrect);
     final gridPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.06)
+      ..color = Colors.white.withValues(alpha: 0.055)
       ..strokeWidth = 1;
 
-    for (final fraction in const <double>[0.20, 0.45, 0.70]) {
-      final y = drawRect.top + (drawRect.height * fraction);
+    for (final fraction in const <double>[0.25, 0.50, 0.75]) {
+      final y = plotRect.top + (plotRect.height * fraction);
       canvas.drawLine(
-        Offset(drawRect.left, y),
-        Offset(drawRect.right, y),
+        Offset(plotRect.left, y),
+        Offset(plotRect.right, y),
         gridPaint,
       );
     }
 
-    for (final hz in const <double>[50, 120, 300, 1000, 4000, 12000]) {
-      final x = _TopBarSpectrumAnalyzer.frequencyToX(
-        hz: hz,
-        rect: drawRect,
-        sampleRate: analyzerSampleRate,
-      );
-      canvas.drawLine(
-        Offset(x, drawRect.top),
-        Offset(x, drawRect.bottom),
-        gridPaint,
-      );
+    if (mode == TopBarVisualizerMode.spectrum ||
+        mode == TopBarVisualizerMode.bars) {
+      for (final hz in _TopBarSpectrumAnalyzer.bandMarkerHz) {
+        final x = _TopBarSpectrumAnalyzer.frequencyToX(
+          hz: hz,
+          rect: plotRect,
+          sampleRate: analyzerSampleRate,
+        );
+        canvas.drawLine(
+          Offset(x, plotRect.top),
+          Offset(x, plotRect.bottom),
+          gridPaint,
+        );
+      }
     }
 
     final baselinePaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.08)
+      ..color = Colors.white.withValues(alpha: 0.10)
       ..strokeWidth = 1.1;
     canvas.drawLine(
-      Offset(drawRect.left, drawRect.bottom - 1),
-      Offset(drawRect.right, drawRect.bottom - 1),
+      Offset(plotRect.left, plotRect.bottom - 0.5),
+      Offset(plotRect.right, plotRect.bottom - 0.5),
       baselinePaint,
     );
 
     switch (mode) {
-      case _TopBarVisualizerMode.spectrum:
-        _paintSpectrum(canvas, drawRect);
+      case TopBarVisualizerMode.spectrum:
+        _paintSpectrum(canvas, plotRect);
         break;
-      case _TopBarVisualizerMode.bars:
-        _paintBars(canvas, drawRect);
+      case TopBarVisualizerMode.bars:
+        _paintBars(canvas, plotRect);
         break;
-      case _TopBarVisualizerMode.bloom:
-        _paintBloom(canvas, drawRect);
+      case TopBarVisualizerMode.meter:
+        _paintMeter(canvas, plotRect);
+        break;
+      case TopBarVisualizerMode.scope:
+        _paintScope(canvas, plotRect);
+        break;
+      case TopBarVisualizerMode.waveform:
+        _paintWaveform(canvas, plotRect);
         break;
     }
 
     canvas.restore();
+
+    final borderPaint = Paint()
+      ..color = const Color(0xFFC5EBFF).withValues(alpha: 0.16)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    canvas.drawRRect(rrect, borderPaint);
   }
 
   void _paintSpectrum(Canvas canvas, Rect drawRect) {
     final spectrumPath = Path();
-    final sampleColumns = math.max(72, drawRect.width.floor());
+    final sampleColumns = math.max(96, drawRect.width.floor());
     for (int i = 0; i < sampleColumns; i++) {
       final t = sampleColumns <= 1 ? 0.0 : i / (sampleColumns - 1);
       final hz = _TopBarSpectrumAnalyzer.normalizedToFrequency(
@@ -60267,40 +68970,49 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
       ..lineTo(drawRect.left, drawRect.bottom)
       ..close();
 
-    const accent = Color(0xFF78D9FF);
+    const accent = Color(0xFF62D8FF);
     final glowPaint = Paint()
       ..shader = LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
         colors: <Color>[
-          accent.withValues(alpha: clipped ? 0.34 : 0.26),
-          accent.withValues(alpha: 0.06),
+          accent.withValues(alpha: clipped ? 0.28 : 0.21),
+          accent.withValues(alpha: 0.045),
           Colors.transparent,
         ],
       ).createShader(drawRect);
     canvas.drawPath(fillPath, glowPaint);
+
+    final haloPaint = Paint()
+      ..color = accent.withValues(alpha: 0.24)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4.0
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+    canvas.drawPath(spectrumPath, haloPaint);
 
     final linePaint = Paint()
       ..shader = LinearGradient(
         begin: Alignment.centerLeft,
         end: Alignment.centerRight,
         colors: <Color>[
-          accent.withValues(alpha: 0.82 + (0.10 * level)),
-          const Color(0xFFFFFFFF).withValues(alpha: 0.88),
+          accent.withValues(alpha: 0.80 + (0.10 * level)),
+          const Color(0xFFFFFFFF).withValues(alpha: 0.90),
         ],
       ).createShader(drawRect)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.6
+      ..strokeWidth = 1.45
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
     canvas.drawPath(spectrumPath, linePaint);
   }
 
   void _paintBars(Canvas canvas, Rect drawRect) {
-    const accent = Color(0xFF8CE3FF);
-    const barCount = 28;
-    final barWidth = drawRect.width / ((barCount * 1.45) - 0.45);
-    final gap = barWidth * 0.45;
+    const accent = Color(0xFF62D8FF);
+    const barCount = 56;
+    final barWidth = drawRect.width / ((barCount * 1.34) - 0.34);
+    final gap = barWidth * 0.34;
     final barPaint = Paint();
     for (int i = 0; i < barCount; i++) {
       final t = barCount <= 1 ? 0.0 : i / (barCount - 1);
@@ -60316,7 +69028,7 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
       final amplitude = _TopBarSpectrumAnalyzer.dbToUnit(db);
       final x = drawRect.left + (i * (barWidth + gap));
       final height =
-          math.max(2.0, (drawRect.height - 2.0) * math.pow(amplitude, 0.86));
+          math.max(1.8, (drawRect.height - 1.4) * math.pow(amplitude, 0.84));
       final barRect = RRect.fromRectAndRadius(
         Rect.fromLTWH(
           x,
@@ -60324,117 +69036,328 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
           barWidth,
           height,
         ),
-        const Radius.circular(3),
+        Radius.circular(math.min(2.2, barWidth * 0.46)),
       );
       barPaint.shader = LinearGradient(
         begin: Alignment.bottomCenter,
         end: Alignment.topCenter,
         colors: [
-          accent.withValues(alpha: 0.16 + (0.12 * level)),
-          accent.withValues(alpha: 0.40 + (0.18 * amplitude)),
-          Colors.white.withValues(alpha: 0.90),
+          accent.withValues(alpha: 0.14 + (0.10 * level)),
+          accent.withValues(alpha: 0.42 + (0.20 * amplitude)),
+          Colors.white.withValues(alpha: 0.86),
         ],
       ).createShader(barRect.outerRect);
       canvas.drawRRect(barRect, barPaint);
     }
   }
 
-  void _paintBloom(Canvas canvas, Rect drawRect) {
-    const accent = Color(0xFF7AD8FF);
-    final centerY = drawRect.center.dy;
-    final path = Path();
-    final sampleColumns = math.max(88, drawRect.width.floor());
-    for (int i = 0; i < sampleColumns; i++) {
-      final t = sampleColumns <= 1 ? 0.0 : i / (sampleColumns - 1);
-      final hz = _TopBarSpectrumAnalyzer.normalizedToFrequency(
-        t,
-        analyzerSampleRate,
+  void _paintMeter(Canvas canvas, Rect drawRect) {
+    const laneGap = 2.0;
+    final laneHeight = (drawRect.height * 0.18).clamp(5.0, 7.5).toDouble();
+    final meterHeight = (laneHeight * 2.0) + laneGap;
+    final meterTop = drawRect.top + ((drawRect.height - meterHeight) / 2.0);
+    final laneArea = Rect.fromLTWH(
+      drawRect.left,
+      meterTop,
+      drawRect.width,
+      meterHeight,
+    );
+    final laneBackground = Paint()
+      ..color = const Color(0xFF071018).withValues(alpha: 0.70);
+    final peakPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.88)
+      ..strokeWidth = 1.0;
+    final tickPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.075)
+      ..strokeWidth = 1;
+
+    for (final db in const <double>[-48, -30, -15, -6, 0]) {
+      final x =
+          laneArea.left + (laneArea.width * DbfsMeterVisuals.dbfsToUnit(db));
+      canvas.drawLine(
+        Offset(x, laneArea.top),
+        Offset(x, laneArea.bottom),
+        tickPaint,
       );
-      final db = _TopBarSpectrumAnalyzer.sampleSpectrumDbAtHz(
-        spectrumDb: spectrumDb,
-        hz: hz,
-        sampleRate: analyzerSampleRate,
+    }
+
+    void drawLane({
+      required double top,
+      required double rms,
+      required double peak,
+    }) {
+      final laneRect = RRect.fromRectAndRadius(
+        Rect.fromLTWH(laneArea.left, top, laneArea.width, laneHeight),
+        const Radius.circular(2.6),
       );
-      final amplitude = _TopBarSpectrumAnalyzer.dbToUnit(db);
-      final bloom = (drawRect.height * 0.44) * math.pow(amplitude, 0.92);
-      final shimmer = math.sin((t * math.pi * 10.0) + (level * 4.0)) * 0.8;
-      final x = drawRect.left + (drawRect.width * t);
-      final y = centerY - bloom - shimmer;
-      if (i == 0) {
-        path.moveTo(x, y);
-      } else {
-        path.lineTo(x, y);
+      canvas.drawRRect(laneRect, laneBackground);
+
+      final rmsWidth = laneArea.width * DbfsMeterVisuals.ampToUnit(rms);
+      final peakWidth = laneArea.width * DbfsMeterVisuals.ampToUnit(peak);
+      if (rmsWidth > 0.0) {
+        final rmsRect = Rect.fromLTWH(
+          laneRect.outerRect.left,
+          laneRect.outerRect.top,
+          rmsWidth,
+          laneRect.outerRect.height,
+        );
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(rmsRect, const Radius.circular(2.6)),
+          Paint()
+            ..shader =
+                DbfsMeterVisuals.horizontalGradient(opacity: 0.94).createShader(
+              laneRect.outerRect,
+            ),
+        );
+      }
+      if (peakWidth > rmsWidth) {
+        final peakRect = Rect.fromLTWH(
+          laneRect.outerRect.left + rmsWidth,
+          laneRect.outerRect.top,
+          peakWidth - rmsWidth,
+          laneRect.outerRect.height,
+        );
+        canvas.drawRect(
+          peakRect,
+          Paint()
+            ..shader =
+                DbfsMeterVisuals.horizontalGradient(opacity: 0.34).createShader(
+              laneRect.outerRect,
+            ),
+        );
+      }
+      if (peakWidth > 0.6) {
+        final peakX = (laneArea.left + peakWidth)
+            .clamp(laneArea.left, laneArea.right)
+            .toDouble();
+        canvas.drawLine(
+          Offset(peakX, laneRect.outerRect.top),
+          Offset(peakX, laneRect.outerRect.bottom),
+          peakPaint,
+        );
       }
     }
-    for (int i = sampleColumns - 1; i >= 0; i--) {
-      final t = sampleColumns <= 1 ? 0.0 : i / (sampleColumns - 1);
-      final hz = _TopBarSpectrumAnalyzer.normalizedToFrequency(
-        t,
-        analyzerSampleRate,
-      );
-      final db = _TopBarSpectrumAnalyzer.sampleSpectrumDbAtHz(
-        spectrumDb: spectrumDb,
-        hz: hz,
-        sampleRate: analyzerSampleRate,
-      );
-      final amplitude = _TopBarSpectrumAnalyzer.dbToUnit(db);
-      final bloom = (drawRect.height * 0.44) * math.pow(amplitude, 0.92);
-      final shimmer = math.sin((t * math.pi * 10.0) + (level * 4.0)) * 0.8;
-      final x = drawRect.left + (drawRect.width * t);
-      final y = centerY + bloom + shimmer;
-      path.lineTo(x, y);
-    }
-    path.close();
 
+    drawLane(
+      top: laneArea.top,
+      rms: meterFrame.rmsL,
+      peak: meterFrame.peakL,
+    );
+    drawLane(
+      top: laneArea.top + laneHeight + laneGap,
+      rms: meterFrame.rmsR,
+      peak: meterFrame.peakR,
+    );
+  }
+
+  double _waveformAutoGain(List<double> samples) {
+    if (samples.isEmpty) return 1.0;
+    var maxAbs = 0.0;
+    for (final sample in samples) {
+      final absValue = sample.abs();
+      if (absValue > maxAbs) maxAbs = absValue;
+    }
+    if (maxAbs < 0.0001) return 1.0;
+    return (0.82 / maxAbs).clamp(1.0, 8.0).toDouble();
+  }
+
+  void _paintScope(Canvas canvas, Rect drawRect) {
+    final center = drawRect.center;
+    final axisPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.055)
+      ..strokeWidth = 1;
+    canvas.drawLine(
+      Offset(drawRect.left, center.dy),
+      Offset(drawRect.right, center.dy),
+      axisPaint,
+    );
+    canvas.drawLine(
+      Offset(center.dx, drawRect.top),
+      Offset(center.dx, drawRect.bottom),
+      axisPaint,
+    );
+
+    final samples = waveformSamples;
+    final path = Path();
+    final points = math.min(420, samples.length);
+    if (points < 8) {
+      final idleRect = Rect.fromCenter(
+        center: center,
+        width: drawRect.width * (0.18 + (level * 0.28)),
+        height: drawRect.height * (0.18 + (level * 0.34)),
+      );
+      path.addOval(idleRect);
+    } else {
+      final step = math.max(1, (samples.length / points).floor());
+      final gain = _waveformAutoGain(samples);
+      final panSkew = ((meterFrame.peakR + meterFrame.rmsR) -
+              (meterFrame.peakL + meterFrame.rmsL))
+          .clamp(-1.0, 1.0)
+          .toDouble();
+      final spread =
+          (0.34 + (level * 0.42) + (panSkew.abs() * 0.20)).clamp(0.26, 0.84);
+      final radiusX = drawRect.width * 0.45;
+      final radiusY = drawRect.height * 0.46;
+      var moved = false;
+      for (int i = 0; i < points; i++) {
+        final sampleIndex = math.min(samples.length - 1, i * step);
+        final prevIndex = math.max(0, sampleIndex - step);
+        final sample =
+            (samples[sampleIndex] * gain).clamp(-1.0, 1.0).toDouble();
+        final prev = (samples[prevIndex] * gain).clamp(-1.0, 1.0).toDouble();
+        final delta = ((sample - prev) * 2.2).clamp(-1.0, 1.0).toDouble();
+        final shimmer = math.sin((i / points) * math.pi * 2.0) * 0.06;
+        final left =
+            (sample * (1.0 - (panSkew * 0.28))) + ((delta + shimmer) * spread);
+        final right =
+            (sample * (1.0 + (panSkew * 0.28))) - ((delta - shimmer) * spread);
+        final mid = ((left + right) * 0.5).clamp(-1.0, 1.0).toDouble();
+        final side = ((left - right) * 0.5).clamp(-1.0, 1.0).toDouble();
+        final x = center.dx + (side * radiusX);
+        final y = center.dy - (mid * radiusY);
+        if (!moved) {
+          path.moveTo(x, y);
+          moved = true;
+        } else {
+          path.lineTo(x, y);
+        }
+      }
+    }
+
+    const accent = Color(0xFF62D8FF);
     final glowPaint = Paint()
-      ..shader = RadialGradient(
-        center: Alignment.center,
-        radius: 1.08,
-        colors: [
-          accent.withValues(alpha: 0.22 + (0.12 * level)),
-          accent.withValues(alpha: 0.08),
-          Colors.transparent,
-        ],
-      ).createShader(drawRect);
+      ..color = accent.withValues(alpha: 0.22 + (0.12 * level))
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 7.0
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
     canvas.drawPath(path, glowPaint);
 
-    final linePaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.86)
+    final tracePaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: <Color>[
+          accent.withValues(alpha: 0.72),
+          Colors.white.withValues(alpha: 0.90),
+          const Color(0xFF9EEBFF).withValues(alpha: 0.76),
+        ],
+      ).createShader(drawRect)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.2;
-    final topHalf = Path();
+      ..strokeWidth = 1.35
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    canvas.drawPath(path, tracePaint);
+  }
+
+  void _paintWaveform(Canvas canvas, Rect drawRect) {
+    final centerY = drawRect.center.dy;
+    final samples = waveformSamples;
+    final path = Path();
+    final fillPath = Path();
+    final points =
+        math.min(math.max(96, drawRect.width.floor()), samples.length);
+    if (points < 8) {
+      canvas.drawLine(
+        Offset(drawRect.left, centerY),
+        Offset(drawRect.right, centerY),
+        Paint()
+          ..color = const Color(0xFF62D8FF).withValues(alpha: 0.34)
+          ..strokeWidth = 1.2
+          ..strokeCap = StrokeCap.round,
+      );
+      return;
+    }
+
+    final gain = _waveformAutoGain(samples);
+    final step = math.max(1, (samples.length / points).floor());
     var moved = false;
-    for (int i = 0; i < sampleColumns; i++) {
-      final t = sampleColumns <= 1 ? 0.0 : i / (sampleColumns - 1);
-      final hz = _TopBarSpectrumAnalyzer.normalizedToFrequency(
-        t,
-        analyzerSampleRate,
-      );
-      final db = _TopBarSpectrumAnalyzer.sampleSpectrumDbAtHz(
-        spectrumDb: spectrumDb,
-        hz: hz,
-        sampleRate: analyzerSampleRate,
-      );
-      final amplitude = _TopBarSpectrumAnalyzer.dbToUnit(db);
-      final bloom = (drawRect.height * 0.44) * math.pow(amplitude, 0.92);
-      final shimmer = math.sin((t * math.pi * 10.0) + (level * 4.0)) * 0.8;
+    for (int i = 0; i < points; i++) {
+      final sampleIndex = math.min(samples.length - 1, i * step);
+      final sample = (samples[sampleIndex] * gain).clamp(-1.0, 1.0).toDouble();
+      final t = points <= 1 ? 0.0 : i / (points - 1);
       final x = drawRect.left + (drawRect.width * t);
-      final y = centerY - bloom - shimmer;
+      final y = centerY - (sample * drawRect.height * 0.43);
       if (!moved) {
-        topHalf.moveTo(x, y);
+        path.moveTo(x, y);
+        fillPath.moveTo(x, centerY);
+        fillPath.lineTo(x, y);
         moved = true;
       } else {
-        topHalf.lineTo(x, y);
+        path.lineTo(x, y);
+        fillPath.lineTo(x, y);
       }
     }
-    canvas.drawPath(topHalf, linePaint);
+    fillPath
+      ..lineTo(drawRect.right, centerY)
+      ..close();
+
+    const accent = Color(0xFF62D8FF);
+    canvas.drawLine(
+      Offset(drawRect.left, centerY),
+      Offset(drawRect.right, centerY),
+      Paint()
+        ..color = Colors.white.withValues(alpha: 0.07)
+        ..strokeWidth = 1,
+    );
+    canvas.drawPath(
+      fillPath,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: <Color>[
+            accent.withValues(alpha: 0.18 + (level * 0.10)),
+            accent.withValues(alpha: 0.03),
+            Colors.transparent,
+          ],
+        ).createShader(drawRect),
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = accent.withValues(alpha: 0.24)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 5
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4),
+    );
+    canvas.drawPath(
+      path,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          colors: <Color>[
+            accent.withValues(alpha: 0.78),
+            Colors.white.withValues(alpha: 0.90),
+            accent.withValues(alpha: 0.78),
+          ],
+        ).createShader(drawRect)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.45
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
   }
 
   @override
   bool shouldRepaint(covariant _TopBarMasterVisualizerPainter oldDelegate) {
-    return !listEquals(oldDelegate.spectrumDb, spectrumDb) ||
+    late final List<double> oldWaveformSamples;
+    late final List<double> oldSpectrumDb;
+    try {
+      oldWaveformSamples = oldDelegate.waveformSamples;
+      oldSpectrumDb = oldDelegate.spectrumDb;
+    } catch (_) {
+      return true;
+    }
+    return !listEquals(oldWaveformSamples, waveformSamples) ||
+        !listEquals(oldSpectrumDb, spectrumDb) ||
         oldDelegate.analyzerSampleRate != analyzerSampleRate ||
         oldDelegate.level != level ||
+        oldDelegate.meterFrame != meterFrame ||
         oldDelegate.clipped != clipped ||
         oldDelegate.mode != mode;
   }
@@ -60444,6 +69367,14 @@ class _TopBarSpectrumAnalyzer {
   static const double _minDb = -90.0;
   static const double _maxDb = 0.0;
   static const double _minHz = 30.0;
+  static const double _maxHz = 18000.0;
+  static const List<double> bandMarkerHz = <double>[
+    80.0,
+    300.0,
+    1200.0,
+    5000.0,
+    12000.0,
+  ];
   static final Map<int, FFT> _fftCache = <int, FFT>{};
 
   static FFT _fftForSize(int size) =>
@@ -60516,9 +69447,9 @@ class _TopBarSpectrumAnalyzer {
   }
 
   static double normalizedToFrequency(double t, double sampleRate) {
-    final nyquist = math.max(22050.0, sampleRate * 0.5);
+    final maxHz = _displayMaxHz(sampleRate);
     final minLog = math.log(_minHz);
-    final maxLog = math.log(nyquist);
+    final maxLog = math.log(maxHz);
     return math.exp(minLog + ((maxLog - minLog) * t));
   }
 
@@ -60527,10 +69458,10 @@ class _TopBarSpectrumAnalyzer {
     required Rect rect,
     required double sampleRate,
   }) {
-    final nyquist = math.max(22050.0, sampleRate * 0.5);
-    final clampedHz = hz.clamp(_minHz, nyquist);
+    final maxHz = _displayMaxHz(sampleRate);
+    final clampedHz = hz.clamp(_minHz, maxHz);
     final minLog = math.log(_minHz);
-    final maxLog = math.log(nyquist);
+    final maxLog = math.log(maxHz);
     final t = (math.log(clampedHz) - minLog) / (maxLog - minLog);
     return rect.left + (rect.width * t.clamp(0.0, 1.0));
   }
@@ -60547,14 +69478,34 @@ class _TopBarSpectrumAnalyzer {
     final nyquist = sampleRate * 0.5;
     final binHz = fftSize > 0 ? sampleRate / fftSize : 0.0;
     if (binHz <= 0.0 || hz > nyquist) return _minDb;
-    final idx = hz / binHz;
-    final maxIdx = spectrumDb.length - 1;
+    final maxUsableIdx = math.max(1, spectrumDb.length - 4);
+    final idx = (hz / binHz).clamp(1.0, maxUsableIdx.toDouble()).toDouble();
     if (idx <= 1.0) return spectrumDb[1];
-    if (idx >= maxIdx) return spectrumDb[maxIdx];
-    final i0 = idx.floor();
-    final i1 = math.min(maxIdx, i0 + 1);
-    final t = idx - i0;
-    return spectrumDb[i0] * (1.0 - t) + spectrumDb[i1] * t;
+
+    final radius = hz >= 8000.0
+        ? 5
+        : hz >= 4000.0
+            ? 3
+            : 2;
+    final center = idx.round().clamp(1, maxUsableIdx);
+    final start = math.max(1, center - radius);
+    final end = math.min(maxUsableIdx, center + radius);
+    var magSum = 0.0;
+    var weightSum = 0.0;
+    for (int i = start; i <= end; i++) {
+      final distance = (i - idx).abs();
+      final weight = math.max(0.15, 1.0 - (distance / (radius + 1.0)));
+      final db = spectrumDb[i].clamp(_minDb, 6.0).toDouble();
+      magSum += math.pow(10.0, db / 20.0) * weight;
+      weightSum += weight;
+    }
+    if (weightSum <= 0.0 || magSum <= 0.0) return _minDb;
+    return (20.0 * _log10(magSum / weightSum)).clamp(_minDb, 6.0).toDouble();
+  }
+
+  static double _displayMaxHz(double sampleRate) {
+    final nyquist = sampleRate > 1000.0 ? sampleRate * 0.5 : 22050.0;
+    return math.min(_maxHz, math.max(12000.0, nyquist * 0.82)).toDouble();
   }
 
   static double dbToY(double db, Rect rect) {
@@ -60725,6 +69676,131 @@ class _TrackGainStagingDbMeterPainter extends CustomPainter {
   bool shouldRepaint(covariant _TrackGainStagingDbMeterPainter oldDelegate) {
     return oldDelegate.f != f ||
         oldDelegate.showClipIndicator != showClipIndicator;
+  }
+}
+
+class _TabletRightPanelEdgeHandleTabPainter extends CustomPainter {
+  const _TabletRightPanelEdgeHandleTabPainter({
+    required this.active,
+  });
+
+  final bool active;
+
+  Path _tabPath(Size size) {
+    final w = size.width;
+    final h = size.height;
+    final right = w - 0.7;
+    final top = 2.5;
+    final bottom = h - 2.5;
+    const left = 1.6;
+
+    return Path()
+      ..moveTo(right, top)
+      ..lineTo(right, bottom)
+      ..lineTo(left + 10.0, bottom - 7.0)
+      ..quadraticBezierTo(left + 3.0, bottom - 11.5, left + 2.2, bottom - 20.0)
+      ..lineTo(left + 2.2, top + 20.0)
+      ..quadraticBezierTo(left + 3.0, top + 11.5, left + 10.0, top + 7.0)
+      ..close();
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = _tabPath(size);
+    canvas.drawShadow(
+      path,
+      Colors.black.withValues(alpha: active ? 0.30 : 0.20),
+      active ? 5.0 : 3.0,
+      true,
+    );
+
+    final fillPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.centerLeft,
+        end: Alignment.centerRight,
+        colors: active
+            ? const <Color>[
+                Color(0xFF59626A),
+                Color(0xFF53606B),
+                Color(0xFF485865),
+              ]
+            : const <Color>[
+                Color(0xFF515E68),
+                Color(0xFF4A5864),
+                Color(0xFF43525E),
+              ],
+      ).createShader(Offset.zero & size);
+    canvas.drawPath(path, fillPaint);
+
+    if (active) {
+      canvas.drawPath(
+        path,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 4.0
+          ..color = const Color(0xFFFFA83D).withValues(alpha: 0.18)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
+      );
+    }
+
+    final edgePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = active ? 1.15 : 0.8
+      ..color = active
+          ? const Color(0xFFFFB45B).withValues(alpha: 0.58)
+          : Colors.white.withValues(alpha: 0.16);
+    canvas.drawPath(path, edgePaint);
+
+    final innerHighlight = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.75
+      ..color = Colors.white.withValues(alpha: active ? 0.18 : 0.11);
+    final insetPath = Path()
+      ..moveTo(size.width - 3.4, 5.0)
+      ..lineTo(size.width - 3.4, size.height - 5.0);
+    canvas.drawPath(insetPath, innerHighlight);
+  }
+
+  @override
+  bool shouldRepaint(
+    covariant _TabletRightPanelEdgeHandleTabPainter oldDelegate,
+  ) {
+    return oldDelegate.active != active;
+  }
+}
+
+class _TabletRightPanelEdgeHandleMarkPainter extends CustomPainter {
+  const _TabletRightPanelEdgeHandleMarkPainter({
+    required this.active,
+  });
+
+  final bool active;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final gripColor =
+        active ? const Color(0xFFFFC06A) : Colors.white.withValues(alpha: 0.52);
+    final center = size.center(Offset.zero);
+    final paint = Paint()
+      ..color = gripColor
+      ..strokeWidth = active ? 1.65 : 1.35
+      ..strokeCap = StrokeCap.round;
+    final top = center.dy - 13.0;
+    final bottom = center.dy + 13.0;
+    for (final dx in <double>[-4.6, 0.0, 4.6]) {
+      canvas.drawLine(
+        Offset(center.dx + dx, top),
+        Offset(center.dx + dx, bottom),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(
+    covariant _TabletRightPanelEdgeHandleMarkPainter oldDelegate,
+  ) {
+    return oldDelegate.active != active;
   }
 }
 

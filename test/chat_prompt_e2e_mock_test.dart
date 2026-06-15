@@ -31,6 +31,7 @@ class _FakeProjectStateBuilder extends ProjectStateBuilder {
     double masterPan0to1 = 0.5,
     Map<int, String> roleOverrides = const {},
     List<TimelineRow> timelineRows = const <TimelineRow>[],
+    List<TrackGroup> trackGroups = const <TrackGroup>[],
   }) async {
     final rowStates = List<RowState>.generate(rows, (row) {
       final rowTracks = audioTracks.where((t) => t.rowIndex == row).toList();
@@ -82,6 +83,7 @@ class _FakeProjectStateBuilder extends ProjectStateBuilder {
       masterPan0to1: masterPan0to1,
       maxRows: rows,
       rows: rowStates,
+      trackGroups: trackGroups,
       masterEffects: const <EffectState>[],
       overlapMatrix:
           List<List<int>>.generate(rows, (_) => List<int>.filled(rows, 0)),
@@ -227,6 +229,74 @@ void main() {
       expect(data['row_index'], 0);
       expect(target['row_index'], 0);
       expect(target['effect_name'], 'Gain');
+    });
+
+    test('row group edit aliases normalize to executable actions', () async {
+      final result = await _runPrompt(
+        prompt: 'group tracks 1 and 2 as drums',
+        output: [
+          {
+            'type': 'function_call',
+            'name': 'daw_assistant_actions',
+            'arguments': {
+              'actions': [
+                {
+                  'type': 'row_group_edit',
+                  'data': {
+                    'operation': 'group_rows',
+                    'row_indices': [0, 1],
+                    'group_name': 'Drums',
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      );
+
+      expect(result.hasAssistantActions, isTrue);
+      expect(result.assistantActions, hasLength(1));
+      final action = result.assistantActions.single;
+      expect(action.type, 'row_group_edit');
+      final data = Map<String, dynamic>.from(action.data);
+      expect(data['operation'], 'create');
+      expect(data['row_indices'], [0, 1]);
+      expect(data['group_name'], 'Drums');
+    });
+
+    test('row color edit with color name remains executable', () async {
+      final result = await _runPrompt(
+        prompt: 'make track 1 orange',
+        output: [
+          {
+            'type': 'function_call',
+            'name': 'daw_assistant_actions',
+            'arguments': {
+              'actions': [
+                {
+                  'type': 'row_color_edit',
+                  'data': {
+                    'operation': 'set',
+                    'target': {'track': 1},
+                    'color_name': 'orange',
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      );
+
+      expect(result.hasAssistantActions, isTrue);
+      expect(result.assistantActions, hasLength(1));
+      final action = result.assistantActions.single;
+      expect(action.type, 'row_color_edit');
+      final data = Map<String, dynamic>.from(action.data);
+      final target = Map<String, dynamic>.from(data['target'] as Map);
+      expect(data['operation'], 'set');
+      expect(data['row_index'], 0);
+      expect(target['row_index'], 0);
+      expect(data['color_name'], 'orange');
     });
 
     test('multi-call DAW tool output keeps all actions instead of falling back',

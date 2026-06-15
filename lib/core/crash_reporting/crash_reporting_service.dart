@@ -28,7 +28,7 @@ class CrashReportingService {
       (options) {
         options.dsn = AnalyticsConfig.sentryDsn;
         options.environment = AnalyticsConfig.environment;
-        options.debug = !kReleaseMode;
+        options.debug = false;
         options.enableAutoSessionTracking = kReleaseMode;
         options.tracesSampleRate = 0.0;
         options.beforeSend = (event, hint) {

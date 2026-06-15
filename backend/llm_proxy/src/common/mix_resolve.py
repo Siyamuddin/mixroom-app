@@ -1105,7 +1105,7 @@ def _goal_target_scope(goal: dict[str, Any]) -> str:
     target = goal.get("target")
     if isinstance(target, dict):
         scope = str(target.get("scope") or "").strip().lower()
-        if scope in {"auto", "row", "master"}:
+        if scope in {"auto", "row", "group", "master"}:
             return scope
     return "auto"
 

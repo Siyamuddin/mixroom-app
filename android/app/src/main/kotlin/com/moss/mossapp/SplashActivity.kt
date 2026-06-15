@@ -7,6 +7,7 @@ import androidx.activity.enableEdgeToEdge
 
 class SplashActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
+    OrientationPolicy.apply(this)
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
     setContentView(R.layout.activity_splash)

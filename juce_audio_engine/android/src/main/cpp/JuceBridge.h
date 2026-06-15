@@ -95,6 +95,9 @@ extern "C"
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_isRowMutedJNI(JNIEnv *, jclass, jint);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setRowPanAutomationPointsJNI(JNIEnv *, jclass, jint, jobject);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setRowPanJNI(JNIEnv *, jclass, jint, jfloat);
+    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_configureTrackGroupsJNI(JNIEnv *, jclass, jobject);
+    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_assignRowToGroupJNI(JNIEnv *, jclass, jint, jstring);
+    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setTrackGroupMixStateJNI(JNIEnv *, jclass, jstring, jfloat, jfloat, jboolean, jboolean);
 
     // Master FX and controls
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_insertMasterEffectJNI(JNIEnv *, jclass, jstring);
@@ -122,6 +125,7 @@ extern "C"
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMetronomeEnabledJNI(JNIEnv *, jclass, jboolean);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMetronomeVolumeJNI(JNIEnv *, jclass, jfloat);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMetronomeBpmJNI(JNIEnv *, jclass, jdouble);
+    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMetronomeTimeSignatureJNI(JNIEnv *, jclass, jint, jint);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMetronomeTransportMsJNI(JNIEnv *, jclass, jdouble);
 
     // Offline analysis

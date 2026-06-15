@@ -924,6 +924,27 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSArray *points = args[@"points"];
         [JuceBridge setRowPanAutomationPointsObjC:row points:points];
         result(nil);
+    } else if ([call.method isEqualToString:@"configureTrackGroups"]) {
+        NSArray *groups = args[@"groups"];
+        [JuceBridge configureTrackGroupsObjC:groups];
+        result(nil);
+    } else if ([call.method isEqualToString:@"assignRowToGroup"]) {
+        NSInteger row = [args[@"row"] integerValue];
+        NSString *groupId = args[@"groupId"] ?: @"";
+        [JuceBridge assignRowToGroupObjC:row groupId:groupId];
+        result(nil);
+    } else if ([call.method isEqualToString:@"setTrackGroupMixState"]) {
+        NSString *groupId = args[@"groupId"] ?: @"";
+        float gain = args[@"gain"] != nil ? [args[@"gain"] floatValue] : 2.0f;
+        float pan = args[@"pan"] != nil ? [args[@"pan"] floatValue] : 0.5f;
+        BOOL muted = args[@"muted"] != nil ? [args[@"muted"] boolValue] : NO;
+        BOOL soloed = args[@"soloed"] != nil ? [args[@"soloed"] boolValue] : NO;
+        [JuceBridge setTrackGroupMixStateObjC:groupId
+                                         gain:gain
+                                          pan:pan
+                                        muted:muted
+                                       soloed:soloed];
+        result(nil);
 
     // ----------------------------------------
     // NEW MASTER BUS API
@@ -1174,6 +1195,11 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     }
     else if ([call.method isEqualToString:@"setMetronomeBpm"]) {
         [JuceBridge setMetronomeBpmObjC:[args[@"bpm"] doubleValue]];
+        result(nil);
+    }
+    else if ([call.method isEqualToString:@"setMetronomeTimeSignature"]) {
+        [JuceBridge setMetronomeTimeSignatureObjC:[args[@"numerator"] integerValue]
+                                      denominator:[args[@"denominator"] integerValue]];
         result(nil);
     }
     else if ([call.method isEqualToString:@"setMetronomeTransportMs"]) {

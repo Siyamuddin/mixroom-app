@@ -201,80 +201,87 @@ class _AccountSubscriptionSurfaceState
         .where(_isEducationStudentOrganization)
         .toList(growable: false);
 
-    return _SectionCard(
-      icon: Icons.workspace_premium_rounded,
-      title: _t(context, 'Plan & Billing'),
-      subtitle: _t(context, 'Manage your current plan and available upgrades.'),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (kDebugMode && debugMessages.isNotEmpty) ...[
-            _DebugBanner(messages: debugMessages),
-            const SizedBox(height: 12),
-          ],
-          _PlanHero(
-            entitlement: entitlement,
-            organizations: widget.entitlementService.effectiveOrganizations,
-            isBusy: busy,
-            onManageSubscription: widget.onManageSubscription,
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 620),
+        child: _SectionCard(
+          icon: Icons.workspace_premium_rounded,
+          title: _t(context, 'Plan & Billing'),
+          subtitle:
+              _t(context, 'Manage your current plan and available upgrades.'),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (kDebugMode && debugMessages.isNotEmpty) ...[
+                _DebugBanner(messages: debugMessages),
+                const SizedBox(height: 12),
+              ],
+              _PlanHero(
+                entitlement: entitlement,
+                organizations: widget.entitlementService.effectiveOrganizations,
+                isBusy: busy,
+                onManageSubscription: widget.onManageSubscription,
+              ),
+              if (widget.entitlementService.billingAccount != null) ...[
+                const SizedBox(height: 10),
+                _BillingDetailsPanel(
+                  billing: widget.entitlementService.billingAccount!,
+                  entitlement: entitlement,
+                  isBusy: busy,
+                  onManageSubscription: widget.onManageSubscription,
+                ),
+              ],
+              const SizedBox(height: 12),
+              _BillingActions(
+                isBusy: busy,
+                isRefreshing: widget.entitlementService.isAccountSurfaceLoading,
+                onRestorePurchases: widget.onRestorePurchases,
+                onContactSupport: widget.onContactSupport,
+                onRefresh: widget.onRefresh,
+              ),
+              const SizedBox(height: 14),
+              _PlansPanel(
+                entitlement: entitlement,
+                catalog: catalog,
+                products: products,
+                platformProvider: widget.platformProvider,
+                regionCode: widget.regionCode,
+                iapService: widget.iapService,
+                isBusy: busy,
+                onManageSubscription: widget.onManageSubscription,
+                onSelectProduct: widget.onSelectProduct,
+              ),
+              if (accessSummary.hasAnyAccess) ...[
+                const SizedBox(height: 14),
+                _TeamAccessSummary(
+                  accessSummary: accessSummary,
+                  organizations:
+                      widget.entitlementService.effectiveOrganizations,
+                  onManageSubscription: widget.onManageSubscription,
+                  onOpenEducationDashboard: _openEducationDashboard,
+                ),
+              ],
+              if (studentEducationOrganizations.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                _EducationStudentAccessPanel(
+                  organization: studentEducationOrganizations.first,
+                ),
+              ],
+              if (widget.entitlementService.effectiveOrganizations
+                      .where(_isEducationTeacherOrganization)
+                      .isEmpty &&
+                  studentEducationOrganizations.isEmpty) ...[
+                const SizedBox(height: 14),
+                _EducationInviteAcceptPanel(
+                  controller: _educationAcceptController,
+                  isBusy: _educationAcceptBusy,
+                  message: _educationAcceptMessage,
+                  onAccept: _acceptEducationInvite,
+                ),
+              ],
+            ],
           ),
-          if (widget.entitlementService.billingAccount != null) ...[
-            const SizedBox(height: 10),
-            _BillingDetailsPanel(
-              billing: widget.entitlementService.billingAccount!,
-              entitlement: entitlement,
-              isBusy: busy,
-              onManageSubscription: widget.onManageSubscription,
-            ),
-          ],
-          const SizedBox(height: 12),
-          _BillingActions(
-            isBusy: busy,
-            isRefreshing: widget.entitlementService.isAccountSurfaceLoading,
-            onRestorePurchases: widget.onRestorePurchases,
-            onContactSupport: widget.onContactSupport,
-            onRefresh: widget.onRefresh,
-          ),
-          const SizedBox(height: 14),
-          _PlansPanel(
-            entitlement: entitlement,
-            catalog: catalog,
-            products: products,
-            platformProvider: widget.platformProvider,
-            regionCode: widget.regionCode,
-            iapService: widget.iapService,
-            isBusy: busy,
-            onManageSubscription: widget.onManageSubscription,
-            onSelectProduct: widget.onSelectProduct,
-          ),
-          if (accessSummary.hasAnyAccess) ...[
-            const SizedBox(height: 14),
-            _TeamAccessSummary(
-              accessSummary: accessSummary,
-              organizations: widget.entitlementService.effectiveOrganizations,
-              onManageSubscription: widget.onManageSubscription,
-              onOpenEducationDashboard: _openEducationDashboard,
-            ),
-          ],
-          if (studentEducationOrganizations.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            _EducationStudentAccessPanel(
-              organization: studentEducationOrganizations.first,
-            ),
-          ],
-          if (widget.entitlementService.effectiveOrganizations
-                  .where(_isEducationTeacherOrganization)
-                  .isEmpty &&
-              studentEducationOrganizations.isEmpty) ...[
-            const SizedBox(height: 14),
-            _EducationInviteAcceptPanel(
-              controller: _educationAcceptController,
-              isBusy: _educationAcceptBusy,
-              message: _educationAcceptMessage,
-              onAccept: _acceptEducationInvite,
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }
@@ -543,7 +550,7 @@ class _PlanHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _AccessOverview(
+    return _EntitlementOverviewCard(
       entitlement: entitlement,
       organizations: organizations,
       isBusy: isBusy,
@@ -552,8 +559,8 @@ class _PlanHero extends StatelessWidget {
   }
 }
 
-class _AccessOverview extends StatelessWidget {
-  const _AccessOverview({
+class _EntitlementOverviewCard extends StatelessWidget {
+  const _EntitlementOverviewCard({
     required this.entitlement,
     required this.organizations,
     required this.isBusy,
@@ -568,164 +575,455 @@ class _AccessOverview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final personal = _personalAccessDisplay(context, entitlement);
+    final purchaseContext = _personalPurchaseContext(entitlement);
+    final planCode = purchaseContext.planCode.trim().isNotEmpty
+        ? purchaseContext.planCode.trim().toLowerCase()
+        : entitlement.planCode.trim().toLowerCase();
+    final accent = _planAccentColor(planCode);
+    final marketing = _planMarketingContent(planCode);
+    final status = _subscriptionStatusLabel(context, entitlement.status);
     final activeOrganizations = _activeTeamOrganizations(organizations);
-    return Column(
-      children: [
-        _AccessOverviewRow(
-          icon: Icons.person_rounded,
-          label: _t(context, 'Personal plan'),
-          value: personal.title,
-          detail: personal.detail,
-          actionLabel: personal.actionLabel,
-          actionIcon: personal.actionIcon,
-          onActionPressed: personal.canManage && !isBusy
-              ? () => onManageSubscription(
-                    provider: personal.actionProvider,
-                    managementChannel: personal.actionManagementChannel,
-                  )
-              : null,
-        ),
-        for (final organization in activeOrganizations) ...[
-          const SizedBox(height: 8),
-          Builder(
-            builder: (context) {
-              final teamAction = _teamAccessAction(organization);
-              return _AccessOverviewRow(
-                icon: _teamAccessIcon(organization),
-                label: _t(context, 'Team access'),
-                value: _teamAccessTitle(context, organization),
-                detail: _teamAccessDetail(context, organization),
-                actionLabel: teamAction.actionLabel.isEmpty
-                    ? ''
-                    : _t(context, teamAction.actionLabel),
-                actionIcon: teamAction.actionIcon,
-                onActionPressed: teamAction.canManage && !isBusy
-                    ? () => onManageSubscription(
-                          provider: teamAction.actionProvider,
-                          managementChannel: teamAction.actionManagementChannel,
-                        )
-                    : null,
-              );
-            },
-          ),
-        ],
-      ],
-    );
-  }
-}
+    final canManagePersonal = personal.canManage && !isBusy;
 
-class _AccessOverviewRow extends StatelessWidget {
-  const _AccessOverviewRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.detail,
-    required this.actionLabel,
-    required this.actionIcon,
-    required this.onActionPressed,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final String detail;
-  final String actionLabel;
-  final IconData actionIcon;
-  final VoidCallback? onActionPressed;
-
-  @override
-  Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(11, 10, 11, 10),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.09)),
+        color: const Color(0xFFF4F4F4).withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: const Color(0xFFF4F4F4).withValues(alpha: 0.16),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.20),
+            blurRadius: 24,
+            offset: const Offset(0, 14),
+          ),
+        ],
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 30,
-                height: 30,
+                width: 44,
+                height: 44,
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(9),
+                  color: accent.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: accent.withValues(alpha: 0.28)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: accent.withValues(alpha: 0.16),
+                      blurRadius: 18,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
                 ),
-                child: Icon(icon, color: const Color(0xFFBFD7FF), size: 17),
+                child: Icon(_planIcon(planCode), color: accent, size: 22),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      label,
+                      _t(context, 'Current tier'),
                       style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.66),
-                        fontSize: 11.1,
+                        color: Colors.white.withValues(alpha: 0.62),
+                        fontSize: 11.4,
                         fontWeight: FontWeight.w700,
+                        height: 1.1,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      value,
+                      personal.title,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 13.4,
+                        fontSize: 24,
                         fontWeight: FontWeight.w800,
-                        height: 1.18,
+                        height: 1.05,
                       ),
                     ),
-                    if (detail.trim().isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        detail,
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.58),
-                          fontSize: 11.4,
-                          fontWeight: FontWeight.w600,
-                          height: 1.25,
-                        ),
+                    const SizedBox(height: 3),
+                    Text(
+                      marketing.subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: accent.withValues(alpha: 0.92),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        height: 1.2,
                       ),
-                    ],
+                    ),
                   ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                status,
+                style: TextStyle(
+                  color: entitlement.isAccessActive
+                      ? const Color(0xFF8CFFCD)
+                      : const Color(0xFFFFC06F),
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w800,
+                  height: 1.2,
                 ),
               ),
             ],
           ),
-          if (actionLabel.trim().isNotEmpty) ...[
+          if (personal.detail.trim().isNotEmpty ||
+              personal.actionLabel.trim().isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                if (personal.detail.trim().isNotEmpty)
+                  Expanded(
+                    child: Text(
+                      personal.detail,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.68),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        height: 1.28,
+                      ),
+                    ),
+                  ),
+                if (personal.actionLabel.trim().isNotEmpty) ...[
+                  const SizedBox(width: 10),
+                  _CompactManageButton(
+                    label: personal.actionLabel,
+                    icon: personal.actionIcon,
+                    onPressed: canManagePersonal
+                        ? () => onManageSubscription(
+                              provider: personal.actionProvider,
+                              managementChannel:
+                                  personal.actionManagementChannel,
+                            )
+                        : null,
+                  ),
+                ],
+              ],
+            ),
+          ],
+          const SizedBox(height: 16),
+          _PromptUsageCard(entitlement: entitlement),
+          if (activeOrganizations.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Container(
+              height: 1,
+              color: Colors.white.withValues(alpha: 0.08),
+            ),
+            const SizedBox(height: 13),
+            Text(
+              _t(context, 'Team access'),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                height: 1.2,
+              ),
+            ),
             const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: onActionPressed,
-                icon: Icon(actionIcon, size: 15),
-                label: Text(actionLabel),
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  disabledForegroundColor: Colors.white.withValues(alpha: 0.34),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 9,
-                    vertical: 8,
-                  ),
-                  textStyle: const TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w800,
-                  ),
+            for (final organization in activeOrganizations) ...[
+              _TeamEntitlementLine(
+                organization: organization,
+                isBusy: isBusy,
+                onManageSubscription: onManageSubscription,
+              ),
+              if (organization != activeOrganizations.last)
+                const SizedBox(height: 7),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _CompactManageButton extends StatelessWidget {
+  const _CompactManageButton({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 15),
+      label: Text(label),
+      style: TextButton.styleFrom(
+        foregroundColor: Colors.white,
+        disabledForegroundColor: Colors.white.withValues(alpha: 0.34),
+        backgroundColor: Colors.white.withValues(alpha: 0.08),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+        minimumSize: const Size(0, 0),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        textStyle: const TextStyle(
+          fontSize: 11.6,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+class _PromptUsageCard extends StatelessWidget {
+  const _PromptUsageCard({required this.entitlement});
+
+  final EntitlementSnapshot entitlement;
+
+  @override
+  Widget build(BuildContext context) {
+    final limits = entitlement.limits;
+    final daily = _limitReadout(limits['ai_prompts_daily']);
+    final weekly = _limitReadout(limits['ai_prompts_weekly']);
+    final modelTier = _modelTierReadout(context, limits['ai_model_tier']);
+    final advanced = _advancedPromptReadout(context, limits);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F4F4).withValues(alpha: 0.20),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: const Color(0xFFF4F4F4).withValues(alpha: 0.12),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _t(context, 'Prompt Usage'),
+            style: const TextStyle(
+              color: Color(0xFFF4F4F4),
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 11),
+          Row(
+            children: [
+              Expanded(
+                child: _PromptAllowanceMetric(
+                  label: _t(context, 'Daily'),
+                  value: daily,
                 ),
               ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _PromptAllowanceMetric(
+                  label: _t(context, 'Weekly'),
+                  value: weekly,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 11),
+          _PromptUsageDetailRow(
+            label: _t(context, 'Model access'),
+            value: modelTier,
+          ),
+          if (advanced.isNotEmpty) ...[
+            const SizedBox(height: 7),
+            _PromptUsageDetailRow(
+              label: _t(context, 'Advanced pool'),
+              value: advanced,
             ),
           ],
         ],
       ),
+    );
+  }
+}
+
+class _PromptAllowanceMetric extends StatelessWidget {
+  const _PromptAllowanceMetric({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.58),
+            fontSize: 11.2,
+            fontWeight: FontWeight.w700,
+            height: 1.2,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+            height: 1.1,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PromptUsageDetailRow extends StatelessWidget {
+  const _PromptUsageDetailRow({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 94,
+          child: Text(
+            label,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.56),
+              fontSize: 11.4,
+              fontWeight: FontWeight.w700,
+              height: 1.25,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            textAlign: TextAlign.right,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.86),
+              fontSize: 11.6,
+              fontWeight: FontWeight.w700,
+              height: 1.25,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _TeamEntitlementLine extends StatelessWidget {
+  const _TeamEntitlementLine({
+    required this.organization,
+    required this.isBusy,
+    required this.onManageSubscription,
+  });
+
+  final OrganizationAccessItem organization;
+  final bool isBusy;
+  final ManageSubscriptionAction onManageSubscription;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = _planAccentColor(organization.planCode);
+    final planLabel = _localizedPlanLabel(
+      context,
+      planCode: organization.planCode,
+      fallback: organization.planLabel,
+    );
+    final role = _localizedRoleLabel(context, organization.role);
+    final teamAction = _teamAccessAction(organization);
+    final canManage = teamAction.canManage && !isBusy;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(
+            color: accent.withValues(alpha: 0.14),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(_teamAccessIcon(organization), color: accent, size: 16),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                organization.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                  height: 1.2,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                '$planLabel · $role',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.58),
+                  fontSize: 11.3,
+                  fontWeight: FontWeight.w600,
+                  height: 1.2,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (teamAction.actionLabel.isNotEmpty) ...[
+          const SizedBox(width: 8),
+          IconButton(
+            tooltip: _t(context, teamAction.actionLabel),
+            onPressed: canManage
+                ? () => onManageSubscription(
+                      provider: teamAction.actionProvider,
+                      managementChannel: teamAction.actionManagementChannel,
+                    )
+                : null,
+            icon: Icon(teamAction.actionIcon, size: 17),
+            color: Colors.white.withValues(alpha: 0.82),
+            disabledColor: Colors.white.withValues(alpha: 0.30),
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+          ),
+        ],
+      ],
     );
   }
 }
@@ -861,11 +1159,13 @@ class _BillingDetailsPanel extends StatelessWidget {
         billing.manageUrl.trim().isNotEmpty || entitlement.isPaidPlan;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(11, 10, 11, 10),
+      padding: const EdgeInsets.fromLTRB(13, 12, 13, 12),
       decoration: BoxDecoration(
-        color: const Color(0xFF14233D).withValues(alpha: 0.42),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.09)),
+        color: const Color(0xFFF4F4F4).withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: const Color(0xFFF4F4F4).withValues(alpha: 0.10),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -891,14 +1191,11 @@ class _BillingDetailsPanel extends StatelessWidget {
             ],
           ),
           if (details.isNotEmpty) ...[
-            const SizedBox(height: 9),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: details
-                  .map((item) => _BillingDetailChip(item: item))
-                  .toList(growable: false),
-            ),
+            const SizedBox(height: 10),
+            for (final item in details) ...[
+              _BillingDetailLine(item: item),
+              if (item != details.last) const SizedBox(height: 7),
+            ],
           ],
           if (hasProviderManagedLink) ...[
             const SizedBox(height: 9),
@@ -941,49 +1238,43 @@ class _BillingDetailItem {
   final String value;
 }
 
-class _BillingDetailChip extends StatelessWidget {
-  const _BillingDetailChip({required this.item});
+class _BillingDetailLine extends StatelessWidget {
+  const _BillingDetailLine({required this.item});
 
   final _BillingDetailItem item;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(minWidth: 98, maxWidth: 220),
-      padding: const EdgeInsets.fromLTRB(9, 7, 9, 7),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Text(
             item.label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.56),
-              fontSize: 10.4,
+              color: Colors.white.withValues(alpha: 0.54),
+              fontSize: 11.3,
               fontWeight: FontWeight.w700,
+              height: 1.25,
             ),
           ),
-          const SizedBox(height: 2),
-          Text(
+        ),
+        const SizedBox(width: 12),
+        Flexible(
+          child: Text(
             item.value,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Colors.white,
+            textAlign: TextAlign.right,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.86),
               fontSize: 11.8,
-              fontWeight: FontWeight.w800,
-              height: 1.18,
+              fontWeight: FontWeight.w700,
+              height: 1.25,
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -1021,7 +1312,7 @@ String _paymentMethodLabel(BillingPaymentMethodDisplay method) {
   return expiry.trim();
 }
 
-class _PlansPanel extends StatelessWidget {
+class _PlansPanel extends StatefulWidget {
   const _PlansPanel({
     required this.entitlement,
     required this.catalog,
@@ -1045,58 +1336,123 @@ class _PlansPanel extends StatelessWidget {
   final ValueChanged<BillingProductDefinition> onSelectProduct;
 
   @override
+  State<_PlansPanel> createState() => _PlansPanelState();
+}
+
+class _PlansPanelState extends State<_PlansPanel> {
+  late final PageController _pageController;
+  int _pageIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController(viewportFraction: 0.94);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (products.isEmpty) {
+    final cards = _planDisplayCards(widget.catalog, widget.products);
+    if (cards.isEmpty) {
       return _LoadingPlansCard(
-        message: catalog == null
+        message: widget.catalog == null
             ? _t(context, 'Plans are loading.')
             : _t(context, 'No plans are currently available for this device.'),
       );
     }
 
+    final currentIndex = _pageIndex.clamp(0, cards.length - 1);
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _SubsectionLabel(label: _t(context, 'Available plans')),
-        const SizedBox(height: 10),
-        ...products.map(
-          (product) {
-            final purchaseContext = _purchaseContextForProduct(
-              entitlement,
-              catalog,
-              product,
-            );
-            final isCurrentPlan = _isCurrentPlan(purchaseContext, product);
-            final managedChange = _requiresManagedPlanChange(
-              purchaseContext,
-              catalog,
-              product,
-              platformProvider,
-            );
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _ProductCard(
-                product: product,
-                plan: catalog?.planByCode(product.planCode),
-                storePrice: _storePriceForProduct(catalog, product),
-                actionLabel: _actionLabel(
-                  context,
-                  purchaseContext,
-                  catalog,
-                  product,
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _t(context, 'Explore More Plans'),
+                  style: const TextStyle(
+                    color: Color(0xFFF4F4F4),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    height: 1.35,
+                  ),
                 ),
-                isCurrentPlan: isCurrentPlan,
-                isBusy: isBusy,
-                onPressed: isBusy
-                    ? null
-                    : managedChange
-                        ? () => onManageSubscription(
-                              provider: purchaseContext.sourceProvider,
-                              managementChannel:
-                                  purchaseContext.managementChannel,
-                            )
-                        : () => onSelectProduct(product),
               ),
+              Text(
+                '${currentIndex + 1}/${cards.length}',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.54),
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final carouselWidth = constraints.maxWidth.clamp(300.0, 382.0);
+            return Center(
+              child: SizedBox(
+                width: carouselWidth,
+                height: 484,
+                child: PageView.builder(
+                  controller: _pageController,
+                  physics: const BouncingScrollPhysics(),
+                  padEnds: false,
+                  itemCount: cards.length,
+                  onPageChanged: (index) {
+                    setState(() => _pageIndex = index);
+                    HapticFeedback.selectionClick();
+                  },
+                  itemBuilder: (context, index) {
+                    final card = cards[index];
+                    final planIsCurrent = _isCurrentPlanCard(card);
+                    return AnimatedPadding(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      padding: EdgeInsets.only(
+                        right: index == cards.length - 1 ? 0 : 10,
+                        top: index == currentIndex ? 0 : 8,
+                        bottom: index == currentIndex ? 0 : 8,
+                      ),
+                      child: _PlanCarouselCard(
+                        data: card,
+                        planIsCurrent: planIsCurrent,
+                        priceLabel: _priceLabelForCard(context, card),
+                        billingCaption: _billingCaptionForCard(context, card),
+                        isBusy: widget.isBusy,
+                        productActions: _productActionsForCard(context, card),
+                        fallbackAction: _fallbackActionForCard(
+                          context,
+                          card,
+                          planIsCurrent,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+        _PlanPageIndicator(
+          count: cards.length,
+          currentIndex: currentIndex,
+          onSelect: (index) {
+            _pageController.animateToPage(
+              index,
+              duration: const Duration(milliseconds: 280),
+              curve: Curves.easeOutCubic,
             );
           },
         ),
@@ -1110,13 +1466,15 @@ class _PlansPanel extends StatelessWidget {
   ) {
     final providerProduct = catalog?.bestProviderProductForProduct(
       productCode: product.code,
-      provider: platformProvider,
-      regionCode: regionCode,
+      provider: widget.platformProvider,
+      regionCode: widget.regionCode,
     );
     if (providerProduct == null) {
       return null;
     }
-    return iapService.findProductById(providerProduct.providerProductId)?.price;
+    return widget.iapService
+        .findProductById(providerProduct.providerProductId)
+        ?.price;
   }
 
   String _actionLabel(
@@ -1135,7 +1493,7 @@ class _PlansPanel extends StatelessWidget {
       purchaseContext,
       catalog,
       product,
-      platformProvider,
+      widget.platformProvider,
     )) {
       return _managePlanChangeLabel(context, purchaseContext);
     }
@@ -1143,16 +1501,18 @@ class _PlansPanel extends StatelessWidget {
       return _t(context, 'Upgrade');
     }
     if (_isPlanDowngrade(purchaseContext, catalog, product) &&
-        _isMobileStorePlanChange(purchaseContext, product, platformProvider)) {
+        _isMobileStorePlanChange(
+            purchaseContext, product, widget.platformProvider)) {
       return _t(context, 'Change plan');
     }
-    if (_isMobileStorePlanChange(purchaseContext, product, platformProvider)) {
+    if (_isMobileStorePlanChange(
+        purchaseContext, product, widget.platformProvider)) {
       return _t(context, 'Change plan');
     }
     final providerProduct = catalog?.bestProviderProductForProduct(
       productCode: product.code,
-      provider: platformProvider,
-      regionCode: regionCode,
+      provider: widget.platformProvider,
+      regionCode: widget.regionCode,
     );
     if (product.managementChannel.trim().toLowerCase() == 'web') {
       return _t(context, 'Buy on web');
@@ -1160,6 +1520,140 @@ class _PlansPanel extends StatelessWidget {
     return providerProduct != null
         ? _t(context, 'Choose plan')
         : _t(context, 'Open checkout');
+  }
+
+  bool _isCurrentPlanCard(_PlanDisplayCardData card) {
+    final planCode = card.plan.code.trim().toLowerCase();
+    if (planCode == 'free') {
+      final purchaseContext = _personalPurchaseContext(widget.entitlement);
+      return purchaseContext.isAccessActive &&
+          purchaseContext.planCode.trim().toLowerCase() == 'free';
+    }
+    for (final product in card.products) {
+      final purchaseContext = _purchaseContextForProduct(
+        widget.entitlement,
+        widget.catalog,
+        product,
+      );
+      if (_isCurrentPlan(purchaseContext, product)) {
+        return true;
+      }
+    }
+    return widget.entitlement.isAccessActive &&
+        widget.entitlement.planCode.trim().toLowerCase() == planCode;
+  }
+
+  String _priceLabelForCard(BuildContext context, _PlanDisplayCardData card) {
+    final planCode = card.plan.code.trim().toLowerCase();
+    if (planCode == 'free') {
+      return _t(context, 'Free');
+    }
+    if (card.products.isEmpty) {
+      return _fallbackWebsitePriceLabel(context, planCode);
+    }
+    final product = _preferredProduct(card.products);
+    final storePrice = _storePriceForProduct(widget.catalog, product);
+    final price = (storePrice ?? '').trim().isNotEmpty
+        ? storePrice!.trim()
+        : product.priceDisplay.trim();
+    if (price.isEmpty) {
+      return _t(context, 'See pricing');
+    }
+    return price;
+  }
+
+  String _billingCaptionForCard(
+    BuildContext context,
+    _PlanDisplayCardData card,
+  ) {
+    if (card.products.isEmpty) {
+      return _planAudienceLabel(context, card.plan.code);
+    }
+    final product = _preferredProduct(card.products);
+    final cadence = _cadenceLabel(context, product.billingInterval);
+    final alternatives = card.products
+        .where((item) => item.code != product.code)
+        .map((item) {
+          final price =
+              (_storePriceForProduct(widget.catalog, item) ?? '').trim();
+          final fallbackPrice = item.priceDisplay.trim();
+          final labelPrice = price.isNotEmpty ? price : fallbackPrice;
+          final interval = _cadenceLabel(context, item.billingInterval);
+          if (labelPrice.isEmpty) return interval ?? '';
+          return interval == null ? labelPrice : '$interval $labelPrice';
+        })
+        .where((label) => label.trim().isNotEmpty)
+        .toList(growable: false);
+    if (alternatives.isEmpty) {
+      return cadence ?? _planAudienceLabel(context, card.plan.code);
+    }
+    return '${cadence ?? _t(context, 'Plan')} · ${alternatives.first}';
+  }
+
+  List<_PlanProductAction> _productActionsForCard(
+    BuildContext context,
+    _PlanDisplayCardData card,
+  ) {
+    return card.products.map((product) {
+      final purchaseContext = _purchaseContextForProduct(
+        widget.entitlement,
+        widget.catalog,
+        product,
+      );
+      final isCurrentPlan = _isCurrentPlan(purchaseContext, product);
+      final managedChange = _requiresManagedPlanChange(
+        purchaseContext,
+        widget.catalog,
+        product,
+        widget.platformProvider,
+      );
+      return _PlanProductAction(
+        label: _actionLabel(context, purchaseContext, widget.catalog, product),
+        detail: _productActionDetail(context, product),
+        isPrimary: product.code == _preferredProduct(card.products).code,
+        onPressed: isCurrentPlan || widget.isBusy
+            ? null
+            : managedChange
+                ? () => widget.onManageSubscription(
+                      provider: purchaseContext.sourceProvider,
+                      managementChannel: purchaseContext.managementChannel,
+                    )
+                : () => widget.onSelectProduct(product),
+      );
+    }).toList(growable: false);
+  }
+
+  _PlanProductAction? _fallbackActionForCard(
+    BuildContext context,
+    _PlanDisplayCardData card,
+    bool planIsCurrent,
+  ) {
+    if (card.products.isNotEmpty) return null;
+    final planCode = card.plan.code.trim().toLowerCase();
+    if (planIsCurrent) {
+      return _PlanProductAction(
+        label: _t(context, 'Current plan'),
+        detail: '',
+        isPrimary: true,
+        onPressed: null,
+      );
+    }
+    if (planCode == 'free') {
+      return _PlanProductAction(
+        label: _t(context, 'Included'),
+        detail: '',
+        isPrimary: true,
+        onPressed: null,
+      );
+    }
+    final syntheticProduct = _syntheticSalesProductForPlan(card.plan);
+    return _PlanProductAction(
+      label: _t(context, 'Contact sales'),
+      detail: '',
+      isPrimary: true,
+      onPressed:
+          widget.isBusy ? null : () => widget.onSelectProduct(syntheticProduct),
+    );
   }
 
   bool _isCurrentPlan(
@@ -1317,6 +1811,877 @@ class _PlanPurchaseContext {
   bool get isPaidPlan => planCode.trim().toLowerCase() != 'free';
 }
 
+class _PlanDisplayCardData {
+  const _PlanDisplayCardData({
+    required this.plan,
+    required this.products,
+  });
+
+  final BillingPlanDefinition plan;
+  final List<BillingProductDefinition> products;
+}
+
+class _PlanProductAction {
+  const _PlanProductAction({
+    required this.label,
+    required this.detail,
+    required this.isPrimary,
+    required this.onPressed,
+  });
+
+  final String label;
+  final String detail;
+  final bool isPrimary;
+  final VoidCallback? onPressed;
+}
+
+class _PlanMarketingContent {
+  const _PlanMarketingContent({
+    required this.subtitle,
+    required this.tagline,
+    required this.sections,
+  });
+
+  final String subtitle;
+  final String tagline;
+  final List<_PlanMarketingSection> sections;
+}
+
+class _PlanMarketingSection {
+  const _PlanMarketingSection({
+    required this.heading,
+    required this.items,
+  });
+
+  final String heading;
+  final List<String> items;
+}
+
+List<_PlanDisplayCardData> _planDisplayCards(
+  BillingCatalogSnapshot? catalog,
+  List<BillingProductDefinition> visibleProducts,
+) {
+  const planOrder = <String>[
+    'free',
+    'starter',
+    'producer',
+    'studio',
+    'enterprise',
+    'education',
+  ];
+  final productsByPlan = <String, List<BillingProductDefinition>>{};
+  for (final product in visibleProducts) {
+    final planCode = product.planCode.trim().toLowerCase();
+    productsByPlan.putIfAbsent(planCode, () => <BillingProductDefinition>[]);
+    productsByPlan[planCode]!.add(product);
+  }
+  for (final entry in productsByPlan.entries) {
+    entry.value.sort((a, b) {
+      final rankCompare = a.rank.compareTo(b.rank);
+      if (rankCompare != 0) return rankCompare;
+      return _billingIntervalSortRank(a.billingInterval)
+          .compareTo(_billingIntervalSortRank(b.billingInterval));
+    });
+  }
+
+  return planOrder.map((planCode) {
+    final plan = catalog?.planByCode(planCode) ?? _fallbackPlan(planCode);
+    return _PlanDisplayCardData(
+      plan: plan,
+      products: List<BillingProductDefinition>.unmodifiable(
+        productsByPlan[planCode] ?? const <BillingProductDefinition>[],
+      ),
+    );
+  }).toList(growable: false);
+}
+
+BillingPlanDefinition _fallbackPlan(String planCode) {
+  final normalized = planCode.trim().toLowerCase();
+  return BillingPlanDefinition(
+    code: normalized,
+    label: defaultPlanLabelForCode(normalized),
+    group: defaultPlanGroupForCode(normalized),
+    rank: _fallbackBillingPlanRank(normalized),
+    active: true,
+    description: _fallbackPlanDescription(normalized),
+    capabilities: defaultCapabilitiesForPlanCode(normalized),
+    limits: defaultLimitsForPlanCode(normalized),
+  );
+}
+
+String _fallbackPlanDescription(String planCode) {
+  switch (planCode.trim().toLowerCase()) {
+    case 'free':
+      return 'Start building ideas with local projects, standard AI, and core sharing.';
+    case 'starter':
+      return 'Expanded creation tools, higher-quality export, more storage, and WAV starter samples.';
+    case 'producer':
+      return 'The full solo creator suite with advanced AI, premium libraries, and cloud file tools.';
+    case 'studio':
+      return 'Shared project space, team seats, studio tools, and priority support for small teams.';
+    case 'enterprise':
+      return 'Custom workspace, security, AI models, storage, and support for larger organizations.';
+    case 'education':
+      return 'Classroom-ready seats, teacher controls, and a safer student creation environment.';
+    default:
+      return '${defaultPlanLabelForCode(planCode)} plan access.';
+  }
+}
+
+BillingProductDefinition _syntheticSalesProductForPlan(
+  BillingPlanDefinition plan,
+) {
+  final planCode = plan.code.trim().toLowerCase();
+  return BillingProductDefinition(
+    code: '${planCode}_sales',
+    planCode: planCode,
+    type: 'contract',
+    billingInterval: 'custom',
+    label: '${defaultPlanLabelForCode(planCode)} Sales',
+    description: _fallbackPlanDescription(planCode),
+    enabled: true,
+    managementChannel: 'admin',
+    platforms: const <String>[],
+    priceDisplay: 'Custom',
+    trialDays: 0,
+    rank: _fallbackBillingPlanRank(planCode) * 100,
+  );
+}
+
+BillingProductDefinition _preferredProduct(
+  List<BillingProductDefinition> products,
+) {
+  if (products.isEmpty) {
+    throw ArgumentError.value(products, 'products', 'Must not be empty');
+  }
+  for (final product in products) {
+    if (product.billingInterval.trim().toLowerCase() == 'monthly') {
+      return product;
+    }
+  }
+  return products.first;
+}
+
+String _contactPriceLabel(BuildContext context, String planCode) {
+  switch (planCode.trim().toLowerCase()) {
+    case 'enterprise':
+    case 'education':
+      return _t(context, 'Custom');
+    default:
+      return _t(context, 'Contact sales');
+  }
+}
+
+String _fallbackWebsitePriceLabel(BuildContext context, String planCode) {
+  switch (planCode.trim().toLowerCase()) {
+    case 'studio':
+      return '\$100/mo';
+    case 'enterprise':
+      return '\$1,000+';
+    case 'education':
+      return _t(context, 'Per seat');
+    default:
+      return _contactPriceLabel(context, planCode);
+  }
+}
+
+String _planAudienceLabel(BuildContext context, String planCode) {
+  return _planMarketingContent(planCode).subtitle;
+}
+
+_PlanMarketingContent _planMarketingContent(String planCode) {
+  switch (planCode.trim().toLowerCase()) {
+    case 'free':
+      return const _PlanMarketingContent(
+        subtitle: 'Casual enthusiasts',
+        tagline: 'Sample the basics with cloud sync.',
+        sections: <_PlanMarketingSection>[
+          _PlanMarketingSection(
+            heading: 'DAW · Storage',
+            items: <String>[
+              '250 MB cloud · 3 projects',
+              'No cap on clips or plugin rows',
+            ],
+          ),
+          _PlanMarketingSection(
+            heading: 'Export',
+            items: <String>[
+              '16-bit / 44.1 kHz stereo',
+              'MP3 or FLAC (no WAV)',
+            ],
+          ),
+          _PlanMarketingSection(
+            heading: 'AI usage',
+            items: <String>[
+              'Limited prompt usage allowance',
+              'Standard model',
+            ],
+          ),
+        ],
+      );
+    case 'starter':
+      return const _PlanMarketingContent(
+        subtitle: 'Aspiring producers',
+        tagline: 'For learners getting serious about the craft.',
+        sections: <_PlanMarketingSection>[
+          _PlanMarketingSection(
+            heading: 'DAW · Storage',
+            items: <String>[
+              '5 GB cloud',
+              'No cap on number of projects',
+            ],
+          ),
+          _PlanMarketingSection(
+            heading: 'Export',
+            items: <String>[
+              'Up to 24-bit / 48 kHz',
+              'WAV supported',
+            ],
+          ),
+          _PlanMarketingSection(
+            heading: 'AI usage',
+            items: <String>[
+              'More prompt allowance than Free',
+              'Standard model',
+            ],
+          ),
+        ],
+      );
+    case 'producer':
+      return const _PlanMarketingContent(
+        subtitle: 'Serious / Professional producers',
+        tagline: 'Full production stack with advanced AI.',
+        sections: <_PlanMarketingSection>[
+          _PlanMarketingSection(
+            heading: 'DAW · Storage',
+            items: <String>[
+              '250 GB cloud',
+              'Upload your own sample packs · cloud browser',
+            ],
+          ),
+          _PlanMarketingSection(
+            heading: 'AI usage',
+            items: <String>[
+              'Highest prompt usage allowance',
+              'Option to choose higher and smarter reasoning AI',
+            ],
+          ),
+          _PlanMarketingSection(
+            heading: 'Other',
+            items: <String>[
+              'Premium sound libraries',
+              'Priority support',
+            ],
+          ),
+        ],
+      );
+    case 'studio':
+      return const _PlanMarketingContent(
+        subtitle: 'Teams · High-volume pros',
+        tagline: 'Producer for everyone on the team.',
+        sections: <_PlanMarketingSection>[
+          _PlanMarketingSection(
+            heading: 'Seats',
+            items: <String>[
+              '5 seats included',
+              'Add seats: \$15/seat/mo (\$153/seat/yr)',
+            ],
+          ),
+          _PlanMarketingSection(
+            heading: 'Shared storage',
+            items: <String>[
+              '1 TB shared storage',
+              '+1 TB: \$10/mo (does not scale per seat)',
+            ],
+          ),
+          _PlanMarketingSection(
+            heading: 'AI & access',
+            items: <String>[
+              'Each seat has individual Producer limits',
+              'Studio badge on profile',
+            ],
+          ),
+        ],
+      );
+    case 'enterprise':
+      return const _PlanMarketingContent(
+        subtitle: 'Large businesses · studios · labels',
+        tagline: 'Built for scale and compliance.',
+        sections: <_PlanMarketingSection>[
+          _PlanMarketingSection(
+            heading: 'Pricing',
+            items: <String>[
+              'Starting from \$1,000/mo',
+              'Custom pricing · multi-user licensing',
+            ],
+          ),
+          _PlanMarketingSection(
+            heading: 'Customization',
+            items: <String>[
+              'Custom AI model development',
+              'API integrations · white-label options',
+            ],
+          ),
+          _PlanMarketingSection(
+            heading: 'Support',
+            items: <String>[
+              'Dedicated account manager',
+              'DPA · SOC 2 roadmap',
+            ],
+          ),
+        ],
+      );
+    case 'education':
+      return const _PlanMarketingContent(
+        subtitle: 'Schools · Teachers · Institutions',
+        tagline: 'Classroom licensing with teacher tools.',
+        sections: <_PlanMarketingSection>[
+          _PlanMarketingSection(
+            heading: 'Seat options',
+            items: <String>[
+              '10 · 20 · 30 seat packages',
+              '\$10/seat/mo (parity with Starter)',
+            ],
+          ),
+          _PlanMarketingSection(
+            heading: 'Per seat',
+            items: <String>[
+              'Each seat = Starter-equivalent features',
+              '5 GB storage per seat',
+            ],
+          ),
+          _PlanMarketingSection(
+            heading: 'Teacher Mode',
+            items: <String>[
+              'Invite students by email · invite links',
+              'Activate / deactivate / reclaim seats',
+            ],
+          ),
+        ],
+      );
+    default:
+      return _PlanMarketingContent(
+        subtitle: defaultPlanLabelForCode(planCode),
+        tagline: '${defaultPlanLabelForCode(planCode)} plan access.',
+        sections: const <_PlanMarketingSection>[],
+      );
+  }
+}
+
+String _productActionDetail(
+  BuildContext context,
+  BillingProductDefinition product,
+) {
+  final cadence = _cadenceLabel(context, product.billingInterval);
+  final price = product.priceDisplay.trim();
+  if (cadence == null) return price;
+  if (price.isEmpty) return cadence;
+  return '$cadence · $price';
+}
+
+Color _planAccentColor(String planCode) {
+  switch (planCode.trim().toLowerCase()) {
+    case 'free':
+      return const Color(0xFFB7C7D8);
+    case 'starter':
+      return const Color(0xFF79B7FF);
+    case 'producer':
+      return const Color(0xFF8CFFCD);
+    case 'studio':
+      return const Color(0xFFFFCB73);
+    case 'enterprise':
+      return const Color(0xFFFF8FCA);
+    case 'education':
+      return const Color(0xFFC4A7FF);
+    default:
+      return const Color(0xFFA4C2FF);
+  }
+}
+
+IconData _planIcon(String planCode) {
+  switch (planCode.trim().toLowerCase()) {
+    case 'free':
+      return Icons.music_note_rounded;
+    case 'starter':
+      return Icons.bolt_rounded;
+    case 'producer':
+      return Icons.auto_awesome_rounded;
+    case 'studio':
+      return Icons.groups_2_rounded;
+    case 'enterprise':
+      return Icons.apartment_rounded;
+    case 'education':
+      return Icons.school_rounded;
+    default:
+      return Icons.workspace_premium_rounded;
+  }
+}
+
+String _subscriptionStatusLabel(
+  BuildContext context,
+  SubscriptionStatus status,
+) {
+  switch (status) {
+    case SubscriptionStatus.trialing:
+      return _t(context, 'Trial');
+    case SubscriptionStatus.active:
+      return _t(context, 'Active');
+    case SubscriptionStatus.gracePeriod:
+      return _t(context, 'Grace');
+    case SubscriptionStatus.pastDue:
+      return _t(context, 'Past due');
+    case SubscriptionStatus.paused:
+      return _t(context, 'Paused');
+    case SubscriptionStatus.canceled:
+      return _t(context, 'Canceled');
+    case SubscriptionStatus.expired:
+      return _t(context, 'Expired');
+    case SubscriptionStatus.refunded:
+      return _t(context, 'Refunded');
+    case SubscriptionStatus.revoked:
+      return _t(context, 'Revoked');
+  }
+}
+
+String _limitReadout(dynamic value) {
+  if (value is num) {
+    final compact = NumberFormat.compact().format(value);
+    return compact.replaceAll('.0', '');
+  }
+  final text = '$value'.trim();
+  if (text.isEmpty || text == 'null') return '0';
+  if (text.toLowerCase() == 'custom') return 'Custom';
+  if (text.toLowerCase() == 'unlimited') return 'Unlimited';
+  return text;
+}
+
+String _modelTierReadout(BuildContext context, dynamic value) {
+  switch ('$value'.trim().toLowerCase()) {
+    case 'advanced':
+      return _t(context, 'Advanced model');
+    case 'custom':
+      return _t(context, 'Custom model access');
+    case 'standard':
+      return _t(context, 'Standard model');
+    default:
+      return _t(context, 'Standard model');
+  }
+}
+
+String _advancedPromptReadout(
+  BuildContext context,
+  Map<String, dynamic> limits,
+) {
+  final hasBetter = limits.containsKey('ai_better_prompts_daily');
+  final hasPremium = limits.containsKey('ai_premium_prompts_daily');
+  if (!hasBetter && !hasPremium) return '';
+
+  final better = _limitReadout(limits['ai_better_prompts_daily']);
+  final premium = _limitReadout(limits['ai_premium_prompts_daily']);
+  if (hasBetter && hasPremium) {
+    return _tr(
+      context,
+      'Better {better}/day · Premium {premium}/day',
+      {
+        'better': better,
+        'premium': premium,
+      },
+    );
+  }
+  if (hasBetter) {
+    return _tr(context, 'Better {count}/day', {'count': better});
+  }
+  return _tr(context, 'Premium {count}/day', {'count': premium});
+}
+
+class _PlanCarouselCard extends StatelessWidget {
+  const _PlanCarouselCard({
+    required this.data,
+    required this.planIsCurrent,
+    required this.priceLabel,
+    required this.billingCaption,
+    required this.isBusy,
+    required this.productActions,
+    required this.fallbackAction,
+  });
+
+  final _PlanDisplayCardData data;
+  final bool planIsCurrent;
+  final String priceLabel;
+  final String billingCaption;
+  final bool isBusy;
+  final List<_PlanProductAction> productActions;
+  final _PlanProductAction? fallbackAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final plan = data.plan;
+    final planCode = plan.code.trim().toLowerCase();
+    final accent = _planAccentColor(planCode);
+    final marketing = _planMarketingContent(planCode);
+    final actions = productActions.isNotEmpty
+        ? productActions
+        : fallbackAction == null
+            ? const <_PlanProductAction>[]
+            : <_PlanProductAction>[fallbackAction!];
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F4F4).withValues(alpha: 0.20),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.16),
+        ),
+        boxShadow: const <BoxShadow>[
+          BoxShadow(
+            color: Color(0x40000000),
+            blurRadius: 15,
+            spreadRadius: 8,
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(13),
+                  border: Border.all(color: accent.withValues(alpha: 0.34)),
+                ),
+                alignment: Alignment.center,
+                child: Icon(_planIcon(planCode), color: accent, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _localizedPlanLabel(
+                        context,
+                        planCode: planCode,
+                        fallback: plan.label,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        height: 1.1,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      _planAudienceLabel(context, planCode),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: accent.withValues(alpha: 0.92),
+                        fontSize: 11.8,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (planIsCurrent) const _CompactCurrentPlanPill(),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Flexible(
+                child: Text(
+                  priceLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 25,
+                    fontWeight: FontWeight.w900,
+                    height: 1,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: Text(
+                    billingCaption,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.62),
+                      fontSize: 11.4,
+                      fontWeight: FontWeight.w700,
+                      height: 1.2,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            marketing.tagline,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.74),
+              fontSize: 12.4,
+              fontWeight: FontWeight.w600,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 13),
+          _PlanMarketingDetails(
+            sections: marketing.sections,
+            accent: accent,
+          ),
+          const Spacer(),
+          if (actions.isNotEmpty)
+            _PlanCardActions(
+              actions: actions,
+              isBusy: isBusy,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CompactCurrentPlanPill extends StatelessWidget {
+  const _CompactCurrentPlanPill();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+      decoration: BoxDecoration(
+        color: const Color(0xFF153024).withValues(alpha: 0.86),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: const Color(0xFF78E2AA).withValues(alpha: 0.36),
+        ),
+      ),
+      child: const Icon(
+        Icons.check_rounded,
+        color: Color(0xFFA4FFCA),
+        size: 16,
+      ),
+    );
+  }
+}
+
+class _PlanMarketingDetails extends StatelessWidget {
+  const _PlanMarketingDetails({
+    required this.sections,
+    required this.accent,
+  });
+
+  final List<_PlanMarketingSection> sections;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    if (sections.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: sections.take(3).map((section) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 9),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                section.heading,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: accent.withValues(alpha: 0.96),
+                  fontSize: 11.2,
+                  fontWeight: FontWeight.w900,
+                  height: 1.1,
+                ),
+              ),
+              const SizedBox(height: 5),
+              ...section.items.take(2).map(
+                    (item) => Padding(
+                      padding: const EdgeInsets.only(bottom: 3),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(top: 5.5),
+                            child: Container(
+                              width: 3.5,
+                              height: 3.5,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.72),
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 7),
+                          Expanded(
+                            child: Text(
+                              item,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.76),
+                                fontSize: 11.3,
+                                fontWeight: FontWeight.w600,
+                                height: 1.22,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+            ],
+          ),
+        );
+      }).toList(growable: false),
+    );
+  }
+}
+
+class _PlanCardActions extends StatelessWidget {
+  const _PlanCardActions({
+    required this.actions,
+    required this.isBusy,
+  });
+
+  final List<_PlanProductAction> actions;
+  final bool isBusy;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = actions.firstWhere(
+      (action) => action.isPrimary,
+      orElse: () => actions.first,
+    );
+    final secondary = actions
+        .where((action) => !identical(action, primary))
+        .toList(growable: false);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        FilledButton(
+          onPressed: isBusy ? null : primary.onPressed,
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFFF4F4F4),
+            foregroundColor: const Color(0xFF111318),
+            disabledBackgroundColor: Colors.white
+                .withValues(alpha: primary.onPressed == null ? 0.13 : 0.24),
+            disabledForegroundColor: Colors.white.withValues(alpha: 0.45),
+            minimumSize: const Size.fromHeight(44),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+            textStyle: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          child: Text(primary.label),
+        ),
+        if (secondary.isNotEmpty) ...[
+          const SizedBox(height: 9),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: secondary.map((action) {
+              final detail = action.detail.trim();
+              return OutlinedButton(
+                onPressed: isBusy ? null : action.onPressed,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  disabledForegroundColor: Colors.white.withValues(alpha: 0.42),
+                  side: BorderSide(
+                    color: Colors.white.withValues(alpha: 0.18),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 11,
+                    vertical: 10,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 11.7,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                child: Text(
+                  detail.isEmpty ? action.label : '${action.label} · $detail',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              );
+            }).toList(growable: false),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _PlanPageIndicator extends StatelessWidget {
+  const _PlanPageIndicator({
+    required this.count,
+    required this.currentIndex,
+    required this.onSelect,
+  });
+
+  final int count;
+  final int currentIndex;
+  final ValueChanged<int> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: List<Widget>.generate(count, (index) {
+        final selected = index == currentIndex;
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => onSelect(index),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            width: selected ? 20 : 7,
+            height: 7,
+            margin: const EdgeInsets.symmetric(horizontal: 3),
+            decoration: BoxDecoration(
+              color: selected
+                  ? Colors.white.withValues(alpha: 0.86)
+                  : Colors.white.withValues(alpha: 0.26),
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+}
+
 _PlanPurchaseContext _purchaseContextForProduct(
   EntitlementSnapshot entitlement,
   BillingCatalogSnapshot? catalog,
@@ -1467,45 +2832,6 @@ IconData _teamAccessIcon(OrganizationAccessItem organization) {
     default:
       return Icons.groups_2_rounded;
   }
-}
-
-String _teamAccessTitle(
-  BuildContext context,
-  OrganizationAccessItem organization,
-) {
-  final planLabel = _localizedPlanLabel(
-    context,
-    planCode: organization.planCode,
-    fallback: organization.planLabel,
-  );
-  return '${organization.name} · $planLabel';
-}
-
-String _teamAccessDetail(
-  BuildContext context,
-  OrganizationAccessItem organization,
-) {
-  final role = _localizedRoleLabel(context, organization.role);
-  final planCode = organization.planCode.trim().toLowerCase();
-  if (planCode == 'education') {
-    return _tr(
-      context,
-      '{role} access to Education seat management and Starter-level student seats',
-      {'role': role},
-    );
-  }
-  if (planCode == 'enterprise') {
-    return _tr(
-      context,
-      '{role} access to enterprise workspace and shared cloud storage',
-      {'role': role},
-    );
-  }
-  return _tr(
-    context,
-    '{role} access to shared workspace and cloud storage',
-    {'role': role},
-  );
 }
 
 bool _accessSourceIsActive(String status) {
@@ -3192,68 +4518,6 @@ class _TinyBadge extends StatelessWidget {
   }
 }
 
-class _PlanHighlights extends StatelessWidget {
-  const _PlanHighlights({required this.plan});
-
-  final BillingPlanDefinition? plan;
-
-  @override
-  Widget build(BuildContext context) {
-    final highlights = _planHighlightLabels(context, plan);
-    if (highlights.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: highlights
-          .map(
-            (label) => _CapabilityChip(
-              label: label,
-            ),
-          )
-          .toList(growable: false),
-    );
-  }
-}
-
-class _PlanLimitSummary extends StatelessWidget {
-  const _PlanLimitSummary({required this.plan});
-
-  final BillingPlanDefinition? plan;
-
-  @override
-  Widget build(BuildContext context) {
-    final limits = plan?.limits ?? const <String, dynamic>{};
-    final chips = <Widget>[];
-    void add(String key) {
-      final value = limits[key];
-      if (_showLimit(value)) {
-        chips.add(
-          _MetricChip(
-            label: _limitLabel(context, key),
-            value: _formattedLimitValue(context, key, value),
-          ),
-        );
-      }
-    }
-
-    add('ai_prompts_daily');
-    add('ai_prompts_weekly');
-    add('cloud_projects');
-    add('storage_gb');
-    add('platform_upload_hours');
-    if (chips.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: chips,
-    );
-  }
-}
-
 class _QuietActionButton extends StatelessWidget {
   const _QuietActionButton({
     required this.label,
@@ -3279,100 +4543,6 @@ class _QuietActionButton extends StatelessWidget {
         style: const TextStyle(
           fontSize: 11.8,
           fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-}
-
-class _CurrentPlanPill extends StatelessWidget {
-  const _CurrentPlanPill();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1F3A2D).withValues(alpha: 0.82),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: const Color(0xFF78E2AA).withValues(alpha: 0.34),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(
-            Icons.check_circle_rounded,
-            color: Color(0xFFA4FFCA),
-            size: 15,
-          ),
-          const SizedBox(width: 6),
-          Text(
-            _t(context, 'Current plan'),
-            style: const TextStyle(
-              color: Color(0xFFA4FFCA),
-              fontSize: 11.7,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _BillingSourcePill extends StatelessWidget {
-  const _BillingSourcePill({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: Colors.white70,
-          fontSize: 11.6,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-}
-
-class _ContactSalesNote extends StatelessWidget {
-  const _ContactSalesNote();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1F2738).withValues(alpha: 0.72),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.08),
-        ),
-      ),
-      child: Text(
-        _t(
-          context,
-          'Studio checkout is available on web. Enterprise and Education plans are handled by sales.',
-        ),
-        style: const TextStyle(
-          color: Colors.white70,
-          fontSize: 11.9,
-          fontWeight: FontWeight.w600,
-          height: 1.35,
         ),
       ),
     );
@@ -3451,229 +4621,6 @@ class _MetricChip extends StatelessWidget {
   }
 }
 
-class _SubsectionLabel extends StatelessWidget {
-  const _SubsectionLabel({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      label,
-      style: const TextStyle(
-        color: Colors.white,
-        fontSize: 12.2,
-        fontWeight: FontWeight.w700,
-      ),
-    );
-  }
-}
-
-class _CapabilityChip extends StatelessWidget {
-  const _CapabilityChip({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFF153024).withValues(alpha: 0.82),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: const Color(0xFF6FE0A4).withValues(alpha: 0.48),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(
-            Icons.check_circle_rounded,
-            color: Color(0xFFA4FFCA),
-            size: 15,
-          ),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Color(0xFFA4FFCA),
-              fontSize: 11.7,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ProductCard extends StatelessWidget {
-  const _ProductCard({
-    required this.product,
-    required this.plan,
-    required this.storePrice,
-    required this.actionLabel,
-    required this.isCurrentPlan,
-    required this.isBusy,
-    required this.onPressed,
-  });
-
-  final BillingProductDefinition product;
-  final BillingPlanDefinition? plan;
-  final String? storePrice;
-  final String actionLabel;
-  final bool isCurrentPlan;
-  final bool isBusy;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final price = (storePrice ?? '').trim().isNotEmpty
-        ? storePrice!.trim()
-        : product.priceDisplay.trim().isNotEmpty
-            ? product.priceDisplay
-            : _t(context, 'See pricing');
-    final cadence = _cadenceLabel(context, product.billingInterval);
-    final planLabel = _localizedPlanLabel(
-      context,
-      planCode: product.planCode,
-      fallback: plan?.label ?? product.planCode,
-    );
-    final productLabel = _localizedProductLabel(context, product);
-    final description = product.description.isEmpty
-        ? _tr(context, '{plan} plan access.', {'plan': planLabel})
-        : _t(context, product.description);
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(13, 13, 13, 13),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      productLabel,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13.6,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      description,
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    price,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  if (cadence != null) ...[
-                    const SizedBox(height: 3),
-                    Text(
-                      cadence,
-                      style: const TextStyle(
-                        color: Colors.white54,
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          _PlanHighlights(plan: plan),
-          const SizedBox(height: 10),
-          _PlanLimitSummary(plan: plan),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              if (isCurrentPlan) const _CurrentPlanPill(),
-              _BillingSourcePill(
-                  label: _purchaseChannelLabel(context, product)),
-              if (product.type == 'contract' ||
-                  product.managementChannel == 'admin')
-                _MetricChip(
-                  label: _t(context, 'Purchase'),
-                  value: _t(context, 'Sales'),
-                ),
-              if (product.trialDays > 0)
-                _MetricChip(
-                  label: _t(context, 'Trial'),
-                  value: _tr(
-                    context,
-                    '{count} days',
-                    {'count': product.trialDays},
-                  ),
-                ),
-            ],
-          ),
-          if (product.type == 'contract' ||
-              product.managementChannel == 'admin') ...[
-            const SizedBox(height: 10),
-            const _ContactSalesNote(),
-          ],
-          const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerRight,
-            child: FilledButton(
-              onPressed: isCurrentPlan || isBusy ? null : onPressed,
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF3E82FF),
-                foregroundColor: Colors.white,
-              ),
-              child: Text(actionLabel),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-String _localizedProductLabel(
-  BuildContext context,
-  BillingProductDefinition product,
-) {
-  final translated = _t(context, product.label);
-  if (translated != product.label) return translated;
-  return product.label
-      .replaceAll('Education', _t(context, 'Education'))
-      .replaceAll('Enterprise', _t(context, 'Enterprise'));
-}
-
 String _manageActionLabelForContext(
   BuildContext buildContext,
   _PlanPurchaseContext context,
@@ -3698,56 +4645,6 @@ String _manageActionLabelForContext(
   if (channel == 'web') return _t(buildContext, 'Manage on web');
   if (channel == 'in_app') return _t(buildContext, 'Manage plan');
   return '';
-}
-
-String _purchaseChannelLabel(
-  BuildContext context,
-  BillingProductDefinition product,
-) {
-  final channel = product.managementChannel.trim().toLowerCase();
-  if (product.type == 'contract' || channel == 'admin') {
-    return _t(context, 'Contact sales');
-  }
-  if (channel == 'in_app') {
-    return _t(context, 'In-app purchase');
-  }
-  if (channel == 'web') {
-    return _t(context, 'Web checkout');
-  }
-  return _t(context, _titleCase(channel.isEmpty ? product.type : channel));
-}
-
-List<String> _planHighlightLabels(
-  BuildContext context,
-  BillingPlanDefinition? plan,
-) {
-  final capabilities = plan?.capabilities ?? const <String, bool>{};
-  final labels = <String>[];
-
-  void add(String key) {
-    if (capabilities[key] == true) {
-      labels.add(_capabilityLabel(context, key));
-    }
-  }
-
-  add(SubscriptionCapability.allPlugins);
-  add(SubscriptionCapability.highQualityExport);
-  add(SubscriptionCapability.selectableAiModels);
-  add(SubscriptionCapability.advancedAiModels);
-  add(SubscriptionCapability.customSamplePacks);
-  add(SubscriptionCapability.teamWorkspaces);
-  add(SubscriptionCapability.prioritySupport);
-
-  if (labels.isEmpty && plan != null) {
-    return <String>[
-      _localizedPlanLabel(
-        context,
-        planCode: plan.code,
-        fallback: plan.label,
-      ),
-    ];
-  }
-  return labels.take(3).toList(growable: false);
 }
 
 IconData _manageActionIconForContext(_PlanPurchaseContext context) {
@@ -3800,133 +4697,6 @@ String? _renewalCopy(BuildContext context, EntitlementSnapshot entitlement) {
   return _tr(context, 'Access ended on {date}.', {'date': date});
 }
 
-String _capabilityLabel(BuildContext context, String key) {
-  switch (key) {
-    case SubscriptionCapability.allPlugins:
-      return _t(context, 'All plugins');
-    case SubscriptionCapability.highQualityExport:
-      return _t(context, 'High-quality export');
-    case SubscriptionCapability.wavStarterSamples:
-      return _t(context, 'WAV starter samples');
-    case SubscriptionCapability.selectableAiModels:
-      return _t(context, 'Selectable AI models');
-    case SubscriptionCapability.advancedAiModels:
-      return _t(context, 'Advanced AI models');
-    case SubscriptionCapability.producerProfilePresets:
-      return _t(context, 'Producer profile presets');
-    case SubscriptionCapability.premiumSoundLibraries:
-      return _t(context, 'Premium sound libraries');
-    case SubscriptionCapability.cloudFileBrowser:
-      return _t(context, 'Cloud file browser');
-    case SubscriptionCapability.customSamplePacks:
-      return _t(context, 'Custom sample packs');
-    case SubscriptionCapability.profilePlanBadge:
-      return _t(context, 'Profile plan badge');
-    case SubscriptionCapability.dedicatedSupport:
-      return _t(context, 'Dedicated support');
-    case SubscriptionCapability.customAiModels:
-      return _t(context, 'Custom AI models');
-    case SubscriptionCapability.complianceControls:
-      return _t(context, 'Compliance controls');
-    case SubscriptionCapability.educationSandbox:
-      return _t(context, 'Education sandbox');
-    case SubscriptionCapability.videoProjects:
-      return _t(context, 'Video projects');
-    case SubscriptionCapability.webCheckout:
-      return _t(context, 'Web checkout');
-    case SubscriptionCapability.mobileIap:
-      return _t(context, 'In-app purchase');
-    case SubscriptionCapability.studioFeatures:
-      return _t(context, 'Studio tools');
-    case SubscriptionCapability.cloudProjects:
-      return _t(context, 'Cloud projects');
-    case SubscriptionCapability.teamWorkspaces:
-      return _t(context, 'Shared project space');
-    case SubscriptionCapability.prioritySupport:
-      return _t(context, 'Priority support');
-    case SubscriptionCapability.educationVisibilityControls:
-      return _t(context, 'Education privacy controls');
-    default:
-      return _t(context, _titleCase(key));
-  }
-}
-
-String _limitLabel(BuildContext context, String key) {
-  switch (key) {
-    case 'members':
-      return _t(context, 'Members');
-    case 'workspaces':
-      return _t(context, 'Workspaces');
-    case 'cloud_projects':
-      return _t(context, 'Cloud projects');
-    case 'storage_gb':
-      return _t(context, 'Storage');
-    case 'platform_upload_hours':
-      return _t(context, 'Upload hours');
-    case 'ai_prompts_daily':
-      return _t(context, 'Daily AI prompts');
-    case 'ai_prompts_weekly':
-      return _t(context, 'Weekly AI prompts');
-    case 'ai_model_tier':
-      return _t(context, 'AI model tier');
-    case 'sample_pack_storage_gb':
-      return _t(context, 'Sample pack storage');
-    case 'shared_storage_gb':
-      return _t(context, 'Shared storage');
-    case 'producer_profile_presets':
-      return _t(context, 'Producer presets');
-    default:
-      return _t(context, _titleCase(key));
-  }
-}
-
-bool _showLimit(Object? value) {
-  if (value == null) {
-    return false;
-  }
-  if (value is num) {
-    return value > 0;
-  }
-  final normalized = '$value'.trim();
-  return normalized.isNotEmpty && normalized != '0';
-}
-
-String _limitValue(Object? value) {
-  if (value == null) {
-    return '0';
-  }
-  if (value is num) {
-    return value == value.roundToDouble() ? value.toInt().toString() : '$value';
-  }
-  return '$value';
-}
-
-String _formattedLimitValue(BuildContext context, String key, Object? value) {
-  final raw = _limitValue(value);
-  switch (key) {
-    case 'storage_gb':
-    case 'sample_pack_storage_gb':
-    case 'shared_storage_gb':
-      return raw.toLowerCase() == 'custom' ? _t(context, 'Custom') : '$raw GB';
-    case 'platform_upload_hours':
-      return raw.toLowerCase() == 'custom'
-          ? _t(context, 'Custom')
-          : _tr(context, '{count} hours', {'count': raw});
-    case 'ai_prompts_daily':
-      return raw.toLowerCase() == 'custom'
-          ? _t(context, 'Custom')
-          : _tr(context, '{count}/day', {'count': raw});
-    case 'ai_prompts_weekly':
-      return raw.toLowerCase() == 'custom'
-          ? _t(context, 'Custom')
-          : _tr(context, '{count}/week', {'count': raw});
-    case 'cloud_projects':
-      return raw.toLowerCase() == 'custom' ? _t(context, 'Unlimited') : raw;
-    default:
-      return raw;
-  }
-}
-
 String? _cadenceLabel(BuildContext context, String interval) {
   switch (interval.trim().toLowerCase()) {
     case 'monthly':
@@ -3940,16 +4710,6 @@ String? _cadenceLabel(BuildContext context, String interval) {
     default:
       return null;
   }
-}
-
-String _titleCase(String value) {
-  return value
-      .split(RegExp(r'[_\s-]+'))
-      .where((part) => part.trim().isNotEmpty)
-      .map(
-        (part) => part[0].toUpperCase() + part.substring(1).toLowerCase(),
-      )
-      .join(' ');
 }
 
 String _formatDate(DateTime value) {

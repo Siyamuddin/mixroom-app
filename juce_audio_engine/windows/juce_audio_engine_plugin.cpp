@@ -2112,6 +2112,16 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       return;
     }
 
+    if (method_call.method_name() == "setMetronomeTimeSignature") {
+      const int numerator = FindInt(args, "numerator", 4);
+      const int denominator = FindInt(args, "denominator", 4);
+      CallOnMessageThreadSync([numerator, denominator] {
+        JuceEngine::get().setMetronomeTimeSignature(numerator, denominator);
+      });
+      result->Success(flutter::EncodableValue());
+      return;
+    }
+
     if (method_call.method_name() == "setMetronomeTransportMs") {
       const double ms = FindDouble(args, "ms", 0.0);
       CallOnMessageThreadSync(

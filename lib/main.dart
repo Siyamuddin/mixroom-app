@@ -15,6 +15,7 @@ import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/helpers/desktop_file_ingress_service.dart';
 import 'package:mixroom/helpers/iap_service.dart';
 import 'package:mixroom/helpers/open_mixroom_service.dart';
+import 'package:mixroom/helpers/orientation_policy.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/entitlement_service.dart';
 import 'package:mixroom/l10n/l10n.dart';
@@ -247,6 +248,8 @@ class MyAppState extends State<MyApp> {
 
 // Top level global
 bool _zeroOffsetPointerGuardInstalled = false;
+bool _orientationPolicyObserverInstalled = false;
+Timer? _orientationPolicyDebounce;
 
 void _installZeroOffsetPointerGuard() {
   if (_zeroOffsetPointerGuardInstalled) return;
@@ -259,6 +262,22 @@ void _absorbZeroOffsetPointerEvent(PointerEvent event) {
   if (event.position == Offset.zero) {
     GestureBinding.instance.cancelPointer(event.pointer);
   }
+}
+
+class _OrientationPolicyObserver extends WidgetsBindingObserver {
+  @override
+  void didChangeMetrics() {
+    _orientationPolicyDebounce?.cancel();
+    _orientationPolicyDebounce = Timer(const Duration(milliseconds: 120), () {
+      unawaited(applyPreferredOrientationsForCurrentWindow());
+    });
+  }
+}
+
+void _installOrientationPolicyObserver() {
+  if (_orientationPolicyObserverInstalled) return;
+  WidgetsBinding.instance.addObserver(_OrientationPolicyObserver());
+  _orientationPolicyObserverInstalled = true;
 }
 
 Future<void> _runStartupStep(
@@ -290,16 +309,15 @@ void main() async {
     listenForNativeLogs();
   }
 
+  await _runStartupStep('orientation.apply', () async {
+    await applyPreferredOrientationsForCurrentWindow();
+    _installOrientationPolicyObserver();
+  });
+
   await _runStartupStep('platform_capabilities.refresh', () async {
     await PlatformCapabilities.refresh();
   });
 
-  if (PlatformCapabilities.current.lockPortraitOrientation) {
-    await SystemChrome.setPreferredOrientations(
-        [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
-  } else {
-    await SystemChrome.setPreferredOrientations(<DeviceOrientation>[]);
-  }
   await _runStartupStep('analytics.initialize', () async {
     await AnalyticsService.instance.initialize();
   });

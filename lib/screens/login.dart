@@ -41,6 +41,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   static const int _confirmationCodeLength = 6;
   static const Duration _confirmationCodeExpiry = Duration(minutes: 20);
+  static const double _tabletAuthTargetContentWidth = 348;
   static final math.Random _usernameRandom = math.Random();
 
   final TextEditingController _emailController = TextEditingController();
@@ -64,6 +65,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _hidePassword = true;
   bool _hideConfirmPassword = true;
+  bool _acceptedLegalTerms = false;
   bool _newsletterOptIn = false;
   DateTime? _selectedBirthdateUtc;
 
@@ -383,6 +385,7 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() {
       _mode = next;
       _registerStep = _RegisterStep.account;
+      _acceptedLegalTerms = false;
       _newsletterOptIn = false;
       _clearSignInErrors();
       _clearRegisterErrors();
@@ -474,20 +477,25 @@ class _LoginScreenState extends State<LoginScreen> {
     final passwordError =
         passwordIssues.isEmpty ? null : passwordIssues.join('\n');
     final confirmError = password == confirm ? null : 'Passwords do not match.';
+    final consentError =
+        mixroomUseTabletLandscapeAuthLayout(context) && !_acceptedLegalTerms
+            ? 'Please agree to the Terms of Service and Privacy Policy.'
+            : null;
 
     setState(() {
       _registerEmailError = emailError;
       _registerCodeError = codeError;
       _registerPasswordError = passwordError;
       _registerConfirmPasswordError = confirmError;
-      _registerInlineError = null;
+      _registerInlineError = consentError;
       _registerInlineInfo = null;
     });
 
     return emailError == null &&
         codeError == null &&
         passwordError == null &&
-        confirmError == null;
+        confirmError == null &&
+        consentError == null;
   }
 
   bool _canSendCreateAccountCodeLocally() {
@@ -511,6 +519,18 @@ class _LoginScreenState extends State<LoginScreen> {
       initialEmail: _emailController.text.trim().toLowerCase(),
       initialPassword: _passwordController.text,
     );
+  }
+
+  Future<void> _openLegalUrl(String url) async {
+    final launched = await launchUrl(
+      Uri.parse(url),
+      mode: LaunchMode.externalApplication,
+    );
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open this link right now.')),
+      );
+    }
   }
 
   Future<void> _showSocialConflictGuidance(
@@ -1155,55 +1175,671 @@ class _LoginScreenState extends State<LoginScreen> {
     final showKakao = supportsSocialSignIn && CognitoConfig.enableKakaoSignIn;
     final showAnySocial = showGoogle || showApple || showKakao;
 
-    return Scaffold(
+    return MixroomAuthPageScaffold(
       resizeToAvoidBottomInset: false,
-      body: Stack(
-        children: [
-          const Positioned.fill(
-            child: MixroomAuthBackground(),
-          ),
-          SafeArea(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final bottomInset = MediaQuery.of(context).viewInsets.bottom;
-                final minHeight = math.max(
-                  0.0,
-                  constraints.maxHeight - bottomInset - 24,
-                );
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+            if (mixroomUseTabletDesktopAuthLayout(context)) {
+              return _buildTabletAuthLayout(
+                auth: auth,
+                busy: busy,
+                constraints: constraints,
+                bottomInset: bottomInset,
+                showGoogle: showGoogle,
+                showApple: showApple,
+                showKakao: showKakao,
+                showAnySocial: showAnySocial,
+              );
+            }
+            final minHeight = math.max(
+              0.0,
+              constraints.maxHeight - bottomInset - 24,
+            );
 
-                return AnimatedPadding(
-                  duration: const Duration(milliseconds: 220),
-                  curve: Curves.easeOutCubic,
-                  padding: EdgeInsets.only(bottom: bottomInset),
-                  child: SingleChildScrollView(
-                    physics: const ClampingScrollPhysics(),
-                    keyboardDismissBehavior:
-                        ScrollViewKeyboardDismissBehavior.onDrag,
-                    padding: const EdgeInsets.fromLTRB(27, 14, 27, 24),
+            return AnimatedPadding(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              padding: EdgeInsets.only(bottom: bottomInset),
+              child: SingleChildScrollView(
+                physics: const ClampingScrollPhysics(),
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: const EdgeInsets.fromLTRB(27, 14, 27, 24),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: 402,
+                      minHeight: minHeight,
+                    ),
+                    child: _isRegisterMode
+                        ? _buildRegisterStage(
+                            auth: auth,
+                            busy: busy,
+                          )
+                        : _buildSignInFlow(
+                            auth: auth,
+                            busy: busy,
+                            showGoogle: showGoogle,
+                            showApple: showApple,
+                            showKakao: showKakao,
+                            showAnySocial: showAnySocial,
+                          ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTabletAuthLayout({
+    required AuthService auth,
+    required bool busy,
+    required BoxConstraints constraints,
+    required double bottomInset,
+    required bool showGoogle,
+    required bool showApple,
+    required bool showKakao,
+    required bool showAnySocial,
+  }) {
+    final minHeight = math.max(0.0, constraints.maxHeight - bottomInset);
+    final horizontalPadding = constraints.maxWidth < 720 ? 18.0 : 24.0;
+    final contentWidth = _tabletAuthContentWidth(constraints.maxWidth);
+    final contentTop = _tabletAuthContentTop(
+      constraints.maxHeight,
+      registerMode: _isRegisterMode,
+    );
+    final estimatedContentHeight = _isRegisterMode ? 660.0 : 612.0;
+    final scrollHeight = math.max(
+      minHeight,
+      contentTop + estimatedContentHeight + 36.0,
+    );
+
+    return Stack(
+      children: [
+        AnimatedPadding(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          padding: EdgeInsets.only(bottom: bottomInset),
+          child: SingleChildScrollView(
+            physics: const ClampingScrollPhysics(),
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            padding: EdgeInsets.fromLTRB(
+              horizontalPadding,
+              0,
+              horizontalPadding,
+              24,
+            ),
+            child: SizedBox(
+              height: scrollHeight,
+              child: Stack(
+                children: [
+                  Positioned(
+                    top: contentTop,
+                    left: 0,
+                    right: 0,
                     child: Center(
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(
-                          maxWidth: 402,
-                          minHeight: minHeight,
+                      child: SizedBox(
+                        width: contentWidth,
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 220),
+                          switchInCurve: Curves.easeOutCubic,
+                          switchOutCurve: Curves.easeInCubic,
+                          transitionBuilder: _slideFadeTransition,
+                          child: _isRegisterMode
+                              ? _buildTabletRegisterStage(
+                                  auth: auth,
+                                  busy: busy,
+                                )
+                              : _buildTabletSignInFlow(
+                                  auth: auth,
+                                  busy: busy,
+                                  showGoogle: showGoogle,
+                                  showApple: showApple,
+                                  showKakao: showKakao,
+                                  showAnySocial: showAnySocial,
+                                ),
                         ),
-                        child: _isRegisterMode
-                            ? _buildRegisterStage(
-                                auth: auth,
-                                busy: busy,
-                              )
-                            : _buildSignInFlow(
-                                auth: auth,
-                                busy: busy,
-                                showGoogle: showGoogle,
-                                showApple: showApple,
-                                showKakao: showKakao,
-                                showAnySocial: showAnySocial,
-                              ),
                       ),
                     ),
                   ),
-                );
-              },
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (_isRegisterMode)
+          Positioned(
+            top: 10,
+            left: horizontalPadding,
+            child: MixroomAuthBackCircleButton(
+              onTap: busy ? null : () => _switchMode(LoginEntryMode.signIn),
+            ),
+          ),
+        Positioned(
+          top: 14,
+          right: horizontalPadding,
+          child: const MixroomLocaleSelector(),
+        ),
+      ],
+    );
+  }
+
+  double _tabletAuthContentTop(
+    double availableHeight, {
+    required bool registerMode,
+  }) {
+    if (registerMode) {
+      return math.min(154.0, math.max(96.0, availableHeight * 0.17));
+    }
+    return math.min(156.0, math.max(96.0, availableHeight * 0.18));
+  }
+
+  double _tabletAuthContentWidth(double availableWidth) {
+    return math.min(
+      _tabletAuthTargetContentWidth,
+      math.max(288.0, availableWidth - 48.0),
+    );
+  }
+
+  Widget _buildTabletSignInFlow({
+    required AuthService auth,
+    required bool busy,
+    required bool showGoogle,
+    required bool showApple,
+    required bool showKakao,
+    required bool showAnySocial,
+  }) {
+    return Column(
+      key: const ValueKey('tablet-sign-in-flow'),
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        const MixroomBrandLockup(),
+        const SizedBox(height: 32),
+        MixroomSignInFieldsCard(
+          emailController: _emailController,
+          passwordController: _passwordController,
+          emailFocusNode: _signInEmailFocusNode,
+          passwordFocusNode: _signInPasswordFocusNode,
+          hidePassword: _hidePassword,
+          hasError: _signInEmailError != null || _signInPasswordError != null,
+          onEmailChanged: (_) {
+            setState(() {
+              _signInEmailError = null;
+              _signInInlineError = null;
+            });
+          },
+          onPasswordChanged: (_) {
+            setState(() {
+              _signInPasswordError = null;
+              _signInInlineError = null;
+            });
+          },
+          onEmailEditingComplete: () {
+            if (busy) return;
+            _signInPasswordFocusNode.requestFocus();
+          },
+          onPasswordSubmitted: (_) {
+            if (busy) return;
+            _submitSignIn(auth);
+          },
+          onTogglePasswordVisibility: () {
+            setState(() {
+              _hidePassword = !_hidePassword;
+            });
+          },
+        ),
+        const SizedBox(height: 6),
+        TextButton(
+          onPressed: busy ? null : () => _openForgotPasswordFlow(auth),
+          style: TextButton.styleFrom(
+            foregroundColor: const Color(0xFFF4F4F4),
+            minimumSize: const Size(0, 32),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            textStyle: const TextStyle(
+              fontFamily: 'Pretendard',
+              fontSize: 15,
+              height: 22 / 15,
+              decoration: TextDecoration.underline,
+              decorationColor: Color(0xFFF4F4F4),
+              fontWeight: FontWeight.w400,
+            ),
+          ),
+          child: Text(L10n.translate(context, 'Forgot password?')),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          child: _buildSignInMessages(auth: auth, busy: busy),
+        ),
+        const SizedBox(height: 14),
+        MixroomPillButton(
+          label: busy
+              ? L10n.translate(context, 'Signing In...')
+              : L10n.translate(context, 'Sign In'),
+          width: 124,
+          busy: busy,
+          onTap: busy ? null : () => _submitSignIn(auth),
+        ),
+        if (showAnySocial) ...[
+          const SizedBox(height: 30),
+          Text(
+            L10n.translate(context, 'Or continue with'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontFamily: 'Pretendard',
+              color: Color(0xFFF4F4F4),
+              fontSize: 15,
+              height: 22 / 15,
+              fontWeight: FontWeight.w400,
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildTabletSocialButtons(
+            auth: auth,
+            busy: busy,
+            showGoogle: showGoogle,
+            showApple: showApple,
+            showKakao: showKakao,
+          ),
+        ],
+        const SizedBox(height: 30),
+        MixroomPillButton(
+          label: L10n.translate(context, 'Create account'),
+          width: 164,
+          onTap: busy ? null : () => _switchMode(LoginEntryMode.createAccount),
+        ),
+        if (isDevLoginButtonEnabled) ...[
+          const SizedBox(height: 10),
+          TextButton.icon(
+            onPressed: busy ? null : () => _devRealLogin(auth),
+            icon: const Icon(Icons.developer_mode_rounded, size: 16),
+            label: Text(
+              hasConfiguredDevLoginCredentials
+                  ? 'Dev Login (Real)'
+                  : 'Dev Login (Use Typed)',
+            ),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.white.withValues(alpha: 0.72),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildTabletRegisterStage({
+    required AuthService auth,
+    required bool busy,
+  }) {
+    final awaitingCode = _isAwaitingCreateAccountCode(auth);
+    final passwordIssues =
+        PasswordPolicy.validateIssues(_passwordController.text);
+    final hasPasswordInteraction = _passwordController.text.isNotEmpty ||
+        _confirmPasswordController.text.isNotEmpty;
+    final confirmMismatch = _confirmPasswordController.text.isNotEmpty &&
+        _passwordController.text != _confirmPasswordController.text;
+    final emailCardHasError = _registerEmailError != null ||
+        (awaitingCode && _registerCodeError != null);
+    final passwordCardHasError =
+        _registerPasswordError != null || _registerConfirmPasswordError != null;
+    final showPasswordRequirementAccent = passwordCardHasError ||
+        (hasPasswordInteraction &&
+            (passwordIssues.isNotEmpty || confirmMismatch));
+    final codeStatusText = awaitingCode
+        ? (_registerInlineInfo ??
+            L10n.translate(context, 'Confirmation code sent!'))
+        : L10n.translate(
+            context,
+            'Confirmation code will be sent to your email inbox.',
+          );
+    final countdownLabel = _confirmationCodeCountdownLabel();
+
+    return Column(
+      key: const ValueKey('tablet-create-account-stage'),
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const MixroomBrandLockup(showMark: false),
+        const SizedBox(height: 28),
+        MixroomGlassPanel(
+          borderColor: emailCardHasError
+              ? const Color.fromRGBO(255, 157, 71, 0.72)
+              : const Color.fromRGBO(244, 244, 244, 0.14),
+          child: Column(
+            children: [
+              MixroomGlassTextFieldRow(
+                controller: _emailController,
+                label: L10n.translate(context, 'Email'),
+                keyboardType: TextInputType.emailAddress,
+                textInputAction: TextInputAction.next,
+                onChanged: (_) {
+                  setState(() {
+                    _registerEmailError = null;
+                    _registerCodeError = null;
+                    _registerInlineError = null;
+                    _registerInlineInfo = null;
+                  });
+                },
+                suffix: awaitingCode
+                    ? MixroomFieldActionIconButton(
+                        assetPath: kMixroomResendIconAsset,
+                        semanticLabel: L10n.translate(context, 'Resend code'),
+                        onPressed:
+                            busy ? null : () => _resendCreateAccountCode(auth),
+                        iconWidth: 20,
+                        iconHeight: 20,
+                        disabledOpacity: 0.45,
+                      )
+                    : null,
+              ),
+              if (awaitingCode) ...[
+                const MixroomGlassDivider(),
+                MixroomGlassTextFieldRow(
+                  controller: _confirmationCodeController,
+                  label: L10n.translate(context, 'Confirmation code'),
+                  keyboardType: TextInputType.number,
+                  textInputAction: TextInputAction.done,
+                  onChanged: (_) {
+                    setState(() {
+                      _registerCodeError = null;
+                      _registerInlineError = null;
+                      _registerInlineInfo = null;
+                    });
+                  },
+                  onSubmitted: (_) {
+                    if (busy) return;
+                    _submitRegister(auth);
+                  },
+                  trailingText: countdownLabel,
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          codeStatusText,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontFamily: 'Pretendard',
+            color: Color(0xFFF4F4F4),
+            fontSize: 12,
+            height: 15 / 12,
+            fontWeight: FontWeight.w400,
+          ),
+        ),
+        const SizedBox(height: 28),
+        MixroomGlassPanel(
+          borderColor: passwordCardHasError
+              ? const Color.fromRGBO(255, 157, 71, 0.72)
+              : const Color.fromRGBO(244, 244, 244, 0.14),
+          child: Column(
+            children: [
+              MixroomGlassTextFieldRow(
+                controller: _passwordController,
+                label: L10n.translate(context, 'Password'),
+                obscureText: _hidePassword,
+                textInputAction: TextInputAction.next,
+                onChanged: (_) {
+                  setState(() {
+                    _registerPasswordError = null;
+                    _registerInlineError = null;
+                    _registerInlineInfo = null;
+                  });
+                },
+                suffix: IconButton(
+                  onPressed: () {
+                    setState(() {
+                      _hidePassword = !_hidePassword;
+                    });
+                  },
+                  splashRadius: 18,
+                  icon: SvgPicture.asset(
+                    _hidePassword
+                        ? kMixroomEyeIconAsset
+                        : kMixroomEyeOffIconAsset,
+                    width: 20,
+                    height: 15,
+                  ),
+                ),
+              ),
+              const MixroomGlassDivider(),
+              MixroomGlassTextFieldRow(
+                controller: _confirmPasswordController,
+                label: L10n.translate(context, 'Confirm Password'),
+                obscureText: _hideConfirmPassword,
+                textInputAction: TextInputAction.done,
+                onChanged: (_) {
+                  setState(() {
+                    _registerConfirmPasswordError = null;
+                    _registerInlineError = null;
+                    _registerInlineInfo = null;
+                  });
+                },
+                onSubmitted: (_) {
+                  if (busy) return;
+                  if (awaitingCode) {
+                    _submitRegister(auth);
+                  } else {
+                    _sendCreateAccountCode(auth);
+                  }
+                },
+                suffix: IconButton(
+                  onPressed: () {
+                    setState(() {
+                      _hideConfirmPassword = !_hideConfirmPassword;
+                    });
+                  },
+                  splashRadius: 18,
+                  icon: SvgPicture.asset(
+                    _hideConfirmPassword
+                        ? kMixroomEyeIconAsset
+                        : kMixroomEyeOffIconAsset,
+                    width: 20,
+                    height: 15,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          PasswordPolicy.requirementsTextLocalized(context),
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontFamily: 'Pretendard',
+            color: showPasswordRequirementAccent
+                ? const Color(0xFFFF9D47)
+                : const Color(0xFFF4F4F4),
+            fontSize: 12,
+            height: 15 / 12,
+            fontWeight: FontWeight.w400,
+          ),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          child: _buildCreateAccountMessages(),
+        ),
+        const SizedBox(height: 26),
+        _buildTabletCreateAccountConsentRows(busy: busy),
+        const SizedBox(height: 28),
+        Center(
+          child: MixroomPillButton(
+            label: L10n.translate(context, 'Next'),
+            width: 124,
+            busy: busy,
+            onTap: busy
+                ? null
+                : () {
+                    if (awaitingCode) {
+                      _submitRegister(auth);
+                    } else {
+                      _sendCreateAccountCode(auth);
+                    }
+                  },
+          ),
+        ),
+        if (isDevLoginButtonEnabled) ...[
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: busy ? null : () => _devRealLogin(auth),
+              icon: const Icon(
+                Icons.developer_mode_rounded,
+                size: 16,
+              ),
+              label: Text(
+                hasConfiguredDevLoginCredentials
+                    ? 'Dev Login (Real)'
+                    : 'Dev Login (Use Typed)',
+              ),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.white.withValues(alpha: 0.72),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildTabletSocialButtons({
+    required AuthService auth,
+    required bool busy,
+    required bool showGoogle,
+    required bool showApple,
+    required bool showKakao,
+  }) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        if (showGoogle)
+          MixroomSocialIconButton(
+            assetPath: kMixroomGoogleSocialAsset,
+            semanticLabel: 'Continue with Google',
+            onTap: busy
+                ? null
+                : () => _submitSocial(
+                      auth,
+                      auth.signInWithGoogle,
+                      providerLabel: AuthProviderType.google.label,
+                    ),
+          ),
+        if (showApple) ...[
+          if (showGoogle) const SizedBox(width: 10),
+          MixroomSocialIconButton(
+            assetPath: kMixroomAppleSocialAsset,
+            semanticLabel: 'Continue with Apple',
+            onTap: busy
+                ? null
+                : () => _submitSocial(
+                      auth,
+                      auth.signInWithApple,
+                      providerLabel: AuthProviderType.apple.label,
+                    ),
+          ),
+        ],
+        if (showKakao) ...[
+          if (showGoogle || showApple) const SizedBox(width: 10),
+          MixroomSocialIconButton(
+            assetPath: kMixroomKakaoSocialAsset,
+            semanticLabel: 'Continue with Kakao',
+            onTap: busy
+                ? null
+                : () => _submitSocial(
+                      auth,
+                      auth.signInWithKakao,
+                      providerLabel: AuthProviderType.kakao.label,
+                    ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildTabletCreateAccountConsentRows({required bool busy}) {
+    final legalLabel = Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 3,
+      runSpacing: 2,
+      children: [
+        Text(L10n.translate(context, "I agree to Mixroom's")),
+        MixroomAuthInlineLink(
+          label: L10n.translate(context, 'terms'),
+          onTap: busy ? null : () => _openLegalUrl(LegalConfig.termsUrl),
+        ),
+        Text(L10n.translate(context, 'and')),
+        MixroomAuthInlineLink(
+          label: L10n.translate(context, 'privacy policy'),
+          onTap: busy ? null : () => _openLegalUrl(LegalConfig.privacyUrl),
+        ),
+        const Text('.'),
+      ],
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          MixroomAuthConsentRow(
+            value: _newsletterOptIn,
+            onChanged: busy
+                ? null
+                : (next) {
+                    setState(() {
+                      _newsletterOptIn = next;
+                      _registerInlineError = null;
+                      _registerInlineInfo = null;
+                    });
+                  },
+            label: L10n.translate(
+              context,
+              'I agree to receive marketing and promotional material.',
+            ),
+          ),
+          MixroomAuthConsentRow(
+            value: _acceptedLegalTerms,
+            onChanged: busy
+                ? null
+                : (next) {
+                    setState(() {
+                      _acceptedLegalTerms = next;
+                      _registerInlineError = null;
+                      _registerInlineInfo = null;
+                    });
+                  },
+            richLabel: legalLabel,
+          ),
+          const SizedBox(height: 22),
+          Align(
+            alignment: Alignment.center,
+            child: SizedBox(
+              width: 136,
+              child: MixroomAuthConsentRow(
+                value: _acceptedLegalTerms && _newsletterOptIn,
+                onChanged: busy
+                    ? null
+                    : (next) {
+                        setState(() {
+                          _acceptedLegalTerms = next;
+                          _newsletterOptIn = next;
+                          _registerInlineError = null;
+                          _registerInlineInfo = null;
+                        });
+                      },
+                label: L10n.translate(context, 'Agree to all.'),
+              ),
             ),
           ),
         ],

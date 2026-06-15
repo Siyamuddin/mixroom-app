@@ -3294,26 +3294,18 @@ class _FeedbackEntryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MixroomShellSurface(
-      radius: 20,
-      color: const Color.fromRGBO(244, 244, 244, 0.10),
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: const Color(0xFF3E82FF).withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(
-              Icons.forum_outlined,
-              color: Color(0xFF9FC2FF),
-            ),
-          ),
-          const SizedBox(width: 12),
+          const Icon(Icons.forum_outlined, color: Color(0xFFA4C2FF)),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -3322,11 +3314,11 @@ class _FeedbackEntryCard extends StatelessWidget {
                   L10n.translate(context, 'Feedback / bug report'),
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 15,
+                    fontSize: 13,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 Text(
                   L10n.translate(
                     context,
@@ -3334,57 +3326,22 @@ class _FeedbackEntryCard extends StatelessWidget {
                   ),
                   style: const TextStyle(
                     color: Colors.white70,
-                    fontSize: 13,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
                     height: 1.35,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () => onOpen(),
-                    borderRadius: BorderRadius.circular(22),
-                    child: MixroomShellSurface(
-                      radius: 22,
-                      color: const Color.fromRGBO(244, 244, 244, 0.14),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 11,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.edit_outlined,
-                            size: 18,
-                            color: Colors.white,
-                          ),
-                          const SizedBox(width: 10),
-                          Flexible(
-                            child: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                L10n.translate(
-                                  context,
-                                  'Send feedback or bug report',
-                                ),
-                                maxLines: 1,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 13.5,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
                   ),
                 ),
               ],
             ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: () => onOpen(),
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFFBBD2FF),
+              minimumSize: const Size(0, 34),
+            ),
+            child: Text(L10n.translate(context, 'Open')),
           ),
         ],
       ),

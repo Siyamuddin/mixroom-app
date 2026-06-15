@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import '../models/goal_vector.dart';
 import '../models/mixing_result.dart';
+import '../models/models.dart';
 import '../models/project_state.dart';
 
 class _MixExecutionPolicy {
@@ -333,6 +334,8 @@ class LocalMixingModel {
       target: MixTarget(
         role: role,
         rowIndex: rowIndex,
+        groupId: normGoal.target.groupId,
+        groupName: normGoal.target.groupName,
         scope: normGoal.target.scope,
         confidence: normGoal.target.confidence,
       ),
@@ -1379,7 +1382,9 @@ class LocalMixingModel {
   // Targeting
   // -----------------------------
   bool _isExplicitTarget(MixTarget t) {
-    if (t.scope == 'master' || t.scope == 'row') return true;
+    if (t.scope == 'master' || t.scope == 'row' || t.scope == 'group') {
+      return true;
+    }
     final role = t.role;
     if (t.rowIndex != null) return true;
     if (role != null &&
@@ -1541,6 +1546,45 @@ class LocalMixingModel {
 
   List<RowState> _resolveTargets(
       ProjectState p, MixTarget target, Map<int, String> roleOverrides) {
+    if (target.scope == 'group') {
+      final tokenId = (target.groupId ?? '').trim().toLowerCase();
+      final tokenName =
+          (target.groupName ?? target.role ?? '').trim().toLowerCase();
+      TrackGroup? matchedGroup;
+      for (final group in p.trackGroups) {
+        final id = group.id.trim().toLowerCase();
+        final name = group.name.trim().toLowerCase();
+        if ((tokenId.isNotEmpty && id == tokenId) ||
+            (tokenName.isNotEmpty &&
+                (name == tokenName ||
+                    name.contains(tokenName) ||
+                    (name.isNotEmpty && tokenName.contains(name))))) {
+          matchedGroup = group;
+          break;
+        }
+      }
+      if (matchedGroup == null && target.rowIndex != null) {
+        final rowIndex = target.rowIndex!;
+        if (rowIndex >= 0 && rowIndex < p.rows.length) {
+          final rowGroupId = p.rows[rowIndex].groupId.trim();
+          for (final group in p.trackGroups) {
+            if (group.id == rowGroupId) {
+              matchedGroup = group;
+              break;
+            }
+          }
+        }
+      }
+      if (matchedGroup != null) {
+        final memberIds = matchedGroup.rowIds.toSet();
+        return p.rows
+            .where((row) =>
+                memberIds.contains(row.rowId) ||
+                row.groupId == matchedGroup!.id)
+            .toList(growable: false);
+      }
+    }
+
     if (target.role == null && target.rowIndex == null) {
       return const [];
     }

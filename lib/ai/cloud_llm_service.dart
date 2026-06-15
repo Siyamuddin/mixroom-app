@@ -308,6 +308,7 @@ class CloudLlmService {
       'selected',
       'all_audio',
       'all',
+      'group',
       if (allowMasterScope) 'master',
     ];
     return <String, dynamic>{
@@ -335,6 +336,8 @@ class CloudLlmService {
           'type': 'string',
           'enum': scopeValues,
         },
+        'group_id': {'type': 'string'},
+        'group_name': {'type': 'string'},
         'prefer_selected': {
           'type': 'boolean',
           'description':
@@ -420,7 +423,7 @@ class CloudLlmService {
           'name': 'daw_assistant_actions',
           'strict': false,
           'description':
-              'Use for tutorials, project edits like BPM changes, library sample insertion or replacement, clip arrangement/editing, plugin CRUD, automation edits such as sidechain-like ducking, auto-pan, stereo movement, or filter sweeps, MIDI composition/editing, stem separation, and role override. Use clip_edit glue for merge/consolidate/bounce-clip requests. For autotune, auto-tune, pitch correction, or Melodyne-style vocal tuning, add the built-in Pitch Corrector effect. For drum or beat-building requests using packaged samples, prefer action over explanation: choose semantically matching library files or advertised role aliases like role:kick, arrange them with musical spacing, and keep core roles like kick/snare/hats on separate rows when helpful. For 8+ bar starter grooves or build-ups, prefer a workable scaffold with repetition plus light variation or fills instead of one identical bar copied forever. If the user wants a placed sample swapped out, prefer replacing the targeted clips while preserving timing. Inspect existing plugin chains and selected MIDI note state when available: prefer modifying, unbypassing, extending, or reshaping what is already there when it is close, and remove conflicting effects or rewrite notes only when the current state clearly fights the user goal. Never use for pure sonic mix changes. Only emit actions the app can actually execute.',
+              'Use for tutorials, project edits like BPM changes, row-group creation/folding, row color changes, library sample insertion or replacement, clip arrangement/editing, plugin CRUD, automation edits such as sidechain-like ducking, auto-pan, stereo movement, or filter sweeps, MIDI composition/editing, stem separation, and role override. For group bus plugin or mix requests, target the existing group with scope=group plus group_id or group_name so the app edits the group bus, not each child row. Use row_group_edit only for creating, removing from, or folding/unfolding row groups. Use clip_edit glue for merge/consolidate/bounce-clip requests. For autotune, auto-tune, pitch correction, or Melodyne-style vocal tuning, add the built-in Pitch Corrector effect. For drum or beat-building requests using packaged samples, prefer action over explanation: choose semantically matching library files or advertised role aliases like role:kick, arrange them with musical spacing, and keep core roles like kick/snare/hats on separate rows when helpful. For 8+ bar starter grooves or build-ups, prefer a workable scaffold with repetition plus light variation or fills instead of one identical bar copied forever. If the user wants a placed sample swapped out, prefer replacing the targeted clips while preserving timing. Inspect existing plugin chains and selected MIDI note state when available: prefer modifying, unbypassing, extending, or reshaping what is already there when it is close, and remove conflicting effects or rewrite notes only when the current state clearly fights the user goal. Never use for pure sonic mix changes. Only emit actions the app can actually execute.',
           'parameters': <String, dynamic>{
             'type': 'object',
             'properties': <String, dynamic>{
@@ -478,6 +481,114 @@ class CloudLlmService {
                               'required': ['bpm'],
                             },
                           ],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['row_color_edit'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'operation': {
+                              'type': 'string',
+                              'enum': ['set', 'clear'],
+                            },
+                            'target': _dawTargetSchema(),
+                            'row_indices': {
+                              'type': 'array',
+                              'items': {
+                                'type': 'integer',
+                                'minimum': 0,
+                              },
+                              'minItems': 1,
+                            },
+                            'track_indices': {
+                              'type': 'array',
+                              'items': {
+                                'type': 'integer',
+                                'minimum': 0,
+                              },
+                              'minItems': 1,
+                            },
+                            'color': {
+                              'type': 'integer',
+                              'minimum': 0,
+                            },
+                            'argb': {
+                              'type': 'integer',
+                              'minimum': 0,
+                            },
+                            'color_name': {'type': 'string'},
+                            'group_id': {'type': 'string'},
+                            'group_name': {'type': 'string'},
+                          },
+                          'required': ['operation'],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['row_group_edit'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'operation': {
+                              'type': 'string',
+                              'enum': [
+                                'create',
+                                'remove_row',
+                                'toggle_collapsed',
+                              ],
+                            },
+                            'target': _dawTargetSchema(),
+                            'row_indices': {
+                              'type': 'array',
+                              'items': {
+                                'type': 'integer',
+                                'minimum': 0,
+                              },
+                              'minItems': 1,
+                            },
+                            'track_indices': {
+                              'type': 'array',
+                              'items': {
+                                'type': 'integer',
+                                'minimum': 0,
+                              },
+                              'minItems': 1,
+                            },
+                            'rows': {
+                              'type': 'array',
+                              'items': {
+                                'type': 'integer',
+                                'minimum': 0,
+                              },
+                              'minItems': 1,
+                            },
+                            'group_id': {'type': 'string'},
+                            'group_name': {'type': 'string'},
+                            'name': {'type': 'string'},
+                            'color': {
+                              'type': 'integer',
+                              'minimum': 0,
+                            },
+                          },
+                          'required': ['operation'],
                           'additionalProperties': true,
                         },
                       },
@@ -1212,9 +1323,11 @@ class CloudLlmService {
                                   'type': 'integer',
                                   'minimum': 0,
                                 },
+                                'group_id': {'type': 'string'},
+                                'group_name': {'type': 'string'},
                                 'scope': {
                                   'type': 'string',
-                                  'enum': ['auto', 'row']
+                                  'enum': ['auto', 'row', 'group']
                                 },
                                 'confidence': {'type': 'number'},
                               },
@@ -1766,6 +1879,8 @@ class CloudLlmService {
     'sample_insert',
     'clip_edit',
     'effect_edit',
+    'row_group_edit',
+    'row_color_edit',
     'automation_edit',
     'midi_compose',
     'stem_separate',
@@ -1840,6 +1955,17 @@ class CloudLlmService {
   static const Set<String> _allowedSampleInsertOperations = <String>{
     'insert_audio_clips',
     'replace_audio_clips',
+  };
+
+  static const Set<String> _allowedRowGroupEditOperations = <String>{
+    'create',
+    'remove_row',
+    'toggle_collapsed',
+  };
+
+  static const Set<String> _allowedRowColorEditOperations = <String>{
+    'set',
+    'clear',
   };
 
   static const Set<String> _allowedRoleOverrideOperations = <String>{
@@ -2013,6 +2139,29 @@ class CloudLlmService {
       return 'clear';
     }
     return token;
+  }
+
+  String _normalizeRowGroupEditOperation(Object? raw) {
+    final token = _normalizeActionToken(raw);
+    const aliases = <String, String>{
+      'group': 'create',
+      'group_rows': 'create',
+      'create_group': 'create',
+      'create_row_group': 'create',
+      'make_group': 'create',
+      'make_row_group': 'create',
+      'ungroup_row': 'remove_row',
+      'remove_from_group': 'remove_row',
+      'remove_row_from_group': 'remove_row',
+      'toggle': 'toggle_collapsed',
+      'fold': 'toggle_collapsed',
+      'unfold': 'toggle_collapsed',
+      'collapse': 'toggle_collapsed',
+      'expand': 'toggle_collapsed',
+      'toggle_group': 'toggle_collapsed',
+      'toggle_row_group': 'toggle_collapsed',
+    };
+    return aliases[token] ?? token;
   }
 
   bool _isKnownAutomationTemplate(String templateRaw) {
@@ -2769,6 +2918,10 @@ class CloudLlmService {
       }
     }
 
+    if (actionType == 'row_group_edit') {
+      data['operation'] = _normalizeRowGroupEditOperation(data['operation']);
+    }
+
     if (actionType == 'midi_compose' && data['notes'] is List) {
       data['notes'] = _normalizeMidiNotesPayload(data['notes']);
     }
@@ -2858,6 +3011,10 @@ class CloudLlmService {
         return true;
       case 'effect_edit':
         return _allowedEffectEditOperations.contains(data['operation']);
+      case 'row_group_edit':
+        return _allowedRowGroupEditOperations.contains(data['operation']);
+      case 'row_color_edit':
+        return _allowedRowColorEditOperations.contains(data['operation']);
       case 'automation_edit':
         if (!_allowedAutomationEditOperations.contains(data['operation'])) {
           return false;
@@ -2927,6 +3084,10 @@ class CloudLlmService {
         data['operation'] = _normalizeClipEditOperation(data['operation']);
       } else if (type == 'effect_edit') {
         data['operation'] = _normalizeEffectEditOperation(data['operation']);
+      } else if (type == 'row_group_edit') {
+        data['operation'] = _normalizeRowGroupEditOperation(data['operation']);
+      } else if (type == 'row_color_edit') {
+        data['operation'] = _normalizeActionToken(data['operation'] ?? 'set');
       } else if (type == 'automation_edit') {
         data['operation'] =
             _normalizeAutomationEditOperation(data['operation']);

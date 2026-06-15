@@ -157,6 +157,15 @@ object JuceBridge {
     @JvmStatic external fun isRowMutedJNI(row: Int): Boolean
     @JvmStatic external fun setRowPanAutomationPointsJNI(row: Int, points: List<Map<String, Any>>)
     @JvmStatic external fun setRowPanJNI(row: Int, pan: Float)
+    @JvmStatic external fun configureTrackGroupsJNI(groups: List<Map<String, Any>>)
+    @JvmStatic external fun assignRowToGroupJNI(row: Int, groupId: String)
+    @JvmStatic external fun setTrackGroupMixStateJNI(
+        groupId: String,
+        gain: Float,
+        pan: Float,
+        muted: Boolean,
+        soloed: Boolean,
+    )
 
     // Master FX and controls
     @JvmStatic external fun insertMasterEffectJNI(pluginPath: String): Boolean
@@ -191,6 +200,7 @@ object JuceBridge {
     @JvmStatic external fun setMetronomeEnabledJNI(enabled: Boolean)
     @JvmStatic external fun setMetronomeVolumeJNI(volume: Float)
     @JvmStatic external fun setMetronomeBpmJNI(bpm: Double)
+    @JvmStatic external fun setMetronomeTimeSignatureJNI(numerator: Int, denominator: Int)
     @JvmStatic external fun setMetronomeTransportMsJNI(ms: Double)
 
     // Offline analysis

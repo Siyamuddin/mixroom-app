@@ -17,6 +17,7 @@ import 'package:mixroom/models/music_profile_option.dart';
 import 'package:mixroom/screens/login.dart';
 import 'package:mixroom/screens/signed_in_shell.dart';
 import 'package:mixroom/widgets/auth_figma_shell.dart';
+import 'package:mixroom/widgets/mixroom_glass_dropdown.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -163,25 +164,18 @@ class _AuthGateLoginLoadingScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF090909),
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          const MixroomAuthBackground(),
-          SafeArea(
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 320),
-                child: _AuthGateStatusPanel(
-                  title: L10n.translate(context, 'Loading your account'),
-                  body: L10n.translate(context, 'Checking your sign-in...'),
-                  compact: true,
-                ),
-              ),
+    return MixroomAuthPageScaffold(
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 320),
+            child: _AuthGateStatusPanel(
+              title: L10n.translate(context, 'Loading your account'),
+              body: L10n.translate(context, 'Checking your sign-in...'),
+              compact: true,
             ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -267,6 +261,7 @@ class _RequiredProfileCompletionGate extends StatefulWidget {
 
 class _RequiredProfileCompletionGateState
     extends State<_RequiredProfileCompletionGate> {
+  static const double _tabletProfileContentWidth = 348;
   static final math.Random _usernameRandom = math.Random();
 
   static final RegExp _usernamePattern =
@@ -315,6 +310,7 @@ class _RequiredProfileCompletionGateState
   String? _musicProfileValue;
   bool _musicProfileMenuOpen = false;
   bool _acceptedLegalTerms = false;
+  bool _requiresProfileConsent = false;
   bool _newsletterOptIn = false;
   String? _inlineError;
   bool _isSubmitting = false;
@@ -338,8 +334,16 @@ class _RequiredProfileCompletionGateState
         ? null
         : widget.profile.musicProfile!.trim().toLowerCase();
     _bioController.text = (widget.profile.bio ?? '').trim();
-    _acceptedLegalTerms = false;
+    final hasAcceptedLegalTerms = _profileHasAcceptedLegalTerms(widget.profile);
+    _acceptedLegalTerms = hasAcceptedLegalTerms;
+    _requiresProfileConsent = !hasAcceptedLegalTerms;
     _newsletterOptIn = widget.profile.newsletterOptIn;
+  }
+
+  bool _profileHasAcceptedLegalTerms(AppUserSnapshot profile) {
+    return (profile.acceptedTermsVersion ?? '').trim().isNotEmpty &&
+        (profile.acceptedPrivacyVersion ?? '').trim().isNotEmpty &&
+        profile.acceptedAt != null;
   }
 
   String _suggestUsername() {
@@ -414,6 +418,10 @@ class _RequiredProfileCompletionGateState
   @override
   void didUpdateWidget(covariant _RequiredProfileCompletionGate oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!_acceptedLegalTerms && _profileHasAcceptedLegalTerms(widget.profile)) {
+      _acceptedLegalTerms = true;
+      _requiresProfileConsent = false;
+    }
     if (oldWidget.error != widget.error &&
         (widget.error ?? '').trim().isNotEmpty &&
         !_isSubmitting) {
@@ -462,169 +470,275 @@ class _RequiredProfileCompletionGateState
   }
 
   Widget _buildMusicProfileSelector({required bool busy}) {
-    final triggerText = _musicProfileValue == null
+    final selectedMusicProfileLabel = musicProfileLabel(_musicProfileValue);
+    final triggerText = selectedMusicProfileLabel.isEmpty
         ? L10n.translate(context, 'Select one')
-        : musicProfileLabel(_musicProfileValue);
+        : L10n.translate(context, selectedMusicProfileLabel);
     final textColor = _musicProfileValue == null
         ? const Color.fromRGBO(244, 244, 244, 0.72)
         : const Color(0xFFF4F4F4);
     final options = kMusicProfileOptions
         .map((option) => MapEntry(option.value, option.label))
         .toList();
+    final useOverlayDropdown = mixroomUseTabletDesktopAuthLayout(context);
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(24),
-            color: const Color.fromRGBO(244, 244, 244, 0.30),
-            boxShadow: const [
-              BoxShadow(
-                color: Color.fromRGBO(0, 0, 0, 0.25),
-                blurRadius: 15,
-                spreadRadius: 8,
+    return Builder(
+      builder: (anchorContext) {
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(24),
+                color: const Color.fromRGBO(244, 244, 244, 0.30),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color.fromRGBO(0, 0, 0, 0.25),
+                    blurRadius: 15,
+                    spreadRadius: 8,
+                  ),
+                ],
+                border: Border.all(
+                  color: const Color.fromRGBO(244, 244, 244, 0.12),
+                ),
               ),
-            ],
-            border: Border.all(
-              color: const Color.fromRGBO(244, 244, 244, 0.12),
-            ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: busy
-                      ? null
-                      : () {
-                          setState(() {
-                            _musicProfileMenuOpen = !_musicProfileMenuOpen;
-                          });
-                        },
-                  child: SizedBox(
-                    height: 48,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(23, 0, 20, 0),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              triggerText,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontFamily: 'Pretendard',
-                                color: textColor,
-                                fontSize: 15,
-                                height: 22 / 15,
-                                fontWeight: FontWeight.w400,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: busy
+                          ? null
+                          : () async {
+                              if (!useOverlayDropdown) {
+                                setState(() {
+                                  _musicProfileMenuOpen =
+                                      !_musicProfileMenuOpen;
+                                });
+                                return;
+                              }
+
+                              setState(() => _musicProfileMenuOpen = true);
+                              final selected =
+                                  await showMixroomGlassDropdown<String>(
+                                anchorContext: anchorContext,
+                                verticalGap: 0,
+                                horizontalInset: 24,
+                                minWidth: _tabletProfileContentWidth,
+                                maxWidth: _tabletProfileContentWidth,
+                                preferredHeight: math.min(
+                                  356.0,
+                                  1.0 + (options.length * 44.0),
+                                ),
+                                radius: 24,
+                                color: const Color.fromRGBO(78, 88, 96, 0.94),
+                                padding: EdgeInsets.zero,
+                                child: _buildMusicProfileDropdownMenu(options),
+                              );
+                              if (!mounted) return;
+                              setState(() {
+                                _musicProfileMenuOpen = false;
+                                if (selected != null) {
+                                  _musicProfileValue = selected;
+                                  _inlineError = null;
+                                }
+                              });
+                            },
+                      child: SizedBox(
+                        height: 48,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(23, 0, 20, 0),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  triggerText,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontFamily: 'Pretendard',
+                                    color: textColor,
+                                    fontSize: 15,
+                                    height: 22 / 15,
+                                    fontWeight: FontWeight.w400,
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Opacity(
-                            opacity: busy ? 0.45 : 1,
-                            child: SizedBox(
-                              width: 11.25,
-                              height: 11.25,
-                              child: Center(
-                                child: Transform.rotate(
-                                  angle: _musicProfileMenuOpen ? 0 : math.pi,
-                                  child: SvgPicture.asset(
-                                    kMixroomDropdownIconAsset,
-                                    width: 11.25,
-                                    height: 11.25,
-                                    colorFilter: const ColorFilter.mode(
-                                      Color(0x80F4F4F4),
-                                      BlendMode.srcIn,
+                              const SizedBox(width: 12),
+                              Opacity(
+                                opacity: busy ? 0.45 : 1,
+                                child: SizedBox(
+                                  width: 11.25,
+                                  height: 11.25,
+                                  child: Center(
+                                    child: Transform.rotate(
+                                      angle:
+                                          _musicProfileMenuOpen ? 0 : math.pi,
+                                      child: SvgPicture.asset(
+                                        kMixroomDropdownIconAsset,
+                                        width: 11.25,
+                                        height: 11.25,
+                                        colorFilter: const ColorFilter.mode(
+                                          Color(0x80F4F4F4),
+                                          BlendMode.srcIn,
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOutCubic,
+                    child: !useOverlayDropdown && _musicProfileMenuOpen
+                        ? _buildInlineMusicProfileDropdownMenu(
+                            options: options,
+                            busy: busy,
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildInlineMusicProfileDropdownMenu({
+    required List<MapEntry<String, String>> options,
+    required bool busy,
+  }) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 23),
+          child: Divider(
+            height: 1,
+            thickness: 1,
+            color: Color.fromRGBO(244, 244, 244, 0.15),
+          ),
+        ),
+        ...options.map((entry) {
+          final isSelected = _musicProfileValue == entry.key;
+          return Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: busy
+                  ? null
+                  : () {
+                      setState(() {
+                        _musicProfileValue = entry.key;
+                        _inlineError = null;
+                        _musicProfileMenuOpen = false;
+                      });
+                    },
+              child: SizedBox(
+                height: 44,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 23),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          L10n.translate(context, entry.value),
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: const Color(0xFFF4F4F4),
+                            fontSize: 15,
+                            height: 22 / 15,
+                            fontWeight:
+                                isSelected ? FontWeight.w600 : FontWeight.w400,
+                          ),
+                        ),
+                      ),
+                      if (isSelected)
+                        const Icon(
+                          Icons.check_rounded,
+                          color: Color(0xFFF4F4F4),
+                          size: 16,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  Widget _buildMusicProfileDropdownMenu(
+    List<MapEntry<String, String>> options,
+  ) {
+    return SingleChildScrollView(
+      padding: EdgeInsets.zero,
+      physics: const ClampingScrollPhysics(),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 23),
+            child: Divider(
+              height: 1,
+              thickness: 1,
+              color: Color.fromRGBO(244, 244, 244, 0.15),
+            ),
+          ),
+          ...options.map((entry) {
+            final isSelected = _musicProfileValue == entry.key;
+            return Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () => Navigator.of(context).pop(entry.key),
+                child: SizedBox(
+                  height: 44,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 23),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            L10n.translate(context, entry.value),
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontFamily: 'Pretendard',
+                              color: const Color(0xFFF4F4F4),
+                              fontSize: 15,
+                              height: 22 / 15,
+                              fontWeight: isSelected
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                        if (isSelected)
+                          const Icon(
+                            Icons.check_rounded,
+                            color: Color(0xFFF4F4F4),
+                            size: 16,
+                          ),
+                      ],
                     ),
                   ),
                 ),
               ),
-              AnimatedSize(
-                duration: const Duration(milliseconds: 180),
-                curve: Curves.easeOutCubic,
-                child: _musicProfileMenuOpen
-                    ? Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 23),
-                            child: Divider(
-                              height: 1,
-                              thickness: 1,
-                              color: Color.fromRGBO(244, 244, 244, 0.15),
-                            ),
-                          ),
-                          ...options.map((entry) {
-                            final isSelected = _musicProfileValue == entry.key;
-                            return Material(
-                              color: Colors.transparent,
-                              child: InkWell(
-                                onTap: busy
-                                    ? null
-                                    : () {
-                                        setState(() {
-                                          _musicProfileValue = entry.key;
-                                          _inlineError = null;
-                                          _musicProfileMenuOpen = false;
-                                        });
-                                      },
-                                child: SizedBox(
-                                  height: 44,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 23,
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            entry.value,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: TextStyle(
-                                              fontFamily: 'Pretendard',
-                                              color: const Color(0xFFF4F4F4),
-                                              fontSize: 15,
-                                              height: 22 / 15,
-                                              fontWeight: isSelected
-                                                  ? FontWeight.w600
-                                                  : FontWeight.w400,
-                                            ),
-                                          ),
-                                        ),
-                                        if (isSelected)
-                                          const Icon(
-                                            Icons.check_rounded,
-                                            color: Color(0xFFF4F4F4),
-                                            size: 16,
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            );
-                          }),
-                        ],
-                      )
-                    : const SizedBox.shrink(),
-              ),
-            ],
-          ),
-        ),
+            );
+          }),
+        ],
       ),
     );
   }
@@ -844,6 +958,379 @@ class _RequiredProfileCompletionGateState
     if (!launched || !mounted) return;
   }
 
+  Widget _buildTabletProfileLayout({
+    required bool busy,
+    required BoxConstraints constraints,
+    required double bottomInset,
+    required String errorText,
+    required String legalErrorText,
+    required String musicProfileErrorText,
+    required String bioErrorText,
+    required bool highlightsUsernameSection,
+    required bool highlightsConsentSection,
+  }) {
+    final minHeight = math.max(0.0, constraints.maxHeight - bottomInset);
+    final showConsentRows = _requiresProfileConsent || highlightsConsentSection;
+    final contentTop = _tabletProfileContentTop(constraints.maxHeight);
+    final estimatedContentHeight = showConsentRows ? 716.0 : 590.0;
+    final scrollHeight = math.max(
+      minHeight,
+      contentTop + estimatedContentHeight + 36.0,
+    );
+
+    return Stack(
+      children: [
+        AnimatedPadding(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          padding: EdgeInsets.only(bottom: bottomInset),
+          child: SingleChildScrollView(
+            physics: const ClampingScrollPhysics(),
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+            child: SizedBox(
+              height: scrollHeight,
+              child: Stack(
+                children: [
+                  Positioned(
+                    top: contentTop,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: SizedBox(
+                        width: _tabletProfileContentWidth,
+                        child: _buildTabletProfileContent(
+                          busy: busy,
+                          errorText: errorText,
+                          legalErrorText: legalErrorText,
+                          musicProfileErrorText: musicProfileErrorText,
+                          bioErrorText: bioErrorText,
+                          highlightsUsernameSection: highlightsUsernameSection,
+                          highlightsConsentSection: highlightsConsentSection,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          top: 10,
+          left: 24,
+          child: MixroomAuthBackCircleButton(
+            onTap: busy
+                ? null
+                : () {
+                    widget.onBack?.call();
+                  },
+          ),
+        ),
+        const Positioned(
+          top: 14,
+          right: 24,
+          child: MixroomLocaleSelector(),
+        ),
+      ],
+    );
+  }
+
+  double _tabletProfileContentTop(double availableHeight) {
+    return math.min(164.0, math.max(96.0, availableHeight * 0.17));
+  }
+
+  Widget _buildTabletProfileContent({
+    required bool busy,
+    required String errorText,
+    required String legalErrorText,
+    required String musicProfileErrorText,
+    required String bioErrorText,
+    required bool highlightsUsernameSection,
+    required bool highlightsConsentSection,
+  }) {
+    final usernameErrorText = highlightsUsernameSection ? errorText : '';
+    final musicErrorText = errorText == musicProfileErrorText ? errorText : '';
+    final bioInlineErrorText = errorText == bioErrorText ? errorText : '';
+    final legalInlineErrorText = errorText == legalErrorText ? errorText : '';
+    final handledError = usernameErrorText.isNotEmpty ||
+        musicErrorText.isNotEmpty ||
+        bioInlineErrorText.isNotEmpty ||
+        legalInlineErrorText.isNotEmpty;
+    final genericErrorText =
+        errorText.isNotEmpty && !handledError ? errorText : '';
+    final showConsentRows = _requiresProfileConsent || highlightsConsentSection;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const MixroomBrandLockup(showMark: false),
+        const SizedBox(height: 28),
+        MixroomGlassPanel(
+          borderColor: highlightsUsernameSection
+              ? const Color.fromRGBO(255, 157, 71, 0.72)
+              : const Color.fromRGBO(244, 244, 244, 0.14),
+          child: Column(
+            children: [
+              MixroomGlassTextFieldRow(
+                controller: _usernameController,
+                label: L10n.translate(context, 'Username'),
+                textInputAction: TextInputAction.next,
+                onChanged: (_) {
+                  if (_inlineError != null) {
+                    setState(() => _inlineError = null);
+                  }
+                },
+              ),
+              const MixroomGlassDivider(),
+              MixroomGlassTextFieldRow(
+                controller: _birthdateController,
+                label: L10n.translate(context, 'Birthday (yyyy.mm.dd)'),
+                readOnly: true,
+                onTap: busy ? null : _pickBirthdate,
+                suffix: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_birthdateController.text.trim().isNotEmpty)
+                      IconButton(
+                        onPressed: busy ? null : _clearBirthdate,
+                        icon: const Icon(
+                          Icons.close_rounded,
+                          color: Color(0xFFF4F4F4),
+                          size: 18,
+                        ),
+                        splashRadius: 18,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 28,
+                          minHeight: 28,
+                        ),
+                      ),
+                    GestureDetector(
+                      onTap: busy ? null : _pickBirthdate,
+                      behavior: HitTestBehavior.translucent,
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 4),
+                        child: SvgPicture.asset(
+                          kMixroomCalendarIconAsset,
+                          width: 18,
+                          height: 20,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (usernameErrorText.isNotEmpty) ...[
+          const SizedBox(height: 9),
+          _TabletProfileInlineError(message: usernameErrorText),
+          const SizedBox(height: 26),
+        ] else
+          const SizedBox(height: 36),
+        Text(
+          L10n.translate(context, 'What describes you best?'),
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontFamily: 'Pretendard',
+            color: Color(0xFFF4F4F4),
+            fontSize: 15,
+            height: 22 / 15,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 14),
+        _buildMusicProfileSelector(busy: busy),
+        if (musicErrorText.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _TabletProfileInlineError(message: musicErrorText),
+          const SizedBox(height: 18),
+        ] else
+          const SizedBox(height: 28),
+        Text(
+          L10n.translate(context, 'Bio'),
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontFamily: 'Pretendard',
+            color: Color(0xFFF4F4F4),
+            fontSize: 15,
+            height: 22 / 15,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 14),
+        _buildTabletBioPanel(busy: busy),
+        if (bioInlineErrorText.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _TabletProfileInlineError(message: bioInlineErrorText),
+        ],
+        if (showConsentRows) ...[
+          const SizedBox(height: 18),
+          _buildTabletProfileConsentRows(
+            busy: busy,
+            highlightsConsentSection: highlightsConsentSection,
+          ),
+          if (legalInlineErrorText.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            _TabletProfileInlineError(message: legalInlineErrorText),
+          ],
+        ],
+        if (genericErrorText.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          _TabletProfileInlineError(message: genericErrorText),
+        ],
+        const SizedBox(height: 30),
+        Center(
+          child: MixroomPillButton(
+            label: L10n.translate(context, 'Done'),
+            width: 124,
+            busy: busy,
+            onTap: busy ? null : _submit,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTabletBioPanel({required bool busy}) {
+    return MixroomGlassPanel(
+      child: SizedBox(
+        height: 112,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(23, 14, 23, 12),
+          child: TextField(
+            controller: _bioController,
+            enabled: !busy,
+            minLines: null,
+            maxLines: null,
+            expands: true,
+            maxLength: 160,
+            cursorColor: Colors.white,
+            style: const TextStyle(
+              fontFamily: 'Pretendard',
+              color: Color(0xFFF4F4F4),
+              fontSize: 15,
+              height: 22 / 15,
+              fontWeight: FontWeight.w400,
+            ),
+            onChanged: (_) {
+              if (_inlineError != null) {
+                setState(() => _inlineError = null);
+              }
+            },
+            decoration: InputDecoration(
+              border: InputBorder.none,
+              isDense: true,
+              counterText: '',
+              hintText: L10n.translate(
+                context,
+                'Tell people a bit about yourself',
+              ),
+              hintStyle: const TextStyle(
+                fontFamily: 'Pretendard',
+                color: Color.fromRGBO(244, 244, 244, 0.72),
+                fontSize: 15,
+                height: 22 / 15,
+                fontWeight: FontWeight.w400,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTabletProfileConsentRows({
+    required bool busy,
+    required bool highlightsConsentSection,
+  }) {
+    final legalLabel = Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 3,
+      runSpacing: 2,
+      children: [
+        Text(L10n.translate(context, "I agree to Mixroom's")),
+        MixroomAuthInlineLink(
+          label: L10n.translate(context, 'terms'),
+          onTap: busy ? null : () => _openUrl(LegalConfig.termsUrl),
+        ),
+        Text(L10n.translate(context, 'and')),
+        MixroomAuthInlineLink(
+          label: L10n.translate(context, 'privacy policy'),
+          onTap: busy ? null : () => _openUrl(LegalConfig.privacyUrl),
+        ),
+        const Text('.'),
+      ],
+    );
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 160),
+      curve: Curves.easeOutCubic,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: highlightsConsentSection
+              ? const Color.fromRGBO(255, 157, 71, 0.72)
+              : Colors.transparent,
+        ),
+      ),
+      child: Column(
+        children: [
+          MixroomAuthConsentRow(
+            value: _newsletterOptIn,
+            onChanged: busy
+                ? null
+                : (next) {
+                    setState(() {
+                      _newsletterOptIn = next;
+                      _inlineError = null;
+                    });
+                  },
+            label: L10n.translate(
+              context,
+              'I agree to receive marketing and promotional material.',
+            ),
+          ),
+          MixroomAuthConsentRow(
+            value: _acceptedLegalTerms,
+            onChanged: busy
+                ? null
+                : (next) {
+                    setState(() {
+                      _acceptedLegalTerms = next;
+                      _inlineError = null;
+                    });
+                  },
+            richLabel: legalLabel,
+          ),
+          Align(
+            alignment: Alignment.center,
+            child: SizedBox(
+              width: 136,
+              child: MixroomAuthConsentRow(
+                value: _acceptedLegalTerms && _newsletterOptIn,
+                onChanged: busy
+                    ? null
+                    : (next) {
+                        setState(() {
+                          _acceptedLegalTerms = next;
+                          _newsletterOptIn = next;
+                          _inlineError = null;
+                        });
+                      },
+                label: L10n.translate(context, 'Agree to all.'),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final busy = widget.busy || _isSubmitting;
@@ -869,441 +1356,442 @@ class _RequiredProfileCompletionGateState
             errorText.startsWith('You must be at least '));
     final highlightsConsentSection = errorText == legalErrorText;
 
-    return Scaffold(
+    return MixroomAuthPageScaffold(
       resizeToAvoidBottomInset: false,
-      body: Stack(
-        children: [
-          const Positioned.fill(child: MixroomAuthBackground()),
-          SafeArea(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final bottomInset = MediaQuery.of(context).viewInsets.bottom;
-                final minHeight = constraints.maxHeight - bottomInset - 24;
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+            if (mixroomUseTabletLandscapeAuthLayout(context)) {
+              return _buildTabletProfileLayout(
+                busy: busy,
+                constraints: constraints,
+                bottomInset: bottomInset,
+                errorText: errorText,
+                legalErrorText: legalErrorText,
+                musicProfileErrorText: musicProfileErrorText,
+                bioErrorText: bioErrorText,
+                highlightsUsernameSection: highlightsUsernameSection,
+                highlightsConsentSection: highlightsConsentSection,
+              );
+            }
+            final minHeight = constraints.maxHeight - bottomInset - 24;
 
-                return AnimatedPadding(
-                  duration: const Duration(milliseconds: 220),
-                  curve: Curves.easeOutCubic,
-                  padding: EdgeInsets.only(bottom: bottomInset),
-                  child: SingleChildScrollView(
-                    physics: const ClampingScrollPhysics(),
-                    keyboardDismissBehavior:
-                        ScrollViewKeyboardDismissBehavior.onDrag,
-                    padding: const EdgeInsets.fromLTRB(27, 14, 27, 24),
-                    child: Center(
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(
-                          maxWidth: 402,
-                          minHeight: minHeight < 0 ? 0 : minHeight,
+            return AnimatedPadding(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              padding: EdgeInsets.only(bottom: bottomInset),
+              child: SingleChildScrollView(
+                physics: const ClampingScrollPhysics(),
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: const EdgeInsets.fromLTRB(27, 14, 27, 24),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: 402,
+                      minHeight: minHeight < 0 ? 0 : minHeight,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        MixroomAuthTopBar(
+                          onBack: busy
+                              ? null
+                              : () {
+                                  widget.onBack?.call();
+                                },
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            MixroomAuthTopBar(
-                              onBack: busy
-                                  ? null
-                                  : () {
-                                      widget.onBack?.call();
-                                    },
-                            ),
-                            const SizedBox(height: 52),
-                            const MixroomBrandLockup(showMark: false),
-                            const SizedBox(height: 28),
-                            Text(
-                              L10n.translate(
-                                context,
-                                'Finish your account setup',
+                        const SizedBox(height: 52),
+                        const MixroomBrandLockup(showMark: false),
+                        const SizedBox(height: 28),
+                        Text(
+                          L10n.translate(
+                            context,
+                            'Finish your account setup',
+                          ),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: Color(0xFFF4F4F4),
+                            fontSize: 22,
+                            height: 28 / 22,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          L10n.translate(
+                            context,
+                            'Add the last few details to start using Mixroom.',
+                          ),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: Color.fromRGBO(244, 244, 244, 0.72),
+                            fontSize: 14,
+                            height: 20 / 14,
+                            fontWeight: FontWeight.w400,
+                          ),
+                        ),
+                        const SizedBox(height: 34),
+                        MixroomGlassPanel(
+                          borderColor: highlightsUsernameSection
+                              ? const Color.fromRGBO(255, 157, 71, 0.72)
+                              : const Color.fromRGBO(244, 244, 244, 0.14),
+                          child: Column(
+                            children: [
+                              MixroomGlassTextFieldRow(
+                                controller: _usernameController,
+                                label: L10n.translate(context, 'Username'),
+                                textInputAction: TextInputAction.next,
+                                onChanged: (_) {
+                                  if (_inlineError != null) {
+                                    setState(() => _inlineError = null);
+                                  }
+                                },
                               ),
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontFamily: 'Pretendard',
-                                color: Color(0xFFF4F4F4),
-                                fontSize: 22,
-                                height: 28 / 22,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            Text(
-                              L10n.translate(
-                                context,
-                                'Add the last few details to start using Mixroom.',
-                              ),
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontFamily: 'Pretendard',
-                                color: Color.fromRGBO(244, 244, 244, 0.72),
-                                fontSize: 14,
-                                height: 20 / 14,
-                                fontWeight: FontWeight.w400,
-                              ),
-                            ),
-                            const SizedBox(height: 34),
-                            MixroomGlassPanel(
-                              borderColor: highlightsUsernameSection
-                                  ? const Color.fromRGBO(255, 157, 71, 0.72)
-                                  : const Color.fromRGBO(244, 244, 244, 0.14),
-                              child: Column(
-                                children: [
-                                  MixroomGlassTextFieldRow(
-                                    controller: _usernameController,
-                                    label: L10n.translate(context, 'Username'),
-                                    textInputAction: TextInputAction.next,
-                                    onChanged: (_) {
-                                      if (_inlineError != null) {
-                                        setState(() => _inlineError = null);
-                                      }
-                                    },
-                                  ),
-                                  const MixroomGlassDivider(),
-                                  MixroomGlassTextFieldRow(
-                                    controller: _birthdateController,
-                                    label: L10n.translate(
-                                      context,
-                                      'Birthday (yyyy.mm.dd)',
-                                    ),
-                                    readOnly: true,
-                                    onTap: busy ? null : _pickBirthdate,
-                                    suffix: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        if (_birthdateController.text
-                                            .trim()
-                                            .isNotEmpty)
-                                          IconButton(
-                                            onPressed:
-                                                busy ? null : _clearBirthdate,
-                                            icon: const Icon(
-                                              Icons.close_rounded,
-                                              color: Color(0xFFF4F4F4),
-                                              size: 18,
-                                            ),
-                                            splashRadius: 18,
-                                            padding: EdgeInsets.zero,
-                                            constraints: const BoxConstraints(
-                                              minWidth: 28,
-                                              minHeight: 28,
-                                            ),
-                                          ),
-                                        GestureDetector(
-                                          onTap: busy ? null : _pickBirthdate,
-                                          behavior: HitTestBehavior.translucent,
-                                          child: Padding(
-                                            padding: const EdgeInsets.only(
-                                              right: 4,
-                                            ),
-                                            child: SvgPicture.asset(
-                                              kMixroomCalendarIconAsset,
-                                              width: 18,
-                                              height: 20,
-                                            ),
-                                          ),
+                              const MixroomGlassDivider(),
+                              MixroomGlassTextFieldRow(
+                                controller: _birthdateController,
+                                label: L10n.translate(
+                                  context,
+                                  'Birthday (yyyy.mm.dd)',
+                                ),
+                                readOnly: true,
+                                onTap: busy ? null : _pickBirthdate,
+                                suffix: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (_birthdateController.text
+                                        .trim()
+                                        .isNotEmpty)
+                                      IconButton(
+                                        onPressed:
+                                            busy ? null : _clearBirthdate,
+                                        icon: const Icon(
+                                          Icons.close_rounded,
+                                          color: Color(0xFFF4F4F4),
+                                          size: 18,
                                         ),
-                                      ],
+                                        splashRadius: 18,
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(
+                                          minWidth: 28,
+                                          minHeight: 28,
+                                        ),
+                                      ),
+                                    GestureDetector(
+                                      onTap: busy ? null : _pickBirthdate,
+                                      behavior: HitTestBehavior.translucent,
+                                      child: Padding(
+                                        padding: const EdgeInsets.only(
+                                          right: 4,
+                                        ),
+                                        child: SvgPicture.asset(
+                                          kMixroomCalendarIconAsset,
+                                          width: 18,
+                                          height: 20,
+                                        ),
+                                      ),
                                     ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 18),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: TextButton.icon(
-                                onPressed: busy ? null : _generateUsername,
-                                icon: const Icon(Icons.autorenew_rounded,
-                                    size: 16),
-                                label: Text(
-                                  L10n.translate(context, 'Generate username'),
-                                ),
-                                style: TextButton.styleFrom(
-                                  foregroundColor: const Color(0xFFF4F4F4),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 8,
-                                  ),
-                                  textStyle: const TextStyle(
-                                    fontFamily: 'Pretendard',
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
+                                  ],
                                 ),
                               ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton.icon(
+                            onPressed: busy ? null : _generateUsername,
+                            icon: const Icon(Icons.autorenew_rounded, size: 16),
+                            label: Text(
+                              L10n.translate(context, 'Generate username'),
                             ),
-                            const SizedBox(height: 18),
-                            Text(
-                              L10n.translate(context, 'Bio'),
-                              textAlign: TextAlign.center,
+                            style: TextButton.styleFrom(
+                              foregroundColor: const Color(0xFFF4F4F4),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              textStyle: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        Text(
+                          L10n.translate(context, 'Bio'),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: Color(0xFFF4F4F4),
+                            fontSize: 15,
+                            height: 22 / 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        MixroomGlassPanel(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(23, 18, 23, 14),
+                            child: TextField(
+                              controller: _bioController,
+                              enabled: !busy,
+                              minLines: 4,
+                              maxLines: 4,
+                              maxLength: 160,
+                              cursorColor: Colors.white,
                               style: const TextStyle(
                                 fontFamily: 'Pretendard',
                                 color: Color(0xFFF4F4F4),
                                 fontSize: 15,
                                 height: 22 / 15,
-                                fontWeight: FontWeight.w600,
+                                fontWeight: FontWeight.w400,
                               ),
-                            ),
-                            const SizedBox(height: 14),
-                            MixroomGlassPanel(
-                              child: Padding(
-                                padding:
-                                    const EdgeInsets.fromLTRB(23, 18, 23, 14),
-                                child: TextField(
-                                  controller: _bioController,
-                                  enabled: !busy,
-                                  minLines: 4,
-                                  maxLines: 4,
-                                  maxLength: 160,
-                                  cursorColor: Colors.white,
-                                  style: const TextStyle(
-                                    fontFamily: 'Pretendard',
-                                    color: Color(0xFFF4F4F4),
-                                    fontSize: 15,
-                                    height: 22 / 15,
-                                    fontWeight: FontWeight.w400,
-                                  ),
-                                  onChanged: (_) {
-                                    if (_inlineError != null) {
-                                      setState(() => _inlineError = null);
-                                    }
-                                  },
-                                  decoration: InputDecoration(
-                                    border: InputBorder.none,
-                                    isDense: true,
-                                    hintText: L10n.translate(
-                                      context,
-                                      'Tell people a bit about yourself',
-                                    ),
-                                    hintStyle: const TextStyle(
-                                      fontFamily: 'Pretendard',
-                                      color:
-                                          Color.fromRGBO(244, 244, 244, 0.72),
-                                      fontSize: 15,
-                                      height: 22 / 15,
-                                      fontWeight: FontWeight.w400,
-                                    ),
-                                    counterStyle: const TextStyle(
-                                      fontFamily: 'Pretendard',
-                                      color:
-                                          Color.fromRGBO(244, 244, 244, 0.72),
-                                      fontSize: 11,
-                                      height: 1.3,
-                                      fontWeight: FontWeight.w400,
-                                    ),
-                                  ),
+                              onChanged: (_) {
+                                if (_inlineError != null) {
+                                  setState(() => _inlineError = null);
+                                }
+                              },
+                              decoration: InputDecoration(
+                                border: InputBorder.none,
+                                isDense: true,
+                                hintText: L10n.translate(
+                                  context,
+                                  'Tell people a bit about yourself',
                                 ),
-                              ),
-                            ),
-                            if (errorText.isNotEmpty) ...[
-                              const SizedBox(height: 8),
-                              Text(
-                                errorText,
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
+                                hintStyle: const TextStyle(
                                   fontFamily: 'Pretendard',
-                                  color: Color(0xFFFF9D47),
-                                  fontSize: 12,
-                                  height: 15 / 12,
+                                  color: Color.fromRGBO(244, 244, 244, 0.72),
+                                  fontSize: 15,
+                                  height: 22 / 15,
+                                  fontWeight: FontWeight.w400,
+                                ),
+                                counterStyle: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Color.fromRGBO(244, 244, 244, 0.72),
+                                  fontSize: 11,
+                                  height: 1.3,
                                   fontWeight: FontWeight.w400,
                                 ),
                               ),
-                              const SizedBox(height: 10),
-                            ] else
-                              const SizedBox(height: 8),
-                            Text(
-                              L10n.translate(
-                                context,
-                                'What describes you best?',
-                              ),
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontFamily: 'Pretendard',
-                                color: Color(0xFFF4F4F4),
-                                fontSize: 15,
-                                height: 22 / 15,
-                                fontWeight: FontWeight.w600,
-                              ),
                             ),
-                            const SizedBox(height: 14),
-                            _buildMusicProfileSelector(busy: busy),
-                            const SizedBox(height: 22),
-                            AnimatedContainer(
-                              duration: const Duration(milliseconds: 160),
-                              curve: Curves.easeOutCubic,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 8,
+                          ),
+                        ),
+                        if (errorText.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            errorText,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontFamily: 'Pretendard',
+                              color: Color(0xFFFF9D47),
+                              fontSize: 12,
+                              height: 15 / 12,
+                              fontWeight: FontWeight.w400,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                        ] else
+                          const SizedBox(height: 8),
+                        Text(
+                          L10n.translate(
+                            context,
+                            'What describes you best?',
+                          ),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: Color(0xFFF4F4F4),
+                            fontSize: 15,
+                            height: 22 / 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        _buildMusicProfileSelector(busy: busy),
+                        const SizedBox(height: 22),
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 160),
+                          curve: Curves.easeOutCubic,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                              color: highlightsConsentSection
+                                  ? const Color.fromRGBO(
+                                      255,
+                                      157,
+                                      71,
+                                      0.72,
+                                    )
+                                  : Colors.transparent,
+                            ),
+                          ),
+                          child: Column(
+                            children: [
+                              _SignupConsentCheckbox(
+                                value: _acceptedLegalTerms && _newsletterOptIn,
+                                onChanged: busy
+                                    ? null
+                                    : (next) {
+                                        setState(() {
+                                          _acceptedLegalTerms = next;
+                                          _newsletterOptIn = next;
+                                          _inlineError = null;
+                                        });
+                                      },
+                                label: L10n.translate(context, 'Agree to all'),
                               ),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(18),
-                                border: Border.all(
-                                  color: highlightsConsentSection
-                                      ? const Color.fromRGBO(
-                                          255,
-                                          157,
-                                          71,
-                                          0.72,
-                                        )
-                                      : Colors.transparent,
+                              const SizedBox(height: 6),
+                              _SignupConsentCheckbox(
+                                value: _acceptedLegalTerms,
+                                onChanged: busy
+                                    ? null
+                                    : (next) {
+                                        setState(() {
+                                          _acceptedLegalTerms = next;
+                                          _inlineError = null;
+                                        });
+                                      },
+                                richLabel: Wrap(
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  spacing: 2,
+                                  runSpacing: 2,
+                                  children: [
+                                    Text(
+                                      L10n.translate(
+                                        context,
+                                        'I agree to the',
+                                      ),
+                                      style: const TextStyle(
+                                        fontFamily: 'Pretendard',
+                                        color: Color.fromRGBO(
+                                          244,
+                                          244,
+                                          244,
+                                          0.82,
+                                        ),
+                                        fontSize: 13,
+                                        height: 18 / 13,
+                                        fontWeight: FontWeight.w400,
+                                      ),
+                                    ),
+                                    _ConsentLinkText(
+                                      label: L10n.translate(
+                                        context,
+                                        'Terms of Service',
+                                      ),
+                                      onTap: busy
+                                          ? null
+                                          : () => _openUrl(
+                                                LegalConfig.termsUrl,
+                                              ),
+                                    ),
+                                    Text(
+                                      L10n.translate(context, 'and'),
+                                      style: const TextStyle(
+                                        fontFamily: 'Pretendard',
+                                        color: Color.fromRGBO(
+                                          244,
+                                          244,
+                                          244,
+                                          0.82,
+                                        ),
+                                        fontSize: 13,
+                                        height: 18 / 13,
+                                        fontWeight: FontWeight.w400,
+                                      ),
+                                    ),
+                                    _ConsentLinkText(
+                                      label: L10n.translate(
+                                        context,
+                                        'Privacy Policy',
+                                      ),
+                                      onTap: busy
+                                          ? null
+                                          : () => _openUrl(
+                                                LegalConfig.privacyUrl,
+                                              ),
+                                    ),
+                                    const Text(
+                                      '.',
+                                      style: TextStyle(
+                                        fontFamily: 'Pretendard',
+                                        color: Color.fromRGBO(
+                                          244,
+                                          244,
+                                          244,
+                                          0.82,
+                                        ),
+                                        fontSize: 13,
+                                        height: 18 / 13,
+                                        fontWeight: FontWeight.w400,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              child: Column(
-                                children: [
-                                  _SignupConsentCheckbox(
-                                    value:
-                                        _acceptedLegalTerms && _newsletterOptIn,
-                                    onChanged: busy
-                                        ? null
-                                        : (next) {
-                                            setState(() {
-                                              _acceptedLegalTerms = next;
-                                              _newsletterOptIn = next;
-                                              _inlineError = null;
-                                            });
-                                          },
-                                    label:
-                                        L10n.translate(context, 'Agree to all'),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  _SignupConsentCheckbox(
-                                    value: _acceptedLegalTerms,
-                                    onChanged: busy
-                                        ? null
-                                        : (next) {
-                                            setState(() {
-                                              _acceptedLegalTerms = next;
-                                              _inlineError = null;
-                                            });
-                                          },
-                                    richLabel: Wrap(
-                                      crossAxisAlignment:
-                                          WrapCrossAlignment.center,
-                                      spacing: 2,
-                                      runSpacing: 2,
-                                      children: [
-                                        Text(
-                                          L10n.translate(
-                                            context,
-                                            'I agree to the',
-                                          ),
-                                          style: const TextStyle(
-                                            fontFamily: 'Pretendard',
-                                            color: Color.fromRGBO(
-                                              244,
-                                              244,
-                                              244,
-                                              0.82,
-                                            ),
-                                            fontSize: 13,
-                                            height: 18 / 13,
-                                            fontWeight: FontWeight.w400,
-                                          ),
-                                        ),
-                                        _ConsentLinkText(
-                                          label: L10n.translate(
-                                            context,
-                                            'Terms of Service',
-                                          ),
-                                          onTap: busy
-                                              ? null
-                                              : () => _openUrl(
-                                                    LegalConfig.termsUrl,
-                                                  ),
-                                        ),
-                                        Text(
-                                          L10n.translate(context, 'and'),
-                                          style: const TextStyle(
-                                            fontFamily: 'Pretendard',
-                                            color: Color.fromRGBO(
-                                              244,
-                                              244,
-                                              244,
-                                              0.82,
-                                            ),
-                                            fontSize: 13,
-                                            height: 18 / 13,
-                                            fontWeight: FontWeight.w400,
-                                          ),
-                                        ),
-                                        _ConsentLinkText(
-                                          label: L10n.translate(
-                                            context,
-                                            'Privacy Policy',
-                                          ),
-                                          onTap: busy
-                                              ? null
-                                              : () => _openUrl(
-                                                    LegalConfig.privacyUrl,
-                                                  ),
-                                        ),
-                                        const Text(
-                                          '.',
-                                          style: TextStyle(
-                                            fontFamily: 'Pretendard',
-                                            color: Color.fromRGBO(
-                                              244,
-                                              244,
-                                              244,
-                                              0.82,
-                                            ),
-                                            fontSize: 13,
-                                            height: 18 / 13,
-                                            fontWeight: FontWeight.w400,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  _SignupConsentCheckbox(
-                                    value: _newsletterOptIn,
-                                    onChanged: busy
-                                        ? null
-                                        : (next) {
-                                            setState(() {
-                                              _newsletterOptIn = next;
-                                              _inlineError = null;
-                                            });
-                                          },
-                                    label: L10n.translate(
-                                      context,
-                                      'Receive marketing and update emails',
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 60),
-                            Center(
-                              child: MixroomPillButton(
-                                label: L10n.translate(context, 'Done'),
-                                width: 124,
-                                busy: busy,
-                                onTap: busy ? null : _submit,
-                              ),
-                            ),
-                            const SizedBox(height: 20),
-                            Center(
-                              child: MixroomSecondaryPillButton(
-                                label: L10n.translate(context, 'Back'),
-                                width: 124,
-                                onTap: busy
+                              const SizedBox(height: 6),
+                              _SignupConsentCheckbox(
+                                value: _newsletterOptIn,
+                                onChanged: busy
                                     ? null
-                                    : () {
-                                        widget.onBack?.call();
+                                    : (next) {
+                                        setState(() {
+                                          _newsletterOptIn = next;
+                                          _inlineError = null;
+                                        });
                                       },
+                                label: L10n.translate(
+                                  context,
+                                  'Receive marketing and update emails',
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
+                        const SizedBox(height: 60),
+                        Center(
+                          child: MixroomPillButton(
+                            label: L10n.translate(context, 'Done'),
+                            width: 124,
+                            busy: busy,
+                            onTap: busy ? null : _submit,
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        Center(
+                          child: MixroomSecondaryPillButton(
+                            label: L10n.translate(context, 'Back'),
+                            width: 124,
+                            onTap: busy
+                                ? null
+                                : () {
+                                    widget.onBack?.call();
+                                  },
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                );
-              },
-            ),
-          ),
-        ],
+                ),
+              ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -1365,6 +1853,29 @@ class _SignupConsentCheckbox extends StatelessWidget {
   }
 }
 
+class _TabletProfileInlineError extends StatelessWidget {
+  const _TabletProfileInlineError({
+    required this.message,
+  });
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      L10n.translate(context, message),
+      textAlign: TextAlign.center,
+      style: const TextStyle(
+        fontFamily: 'Pretendard',
+        color: Color(0xFFFF9D47),
+        fontSize: 12,
+        height: 15 / 12,
+        fontWeight: FontWeight.w400,
+      ),
+    );
+  }
+}
+
 class _ConsentLinkText extends StatelessWidget {
   const _ConsentLinkText({
     required this.label,
@@ -1421,27 +1932,20 @@ class _SignupCompletionGate extends StatelessWidget {
                 context,
                 'We are getting everything ready for you.',
               ));
-    return Scaffold(
-      backgroundColor: const Color(0xFF090909),
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          const MixroomAuthBackground(),
-          SafeArea(
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 360),
-                  child: _AuthGateStatusPanel(
-                    title: title,
-                    body: body,
-                  ),
-                ),
+    return MixroomAuthPageScaffold(
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 360),
+              child: _AuthGateStatusPanel(
+                title: title,
+                body: body,
               ),
             ),
           ),
-        ],
+        ),
       ),
     );
   }

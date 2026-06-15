@@ -130,6 +130,7 @@ class ProjectStateBuilder {
     double masterPan0to1 = 0.5,
     Map<int, String> roleOverrides = const {},
     List<TimelineRow> timelineRows = const <TimelineRow>[],
+    List<TrackGroup> trackGroups = const <TrackGroup>[],
   }) async {
     int inferredRows = 0;
     if (rowGain.length > inferredRows) inferredRows = rowGain.length;
@@ -270,6 +271,7 @@ class ProjectStateBuilder {
             instrumentName: rowMeta?.instrumentName ?? '',
             roleOverride: rowMeta?.roleOverride ?? '',
             groupId: rowMeta?.groupId ?? '',
+            rowColor: rowMeta?.color ?? 0,
             inputDeviceName: rowMeta?.inputDeviceName ?? '',
             inputChannelStart: rowMeta?.inputChannelStart ?? 0,
             inputChannelCount: rowMeta?.inputChannelCount ?? 1,
@@ -566,6 +568,7 @@ class ProjectStateBuilder {
           instrumentName: rowMeta?.instrumentName ?? '',
           roleOverride: rowMeta?.roleOverride ?? '',
           groupId: rowMeta?.groupId ?? '',
+          rowColor: rowMeta?.color ?? 0,
           inputDeviceName: rowMeta?.inputDeviceName ?? '',
           inputChannelStart: rowMeta?.inputChannelStart ?? 0,
           inputChannelCount: rowMeta?.inputChannelCount ?? 1,
@@ -621,6 +624,7 @@ class ProjectStateBuilder {
         masterPan0to1: masterPan0to1,
         maxRows: effectiveMaxRows,
         rows: rows,
+        trackGroups: trackGroups,
         masterEffects: masterEffects,
         overlapMatrix: overlap,
         overlapRatioMatrix: overlapRatio);

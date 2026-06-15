@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:mixroom/widgets/auth_figma_shell.dart';
 
 class RemoteWelcomeOnboardingScreen extends StatefulWidget {
   const RemoteWelcomeOnboardingScreen({
@@ -66,39 +67,26 @@ class _RemoteWelcomeOnboardingScreenState
 
     return PopScope(
       canPop: false,
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(
-              child: Image.asset(
-                _OnboardingAssets.bgNoise,
-                fit: BoxFit.cover,
-                alignment: Alignment.center,
+      child: MixroomAuthPageScaffold(
+        body: SafeArea(
+          child: Column(
+            children: [
+              const SizedBox(height: 16),
+              Expanded(
+                child: _buildPageViewport(copy),
               ),
-            ),
-            SafeArea(
-              child: Column(
-                children: [
-                  const SizedBox(height: 16),
-                  Expanded(
-                    child: _buildPageViewport(copy),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                    child: Column(
-                      children: [
-                        _buildPageIndicators(),
-                        const SizedBox(height: 18),
-                        _buildPrimaryButton(copy),
-                      ],
-                    ),
-                  ),
-                ],
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                child: Column(
+                  children: [
+                    _buildPageIndicators(),
+                    const SizedBox(height: 18),
+                    _buildPrimaryButton(copy),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -624,7 +612,6 @@ class _RemoteWelcomeOnboardingScreenState
 }
 
 class _OnboardingAssets {
-  static const String bgNoise = 'assets/auth/onboarding/bg_noise.png';
   static const String heroWaveLines =
       'assets/auth/onboarding/hero_wave_lines.svg';
   static const String heroHand = 'assets/auth/onboarding/hero_hand.svg';

@@ -104,6 +104,7 @@ class PianoRollEditor extends StatefulWidget {
     required this.availableInstruments,
     required this.bpm,
     required this.beatsPerBar,
+    this.beatUnit = 4,
     required this.projectPlayheadMs,
     required this.isPlaying,
     required this.magnetEnabled,
@@ -126,6 +127,7 @@ class PianoRollEditor extends StatefulWidget {
   final List<Map<String, dynamic>> availableInstruments;
   final double bpm;
   final int beatsPerBar;
+  final int beatUnit;
   final double projectPlayheadMs;
   final bool isPlaying;
   final bool magnetEnabled;
@@ -164,6 +166,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   static const double _rollExtensionChunkBeats = 16.0;
   static const double _rulerHeight = 28.0;
   static const int _sequencerStepsPerBar = 16;
+  static const double _minSequencerStepScale = 0.62;
+  static const double _maxSequencerStepScale = 1.9;
+  static const List<int> _sequencerFillIntervals = <int>[1, 2, 4, 8];
   static const List<_StepSequencerLane> _defaultSequencerLanes =
       <_StepSequencerLane>[
     _StepSequencerLane(pitch: 36, label: 'Kick'),
@@ -227,6 +232,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   Future<List<double>>? _samplerWaveformFuture;
   int _activeSequencerPitch = 36;
   int _sequencerVisibleBars = 4;
+  double _sequencerStepScale = 1.0;
 
   String? _selectedNoteId;
   final Set<String> _selectedNoteIds = <String>{};
@@ -396,6 +402,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       _lastEditedNoteLengthBeats = null;
       if (_notes.isNotEmpty) {
         _activeSequencerPitch = _notes.first.pitch.clamp(0, 127).toInt();
+      } else if (!_currentInstrumentUsesDrumSequencer) {
+        _activeSequencerPitch = _defaultSingleSequencerPitch;
       }
       _sequencerVisibleBars =
           math.max(_sequencerVisibleBars, _sequencerBarCount);
@@ -717,6 +725,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       _instrumentId = id;
       _instrumentName = (name == null || name.isEmpty) ? id : name;
       _params = _instrumentParamsFromSpec(spec);
+      if (_notes.isEmpty && !_currentInstrumentUsesDrumSequencer) {
+        _activeSequencerPitch = _defaultSingleSequencerPitch;
+      }
       _refreshSamplerWaveformFuture();
     });
     _queueCommit(immediate: true);
@@ -885,10 +896,15 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   double _xForBeat(double beat) =>
       _followLeadingPaddingPx + (beat * _pxPerBeat);
 
+  double get _barLengthBeats {
+    final numerator = math.max(1, widget.beatsPerBar);
+    final denominator = math.max(1, widget.beatUnit);
+    return numerator * 4.0 / denominator;
+  }
+
   double get _quantizeBeat {
     final safeDivisions = math.max(1, widget.quantizeDivisionsPerBar);
-    final safeBeatsPerBar = math.max(1, widget.beatsPerBar);
-    return safeBeatsPerBar / safeDivisions;
+    return _barLengthBeats / safeDivisions;
   }
 
   double get _minimumLengthBeat =>
@@ -922,14 +938,15 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   }
 
   double get _sequencerStepLengthBeat =>
-      math.max(1, widget.beatsPerBar) / _sequencerStepsPerBar;
+      _barLengthBeats / _sequencerStepsPerBar;
 
   int get _sequencerBarCount {
-    var spanBeat = math.max(widget.beatsPerBar.toDouble(), _clipSpanBeat);
+    final barLength = _barLengthBeats;
+    var spanBeat = math.max(barLength, _clipSpanBeat);
     for (final note in _displayNotes) {
       spanBeat = math.max(spanBeat, note.startBeat + note.lengthBeats);
     }
-    return math.max(1, (spanBeat / math.max(1, widget.beatsPerBar)).ceil());
+    return math.max(1, (spanBeat / barLength).ceil());
   }
 
   int get _sequencerPatternBars =>
@@ -970,6 +987,73 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       return _activeSequencerPitch;
     }
     return lanes.isEmpty ? 36 : lanes.first.pitch;
+  }
+
+  bool get _currentInstrumentUsesDrumSequencer {
+    final spec = _instrumentSpecForId(_instrumentId);
+    final id = _instrumentId.trim().toLowerCase();
+    final name = _instrumentName.trim().toLowerCase();
+    final category = (spec?['category'] as String? ?? '').trim().toLowerCase();
+    final picker =
+        (spec?['pickerCategory'] as String? ?? '').trim().toLowerCase();
+    final sfzPath =
+        (spec?['sfzAssetPath'] as String? ?? '').trim().toLowerCase();
+    final text = '$id $name $sfzPath';
+    final drumLike = category == 'drum' ||
+        picker == 'drums' ||
+        text.contains('drum') ||
+        text.contains('808');
+    final kitLike = id.startsWith('mixroom.drum_') ||
+        text.contains('drum kit') ||
+        text.contains('drum_kit') ||
+        text.contains('drumstarter') ||
+        text.contains('kit') ||
+        text.contains('breakbeat') ||
+        text.contains('dnb starter') ||
+        text.contains('trap starter') ||
+        text.contains('808 starter') ||
+        text.contains('beat kit');
+    return drumLike && kitLike;
+  }
+
+  bool get _currentInstrumentIsSingleDrum {
+    final spec = _instrumentSpecForId(_instrumentId);
+    final id = _instrumentId.trim().toLowerCase();
+    final name = _instrumentName.trim().toLowerCase();
+    final category = (spec?['category'] as String? ?? '').trim().toLowerCase();
+    final picker =
+        (spec?['pickerCategory'] as String? ?? '').trim().toLowerCase();
+    return !_currentInstrumentUsesDrumSequencer &&
+        (category == 'drum' ||
+            picker == 'drums' ||
+            id.contains('kick') ||
+            name.contains('kick') ||
+            name.contains('snare') ||
+            name.contains('hat') ||
+            name.contains('clap'));
+  }
+
+  int get _defaultSingleSequencerPitch {
+    final root = _params['rootNote'];
+    if (root != null && root.isFinite) {
+      return root.round().clamp(0, 127).toInt();
+    }
+    return _currentInstrumentIsSingleDrum ? 36 : 60;
+  }
+
+  int get _effectiveSingleSequencerPitch {
+    if (_notes.isEmpty &&
+        _activeSequencerPitch == 36 &&
+        !_currentInstrumentIsSingleDrum) {
+      return _defaultSingleSequencerPitch;
+    }
+    return _activeSequencerPitch.clamp(0, 127).toInt();
+  }
+
+  int get _effectiveSequencerEditPitch {
+    return _currentInstrumentUsesDrumSequencer
+        ? _effectiveSequencerPitch
+        : _effectiveSingleSequencerPitch;
   }
 
   double _sequencerStartBeatForStep(int step) {
@@ -1030,6 +1114,10 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     return (total / notes.length).clamp(0.05, 1.0);
   }
 
+  int _sequencerHitCountForPitch(int pitch) {
+    return _sequencerNoteIndexesInPattern(pitch).length;
+  }
+
   void _toggleSequencerStep({
     required int pitch,
     required int step,
@@ -1060,7 +1148,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   void _fillSequencerEvery(int intervalSteps) {
     if (widget.isRecording) return;
     final safeInterval = intervalSteps.clamp(1, _sequencerStepsPerBar).toInt();
-    final pitch = _effectiveSequencerPitch;
+    final pitch = _effectiveSequencerEditPitch;
     setState(() {
       final removeIndexes = _sequencerNoteIndexesInPattern(pitch).reversed;
       for (final index in removeIndexes) {
@@ -1083,7 +1171,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
   void _clearSequencerLane() {
     if (widget.isRecording) return;
-    final pitch = _effectiveSequencerPitch;
+    final pitch = _effectiveSequencerEditPitch;
     final indexes = _sequencerNoteIndexesInPattern(pitch);
     if (indexes.isEmpty) return;
     setState(() {
@@ -1093,6 +1181,38 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       _clearSelection();
     });
     _queueCommit(immediate: true);
+  }
+
+  void _setSequencerStepScale(double value) {
+    final next =
+        value.clamp(_minSequencerStepScale, _maxSequencerStepScale).toDouble();
+    if ((next - _sequencerStepScale).abs() < 0.001) return;
+    setState(() {
+      _sequencerStepScale = next;
+    });
+  }
+
+  void _setSequencerVisibleBars(int bars) {
+    final minBars = math.max(4, _sequencerBarCount);
+    final next = bars.clamp(minBars, 64).toInt();
+    if (next == _sequencerVisibleBars) return;
+    setState(() {
+      _sequencerVisibleBars = next;
+    });
+  }
+
+  void _setSingleSequencerPitch(int pitch) {
+    if (widget.isRecording) return;
+    final next = pitch.clamp(0, 127).toInt();
+    if (next == _effectiveSingleSequencerPitch) return;
+    setState(() {
+      _activeSequencerPitch = next;
+    });
+    _previewPianoKey(next);
+    Future<void>.delayed(const Duration(milliseconds: 80), () {
+      if (!mounted) return;
+      _releasePianoKey(next);
+    });
   }
 
   void _extendSequencerWhenNeeded() {
@@ -2342,8 +2462,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   }) {
     final targetIds = _targetNoteIds(selectedOnly: selectedOnly);
     if (targetIds.isEmpty) return false;
-    final stepBeats =
-        widget.beatsPerBar / math.max(1, divisionsPerBar).toDouble();
+    final stepBeats = _barLengthBeats / math.max(1, divisionsPerBar).toDouble();
     bool changed = false;
     setState(() {
       for (final note in _notes) {
@@ -2380,8 +2499,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
         .toList(growable: false);
     if (targetNotes.isEmpty) return false;
 
-    final stepBeats =
-        widget.beatsPerBar / math.max(1, divisionsPerBar).toDouble();
+    final stepBeats = _barLengthBeats / math.max(1, divisionsPerBar).toDouble();
     final chopped = AssistantActionUtils.chopMidiNotes(
       notes: targetNotes,
       subdivision: divisionsPerBar,
@@ -3407,11 +3525,19 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   }
 
   Widget _buildSequencerTab(double playheadBeat) {
+    if (!_currentInstrumentUsesDrumSequencer) {
+      return _buildSingleSequencerTab(playheadBeat);
+    }
+    return _buildDrumSequencerTab(playheadBeat);
+  }
+
+  Widget _buildDrumSequencerTab(double playheadBeat) {
     final lanes = _sequencerLanes;
     final activePitch = _effectiveSequencerPitch;
-    final rowHeight = PlatformCapabilities.current.isDesktop ? 46.0 : 50.0;
-    final labelWidth = PlatformCapabilities.current.isDesktop ? 92.0 : 78.0;
-    const stepGap = 4.0;
+    final rowHeight = PlatformCapabilities.current.isDesktop ? 48.0 : 52.0;
+    final labelWidth = PlatformCapabilities.current.isDesktop ? 126.0 : 112.0;
+    const stepGap = 5.0;
+    const headerHeight = 30.0;
     final playheadStep =
         playheadBeat >= 0.0 && playheadBeat < _sequencerPatternLengthBeat
             ? (playheadBeat / _sequencerStepLengthBeat)
@@ -3430,6 +3556,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
             children: [
               _buildSequencerToolbar(
                 activePitch: activePitch,
+                drumMode: true,
               ),
               const Divider(
                 height: 1,
@@ -3447,8 +3574,21 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                           width: labelWidth,
                           child: Column(
                             children: [
-                              SizedBox(
-                                height: 24,
+                              Container(
+                                height: headerHeight,
+                                padding: const EdgeInsets.fromLTRB(10, 0, 6, 0),
+                                alignment: Alignment.centerLeft,
+                                child: const Text(
+                                  'Sound',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: _kPianoShellMutedText,
+                                    fontFamily: 'Pretendard',
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
                               ),
                               for (final lane in lanes)
                                 SizedBox(
@@ -3466,40 +3606,210 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                             builder: (context, constraints) {
                               final minStepWidth =
                                   PlatformCapabilities.current.isDesktop
-                                      ? 34.0
-                                      : 40.0;
+                                      ? 26.0
+                                      : 30.0;
+                              final scaledMinStepWidth =
+                                  minStepWidth * _sequencerStepScale;
                               final fittedWidth = ((constraints.maxWidth -
                                           (stepGap *
                                               (_sequencerTotalSteps - 1))) /
                                       _sequencerTotalSteps)
                                   .floorToDouble();
                               final stepWidth = math.max(
-                                minStepWidth,
+                                scaledMinStepWidth,
                                 fittedWidth,
                               );
                               final contentWidth =
                                   (stepWidth * _sequencerTotalSteps) +
                                       (stepGap * (_sequencerTotalSteps - 1));
 
-                              return _hideDesktopScrollbars(
-                                SingleChildScrollView(
-                                  key: const ValueKey<String>(
-                                    'sequencer_grid_scroll',
+                              return RawScrollbar(
+                                controller: _sequencerHorizontalController,
+                                thumbVisibility: true,
+                                interactive: true,
+                                scrollbarOrientation:
+                                    ScrollbarOrientation.bottom,
+                                thickness: 3.5,
+                                radius: const Radius.circular(999),
+                                thumbColor:
+                                    _kPianoWarmBorder.withValues(alpha: 0.70),
+                                child: _hideDesktopScrollbars(
+                                  SingleChildScrollView(
+                                    key: const ValueKey<String>(
+                                      'sequencer_grid_scroll',
+                                    ),
+                                    controller: _sequencerHorizontalController,
+                                    scrollDirection: Axis.horizontal,
+                                    physics: const ClampingScrollPhysics(),
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: SizedBox(
+                                      width: contentWidth,
+                                      child: Column(
+                                        children: [
+                                          _buildSequencerStepHeader(
+                                            stepWidth: stepWidth,
+                                            stepGap: stepGap,
+                                            playheadStep: playheadStep,
+                                            totalSteps: _sequencerTotalSteps,
+                                            height: headerHeight,
+                                          ),
+                                          for (final lane in lanes)
+                                            SizedBox(
+                                              height: rowHeight,
+                                              child: _buildSequencerLaneSteps(
+                                                lane: lane,
+                                                stepWidth: stepWidth,
+                                                stepGap: stepGap,
+                                                playheadStep: playheadStep,
+                                                totalSteps:
+                                                    _sequencerTotalSteps,
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
                                   ),
-                                  controller: _sequencerHorizontalController,
-                                  scrollDirection: Axis.horizontal,
-                                  physics: const ClampingScrollPhysics(),
-                                  child: SizedBox(
-                                    width: contentWidth,
-                                    child: Column(
-                                      children: [
-                                        _buildSequencerStepHeader(
-                                          stepWidth: stepWidth,
-                                          stepGap: stepGap,
-                                          playheadStep: playheadStep,
-                                          totalSteps: _sequencerTotalSteps,
-                                        ),
-                                        for (final lane in lanes)
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSingleSequencerTab(double playheadBeat) {
+    final activePitch = _effectiveSingleSequencerPitch;
+    final lane = _StepSequencerLane(
+      pitch: activePitch,
+      label: _noteNameForPitch(activePitch),
+    );
+    final rowHeight = PlatformCapabilities.current.isDesktop ? 58.0 : 62.0;
+    final labelWidth = PlatformCapabilities.current.isDesktop ? 92.0 : 84.0;
+    const stepGap = 5.0;
+    const headerHeight = 30.0;
+    final playheadStep =
+        playheadBeat >= 0.0 && playheadBeat < _sequencerPatternLengthBeat
+            ? (playheadBeat / _sequencerStepLengthBeat)
+                .floor()
+                .clamp(0, math.max(0, _sequencerTotalSteps - 1))
+                .toInt()
+            : -1;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          decoration: _mixroomPianoInsetDecoration(radius: 18),
+          child: Column(
+            children: [
+              _buildSequencerToolbar(
+                activePitch: activePitch,
+                drumMode: false,
+              ),
+              const Divider(
+                height: 1,
+                thickness: 1,
+                color: Color(0x1FFFFFFF),
+              ),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(0, 8, 0, 0),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: labelWidth,
+                          child: Column(
+                            children: [
+                              Container(
+                                height: headerHeight,
+                                padding: const EdgeInsets.fromLTRB(10, 0, 6, 0),
+                                alignment: Alignment.centerLeft,
+                                child: const Text(
+                                  'Note',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: _kPianoShellMutedText,
+                                    fontFamily: 'Pretendard',
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                              SizedBox(
+                                height: rowHeight,
+                                child: _buildSingleSequencerLaneLabel(
+                                  pitch: activePitch,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final minStepWidth =
+                                  PlatformCapabilities.current.isDesktop
+                                      ? 28.0
+                                      : 32.0;
+                              final scaledMinStepWidth =
+                                  minStepWidth * _sequencerStepScale;
+                              final fittedWidth = ((constraints.maxWidth -
+                                          (stepGap *
+                                              (_sequencerTotalSteps - 1))) /
+                                      _sequencerTotalSteps)
+                                  .floorToDouble();
+                              final stepWidth = math.max(
+                                scaledMinStepWidth,
+                                fittedWidth,
+                              );
+                              final contentWidth =
+                                  (stepWidth * _sequencerTotalSteps) +
+                                      (stepGap * (_sequencerTotalSteps - 1));
+
+                              return RawScrollbar(
+                                controller: _sequencerHorizontalController,
+                                thumbVisibility: true,
+                                interactive: true,
+                                scrollbarOrientation:
+                                    ScrollbarOrientation.bottom,
+                                thickness: 3.5,
+                                radius: const Radius.circular(999),
+                                thumbColor:
+                                    _kPianoWarmBorder.withValues(alpha: 0.70),
+                                child: _hideDesktopScrollbars(
+                                  SingleChildScrollView(
+                                    key: const ValueKey<String>(
+                                      'single_sequencer_grid_scroll',
+                                    ),
+                                    controller: _sequencerHorizontalController,
+                                    scrollDirection: Axis.horizontal,
+                                    physics: const ClampingScrollPhysics(),
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: SizedBox(
+                                      width: contentWidth,
+                                      child: Column(
+                                        children: [
+                                          _buildSequencerStepHeader(
+                                            stepWidth: stepWidth,
+                                            stepGap: stepGap,
+                                            playheadStep: playheadStep,
+                                            totalSteps: _sequencerTotalSteps,
+                                            height: headerHeight,
+                                          ),
                                           SizedBox(
                                             height: rowHeight,
                                             child: _buildSequencerLaneSteps(
@@ -3510,7 +3820,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                                               totalSteps: _sequencerTotalSteps,
                                             ),
                                           ),
-                                      ],
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -3532,54 +3843,178 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
   Widget _buildSequencerToolbar({
     required int activePitch,
+    required bool drumMode,
   }) {
-    final activeLane = _sequencerLanes.firstWhere(
-      (lane) => lane.pitch == activePitch,
-      orElse: () => _StepSequencerLane(
-        pitch: activePitch,
-        label: _noteNameForPitch(activePitch),
-      ),
-    );
+    final activeLane = drumMode
+        ? _sequencerLanes.firstWhere(
+            (lane) => lane.pitch == activePitch,
+            orElse: () => _StepSequencerLane(
+              pitch: activePitch,
+              label: _noteNameForPitch(activePitch),
+            ),
+          )
+        : _StepSequencerLane(
+            pitch: activePitch,
+            label: _instrumentName.isEmpty ? 'Instrument' : _instrumentName,
+          );
+    final activeNoteName = _noteNameForPitch(activePitch);
+    final activeHitCount = _sequencerHitCountForPitch(activePitch);
+    final subtitle = drumMode
+        ? '$activeNoteName  |  $activeHitCount hits'
+        : 'Step note $activeNoteName  |  $activeHitCount hits';
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              activeLane.label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: _kPianoShellText,
-                fontFamily: 'Pretendard',
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  activeLane.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _kPianoShellText,
+                    fontFamily: 'Pretendard',
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _kPianoShellMutedText,
+                    fontFamily: 'Pretendard',
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  if (!drumMode) ...[
+                    _compactIconButton(
+                      key: const ValueKey<String>('sequencer_pitch_down'),
+                      icon: Icons.keyboard_arrow_down_rounded,
+                      tooltip: L10n.translate(context, 'Lower note'),
+                      enabled: !widget.isRecording && activePitch > 0,
+                      onTap: () => _setSingleSequencerPitch(activePitch - 1),
+                    ),
+                    const SizedBox(width: 5),
+                    _sequencerInfoPill(activeNoteName),
+                    const SizedBox(width: 5),
+                    _compactIconButton(
+                      key: const ValueKey<String>('sequencer_pitch_up'),
+                      icon: Icons.keyboard_arrow_up_rounded,
+                      tooltip: L10n.translate(context, 'Higher note'),
+                      enabled: !widget.isRecording && activePitch < 127,
+                      onTap: () => _setSingleSequencerPitch(activePitch + 1),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  _compactIconButton(
+                    key: const ValueKey<String>('sequencer_zoom_out'),
+                    icon: Icons.remove_rounded,
+                    tooltip: L10n.translate(context, 'Zoom out'),
+                    enabled: _sequencerStepScale > _minSequencerStepScale,
+                    onTap: () => _setSequencerStepScale(
+                      _sequencerStepScale - 0.16,
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  _sequencerInfoPill(
+                    '${(_sequencerStepScale * 100).round()}%',
+                  ),
+                  const SizedBox(width: 5),
+                  _compactIconButton(
+                    key: const ValueKey<String>('sequencer_zoom_in'),
+                    icon: Icons.add_rounded,
+                    tooltip: L10n.translate(context, 'Zoom in'),
+                    enabled: _sequencerStepScale < _maxSequencerStepScale,
+                    onTap: () => _setSequencerStepScale(
+                      _sequencerStepScale + 0.16,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _compactIconButton(
+                    key: const ValueKey<String>('sequencer_bars_less'),
+                    icon: Icons.keyboard_arrow_left_rounded,
+                    tooltip: L10n.translate(context, 'Shorter pattern'),
+                    enabled:
+                        _sequencerPatternBars > math.max(4, _sequencerBarCount),
+                    onTap: () => _setSequencerVisibleBars(
+                      _sequencerPatternBars - 1,
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  _sequencerInfoPill('$_sequencerPatternBars bars'),
+                  const SizedBox(width: 5),
+                  _compactIconButton(
+                    key: const ValueKey<String>('sequencer_bars_more'),
+                    icon: Icons.keyboard_arrow_right_rounded,
+                    tooltip: L10n.translate(context, 'Longer pattern'),
+                    enabled: _sequencerPatternBars < 64,
+                    onTap: () => _setSequencerVisibleBars(
+                      _sequencerPatternBars + 1,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _buildSequencerRepeatShortcuts(),
+                  const SizedBox(width: 5),
+                  _compactIconButton(
+                    key: const ValueKey<String>('sequencer_clear_lane'),
+                    icon: Icons.backspace_outlined,
+                    tooltip: L10n.translate(context, 'Clear lane'),
+                    enabled: !widget.isRecording,
+                    onTap: _clearSequencerLane,
+                  ),
+                ],
               ),
             ),
           ),
-          _sequencerMacroButton(
-            key: const ValueKey<String>('sequencer_fill_two'),
-            label: '2',
-            tooltip: L10n.translate(context, 'Fill every two steps'),
-            enabled: !widget.isRecording,
-            onTap: () => _fillSequencerEvery(2),
-          ),
-          const SizedBox(width: 5),
-          _sequencerMacroButton(
-            key: const ValueKey<String>('sequencer_fill_four'),
-            label: '4',
-            tooltip: L10n.translate(context, 'Fill every four steps'),
-            enabled: !widget.isRecording,
-            onTap: () => _fillSequencerEvery(4),
-          ),
-          const SizedBox(width: 5),
-          _compactIconButton(
-            key: const ValueKey<String>('sequencer_clear_lane'),
-            icon: Icons.backspace_outlined,
-            tooltip: L10n.translate(context, 'Clear lane'),
-            enabled: !widget.isRecording,
-            onTap: _clearSequencerLane,
-          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSequencerRepeatShortcuts() {
+    return Container(
+      height: 30,
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final interval in _sequencerFillIntervals) ...[
+            _sequencerMacroButton(
+              key: ValueKey<String>('sequencer_fill_$interval'),
+              label: '${interval}x',
+              tooltip: L10n.translate(
+                context,
+                interval == 1
+                    ? 'Fill every step'
+                    : 'Fill every $interval steps',
+              ),
+              enabled: !widget.isRecording,
+              onTap: () => _fillSequencerEvery(interval),
+            ),
+            if (interval != _sequencerFillIntervals.last)
+              const SizedBox(width: 2),
+          ],
         ],
       ),
     );
@@ -3589,6 +4024,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     required _StepSequencerLane lane,
     required bool selected,
   }) {
+    final noteName = _noteNameForPitch(lane.pitch);
+    final hitCount = _sequencerHitCountForPitch(lane.pitch);
     return Padding(
       padding: const EdgeInsets.fromLTRB(7, 4, 4, 4),
       child: Material(
@@ -3602,9 +4039,14 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                   setState(() {
                     _activeSequencerPitch = lane.pitch;
                   });
+                  _previewPianoKey(lane.pitch);
+                  Future<void>.delayed(const Duration(milliseconds: 80), () {
+                    if (!mounted) return;
+                    _releasePianoKey(lane.pitch);
+                  });
                 },
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
             decoration: BoxDecoration(
               color: selected
                   ? _kPianoWarmBorder.withValues(alpha: 0.20)
@@ -3616,21 +4058,103 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                     : Colors.white.withValues(alpha: 0.10),
               ),
             ),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                lane.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: selected ? _kPianoShellText : _kPianoShellMutedText,
-                  fontFamily: 'Pretendard',
-                  fontSize: 11,
-                  fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  lane.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: selected ? _kPianoShellText : _kPianoShellMutedText,
+                    fontFamily: 'Pretendard',
+                    fontSize: 11,
+                    fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
+                  ),
                 ),
-              ),
+                const SizedBox(height: 1),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        noteName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white.withValues(
+                            alpha: selected ? 0.72 : 0.50,
+                          ),
+                          fontFamily: 'Pretendard',
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    if (hitCount > 0)
+                      Text(
+                        '$hitCount',
+                        style: TextStyle(
+                          color: selected
+                              ? _kPianoWarmBorder
+                              : Colors.white.withValues(alpha: 0.52),
+                          fontFamily: 'Pretendard',
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                  ],
+                ),
+              ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSingleSequencerLaneLabel({
+    required int pitch,
+  }) {
+    final noteName = _noteNameForPitch(pitch);
+    final hitCount = _sequencerHitCountForPitch(pitch);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(7, 4, 4, 4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+        decoration: BoxDecoration(
+          color: _kPianoWarmBorder.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: _kPianoWarmBorder.withValues(alpha: 0.72)),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              noteName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: _kPianoShellText,
+                fontFamily: 'Pretendard',
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 1),
+            Text(
+              '$hitCount hits',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.62),
+                fontFamily: 'Pretendard',
+                fontSize: 9.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -3641,39 +4165,72 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     required double stepGap,
     required int playheadStep,
     required int totalSteps,
+    required double height,
   }) {
     return SizedBox(
-      height: 24,
+      height: height,
       child: Row(
         children: [
           for (int step = 0; step < totalSteps; step++) ...[
             SizedBox(
               width: stepWidth,
               child: Center(
-                child: step % _sequencerStepsPerBar == 0
-                    ? Text(
-                        '${(step ~/ _sequencerStepsPerBar) + 1}',
-                        style: TextStyle(
-                          color: step == playheadStep
-                              ? const Color(0xFFFFD45A)
-                              : _kPianoShellMutedText,
-                          fontFamily: 'Pretendard',
-                          fontSize: 10,
-                          fontWeight: FontWeight.w800,
+                child: step == playheadStep
+                    ? Container(
+                        width: math.max(18.0, stepWidth * 0.58),
+                        height: 18,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFD45A),
+                          borderRadius: BorderRadius.circular(999),
+                          boxShadow: const <BoxShadow>[
+                            BoxShadow(
+                              color: Color(0x66FFD45A),
+                              blurRadius: 10,
+                              spreadRadius: 1,
+                            ),
+                          ],
+                        ),
+                        child: Center(
+                          child: step % _sequencerStepsPerBar == 0
+                              ? Text(
+                                  '${(step ~/ _sequencerStepsPerBar) + 1}',
+                                  style: const TextStyle(
+                                    color: Color(0xFF271800),
+                                    fontFamily: 'Pretendard',
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                )
+                              : Container(
+                                  width: step % 4 == 0 ? 9 : 4,
+                                  height: step % 4 == 0 ? 3 : 4,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF271800),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                ),
                         ),
                       )
-                    : Container(
-                        width: step % 4 == 0 ? 15 : 4,
-                        height: step % 4 == 0 ? 3 : 4,
-                        decoration: BoxDecoration(
-                          color: step == playheadStep
-                              ? const Color(0xFFFFD45A)
-                              : Colors.white.withValues(
-                                  alpha: step % 4 == 0 ? 0.48 : 0.18,
-                                ),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                      ),
+                    : step % _sequencerStepsPerBar == 0
+                        ? Text(
+                            '${(step ~/ _sequencerStepsPerBar) + 1}',
+                            style: const TextStyle(
+                              color: _kPianoShellMutedText,
+                              fontFamily: 'Pretendard',
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          )
+                        : Container(
+                            width: step % 4 == 0 ? 18 : 4,
+                            height: step % 4 == 0 ? 3 : 4,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(
+                                alpha: step % 4 == 0 ? 0.48 : 0.18,
+                              ),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                          ),
               ),
             ),
             if (step != totalSteps - 1) SizedBox(width: stepGap),
@@ -3690,20 +4247,29 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     required int playheadStep,
     required int totalSteps,
   }) {
+    final selectedPitch = _effectiveSequencerEditPitch;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          for (int step = 0; step < totalSteps; step++) ...[
-            _buildSequencerStepButton(
-              lane: lane,
-              step: step,
-              width: stepWidth,
-              playheadActive: step == playheadStep,
-            ),
-            if (step != totalSteps - 1) SizedBox(width: stepGap),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: lane.pitch == selectedPitch
+              ? Colors.white.withValues(alpha: 0.035)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            for (int step = 0; step < totalSteps; step++) ...[
+              _buildSequencerStepButton(
+                lane: lane,
+                step: step,
+                width: stepWidth,
+                playheadActive: step == playheadStep,
+              ),
+              if (step != totalSteps - 1) SizedBox(width: stepGap),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -3715,10 +4281,21 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     required bool playheadActive,
   }) {
     final enabled = _sequencerNoteIndexAt(pitch: lane.pitch, step: step) >= 0;
-    final selectedLane = lane.pitch == _effectiveSequencerPitch;
+    final selectedLane = lane.pitch == _effectiveSequencerEditPitch;
     final strongBeat = step % 4 == 0;
+    final barStart = step % _sequencerStepsPerBar == 0;
     final activeColor =
         strongBeat ? const Color(0xFFFFC66E) : const Color(0xFF79DCA7);
+    final inactiveAlpha = barStart ? 0.16 : (strongBeat ? 0.115 : 0.070);
+    final baseColor = enabled
+        ? activeColor.withValues(alpha: selectedLane ? 0.92 : 0.72)
+        : Colors.white.withValues(alpha: inactiveAlpha);
+    final playheadColor = enabled
+        ? Color.alphaBlend(
+            const Color(0xFFFFD45A).withValues(alpha: 0.34),
+            baseColor,
+          )
+        : const Color(0xFFFFD45A).withValues(alpha: 0.24);
 
     return Semantics(
       button: true,
@@ -3736,9 +4313,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
           width: width,
           height: double.infinity,
           decoration: BoxDecoration(
-            color: enabled
-                ? activeColor.withValues(alpha: selectedLane ? 0.92 : 0.72)
-                : Colors.white.withValues(alpha: strongBeat ? 0.12 : 0.075),
+            color: playheadActive ? playheadColor : baseColor,
             borderRadius: BorderRadius.circular(7),
             border: Border.all(
               color: playheadActive
@@ -3755,9 +4330,52 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                       blurRadius: 8,
                       offset: const Offset(0, 0),
                     ),
+                    if (playheadActive)
+                      const BoxShadow(
+                        color: Color(0x66FFD45A),
+                        blurRadius: 14,
+                        spreadRadius: 1,
+                      ),
                   ]
-                : null,
+                : playheadActive
+                    ? const <BoxShadow>[
+                        BoxShadow(
+                          color: Color(0x44FFD45A),
+                          blurRadius: 12,
+                          spreadRadius: 1,
+                        ),
+                      ]
+                    : null,
           ),
+          child: enabled
+              ? Center(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 95),
+                    curve: Curves.easeOutCubic,
+                    width: selectedLane ? 8 : 6,
+                    height: selectedLane ? 8 : 6,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(
+                        alpha: selectedLane ? 0.88 : 0.62,
+                      ),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                )
+              : barStart
+                  ? Align(
+                      alignment: Alignment.topCenter,
+                      child: Container(
+                        margin: const EdgeInsets.only(top: 5),
+                        width: 12,
+                        height: 2,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.22),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                    )
+                  : null,
         ),
       ),
     );
@@ -5838,6 +6456,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                                                     maxBeat: _maxBeat,
                                                     beatsPerBar:
                                                         widget.beatsPerBar,
+                                                    beatUnit: widget.beatUnit,
                                                     quantizeDivisionsPerBar: widget
                                                         .quantizeDivisionsPerBar,
                                                     magnetEnabled:
@@ -5965,6 +6584,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                       leadingBeatPadPx: _followLeadingPaddingPx,
                       maxBeat: _maxBeat,
                       beatsPerBar: widget.beatsPerBar,
+                      beatUnit: widget.beatUnit,
                     ),
                   ),
                 ),
@@ -6277,6 +6897,32 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     );
   }
 
+  Widget _sequencerInfoPill(String label) {
+    return Container(
+      height: 30,
+      constraints: const BoxConstraints(minWidth: 54),
+      padding: const EdgeInsets.symmetric(horizontal: 9),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.075),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      ),
+      child: Center(
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.clip,
+          style: const TextStyle(
+            color: _kPianoShellText,
+            fontFamily: 'Pretendard',
+            fontSize: 10.5,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _sequencerMacroButton({
     Key? key,
     required String label,
@@ -6293,11 +6939,12 @@ class _PianoRollEditorState extends State<PianoRollEditor>
         child: Opacity(
           opacity: enabled ? 1.0 : 0.35,
           child: Container(
-            height: 30,
-            padding: const EdgeInsets.symmetric(horizontal: 9),
+            height: 26,
+            constraints: const BoxConstraints(minWidth: 34),
+            padding: const EdgeInsets.symmetric(horizontal: 7),
             decoration: BoxDecoration(
               color: _kPianoWarmBorder.withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(6),
               border: Border.all(
                 color: _kPianoWarmBorder.withValues(alpha: 0.45),
               ),
@@ -6672,6 +7319,7 @@ class _PianoGridPainter extends CustomPainter {
     required this.minPitch,
     required this.maxBeat,
     required this.beatsPerBar,
+    required this.beatUnit,
     required this.quantizeDivisionsPerBar,
     required this.magnetEnabled,
   });
@@ -6683,6 +7331,7 @@ class _PianoGridPainter extends CustomPainter {
   final int minPitch;
   final double maxBeat;
   final int beatsPerBar;
+  final int beatUnit;
   final int quantizeDivisionsPerBar;
   final bool magnetEnabled;
 
@@ -6730,12 +7379,15 @@ class _PianoGridPainter extends CustomPainter {
     );
 
     final safeBeatsPerBar = math.max(1, beatsPerBar);
+    final safeBeatUnit = math.max(1, beatUnit);
+    final barLengthBeats = safeBeatsPerBar * 4.0 / safeBeatUnit;
+    final beatStep = barLengthBeats / safeBeatsPerBar;
     final safeDivisions = math.max(1, quantizeDivisionsPerBar);
-    final divisionBeat = safeBeatsPerBar / safeDivisions;
-    final maxBars = (maxBeat / safeBeatsPerBar).ceil() + 1;
+    final divisionBeat = barLengthBeats / safeDivisions;
+    final maxBars = (maxBeat / barLengthBeats).ceil() + 1;
 
     for (int bar = 0; bar <= maxBars; bar++) {
-      final barBeat = bar * safeBeatsPerBar;
+      final barBeat = bar * barLengthBeats;
       final barX = leadingBeatPadPx + (barBeat * pxPerBeat);
       canvas.drawLine(
         Offset(barX, 0),
@@ -6747,11 +7399,21 @@ class _PianoGridPainter extends CustomPainter {
         final beat = barBeat + (d * divisionBeat);
         if (beat > maxBeat) break;
         final x = leadingBeatPadPx + (beat * pxPerBeat);
-        final isBeatBoundary = (d * safeBeatsPerBar) % safeDivisions == 0;
         canvas.drawLine(
           Offset(x, 0),
           Offset(x, size.height),
-          isBeatBoundary ? beatPaint : minorPaint,
+          minorPaint,
+        );
+      }
+
+      for (int beat = 1; beat < safeBeatsPerBar; beat++) {
+        final beatValue = barBeat + (beat * beatStep);
+        if (beatValue > maxBeat) break;
+        final x = leadingBeatPadPx + (beatValue * pxPerBeat);
+        canvas.drawLine(
+          Offset(x, 0),
+          Offset(x, size.height),
+          beatPaint,
         );
       }
     }
@@ -6765,6 +7427,7 @@ class _PianoGridPainter extends CustomPainter {
         minPitch != oldDelegate.minPitch ||
         maxBeat != oldDelegate.maxBeat ||
         beatsPerBar != oldDelegate.beatsPerBar ||
+        beatUnit != oldDelegate.beatUnit ||
         quantizeDivisionsPerBar != oldDelegate.quantizeDivisionsPerBar ||
         magnetEnabled != oldDelegate.magnetEnabled;
   }
@@ -6776,12 +7439,14 @@ class _PianoRollRulerPainter extends CustomPainter {
     required this.leadingBeatPadPx,
     required this.maxBeat,
     required this.beatsPerBar,
+    required this.beatUnit,
   });
 
   final double pxPerBeat;
   final double leadingBeatPadPx;
   final double maxBeat;
   final int beatsPerBar;
+  final int beatUnit;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -6811,9 +7476,12 @@ class _PianoRollRulerPainter extends CustomPainter {
     );
 
     final safeBeatsPerBar = math.max(1, beatsPerBar);
-    final maxBars = (maxBeat / safeBeatsPerBar).ceil() + 1;
+    final safeBeatUnit = math.max(1, beatUnit);
+    final barLengthBeats = safeBeatsPerBar * 4.0 / safeBeatUnit;
+    final beatStep = barLengthBeats / safeBeatsPerBar;
+    final maxBars = (maxBeat / barLengthBeats).ceil() + 1;
     for (int bar = 0; bar <= maxBars; bar++) {
-      final barBeat = bar * safeBeatsPerBar;
+      final barBeat = bar * barLengthBeats;
       final barX = leadingBeatPadPx + (barBeat * pxPerBeat);
       canvas.drawLine(
         Offset(barX, 0),
@@ -6830,8 +7498,9 @@ class _PianoRollRulerPainter extends CustomPainter {
       }
 
       for (int beat = 1; beat < safeBeatsPerBar; beat++) {
-        final beatX = leadingBeatPadPx + ((barBeat + beat) * pxPerBeat);
-        if ((barBeat + beat) > maxBeat) break;
+        final beatValue = barBeat + (beat * beatStep);
+        final beatX = leadingBeatPadPx + (beatValue * pxPerBeat);
+        if (beatValue > maxBeat) break;
         canvas.drawLine(
           Offset(beatX, size.height * 0.46),
           Offset(beatX, size.height),
@@ -6846,6 +7515,7 @@ class _PianoRollRulerPainter extends CustomPainter {
     return pxPerBeat != oldDelegate.pxPerBeat ||
         leadingBeatPadPx != oldDelegate.leadingBeatPadPx ||
         maxBeat != oldDelegate.maxBeat ||
-        beatsPerBar != oldDelegate.beatsPerBar;
+        beatsPerBar != oldDelegate.beatsPerBar ||
+        beatUnit != oldDelegate.beatUnit;
   }
 }

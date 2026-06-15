@@ -680,13 +680,16 @@ class _SignedInShellState extends State<SignedInShell> {
   @override
   Widget build(BuildContext context) {
     context.watch<LocaleProvider>();
-    final useDesktopRail = mixroomUsesDesktopRailNavigation;
+    final useSideRail = mixroomUsesSideRailNavigation(context);
+    final useDesktopTitleBar = mixroomUsesDesktopRailNavigation;
+    final titleBarHeight =
+        useDesktopTitleBar ? kMixroomDesktopTitleBarHeight : 0.0;
     return Scaffold(
       resizeToAvoidBottomInset: false,
       backgroundColor: const Color(0xFF090909),
       body: Stack(
         children: [
-          if (useDesktopRail)
+          if (useSideRail)
             Positioned.fill(
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -696,10 +699,10 @@ class _SignedInShellState extends State<SignedInShell> {
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(
                         0,
-                        kMixroomDesktopTitleBarHeight,
                         0,
                         0,
-                      ),
+                        0,
+                      ).copyWith(top: titleBarHeight),
                       child: MixroomMainSideRail(
                         selectedTab: _selectedTab,
                         onTabSelected: _setTab,
@@ -713,9 +716,8 @@ class _SignedInShellState extends State<SignedInShell> {
                         Positioned.fill(
                           child: Padding(
                             padding: const EdgeInsets.only(
-                              top: kMixroomDesktopTitleBarHeight,
                               right: 28,
-                            ),
+                            ).copyWith(top: titleBarHeight),
                             child: _buildPage(_selectedTab),
                           ),
                         ),
@@ -761,14 +763,14 @@ class _SignedInShellState extends State<SignedInShell> {
                 ],
               ),
             ),
-          if (useDesktopRail)
+          if (useDesktopTitleBar)
             const Positioned(
               left: 0,
               right: 0,
               top: 0,
               child: MixroomDesktopTitleBar(),
             )
-          else ...[
+          else if (!useSideRail) ...[
             Positioned.fill(child: _buildPage(_selectedTab)),
             if (_activeAnnouncement != null && _activeAnnouncement!.showsBanner)
               Positioned(
@@ -863,9 +865,12 @@ class _HomeTabState extends State<_HomeTab> {
 
   @override
   Widget build(BuildContext context) {
+    final useTabletShell = mixroomUsesTabletLandscapeShell(context);
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     final bottomPadding = mixroomShellBottomPadding(context) +
         (keyboardInset > 0 ? keyboardInset + 16 : 0);
+    final horizontalPadding = useTabletShell ? 32.0 : 27.0;
+    final contentMaxWidth = useTabletShell ? 420.0 : 348.0;
     return Stack(
       children: [
         const Positioned.fill(child: MixroomShellBackground()),
@@ -877,13 +882,13 @@ class _HomeTabState extends State<_HomeTab> {
               controller: _scrollController,
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               padding: EdgeInsets.fromLTRB(
-                27,
+                horizontalPadding,
                 0,
-                27,
+                horizontalPadding,
                 bottomPadding,
               ),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 348),
+                constraints: BoxConstraints(maxWidth: contentMaxWidth),
                 child: MixroomInlineFeedbackComposer(
                   onSubmit: widget.onSubmitFeedback,
                   showBetaNotice: true,

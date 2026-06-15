@@ -179,6 +179,7 @@ class MainActivity : FlutterFragmentActivity() {
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
+    OrientationPolicy.apply(this)
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
     handleIntent(intent, isInitial = true)
@@ -1199,7 +1200,8 @@ class MainActivity : FlutterFragmentActivity() {
     val normalized = path.trim()
     if (normalized.isEmpty()) return false
 
-    return launchSavedExportFile(normalized)
+    return launchFilesAppForDocument(normalized) ||
+      launchFilesAppForSavedExportFile(normalized)
   }
 
   private fun saveProducerSessionToDownloads(

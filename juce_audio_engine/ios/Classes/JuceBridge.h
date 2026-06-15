@@ -183,6 +183,13 @@
 + (void)setRowPanAutomationPointsObjC:(NSInteger)row
                               points:(NSArray<NSDictionary *> *)points;
 + (void)setRowPanObjC:(NSInteger)row pan:(float)pan;
++ (void)configureTrackGroupsObjC:(NSArray<NSDictionary *> *)groups;
++ (void)assignRowToGroupObjC:(NSInteger)row groupId:(NSString *)groupId;
++ (void)setTrackGroupMixStateObjC:(NSString *)groupId
+                             gain:(float)gain
+                              pan:(float)pan
+                            muted:(BOOL)muted
+                           soloed:(BOOL)soloed;
 
 // Master bus FX and controls
 + (BOOL)insertMasterEffectObjC:(NSString *)pluginPath;
@@ -238,6 +245,10 @@
 
 // Change BPM
 + (void)setMetronomeBpmObjC:(double)bpm;
+
+// Change time signature
++ (void)setMetronomeTimeSignatureObjC:(NSInteger)numerator
+                          denominator:(NSInteger)denominator;
 
 // Sync transport (in milliseconds)
 + (void)setMetronomeTransportMsObjC:(double)ms;

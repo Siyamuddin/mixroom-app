@@ -2087,6 +2087,22 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<void> setMetronomeTimeSignature({
+    required int numerator,
+    required int denominator,
+  }) async {
+    try {
+      await _ch.invokeMethod('setMetronomeTimeSignature', {
+        'numerator': numerator,
+        'denominator': denominator,
+      });
+    } on MissingPluginException catch (e) {
+      _logError('setMetronomeTimeSignature', e);
+    } on PlatformException catch (e) {
+      _logError('setMetronomeTimeSignature', e);
+    }
+  }
+
   static Future<void> setMetronomeTransportMs(double ms) async {
     try {
       await _ch.invokeMethod('setMetronomeTransportMs', {

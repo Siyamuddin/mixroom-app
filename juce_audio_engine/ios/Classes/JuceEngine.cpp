@@ -1473,8 +1473,7 @@ void JuceEngine::attachRowBusNodes(RowState &r,
         graph.addConnection({{r.panNode->nodeID, ch}, {r.meterTapNode->nodeID, ch}}, updateKind);
     }
 
-    if (masterInputNode != nullptr)
-        connectStereo(graph, r.meterTapNode->nodeID, masterInputNode->nodeID, updateKind);
+    reconnectAllRowOutputsToBuses(updateKind);
 }
 
 void JuceEngine::ensureRowBusNodesAttached(int rowIndex,
@@ -1526,6 +1525,114 @@ void JuceEngine::rebuildRowIdIndexCache()
         rowIdToIndex[rows[(size_t)i].rowId] = i;
 }
 
+JuceEngine::TrackGroupState *JuceEngine::trackGroupForId(const juce::String &groupId)
+{
+    const auto normalized = groupId.trim();
+    if (normalized.isEmpty())
+        return nullptr;
+    for (auto &group : trackGroups)
+        if (group.id == normalized)
+            return &group;
+    return nullptr;
+}
+
+const JuceEngine::TrackGroupState *JuceEngine::trackGroupForId(const juce::String &groupId) const
+{
+    const auto normalized = groupId.trim();
+    if (normalized.isEmpty())
+        return nullptr;
+    for (const auto &group : trackGroups)
+        if (group.id == normalized)
+            return &group;
+    return nullptr;
+}
+
+JuceEngine::TrackGroupState *JuceEngine::trackGroupForLeadRowIndex(int rowIndex)
+{
+    if (rowIndex < 0 || rowIndex >= (int)rows.size())
+        return nullptr;
+    const int rowId = rows[(size_t)rowIndex].rowId;
+    for (auto &group : trackGroups)
+        if (!group.rowIds.isEmpty() && group.rowIds[0] == rowId)
+            return &group;
+    return nullptr;
+}
+
+const JuceEngine::TrackGroupState *JuceEngine::trackGroupForLeadRowIndex(int rowIndex) const
+{
+    if (rowIndex < 0 || rowIndex >= (int)rows.size())
+        return nullptr;
+    const int rowId = rows[(size_t)rowIndex].rowId;
+    for (const auto &group : trackGroups)
+        if (!group.rowIds.isEmpty() && group.rowIds[0] == rowId)
+            return &group;
+    return nullptr;
+}
+
+JuceEngine::TrackGroupState *JuceEngine::trackGroupForMemberRowId(int rowId)
+{
+    for (auto &group : trackGroups)
+        if (group.rowIds.contains(rowId))
+            return &group;
+    return nullptr;
+}
+
+void JuceEngine::attachTrackGroupBusNodes(
+    TrackGroupState &group,
+    juce::AudioProcessorGraph::UpdateKind updateKind)
+{
+    if (group.inputNode == nullptr)
+    {
+        auto input = std::make_unique<TrackInputProcessor>();
+        group.inputProc = input.get();
+        group.inputNode = graph.addNode(std::move(input), std::nullopt, updateKind);
+    }
+
+    if (group.gainNode == nullptr)
+    {
+        auto gain = std::make_unique<SimpleGainProcessor>();
+        group.gainProc = gain.get();
+        group.gainNode = graph.addNode(std::move(gain), std::nullopt, updateKind);
+        group.gainProc->gain->setValueNotifyingHost(
+            juce::jlimit(kGainUiMin, kGainUiMax, group.gainUi) / kGainUiMax);
+        group.gainProc->setMuted(group.muted);
+    }
+
+    if (group.panNode == nullptr)
+    {
+        auto pan = std::make_unique<StereoPanProcessor>();
+        group.panProc = pan.get();
+        group.panNode = graph.addNode(std::move(pan), std::nullopt, updateKind);
+        group.panProc->pan->setValueNotifyingHost(panUIToNormalized(group.panUi));
+    }
+
+    if (group.meterTapNode == nullptr)
+    {
+        auto meterTap = std::make_unique<MeterTapProcessor>(
+            &group.meter.peakL,
+            &group.meter.peakR,
+            &group.meter.rmsL,
+            &group.meter.rmsR,
+            &rowMetersEnabled);
+        group.meterTapProc = meterTap.get();
+        group.meterTapNode = graph.addNode(std::move(meterTap), std::nullopt, updateKind);
+    }
+
+    rewireTrackGroupFxChain(group.id, updateKind);
+}
+
+void JuceEngine::ensureTrackGroupBusNodesAttached(
+    TrackGroupState &group,
+    juce::AudioProcessorGraph::UpdateKind updateKind)
+{
+    if (!engineInitialized || !busGraphInitialised)
+        return;
+    if (group.inputNode != nullptr && group.gainNode != nullptr &&
+        group.panNode != nullptr && group.meterTapNode != nullptr)
+        return;
+    attachTrackGroupBusNodes(group, updateKind);
+}
+
 void JuceEngine::ensureBusGraphInitialised()
 {
     if (busGraphInitialised)
@@ -1570,6 +1677,9 @@ void JuceEngine::ensureBusGraphInitialised()
 
     if (masterEffectChain == nullptr)
         masterEffectChain = new juce::Array<juce::AudioProcessorGraph::NodeID>();
+
+    for (auto &group : trackGroups)
+        attachTrackGroupBusNodes(group, kBatchGraphUpdate);
 
     // Row meters enabled already exist (atomic)
     // Create per-row chain: Input -> [Row FX] -> Automation -> Gain -> Pan -> MeterTap -> Master entry
@@ -2680,10 +2790,21 @@ struct ExportRowSnapshot
     std::vector<ExportEffectSnapshot> effects;
 };
 
+struct ExportGroupSnapshot
+{
+    juce::String id;
+    juce::Array<int> rowIds;
+    float gainUi = SimpleGainProcessor::kUiUnity;
+    float panUi = 0.5f;
+    bool muted = false;
+    std::vector<ExportEffectSnapshot> effects;
+};
+
 struct ExportProjectSnapshot
 {
     std::vector<ExportClipSnapshot> clips;
     std::vector<ExportRowSnapshot> rows;
+    std::vector<ExportGroupSnapshot> groups;
     std::vector<ExportEffectSnapshot> masterEffects;
     std::vector<ExportEffectAutomationLane> masterEffectAutomationLanes;
     std::vector<AutomationPoint> masterGainAutomationPoints;
@@ -2760,13 +2881,29 @@ struct OfflineMasterRenderState
     float lastAppliedPanAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
 };
 
+struct OfflineGroupRenderState
+{
+    juce::String id;
+    juce::Array<int> rowIds;
+    float gainUi = SimpleGainProcessor::kUiUnity;
+    float panUi = 0.5f;
+    bool muted = false;
+    TrackInputProcessor *inputProc = nullptr;
+    SimpleGainProcessor *gainProc = nullptr;
+    StereoPanProcessor *panProc = nullptr;
+    juce::AudioProcessorGraph::Node::Ptr inputNode;
+    juce::Array<juce::AudioProcessorGraph::NodeID> fxChain;
+};
+
 struct OfflineExportContext
 {
     juce::AudioProcessorGraph graph;
     juce::AudioProcessorGraph::Node::Ptr outputNode;
     std::vector<OfflineClipRenderState> clips;
     std::vector<OfflineRowRenderState> rows;
+    std::vector<OfflineGroupRenderState> groups;
     std::unordered_map<int, int> rowIdToIndex;
+    std::unordered_map<int, int> rowIdToGroupIndex;
     OfflineMasterRenderState master;
     OfflineExportPlayHead playHead;
     std::atomic<double> blockTransportStartSec{0.0};
@@ -3312,6 +3449,22 @@ void reapplyOfflineEffectSnapshots(OfflineExportContext &context,
             context.graph.getNodeForId(context.master.fxChain.getReference(effectIndex)));
     }
 
+    for (size_t groupIndex = 0; groupIndex < context.groups.size() &&
+                                groupIndex < snapshot.groups.size();
+         ++groupIndex)
+    {
+        auto &group = context.groups[groupIndex];
+        const auto &groupSnapshot = snapshot.groups[groupIndex];
+        for (int effectIndex = 0; effectIndex < group.fxChain.size() &&
+                                  effectIndex < (int)groupSnapshot.effects.size();
+             ++effectIndex)
+        {
+            applyEffectSnapshotToNode(
+                groupSnapshot.effects[(size_t)effectIndex],
+                context.graph.getNodeForId(group.fxChain.getReference(effectIndex)));
+        }
+    }
+
     for (size_t rowIndex = 0; rowIndex < context.rows.size() &&
                               rowIndex < snapshot.rows.size();
          ++rowIndex)
@@ -3364,6 +3517,20 @@ void applyOfflineMasterStaticState(OfflineMasterRenderState &master)
         master.panProc->pan->setValueNotifyingHost(normalizePanUiValue(master.panUi));
 }
 
+void applyOfflineGroupStaticState(OfflineGroupRenderState &group)
+{
+    if (group.gainProc != nullptr)
+    {
+        group.gainProc->gain->setValueNotifyingHost(
+            juce::jlimit(SimpleGainProcessor::kUiMin, SimpleGainProcessor::kUiMax, group.gainUi) /
+            SimpleGainProcessor::kUiMax);
+        group.gainProc->setMuted(group.muted);
+    }
+
+    if (group.panProc != nullptr)
+        group.panProc->pan->setValueNotifyingHost(normalizePanUiValue(group.panUi));
+}
+
 bool buildOfflineExportContext(
     const ExportProjectSnapshot &snapshot,
     double sampleRate,
@@ -3381,6 +3548,8 @@ bool buildOfflineExportContext(
     context.blockIsPlaying.store(false, std::memory_order_relaxed);
     context.rows.clear();
     context.rowIdToIndex.clear();
+    context.groups.clear();
+    context.rowIdToGroupIndex.clear();
     context.clips.clear();
     context.playHead.setTransport(0.0, sampleRate, snapshot.tempoBpm, false);
     context.graph.setPlayHead(&context.playHead);
@@ -3478,6 +3647,83 @@ bool buildOfflineExportContext(
         connectStereo(context.graph, masterPanNode->nodeID, context.outputNode->nodeID, kBatchGraphUpdate);
     }
 
+    context.groups.reserve(snapshot.groups.size());
+    for (const auto &groupSnapshot : snapshot.groups)
+    {
+        if (groupSnapshot.id.trim().isEmpty() || groupSnapshot.rowIds.isEmpty())
+            continue;
+
+        OfflineGroupRenderState group;
+        group.id = groupSnapshot.id;
+        group.rowIds = groupSnapshot.rowIds;
+        group.gainUi = groupSnapshot.gainUi;
+        group.panUi = groupSnapshot.panUi;
+        group.muted = groupSnapshot.muted;
+
+        auto inputProcessor = std::make_unique<TrackInputProcessor>();
+        group.inputProc = inputProcessor.get();
+        group.inputNode = context.graph.addNode(std::move(inputProcessor), std::nullopt, kBatchGraphUpdate);
+
+        auto gainProcessor = std::make_unique<SimpleGainProcessor>();
+        group.gainProc = gainProcessor.get();
+        auto gainNode = context.graph.addNode(std::move(gainProcessor), std::nullopt, kBatchGraphUpdate);
+
+        auto panProcessor = std::make_unique<StereoPanProcessor>();
+        group.panProc = panProcessor.get();
+        auto panNode = context.graph.addNode(std::move(panProcessor), std::nullopt, kBatchGraphUpdate);
+
+        if (group.inputNode == nullptr || gainNode == nullptr || panNode == nullptr)
+        {
+            error = "Offline export graph could not create group bus nodes.";
+            return false;
+        }
+
+        juce::AudioProcessorGraph::NodeID previousNodeId = group.inputNode->nodeID;
+        for (const auto &effectSnapshot : groupSnapshot.effects)
+        {
+            juce::String pluginError;
+            auto processor = createEffectProcessorFromIdentifier(
+                pluginFormatManager,
+                pluginList,
+                effectSnapshot.pluginId,
+                sampleRate,
+                blockSize,
+                pluginError);
+            if (!processor)
+            {
+                error = "Offline export could not create group effect '" +
+                        effectSnapshot.pluginId + "': " + pluginError;
+                return false;
+            }
+
+            if (!effectSnapshot.state.isEmpty())
+                processor->setStateInformation(effectSnapshot.state.getData(),
+                                               (int)effectSnapshot.state.getSize());
+            applyNormalizedParameterSnapshots(*processor, effectSnapshot.parameters);
+
+            auto node = context.graph.addNode(std::move(processor), std::nullopt, kBatchGraphUpdate);
+            if (node == nullptr)
+            {
+                error = "Offline export graph could not add group effect node.";
+                return false;
+            }
+
+            node->setBypassed(effectSnapshot.bypassed);
+            group.fxChain.add(node->nodeID);
+            connectStereo(context.graph, previousNodeId, node->nodeID, kBatchGraphUpdate);
+            previousNodeId = node->nodeID;
+        }
+
+        connectStereo(context.graph, previousNodeId, gainNode->nodeID, kBatchGraphUpdate);
+        connectStereo(context.graph, gainNode->nodeID, panNode->nodeID, kBatchGraphUpdate);
+        connectStereo(context.graph, panNode->nodeID, context.master.inputNode->nodeID, kBatchGraphUpdate);
+
+        const int groupIndex = (int)context.groups.size();
+        for (int i = 0; i < group.rowIds.size(); ++i)
+            context.rowIdToGroupIndex[group.rowIds[i]] = groupIndex;
+        context.groups.push_back(std::move(group));
+    }
+
     context.rows.reserve(snapshot.rows.size());
     for (const auto &rowSnapshot : snapshot.rows)
     {
@@ -3569,7 +3815,22 @@ bool buildOfflineExportContext(
         connectStereo(context.graph, previousNodeId, automationNode->nodeID, kBatchGraphUpdate);
         connectStereo(context.graph, automationNode->nodeID, gainNode->nodeID, kBatchGraphUpdate);
         connectStereo(context.graph, gainNode->nodeID, panNode->nodeID, kBatchGraphUpdate);
-        connectStereo(context.graph, panNode->nodeID, context.master.inputNode->nodeID, kBatchGraphUpdate);
+        auto groupIt = context.rowIdToGroupIndex.find(row.rowId);
+        if (groupIt != context.rowIdToGroupIndex.end() &&
+            groupIt->second >= 0 &&
+            groupIt->second < (int)context.groups.size() &&
+            context.groups[(size_t)groupIt->second].inputNode != nullptr)
+        {
+            connectStereo(
+                context.graph,
+                panNode->nodeID,
+                context.groups[(size_t)groupIt->second].inputNode->nodeID,
+                kBatchGraphUpdate);
+        }
+        else
+        {
+            connectStereo(context.graph, panNode->nodeID, context.master.inputNode->nodeID, kBatchGraphUpdate);
+        }
 
         context.rowIdToIndex[row.rowId] = (int)context.rows.size();
         context.rows.push_back(std::move(row));
@@ -3714,6 +3975,8 @@ bool buildOfflineExportContext(
 
     reapplyOfflineEffectSnapshots(context, snapshot);
     applyOfflineMasterStaticState(context.master);
+    for (auto &group : context.groups)
+        applyOfflineGroupStaticState(group);
     for (auto &row : context.rows)
         applyOfflineRowStaticState(row, context.blockTransportStartSec);
     for (auto &clip : context.clips)
@@ -4300,6 +4563,35 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
             snapshot.rows.push_back(std::move(rowSnapshot));
         }
 
+        snapshot.groups.reserve(trackGroups.size());
+        for (auto &groupState : trackGroups)
+        {
+            compactTrackGroupFxChain(groupState);
+
+            ExportGroupSnapshot groupSnapshot;
+            groupSnapshot.id = groupState.id;
+            groupSnapshot.rowIds = groupState.rowIds;
+            groupSnapshot.gainUi = groupState.gainUi;
+            groupSnapshot.panUi = groupState.panUi;
+            groupSnapshot.muted = groupState.muted;
+
+            for (int fxIndex = 0; fxIndex < groupState.fxChain.size(); ++fxIndex)
+            {
+                const auto nodeId = groupState.fxChain.getReference(fxIndex);
+                auto node = graph.getNodeForId(nodeId);
+                if (node == nullptr)
+                    continue;
+
+                const auto pluginId =
+                    (fxIndex >= 0 && fxIndex < groupState.fxIds.size())
+                        ? groupState.fxIds[fxIndex]
+                        : (node->getProcessor() != nullptr ? node->getProcessor()->getName() : juce::String{});
+                groupSnapshot.effects.push_back(captureEffectSnapshot(pluginId, node));
+            }
+
+            snapshot.groups.push_back(std::move(groupSnapshot));
+        }
+
         snapshot.clips.reserve(clips.size());
         for (auto &clip : clips)
         {
@@ -4513,6 +4805,35 @@ juce::String JuceEngine::exportTrack(int trackIndex,
             }
 
             snapshot.rows.push_back(std::move(rowSnapshot));
+        }
+
+        snapshot.groups.reserve(trackGroups.size());
+        for (auto &groupState : trackGroups)
+        {
+            compactTrackGroupFxChain(groupState);
+
+            ExportGroupSnapshot groupSnapshot;
+            groupSnapshot.id = groupState.id;
+            groupSnapshot.rowIds = groupState.rowIds;
+            groupSnapshot.gainUi = groupState.gainUi;
+            groupSnapshot.panUi = groupState.panUi;
+            groupSnapshot.muted = groupState.muted;
+
+            for (int fxIndex = 0; fxIndex < groupState.fxChain.size(); ++fxIndex)
+            {
+                const auto nodeId = groupState.fxChain.getReference(fxIndex);
+                auto node = graph.getNodeForId(nodeId);
+                if (node == nullptr)
+                    continue;
+
+                const auto pluginId =
+                    (fxIndex >= 0 && fxIndex < groupState.fxIds.size())
+                        ? groupState.fxIds[fxIndex]
+                        : (node->getProcessor() != nullptr ? node->getProcessor()->getName() : juce::String{});
+                groupSnapshot.effects.push_back(captureEffectSnapshot(pluginId, node));
+            }
+
+            snapshot.groups.push_back(std::move(groupSnapshot));
         }
 
         snapshot.clips.reserve(clips.size());
@@ -5143,6 +5464,101 @@ void JuceEngine::rewireTrackBusFxChain(
     armOutputSafetyForCurrentRoute();
 }
 
+void JuceEngine::compactTrackGroupFxChain(TrackGroupState &group)
+{
+    juce::Array<juce::AudioProcessorGraph::NodeID> compactedChain;
+    juce::StringArray compactedIds;
+    compactedChain.ensureStorageAllocated(group.fxChain.size());
+    compactedIds.ensureStorageAllocated(group.fxIds.size());
+
+    for (int i = 0; i < group.fxChain.size(); ++i)
+    {
+        const auto id = group.fxChain.getReference(i);
+        if (graph.getNodeForId(id) == nullptr)
+            continue;
+        compactedChain.add(id);
+        if (i >= 0 && i < group.fxIds.size())
+            compactedIds.add(group.fxIds[i]);
+    }
+
+    group.fxChain.swapWith(compactedChain);
+    group.fxIds.swapWith(compactedIds);
+    while (group.fxIds.size() > group.fxChain.size())
+        group.fxIds.removeRange(group.fxIds.size() - 1, 1);
+}
+
+void JuceEngine::rewireTrackGroupFxChain(
+    const juce::String &groupId,
+    juce::AudioProcessorGraph::UpdateKind updateKind)
+{
+    auto *group = trackGroupForId(groupId);
+    if (group == nullptr || group->inputNode == nullptr ||
+        group->gainNode == nullptr || group->panNode == nullptr ||
+        group->meterTapNode == nullptr || masterInputNode == nullptr)
+        return;
+
+    compactTrackGroupFxChain(*group);
+
+    juce::Array<AudioProcessorGraph::NodeID> localNodes;
+    localNodes.add(group->inputNode->nodeID);
+    localNodes.add(group->gainNode->nodeID);
+    localNodes.add(group->panNode->nodeID);
+    localNodes.add(group->meterTapNode->nodeID);
+    localNodes.add(masterInputNode->nodeID);
+    for (auto fx : group->fxChain)
+        localNodes.addIfNotAlreadyThere(fx);
+    clearStereoConnectionsBetweenNodes(graph, localNodes, updateKind);
+
+    auto prevNodeId = group->inputNode->nodeID;
+    for (auto fx : group->fxChain)
+    {
+        if (graph.getNodeForId(fx) == nullptr)
+            continue;
+        connectStereo(graph, prevNodeId, fx, updateKind);
+        prevNodeId = fx;
+    }
+
+    connectStereo(graph, prevNodeId, group->gainNode->nodeID, updateKind);
+    connectStereo(graph, group->gainNode->nodeID, group->panNode->nodeID, updateKind);
+    connectStereo(graph, group->panNode->nodeID, group->meterTapNode->nodeID, updateKind);
+    connectStereo(graph, group->meterTapNode->nodeID, masterInputNode->nodeID, updateKind);
+    armOutputSafetyForCurrentRoute();
+}
+
+void JuceEngine::reconnectAllRowOutputsToBuses(
+    juce::AudioProcessorGraph::UpdateKind updateKind)
+{
+    if (masterInputNode == nullptr)
+        return;
+
+    juce::Array<AudioProcessorGraph::NodeID> destinations;
+    destinations.add(masterInputNode->nodeID);
+    for (auto &group : trackGroups)
+    {
+        if (group.inputNode != nullptr)
+            destinations.addIfNotAlreadyThere(group.inputNode->nodeID);
+    }
+
+    for (auto &row : rows)
+    {
+        if (row.meterTapNode == nullptr)
+            continue;
+
+        for (auto destination : destinations)
+            disconnectStereo(graph, row.meterTapNode->nodeID, destination, updateKind);
+
+        if (auto *group = trackGroupForMemberRowId(row.rowId);
+            group != nullptr && group->inputNode != nullptr)
+        {
+            connectStereo(graph, row.meterTapNode->nodeID, group->inputNode->nodeID, updateKind);
+        }
+        else
+        {
+            connectStereo(graph, row.meterTapNode->nodeID, masterInputNode->nodeID, updateKind);
+        }
+    }
+}
+
 // ============================================================
 // Track-row FX / parameters
 // ============================================================
@@ -5185,6 +5601,24 @@ void JuceEngine::compactRowFxChain(int row)
 
     while (r.fxIds.size() > r.fxChain.size())
         r.fxIds.removeRange(r.fxIds.size() - 1, 1);
+}
+
+juce::Array<juce::AudioProcessorGraph::NodeID> *JuceEngine::effectChainForRowApi(int rowIndex)
+{
+    if (auto *group = trackGroupForLeadRowIndex(rowIndex))
+        return &group->fxChain;
+    if (rowIndex < 0 || rowIndex >= (int)rows.size())
+        return nullptr;
+    return &rows[(size_t)rowIndex].fxChain;
+}
+
+juce::StringArray *JuceEngine::effectIdsForRowApi(int rowIndex)
+{
+    if (auto *group = trackGroupForLeadRowIndex(rowIndex))
+        return &group->fxIds;
+    if (rowIndex < 0 || rowIndex >= (int)rows.size())
+        return nullptr;
+    return &rows[(size_t)rowIndex].fxIds;
 }
 
 void JuceEngine::compactMasterFxChain()
@@ -5291,7 +5725,12 @@ void JuceEngine::ensureMasterOutputRouting()
 
             for (int ch = 0; ch < 2; ++ch)
             {
-                if (!isGraphConnectionPresent(row.meterTapNode->nodeID, masterInputNode->nodeID, ch))
+                auto *group = trackGroupForMemberRowId(row.rowId);
+                const auto destination =
+                    (group != nullptr && group->inputNode != nullptr)
+                        ? group->inputNode->nodeID
+                        : masterInputNode->nodeID;
+                if (!isGraphConnectionPresent(row.meterTapNode->nodeID, destination, ch))
                 {
                     needsRepair = true;
                     break;
@@ -5409,10 +5848,14 @@ bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath)
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return false;
     ensureRowBusNodesAttached(trackRow);
-
-    compactRowFxChain(trackRow);
+    auto *groupState = trackGroupForLeadRowIndex(trackRow);
+    if (groupState != nullptr)
+        ensureTrackGroupBusNodesAttached(*groupState, kBatchGraphUpdate);
+    else
+        compactRowFxChain(trackRow);
     auto &rowState = rows[(size_t)trackRow];
-    auto &chain = rowState.fxChain;
+    auto &chain = groupState != nullptr ? groupState->fxChain : rowState.fxChain;
+    auto &fxIds = groupState != nullptr ? groupState->fxIds : rowState.fxIds;
 
     // Built-in Mixroom
     if (mixroomPlugins.contains(pluginPath))
@@ -5474,9 +5917,12 @@ bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath)
             return false;
         }
         chain.add(node->nodeID);
-        rowState.fxIds.add(pluginPath);
+        fxIds.add(pluginPath);
 
-        rewireTrackBusFxChain(trackRow, kBatchGraphUpdate);
+        if (groupState != nullptr)
+            rewireTrackGroupFxChain(groupState->id, kBatchGraphUpdate);
+        else
+            rewireTrackBusFxChain(trackRow, kBatchGraphUpdate);
         graph.rebuild();
         return true;
     }
@@ -5548,10 +5994,13 @@ bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath)
         return false;
     }
 
-    rows[(size_t)trackRow].fxChain.add(pluginNode->nodeID);
-    rows[(size_t)trackRow].fxIds.add(requestedId);
-    const int insertedEffectIndex = rows[(size_t)trackRow].fxChain.size() - 1;
-    rewireTrackBusFxChain(trackRow, kBatchGraphUpdate);
+    chain.add(pluginNode->nodeID);
+    fxIds.add(requestedId);
+    const int insertedEffectIndex = chain.size() - 1;
+    if (groupState != nullptr)
+        rewireTrackGroupFxChain(groupState->id, kBatchGraphUpdate);
+    else
+        rewireTrackBusFxChain(trackRow, kBatchGraphUpdate);
     graph.rebuild();
 
     HostedPluginEditorMetadata metadata;
@@ -5571,34 +6020,44 @@ void JuceEngine::removeTrackEffect(int trackRow, int effectIndex)
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return;
 
-    compactRowFxChain(trackRow);
-    auto &chain = rows[(size_t)trackRow].fxChain;
+    auto *groupState = trackGroupForLeadRowIndex(trackRow);
+    if (groupState != nullptr)
+        compactTrackGroupFxChain(*groupState);
+    else
+        compactRowFxChain(trackRow);
+    auto &chain = groupState != nullptr ? groupState->fxChain : rows[(size_t)trackRow].fxChain;
     if (effectIndex < 0 || effectIndex >= chain.size())
         return;
 
     const auto nodeID = chain.getReference(effectIndex);
 
     chain.removeRange(effectIndex, 1);
-    auto &fxIds = rows[(size_t)trackRow].fxIds;
+    auto &fxIds = groupState != nullptr ? groupState->fxIds : rows[(size_t)trackRow].fxIds;
     if (effectIndex >= 0 && effectIndex < fxIds.size())
         fxIds.removeRange(effectIndex, 1);
 
-    auto &automationLanes = rows[(size_t)trackRow].effectAutomationLanes;
-    automationLanes.erase(
-        std::remove_if(
-            automationLanes.begin(),
-            automationLanes.end(),
-            [effectIndex](const RowState::TrackEffectAutomationLane &lane)
-            { return lane.effectIndex == effectIndex; }),
-        automationLanes.end());
-    for (auto &lane : automationLanes)
+    if (groupState == nullptr)
     {
-        if (lane.effectIndex > effectIndex)
-            lane.effectIndex -= 1;
-        lane.lastAppliedNormalized = std::numeric_limits<float>::quiet_NaN();
+        auto &automationLanes = rows[(size_t)trackRow].effectAutomationLanes;
+        automationLanes.erase(
+            std::remove_if(
+                automationLanes.begin(),
+                automationLanes.end(),
+                [effectIndex](const RowState::TrackEffectAutomationLane &lane)
+                { return lane.effectIndex == effectIndex; }),
+            automationLanes.end());
+        for (auto &lane : automationLanes)
+        {
+            if (lane.effectIndex > effectIndex)
+                lane.effectIndex -= 1;
+            lane.lastAppliedNormalized = std::numeric_limits<float>::quiet_NaN();
+        }
     }
 
-    rewireTrackBusFxChain(trackRow, kBatchGraphUpdate);
+    if (groupState != nullptr)
+        rewireTrackGroupFxChain(groupState->id, kBatchGraphUpdate);
+    else
+        rewireTrackBusFxChain(trackRow, kBatchGraphUpdate);
 
     juce::Array<AudioProcessorGraph::Connection> nodeConnections;
     for (const auto &connection : graph.getConnections())
@@ -5624,8 +6083,12 @@ void JuceEngine::reorderTrackEffects(int trackRow, int fromIndex, int toIndex)
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return;
 
-    compactRowFxChain(trackRow);
-    auto &chain = rows[(size_t)trackRow].fxChain;
+    auto *groupState = trackGroupForLeadRowIndex(trackRow);
+    if (groupState != nullptr)
+        compactTrackGroupFxChain(*groupState);
+    else
+        compactRowFxChain(trackRow);
+    auto &chain = groupState != nullptr ? groupState->fxChain : rows[(size_t)trackRow].fxChain;
 
     if (fromIndex < 0 || fromIndex >= chain.size())
         return;
@@ -5636,7 +6099,7 @@ void JuceEngine::reorderTrackEffects(int trackRow, int fromIndex, int toIndex)
 
     auto nodeID = chain.getReference(fromIndex);
     juce::String fxId;
-    auto &fxIds = rows[(size_t)trackRow].fxIds;
+    auto &fxIds = groupState != nullptr ? groupState->fxIds : rows[(size_t)trackRow].fxIds;
     if (fromIndex >= 0 && fromIndex < fxIds.size())
         fxId = fxIds[fromIndex];
 
@@ -5651,28 +6114,34 @@ void JuceEngine::reorderTrackEffects(int trackRow, int fromIndex, int toIndex)
         fxIds.insert(idToIndex, fxId);
     }
 
-    auto &automationLanes = rows[(size_t)trackRow].effectAutomationLanes;
-    for (auto &lane : automationLanes)
+    if (groupState == nullptr)
     {
-        const int idx = lane.effectIndex;
-        if (idx == fromIndex)
+        auto &automationLanes = rows[(size_t)trackRow].effectAutomationLanes;
+        for (auto &lane : automationLanes)
         {
-            lane.effectIndex = finalToIndex;
+            const int idx = lane.effectIndex;
+            if (idx == fromIndex)
+            {
+                lane.effectIndex = finalToIndex;
+            }
+            else if (fromIndex < finalToIndex)
+            {
+                if (idx > fromIndex && idx <= finalToIndex)
+                    lane.effectIndex = idx - 1;
+            }
+            else if (fromIndex > finalToIndex)
+            {
+                if (idx >= finalToIndex && idx < fromIndex)
+                    lane.effectIndex = idx + 1;
+            }
+            lane.lastAppliedNormalized = std::numeric_limits<float>::quiet_NaN();
         }
-        else if (fromIndex < finalToIndex)
-        {
-            if (idx > fromIndex && idx <= finalToIndex)
-                lane.effectIndex = idx - 1;
-        }
-        else if (fromIndex > finalToIndex)
-        {
-            if (idx >= finalToIndex && idx < fromIndex)
-                lane.effectIndex = idx + 1;
-        }
-        lane.lastAppliedNormalized = std::numeric_limits<float>::quiet_NaN();
     }
 
-    rewireTrackBusFxChain(trackRow, kBatchGraphUpdate);
+    if (groupState != nullptr)
+        rewireTrackGroupFxChain(groupState->id, kBatchGraphUpdate);
+    else
+        rewireTrackBusFxChain(trackRow, kBatchGraphUpdate);
     graph.rebuild();
 }
 
@@ -5684,7 +6153,10 @@ juce::StringArray JuceEngine::getTrackEffectsForRow(int trackRow)
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return names;
 
-    auto &chain = rows[(size_t)trackRow].fxChain;
+    auto *chainPtr = effectChainForRowApi(trackRow);
+    if (chainPtr == nullptr)
+        return names;
+    auto &chain = *chainPtr;
 
     for (auto &nodeID : chain)
     {
@@ -5706,12 +6178,17 @@ juce::StringArray JuceEngine::getTrackEffectIdsForRow(int trackRow)
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return ids;
 
-    auto &r = rows[(size_t)trackRow];
-    if (r.fxIds.size() == r.fxChain.size())
-        return r.fxIds;
+    auto *chainPtr = effectChainForRowApi(trackRow);
+    auto *idsPtr = effectIdsForRowApi(trackRow);
+    if (chainPtr == nullptr || idsPtr == nullptr)
+        return ids;
+    auto &chain = *chainPtr;
+    auto &fxIds = *idsPtr;
+    if (fxIds.size() == chain.size())
+        return fxIds;
 
     // Legacy fallback for previously-created rows without explicit IDs.
-    for (auto &nodeID : r.fxChain)
+    for (auto &nodeID : chain)
     {
         if (auto node = graph.getNodeForId(nodeID))
             if (auto *processor = node->getProcessor())
@@ -5729,7 +6206,10 @@ juce::StringArray JuceEngine::getTrackEffectInstanceIdsForRow(int trackRow)
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return ids;
 
-    auto &chain = rows[(size_t)trackRow].fxChain;
+    auto *chainPtr = effectChainForRowApi(trackRow);
+    if (chainPtr == nullptr)
+        return ids;
+    auto &chain = *chainPtr;
 
     for (auto &nodeID : chain)
         ids.add(juce::String((juce::int64)nodeID.uid));
@@ -5744,8 +6224,14 @@ juce::String JuceEngine::getTrackEffectStateBase64(int trackRow, int effectIndex
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return {};
 
-    compactRowFxChain(trackRow);
-    auto &chain = rows[(size_t)trackRow].fxChain;
+    if (auto *group = trackGroupForLeadRowIndex(trackRow))
+        compactTrackGroupFxChain(*group);
+    else
+        compactRowFxChain(trackRow);
+    auto *chainPtr = effectChainForRowApi(trackRow);
+    if (chainPtr == nullptr)
+        return {};
+    auto &chain = *chainPtr;
     if (effectIndex < 0 || effectIndex >= chain.size())
         return {};
 
@@ -5773,8 +6259,14 @@ bool JuceEngine::setTrackEffectStateBase64(int trackRow,
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return false;
 
-    compactRowFxChain(trackRow);
-    auto &chain = rows[(size_t)trackRow].fxChain;
+    if (auto *group = trackGroupForLeadRowIndex(trackRow))
+        compactTrackGroupFxChain(*group);
+    else
+        compactRowFxChain(trackRow);
+    auto *chainPtr = effectChainForRowApi(trackRow);
+    if (chainPtr == nullptr)
+        return false;
+    auto &chain = *chainPtr;
     if (effectIndex < 0 || effectIndex >= chain.size())
         return false;
 
@@ -6038,8 +6530,14 @@ bool JuceEngine::openTrackPluginEditor(int trackRow, int effectIndex)
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return false;
 
-    compactRowFxChain(trackRow);
-    auto &chain = rows[(size_t)trackRow].fxChain;
+    if (auto *group = trackGroupForLeadRowIndex(trackRow))
+        compactTrackGroupFxChain(*group);
+    else
+        compactRowFxChain(trackRow);
+    auto *chainPtr = effectChainForRowApi(trackRow);
+    if (chainPtr == nullptr)
+        return false;
+    auto &chain = *chainPtr;
     if (effectIndex < 0 || effectIndex >= chain.size())
         return false;
 
@@ -6063,7 +6561,10 @@ void JuceEngine::setTrackEffectParameter(int trackRow,
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return;
 
-    auto &chain = rows[(size_t)trackRow].fxChain;
+    auto *chainPtr = effectChainForRowApi(trackRow);
+    if (chainPtr == nullptr)
+        return;
+    auto &chain = *chainPtr;
     if (effectIndex < 0 || effectIndex >= chain.size())
         return;
 
@@ -6145,8 +6646,14 @@ void JuceEngine::bypassRowEffect(int trackRow, int effectIndex, bool shouldBypas
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return;
 
-    compactRowFxChain(trackRow);
-    auto &chain = rows[(size_t)trackRow].fxChain;
+    if (auto *group = trackGroupForLeadRowIndex(trackRow))
+        compactTrackGroupFxChain(*group);
+    else
+        compactRowFxChain(trackRow);
+    auto *chainPtr = effectChainForRowApi(trackRow);
+    if (chainPtr == nullptr)
+        return;
+    auto &chain = *chainPtr;
     if (effectIndex < 0 || effectIndex >= chain.size())
         return;
 
@@ -6160,7 +6667,10 @@ bool JuceEngine::getRowEffectBypassState(int trackRow, int effectIndex)
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return false;
 
-    auto &chain = rows[(size_t)trackRow].fxChain;
+    auto *chainPtr = effectChainForRowApi(trackRow);
+    if (chainPtr == nullptr)
+        return false;
+    auto &chain = *chainPtr;
     if (effectIndex < 0 || effectIndex >= chain.size())
         return false;
 
@@ -6591,6 +7101,121 @@ void JuceEngine::setRowPan(int row, float pan)
     rows[(size_t)row].panUi = pan;
     if (rows[(size_t)row].panProc != nullptr)
         rows[(size_t)row].panProc->pan->setValueNotifyingHost(panUIToNormalized(pan));
+}
+
+void JuceEngine::configureTrackGroups(const juce::Array<juce::NamedValueSet> &groups)
+{
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
+
+    juce::StringArray seenIds;
+    for (const auto &entry : groups)
+    {
+        const auto groupId = entry["id"].toString().trim();
+        if (groupId.isEmpty())
+            continue;
+
+        auto *group = trackGroupForId(groupId);
+        if (group == nullptr)
+        {
+            TrackGroupState next;
+            next.id = groupId;
+            trackGroups.push_back(std::move(next));
+            group = &trackGroups.back();
+        }
+
+        seenIds.addIfNotAlreadyThere(groupId);
+        group->rowIds.clear();
+        if (auto *array = entry["rowIds"].getArray())
+        {
+            for (const auto &value : *array)
+            {
+                const int rowId = (int)value;
+                if (rowId >= 0)
+                    group->rowIds.addIfNotAlreadyThere(rowId);
+            }
+        }
+        group->gainUi = juce::jlimit(kGainUiMin, kGainUiMax, (float)entry["gain"]);
+        group->panUi = juce::jlimit(0.0f, 1.0f, (float)entry["pan"]);
+        group->muted = (bool)entry["muted"];
+        group->soloed = (bool)entry["soloed"];
+
+        if (busGraphInitialised)
+        {
+            ensureTrackGroupBusNodesAttached(*group, kBatchGraphUpdate);
+            if (group->gainProc != nullptr)
+            {
+                group->gainProc->gain->setValueNotifyingHost(group->gainUi / kGainUiMax);
+                group->gainProc->setMuted(group->muted);
+            }
+            if (group->panProc != nullptr)
+                group->panProc->pan->setValueNotifyingHost(panUIToNormalized(group->panUi));
+        }
+    }
+
+    for (auto it = trackGroups.begin(); it != trackGroups.end();)
+    {
+        if (seenIds.contains(it->id))
+        {
+            ++it;
+            continue;
+        }
+
+        for (auto fx : it->fxChain)
+            if (graph.getNodeForId(fx) != nullptr)
+                graph.removeNode(fx, kBatchGraphUpdate);
+        if (it->inputNode)
+            graph.removeNode(it->inputNode->nodeID, kBatchGraphUpdate);
+        if (it->gainNode)
+            graph.removeNode(it->gainNode->nodeID, kBatchGraphUpdate);
+        if (it->panNode)
+            graph.removeNode(it->panNode->nodeID, kBatchGraphUpdate);
+        if (it->meterTapNode)
+            graph.removeNode(it->meterTapNode->nodeID, kBatchGraphUpdate);
+        it = trackGroups.erase(it);
+    }
+
+    reconnectAllRowOutputsToBuses(kBatchGraphUpdate);
+    graph.rebuild();
+    armOutputSafetyForCurrentRoute();
+}
+
+void JuceEngine::assignRowToGroup(int row, const juce::String &groupId)
+{
+    if (row < 0 || row >= (int)rows.size())
+        return;
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
+    const int rowId = rows[(size_t)row].rowId;
+    for (auto &group : trackGroups)
+        group.rowIds.removeAllInstancesOf(rowId);
+    if (auto *group = trackGroupForId(groupId))
+        group->rowIds.addIfNotAlreadyThere(rowId);
+    reconnectAllRowOutputsToBuses(kBatchGraphUpdate);
+    graph.rebuild();
+    armOutputSafetyForCurrentRoute();
+}
+
+void JuceEngine::setTrackGroupMixState(const juce::String &groupId,
+                                       float gain,
+                                       float pan,
+                                       bool muted,
+                                       bool soloed)
+{
+    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
+    auto *group = trackGroupForId(groupId);
+    if (group == nullptr)
+        return;
+    group->gainUi = juce::jlimit(kGainUiMin, kGainUiMax, gain);
+    group->panUi = juce::jlimit(0.0f, 1.0f, pan);
+    group->muted = muted;
+    group->soloed = soloed;
+    ensureTrackGroupBusNodesAttached(*group, kBatchGraphUpdate);
+    if (group->gainProc != nullptr)
+    {
+        group->gainProc->gain->setValueNotifyingHost(group->gainUi / kGainUiMax);
+        group->gainProc->setMuted(group->muted);
+    }
+    if (group->panProc != nullptr)
+        group->panProc->pan->setValueNotifyingHost(panUIToNormalized(group->panUi));
 }
 
 // ============================================================
@@ -7261,7 +7886,10 @@ juce::Array<juce::NamedValueSet> JuceEngine::getTrackPluginParameterInfo(int row
     if (row < 0 || row >= (int)rows.size())
         return results;
 
-    auto &chain = rows[(size_t)row].fxChain;
+    auto *chainPtr = effectChainForRowApi(row);
+    if (chainPtr == nullptr)
+        return results;
+    auto &chain = *chainPtr;
     if (effectIndex < 0 || effectIndex >= chain.size())
         return results;
 
@@ -7458,6 +8086,12 @@ void JuceEngine::setMetronomeBpm(double bpm)
     mixroom::fx::setGlobalTempoBpm(bpm);
     if (metronomeCallback)
         metronomeCallback->setBpm(bpm);
+}
+
+void JuceEngine::setMetronomeTimeSignature(int numerator, int denominator)
+{
+    if (metronomeCallback)
+        metronomeCallback->setTimeSignature(numerator, denominator);
 }
 
 void JuceEngine::setMetronomeTransportMs(double ms)
@@ -9077,11 +9711,13 @@ std::vector<float> JuceEngine::getAllMeterValues() const
     {
         const int base = stride * (1 + row);
 
-        auto &m = rows[(size_t)row].meter;
-        out[base + 0] = m.peakL.load(std::memory_order_relaxed);
-        out[base + 1] = m.peakR.load(std::memory_order_relaxed);
-        out[base + 2] = m.rmsL.load(std::memory_order_relaxed);
-        out[base + 3] = m.rmsR.load(std::memory_order_relaxed);
+        const StereoMeterState *m = &rows[(size_t)row].meter;
+        if (const auto *group = trackGroupForLeadRowIndex(row); group != nullptr)
+            m = &group->meter;
+        out[base + 0] = m->peakL.load(std::memory_order_relaxed);
+        out[base + 1] = m->peakR.load(std::memory_order_relaxed);
+        out[base + 2] = m->rmsL.load(std::memory_order_relaxed);
+        out[base + 3] = m->rmsR.load(std::memory_order_relaxed);
 
         // If you don’t have row clip yet, set 0 for now
         out[base + 4] = 0.0f;
@@ -9124,7 +9760,10 @@ const std::array<float, 5> JuceEngine::getRowCompressorMeter(int row, int effect
     if (row < 0 || row >= (int)rows.size())
         return {0, 0, 0, 0, 0};
 
-    auto &chain = rows[(size_t)row].fxChain;
+    auto *chainPtr = effectChainForRowApi(row);
+    if (chainPtr == nullptr)
+        return {0, 0, 0, 0, 0};
+    auto &chain = *chainPtr;
     if (effectIndex < 0 || effectIndex >= chain.size())
         return {0, 0, 0, 0, 0};
 
@@ -9186,7 +9825,10 @@ std::vector<float> JuceEngine::getRowEqWaveform(int row, int effectIndex, int sa
     if (row < 0 || row >= (int)rows.size())
         return std::vector<float>((size_t)count, 0.0f);
 
-    auto &chain = rows[(size_t)row].fxChain;
+    auto *chainPtr = effectChainForRowApi(row);
+    if (chainPtr == nullptr)
+        return std::vector<float>((size_t)count, 0.0f);
+    auto &chain = *chainPtr;
     if (effectIndex < 0 || effectIndex >= chain.size())
         return std::vector<float>((size_t)count, 0.0f);
 
@@ -9241,7 +9883,10 @@ std::vector<float> JuceEngine::getRowStereoScope(int row, int effectIndex, int p
     if (row < 0 || row >= (int)rows.size())
         return std::vector<float>((size_t)(count * 2), 0.0f);
 
-    auto &chain = rows[(size_t)row].fxChain;
+    auto *chainPtr = effectChainForRowApi(row);
+    if (chainPtr == nullptr)
+        return std::vector<float>((size_t)(count * 2), 0.0f);
+    auto &chain = *chainPtr;
     if (effectIndex < 0 || effectIndex >= chain.size())
         return std::vector<float>((size_t)(count * 2), 0.0f);
 
@@ -9288,7 +9933,10 @@ std::vector<float> JuceEngine::getRowShaperPreview(int row, int effectIndex, int
     if (row < 0 || row >= (int)rows.size())
         return std::vector<float>((size_t)(count + 1), 1.0f);
 
-    auto &chain = rows[(size_t)row].fxChain;
+    auto *chainPtr = effectChainForRowApi(row);
+    if (chainPtr == nullptr)
+        return std::vector<float>((size_t)(count + 1), 1.0f);
+    auto &chain = *chainPtr;
     if (effectIndex < 0 || effectIndex >= chain.size())
         return std::vector<float>((size_t)(count + 1), 1.0f);
 
@@ -9338,7 +9986,10 @@ std::vector<float> JuceEngine::getRowDynamicSoftenerFrame(int row, int effectInd
     if (row < 0 || row >= (int)rows.size())
         return std::vector<float>(fallbackSize, 0.0f);
 
-    auto &chain = rows[(size_t)row].fxChain;
+    auto *chainPtr = effectChainForRowApi(row);
+    if (chainPtr == nullptr)
+        return std::vector<float>(fallbackSize, 0.0f);
+    auto &chain = *chainPtr;
     if (effectIndex < 0 || effectIndex >= chain.size())
         return std::vector<float>(fallbackSize, 0.0f);
 
@@ -9385,7 +10036,10 @@ std::vector<float> JuceEngine::getRowTransientShaperVisual(int row, int effectIn
     if (row < 0 || row >= (int)rows.size())
         return std::vector<float>(fallbackSize, 0.0f);
 
-    auto &chain = rows[(size_t)row].fxChain;
+    auto *chainPtr = effectChainForRowApi(row);
+    if (chainPtr == nullptr)
+        return std::vector<float>(fallbackSize, 0.0f);
+    auto &chain = *chainPtr;
     if (effectIndex < 0 || effectIndex >= chain.size())
         return std::vector<float>(fallbackSize, 0.0f);
 
@@ -9684,6 +10338,22 @@ void JuceEngine::rebuildBusesAndRewireClips()
     masterGainProcessor = nullptr;
     masterPanProcessor = nullptr;
 
+    for (auto &group : trackGroups)
+    {
+        if (group.inputNode)
+            graph.removeNode(group.inputNode->nodeID, kBatchGraphUpdate);
+        if (group.gainNode)
+            graph.removeNode(group.gainNode->nodeID, kBatchGraphUpdate);
+        if (group.panNode)
+            graph.removeNode(group.panNode->nodeID, kBatchGraphUpdate);
+        group.inputNode = nullptr;
+        group.gainNode = nullptr;
+        group.panNode = nullptr;
+        group.inputProc = nullptr;
+        group.gainProc = nullptr;
+        group.panProc = nullptr;
+    }
+
     // Remove all old row bus nodes (keep row FX nodes + chain IDs).
     for (auto &r : rows)
     {
@@ -9715,8 +10385,11 @@ void JuceEngine::rebuildBusesAndRewireClips()
     ensureBusGraphInitialised();
 
     // Restore row/master FX routing on top of rebuilt bus nodes.
+    for (auto &group : trackGroups)
+        rewireTrackGroupFxChain(group.id, kBatchGraphUpdate);
     for (int i = 0; i < (int)rows.size(); ++i)
         rewireTrackBusFxChain(i, kBatchGraphUpdate);
+    reconnectAllRowOutputsToBuses(kBatchGraphUpdate);
     rewireMasterFxChain(kBatchGraphUpdate);
 
     // Rewire clips

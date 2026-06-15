@@ -222,6 +222,7 @@ def _daw_target_schema(*, allow_master_scope: bool = False) -> Dict[str, Any]:
         "selected",
         "all_audio",
         "all",
+        "group",
     ]
     if allow_master_scope:
         scope_values.append("master")
@@ -259,6 +260,8 @@ def _daw_target_schema(*, allow_master_scope: bool = False) -> Dict[str, Any]:
                 "type": "string",
                 "enum": scope_values,
             },
+            "group_id": {"type": "string"},
+            "group_name": {"type": "string"},
             "prefer_selected": {
                 "type": "boolean",
                 "description": (
@@ -618,6 +621,7 @@ Rules:
 • Set target.scope to:
   - "master" for overall/master-bus/finishing requests
   - "row" for explicit track- or role-targeted requests
+  - "group" for explicit row-group targets; include group_id or group_name when available
   - "auto" when scope should be inferred by the local planner
 • If target.scope = "master", omit row_index and role entirely
 • NEVER emit row_index = -1 or role = null as a placeholder
@@ -1261,6 +1265,7 @@ Targeting and ambiguity
 Scope and indexing
 - `target.scope="master"` for overall/master-bus/finishing requests; omit `row_index` and `role` when scope is `master`
 - `target.scope="row"` for explicit track or role targets
+- `target.scope="group"` for explicit row-group targets; include `group_id` or `group_name` when available
 - `target.scope="auto"` only when local planning should infer the exact scope
 - Default to SINGLE-TRACK when one target is clearly dominant
 - Do not infer GLOBAL from singular/plural wording alone
@@ -1503,9 +1508,10 @@ canceling a prior proposal.
 
 Treat the snapshots like a practical session overview, not a parser dump.
 Use labels, filenames, instruments, clip kinds, row position, occupied-row
-context, interpretation flags/notes, fx_count, active_fx_count, fx_chain,
-selected_row_context, master_context, coverage, midi_state, selected_clip_midi,
-sample_hints, library_role_hints, and reference_hints as musical identity cues.
+context, group names/ids/membership, interpretation flags/notes, fx_count,
+active_fx_count, fx_chain, selected_row_context, master_context, coverage,
+midi_state, selected_clip_midi, sample_hints, library_role_hints, and
+reference_hints as musical identity cues.
 
 Resolve targets in this order:
 1. explicit target from the user
@@ -1964,6 +1970,114 @@ TOOLS = [
                                             {"required": ["tempo_bpm"]},
                                             {"required": ["bpm"]},
                                         ],
+                                        "additionalProperties": True,
+                                    },
+                                },
+                                "required": ["type", "data"],
+                                "additionalProperties": False,
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "enum": ["row_color_edit"],
+                                    },
+                                    "data": {
+                                        "type": "object",
+                                        "properties": {
+                                            "operation": {
+                                                "type": "string",
+                                                "enum": ["set", "clear"],
+                                            },
+                                            "target": _daw_target_schema(),
+                                            "row_indices": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                },
+                                                "minItems": 1,
+                                            },
+                                            "track_indices": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                },
+                                                "minItems": 1,
+                                            },
+                                            "color": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                            },
+                                            "argb": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                            },
+                                            "color_name": {"type": "string"},
+                                            "group_id": {"type": "string"},
+                                            "group_name": {"type": "string"},
+                                        },
+                                        "required": ["operation"],
+                                        "additionalProperties": True,
+                                    },
+                                },
+                                "required": ["type", "data"],
+                                "additionalProperties": False,
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "enum": ["row_group_edit"],
+                                    },
+                                    "data": {
+                                        "type": "object",
+                                        "properties": {
+                                            "operation": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "create",
+                                                    "remove_row",
+                                                    "toggle_collapsed",
+                                                ],
+                                            },
+                                            "target": _daw_target_schema(),
+                                            "row_indices": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                },
+                                                "minItems": 1,
+                                            },
+                                            "track_indices": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                },
+                                                "minItems": 1,
+                                            },
+                                            "rows": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                },
+                                                "minItems": 1,
+                                            },
+                                            "group_id": {"type": "string"},
+                                            "group_name": {"type": "string"},
+                                            "name": {"type": "string"},
+                                            "color": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                            },
+                                        },
+                                        "required": ["operation"],
                                         "additionalProperties": True,
                                     },
                                 },
@@ -2838,9 +2952,11 @@ TOOLS = [
                                                         "type": "integer",
                                                         "minimum": 0,
                                                     },
+                                                    "group_id": {"type": "string"},
+                                                    "group_name": {"type": "string"},
                                                     "scope": {
                                                         "type": "string",
-                                                        "enum": ["auto", "row"],
+                                                        "enum": ["auto", "row", "group"],
                                                     },
                                                     "confidence": {"type": "number"},
                                                 },
@@ -2951,6 +3067,8 @@ def _build_tools(client_capabilities: set[str]) -> list[dict[str, Any]]:
         "clarify",
         "clip_edit",
         "effect_edit",
+        "row_group_edit",
+        "row_color_edit",
         "automation_edit",
         "midi_compose",
         "stem_separate",

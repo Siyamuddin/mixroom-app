@@ -5438,6 +5438,16 @@ public:
                                    const std::vector<AutomationPoint> &points);
     void setRowPan(int row, float pan);
 
+    // TRACK GROUP bus routing. A group's first rowId is treated as the visible
+    // group header; row FX calls on that row are routed to the group bus.
+    void configureTrackGroups(const juce::Array<juce::NamedValueSet> &groups);
+    void assignRowToGroup(int row, const juce::String &groupId);
+    void setTrackGroupMixState(const juce::String &groupId,
+                               float gain,
+                               float pan,
+                               bool muted,
+                               bool soloed);
+
     // MASTER bus FX
     bool insertMasterEffect(const juce::String &pluginPath);
     void removeMasterEffect(int effectIndex);
@@ -5473,6 +5483,7 @@ public:
     void setMetronomeEnabled(bool);
     void setMetronomeVolume(float);
     void setMetronomeBpm(double);
+    void setMetronomeTimeSignature(int numerator, int denominator);
     void setMetronomeTransportMs(double);
 
     std::vector<float> decodeAudioMono16k(const juce::File &file, int maxOutputSamples = -1);
@@ -5577,6 +5588,11 @@ private:
     void rewireTrackBusFxChain(
         int trackRow,
         juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync); // row-level FX between input and automation
+    void rewireTrackGroupFxChain(
+        const juce::String &groupId,
+        juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync);
+    void reconnectAllRowOutputsToBuses(
+        juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync);
     int getTrackIndexForClip(int clipIdx) const; // clip → row mapping
     float panUIToNormalized(float uiPan)         // OLD: uiPan ∈ [-1, 1] NEW: uiPan ∈ [0, 1]
     {
@@ -5815,10 +5831,33 @@ private:
         StereoMeterState meter;
     };
 
+    struct TrackGroupState
+    {
+        juce::String id;
+        juce::Array<int> rowIds;
+        float gainUi = kGainUiUnity;
+        float panUi = 0.5f;
+        bool muted = false;
+        bool soloed = false;
+
+        TrackInputProcessor *inputProc = nullptr;
+        SimpleGainProcessor *gainProc = nullptr;
+        StereoPanProcessor *panProc = nullptr;
+        MeterTapProcessor *meterTapProc = nullptr;
+        juce::AudioProcessorGraph::Node::Ptr inputNode;
+        juce::AudioProcessorGraph::Node::Ptr gainNode;
+        juce::AudioProcessorGraph::Node::Ptr panNode;
+        juce::AudioProcessorGraph::Node::Ptr meterTapNode;
+        juce::Array<juce::AudioProcessorGraph::NodeID> fxChain;
+        juce::StringArray fxIds;
+        StereoMeterState meter;
+    };
+
     // row storage
     std::vector<RowState> rows;
     std::unordered_map<int, int> rowIdToIndex;
     std::unordered_map<int, juce::Array<int>> rowIdToClipIds;
+    std::vector<TrackGroupState> trackGroups;
     std::unordered_map<std::string, std::unique_ptr<HostedPluginEditorWindow>> hostedPluginEditorWindows;
     std::atomic<int> pluginEditorPrewarmSequence{0};
     std::atomic<int> nextRowId{1};
@@ -5845,6 +5884,18 @@ private:
     bool masterMuted = false;
 
     bool busGraphInitialised = false;
+    TrackGroupState *trackGroupForId(const juce::String &groupId);
+    const TrackGroupState *trackGroupForId(const juce::String &groupId) const;
+    TrackGroupState *trackGroupForLeadRowIndex(int rowIndex);
+    const TrackGroupState *trackGroupForLeadRowIndex(int rowIndex) const;
+    TrackGroupState *trackGroupForMemberRowId(int rowId);
+    void attachTrackGroupBusNodes(TrackGroupState &group,
+                                  juce::AudioProcessorGraph::UpdateKind updateKind);
+    void ensureTrackGroupBusNodesAttached(TrackGroupState &group,
+                                          juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync);
+    void compactTrackGroupFxChain(TrackGroupState &group);
+    juce::Array<juce::AudioProcessorGraph::NodeID> *effectChainForRowApi(int rowIndex);
+    juce::StringArray *effectIdsForRowApi(int rowIndex);
 
     std::unique_ptr<MetronomeAudioCallback> metronomeCallback;
 
@@ -5945,7 +5996,18 @@ public:
     void setBpm(double newBpm)
     {
         bpm = newBpm;
-        msPerBeat = 60000.0 / bpm;
+        updateMsPerBeat();
+    }
+
+    void setTimeSignature(int numerator, int denominator)
+    {
+        beatsPerBar = juce::jlimit(1, 12, numerator);
+        beatUnit = (denominator == 2 || denominator == 4 ||
+                    denominator == 8 || denominator == 16)
+                       ? denominator
+                       : 4;
+        updateMsPerBeat();
+        alignToTransport();
     }
 
     void setTransportMs(double ms)
@@ -5963,7 +6025,7 @@ public:
         expectedBlockSize = device->getCurrentBufferSizeSamples();
         expectedInputChannels = device->getActiveInputChannels().countNumberOfSetBits();
         expectedOutputChannels = device->getActiveOutputChannels().countNumberOfSetBits();
-        msPerBeat = 60000.0 / bpm;
+        updateMsPerBeat();
         clickPhaseInc = juce::MathConstants<double>::twoPi * clickFrequency / sampleRate;
         engine.setBlockPlayingState(false);
         player.audioDeviceAboutToStart(device);
@@ -6163,6 +6225,7 @@ private:
     float volume = 0.5f;
     double bpm = 120.0;
     int beatsPerBar = 4;
+    int beatUnit = 4;
 
     double sampleRate = 44100.0;
     double msPerBeat = 500.0;
@@ -6209,6 +6272,12 @@ private:
     double a2 = 0.0;
     double b1 = 0.0;
     double b2 = 0.0;
+
+    void updateMsPerBeat()
+    {
+        msPerBeat = (60000.0 / juce::jmax(1.0, bpm)) *
+                    4.0 / juce::jmax(1, beatUnit);
+    }
 
     void alignToTransport()
     {

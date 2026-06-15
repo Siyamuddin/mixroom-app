@@ -12,6 +12,11 @@
     {
       "idiom" : "universal",
       "scale" : "3x"
+    },
+    {
+      "filename" : "background-ipad.png",
+      "idiom" : "ipad",
+      "scale" : "2x"
     }
   ],
   "info" : {

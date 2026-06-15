@@ -19,6 +19,10 @@ class AnalyticsConfig {
         'https://5e8e9f0b08714d2c26591bce7b3e057f@o4511009749729280.ingest.us.sentry.io/4511012111712256',
   );
 
+  static const bool sentryEnabledInDebug = bool.fromEnvironment(
+    'SENTRY_ENABLED_IN_DEBUG',
+  );
+
   static const String appEnvironment = String.fromEnvironment(
     'APP_ENV',
     defaultValue: '',
@@ -27,7 +31,8 @@ class AnalyticsConfig {
   static bool get hasPostHog =>
       postHogApiKey.trim().isNotEmpty && postHogHost.trim().isNotEmpty;
 
-  static bool get hasSentry => sentryDsn.trim().isNotEmpty;
+  static bool get hasSentry =>
+      sentryDsn.trim().isNotEmpty && (kReleaseMode || sentryEnabledInDebug);
 
   static String get environment {
     final explicit = appEnvironment.trim();

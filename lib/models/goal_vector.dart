@@ -217,7 +217,8 @@ class GoalVector {
         'audibility': audibility.wireValue,
         if (styleTags.isNotEmpty) 'style_tags': styleTags,
         if (destructiveOk) 'destructive_ok': true,
-        if (referenceTarget != null) 'reference_target': referenceTarget!.toJson(),
+        if (referenceTarget != null)
+          'reference_target': referenceTarget!.toJson(),
         if (referenceMode != null) 'reference_mode': referenceMode!.wireValue,
         if (referenceCloseness != null)
           'reference_closeness': referenceCloseness!.wireValue,
@@ -289,22 +290,28 @@ class MixIntent {
 class MixTarget {
   final String? role;
   final int? rowIndex; // 0-based
-  final String scope; // auto | row | master
+  final String? groupId;
+  final String? groupName;
+  final String scope; // auto | row | group | master
   final double confidence;
 
   MixTarget({
     this.role,
     this.rowIndex,
+    this.groupId,
+    this.groupName,
     this.scope = 'auto',
     required this.confidence,
   });
 
   factory MixTarget.fromJson(Map<String, dynamic> j) {
     final rawScope = j['scope']?.toString().trim().toLowerCase();
-    final scope =
-        (rawScope == 'row' || rawScope == 'master' || rawScope == 'auto')
-            ? rawScope!
-            : 'auto';
+    final scope = (rawScope == 'row' ||
+            rawScope == 'group' ||
+            rawScope == 'master' ||
+            rawScope == 'auto')
+        ? rawScope!
+        : 'auto';
     final rawRowIndex = j['row_index'] is int
         ? j['row_index'] as int
         : (j['row_index'] is num ? (j['row_index'] as num).toInt() : null);
@@ -316,6 +323,8 @@ class MixTarget {
     return MixTarget(
       role: j['role']?.toString(),
       rowIndex: rowIndex,
+      groupId: j['group_id']?.toString(),
+      groupName: j['group_name']?.toString(),
       scope: scope,
       confidence: ((j['confidence'] ?? 0.5) as num).toDouble().clamp(0.0, 1.0),
     );
@@ -324,6 +333,8 @@ class MixTarget {
   Map<String, dynamic> toJson() => {
         if (role != null) 'role': role,
         if (rowIndex != null) 'row_index': rowIndex,
+        if (groupId != null) 'group_id': groupId,
+        if (groupName != null) 'group_name': groupName,
         'scope': scope,
         'confidence': confidence,
       };

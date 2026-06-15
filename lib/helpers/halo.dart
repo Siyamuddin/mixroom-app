@@ -22,6 +22,7 @@ class Halo extends StatelessWidget {
       builder: (context, active, _) {
         return _HaloFrame(
           active: active.contains(haloKey),
+          strong: _isStrongHaloKey(haloKey),
           borderRadius: borderRadius ?? BorderRadius.circular(8),
           child: child,
         );
@@ -59,8 +60,12 @@ class MultiHalo extends StatelessWidget {
       valueListenable: highlighter.active,
       builder: (context, active, _) {
         final isActive = ordered.any(active.contains);
+        final isStrong = ordered.any(
+          (key) => active.contains(key) && _isStrongHaloKey(key),
+        );
         return _HaloFrame(
           active: isActive,
+          strong: isStrong,
           borderRadius: borderRadius ?? BorderRadius.circular(8),
           child: child,
         );
@@ -69,13 +74,22 @@ class MultiHalo extends StatelessWidget {
   }
 }
 
+bool _isStrongHaloKey(HaloKey key) {
+  final value = key.key.trim().toLowerCase();
+  return value.endsWith(':strong') ||
+      value.endsWith('_strong') ||
+      value.contains(':strong:');
+}
+
 class _HaloFrame extends StatefulWidget {
   final bool active;
+  final bool strong;
   final BorderRadius borderRadius;
   final Widget child;
 
   const _HaloFrame({
     required this.active,
+    required this.strong,
     required this.borderRadius,
     required this.child,
   });
@@ -132,6 +146,21 @@ class _HaloFrameState extends State<_HaloFrame>
           duration: const Duration(milliseconds: 160),
           builder: (context, visibility, __) {
             final glow = Curves.easeOut.transform(visibility) * pulse;
+            final glowColor = widget.strong
+                ? const Color(0xFFFFA23A)
+                : const Color(0xFF8DD6FF);
+            final fillColor = widget.strong
+                ? const Color(0xFFFFA23A)
+                : const Color(0xFF7CB6FF);
+            final borderColor = widget.strong
+                ? const Color(0xFFFFE0B8)
+                : const Color(0xFFD7F0FF);
+            final glowAlpha = widget.strong ? 0.36 : 0.18;
+            final fillAlpha = widget.strong ? 0.10 : 0.05;
+            final blur = widget.strong ? 28.0 : 16.0;
+            final spread = widget.strong ? 4.0 : 1.6;
+            final borderWidthBase = widget.strong ? 2.0 : 1.2;
+            final borderWidthPulse = widget.strong ? 1.4 : 0.9;
             return Stack(
               fit: StackFit.passthrough,
               children: [
@@ -143,10 +172,10 @@ class _HaloFrameState extends State<_HaloFrame>
                         ? const []
                         : [
                             BoxShadow(
-                              color: const Color(0xFF8DD6FF)
-                                  .withValues(alpha: 0.18 * glow),
-                              blurRadius: 16 * glow,
-                              spreadRadius: 1.6 * glow,
+                              color:
+                                  glowColor.withValues(alpha: glowAlpha * glow),
+                              blurRadius: blur * glow,
+                              spreadRadius: spread * glow,
                             ),
                           ],
                   ),
@@ -160,12 +189,13 @@ class _HaloFrameState extends State<_HaloFrame>
                           ? const BoxDecoration()
                           : BoxDecoration(
                               borderRadius: widget.borderRadius,
-                              color: const Color(0xFF7CB6FF)
-                                  .withValues(alpha: 0.05 * glow),
+                              color:
+                                  fillColor.withValues(alpha: fillAlpha * glow),
                               border: Border.all(
-                                color: const Color(0xFFD7F0FF)
-                                    .withValues(alpha: 0.78 * glow),
-                                width: 1.2 + (0.9 * glow),
+                                color:
+                                    borderColor.withValues(alpha: 0.9 * glow),
+                                width:
+                                    borderWidthBase + (borderWidthPulse * glow),
                               ),
                             ),
                     ),

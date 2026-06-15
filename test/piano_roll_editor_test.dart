@@ -8,7 +8,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/widgets/piano_roll_editor.dart';
 
-Future<AudioTrack> _buildMidiTrack(List<MidiNote> notes) {
+Future<AudioTrack> _buildMidiTrack(
+  List<MidiNote> notes, {
+  String instrumentId = 'synth.test',
+  String instrumentName = 'Test Synth',
+}) {
   final file = File('/tmp/piano_roll_editor_test.mid');
   return AudioTrack.create(
     file: file,
@@ -18,8 +22,8 @@ Future<AudioTrack> _buildMidiTrack(List<MidiNote> notes) {
     engineClipId: 101,
     label: 'Test MIDI',
     clipKind: ClipKind.midi,
-    instrumentId: 'synth.test',
-    instrumentName: 'Test Synth',
+    instrumentId: instrumentId,
+    instrumentName: instrumentName,
     midiNotes: notes,
   );
 }
@@ -802,7 +806,11 @@ void main() {
 
   testWidgets('sequencer tab opens and commits step edits', (tester) async {
     List<MidiNote>? committedNotes;
-    final clip = await _buildMidiTrack(const <MidiNote>[]);
+    final clip = await _buildMidiTrack(
+      const <MidiNote>[],
+      instrumentId: 'mixroom.drum_test',
+      instrumentName: 'Test Drum Kit',
+    );
 
     await tester.pumpWidget(
       _buildEditor(
@@ -819,9 +827,11 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 120));
 
-    await tester.tap(find.text('Sequencer'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 220));
+    final tabBarRect = tester.getRect(find.byType(TabBar));
+    await tester.tapAt(
+      Offset(tabBarRect.left + tabBarRect.width * 0.5, tabBarRect.center.dy),
+    );
+    await tester.pumpAndSettle();
 
     expect(
       find.byKey(const ValueKey<String>('sequencer_step_36_0')),
@@ -835,5 +845,23 @@ void main() {
     expect(committedNotes, hasLength(1));
     expect(committedNotes!.single.pitch, 36);
     expect(committedNotes!.single.startBeat, 0.0);
+
+    expect(
+        find.byKey(const ValueKey<String>('sequencer_fill_2')), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey<String>('sequencer_fill_4')), findsOneWidget);
+
+    await tester.ensureVisible(
+      find.byKey(const ValueKey<String>('sequencer_fill_4')),
+    );
+    await tester.tap(find.byKey(const ValueKey<String>('sequencer_fill_4')));
+    await tester.pump(const Duration(milliseconds: 120));
+
+    expect(committedNotes, isNotNull);
+    expect(committedNotes, hasLength(16));
+    expect(
+      committedNotes!.map((note) => note.startBeat).take(4).toList(),
+      <double>[0.0, 1.0, 2.0, 3.0],
+    );
   });
 }

@@ -68,6 +68,7 @@ class ProjectsScreen extends StatefulWidget {
 
 const double kActionCardHeight = 72;
 const double _kProjectLibraryPageHorizontalGutter = 8;
+const double _kProjectLibrarySideRailInset = 8;
 
 enum _ProjectSortMode {
   recent,
@@ -924,11 +925,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       for (final org in entitlement.effectiveOrganizations)
         org.organizationId: org,
     };
+    final seenWorkspaceIds = <String>{''};
     final destinations = <_CloudProjectDestination>[
       const _CloudProjectDestination.personal(),
     ];
     for (final workspace in entitlement.effectiveWorkspaces) {
-      if (workspace.workspaceId.trim().isEmpty) continue;
+      final workspaceId = workspace.workspaceId.trim();
+      if (workspaceId.isEmpty || !seenWorkspaceIds.add(workspaceId)) continue;
       final organization = organizationsById[workspace.organizationId];
       final orgName = (organization?.name ?? '').trim();
       final planLabel = (organization?.planLabel ?? '').trim();
@@ -936,7 +939,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       final label = orgName.isNotEmpty ? orgName : workspace.name;
       destinations.add(
         _CloudProjectDestination.workspace(
-          workspaceId: workspace.workspaceId,
+          workspaceId: workspaceId,
           organizationId: workspace.organizationId,
           label: label.isEmpty ? 'Shared Cloud' : label,
           subtitle: canWrite
@@ -949,7 +952,41 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         ),
       );
     }
+    final storage = _cloudStorage;
+    if (storage != null) {
+      for (final location in storage.locations) {
+        final workspaceId = location.workspaceId.trim();
+        if (workspaceId.isEmpty || !seenWorkspaceIds.add(workspaceId)) continue;
+        final planLabel = defaultPlanLabelForCode(location.planCode);
+        destinations.add(
+          _CloudProjectDestination.workspace(
+            workspaceId: workspaceId,
+            organizationId: location.organizationId,
+            label: location.label.trim().isEmpty
+                ? 'Shared Cloud'
+                : location.label.trim(),
+            subtitle: location.canWrite
+                ? (planLabel.isEmpty ? 'Shared cloud project space' : planLabel)
+                : 'Read-only cloud storage',
+            canWrite: location.canWrite,
+            status: _cloudStorageLocationStatus(location),
+          ),
+        );
+      }
+    }
     return destinations;
+  }
+
+  String _cloudStorageLocationStatus(CloudProjectStorageLocation location) {
+    for (final status in <String>[
+      location.workspaceStatus,
+      location.organizationStatus,
+      location.status,
+    ]) {
+      final normalized = status.trim().toLowerCase();
+      if (normalized.isNotEmpty) return normalized;
+    }
+    return 'active';
   }
 
   _CloudProjectDestination _destinationForCloudProject(
@@ -3929,16 +3966,16 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     final searchFocused = _searchFocusNode.hasFocus;
     final showSearchClear = searchFocused || hasSearchQuery;
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
-    final useDesktopRail = mixroomUsesDesktopRailNavigation;
-    final dockOverlayBottom = useDesktopRail
+    final useSideRail = mixroomUsesSideRailNavigation(context);
+    final dockOverlayBottom = useSideRail
         ? 0.0
         : mixroomShellDockBottomInset(context) + kMixroomMainDockHeight;
-    final listBottomBaseline = dockOverlayBottom + (useDesktopRail ? 28 : 14);
-    final floatingControlsBottom =
-        dockOverlayBottom + (useDesktopRail ? 28 : 14);
-    final pageMaxWidth = useDesktopRail ? 940.0 : 980.0;
-    final pageHorizontalPadding = useDesktopRail ? 0.0 : 16.0;
-    final pageTopPadding = useDesktopRail ? 14.0 : 14.0;
+    final listBottomBaseline = dockOverlayBottom + (useSideRail ? 28 : 14);
+    final floatingControlsBottom = dockOverlayBottom + (useSideRail ? 28 : 14);
+    final pageMaxWidth = useSideRail ? 940.0 : 980.0;
+    final pageHorizontalPadding =
+        useSideRail ? _kProjectLibrarySideRailInset : 16.0;
+    final pageTopPadding = useSideRail ? 14.0 : 14.0;
     final searchBarBottom = searchFocused && keyboardInset > 0
         ? keyboardInset + 14
         : floatingControlsBottom;
@@ -4174,219 +4211,230 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                                   final selected =
                                                       _isBundledDemoSelected(
                                                           demo);
-                                                  return Material(
-                                                    color: Colors.transparent,
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                            24),
-                                                    clipBehavior:
-                                                        Clip.antiAlias,
-                                                    child: InkWell(
-                                                      onLongPress: () =>
-                                                          _toggleBundledDemoSelection(
-                                                        demo,
-                                                      ),
-                                                      onTap: () {
-                                                        if (_selectionMode) {
-                                                          _toggleBundledDemoSelection(
+                                                  return Semantics(
+                                                    button: true,
+                                                    enabled: true,
+                                                    label:
+                                                        'Open demo project ${demo.name}',
+                                                    child: ExcludeSemantics(
+                                                      child: Material(
+                                                        color:
+                                                            Colors.transparent,
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(24),
+                                                        clipBehavior:
+                                                            Clip.antiAlias,
+                                                        child: InkWell(
+                                                          onLongPress: () =>
+                                                              _toggleBundledDemoSelection(
                                                             demo,
-                                                          );
-                                                          return;
-                                                        }
-                                                        _importBundledDemoAndOpen(
-                                                          demo,
-                                                        );
-                                                      },
-                                                      splashFactory: InkRipple
-                                                          .splashFactory,
-                                                      splashColor: Colors.white
-                                                          .withValues(
-                                                              alpha: 0.12),
-                                                      highlightColor: Colors
-                                                          .white
-                                                          .withValues(
-                                                              alpha: 0.04),
-                                                      overlayColor:
-                                                          WidgetStateProperty
-                                                              .resolveWith<
-                                                                  Color?>(
-                                                        (states) {
-                                                          if (states.contains(
-                                                            WidgetState.pressed,
-                                                          )) {
-                                                            return Colors.white
-                                                                .withValues(
-                                                                    alpha:
-                                                                        0.14);
-                                                          }
-                                                          if (states.contains(
-                                                            WidgetState.hovered,
-                                                          )) {
-                                                            return Colors.white
-                                                                .withValues(
-                                                                    alpha:
-                                                                        0.08);
-                                                          }
-                                                          if (states.contains(
-                                                            WidgetState.focused,
-                                                          )) {
-                                                            return Colors.white
-                                                                .withValues(
-                                                                    alpha:
-                                                                        0.10);
-                                                          }
-                                                          return Colors
-                                                              .transparent;
-                                                        },
-                                                      ),
-                                                      child:
-                                                          MixroomShellSurface(
-                                                        padding:
-                                                            const EdgeInsets
-                                                                .fromLTRB(
-                                                          18,
-                                                          16,
-                                                          12,
-                                                          16,
-                                                        ),
-                                                        color: selected
-                                                            ? const Color
-                                                                .fromRGBO(
-                                                                193,
-                                                                221,
-                                                                249,
-                                                                0.34,
-                                                              )
-                                                            : const Color
-                                                                .fromRGBO(
-                                                                244,
-                                                                244,
-                                                                244,
-                                                                0.30,
-                                                              ),
-                                                        child: Row(
-                                                          crossAxisAlignment:
-                                                              CrossAxisAlignment
-                                                                  .start,
-                                                          children: [
-                                                            Expanded(
-                                                              child: Column(
-                                                                crossAxisAlignment:
-                                                                    CrossAxisAlignment
-                                                                        .start,
-                                                                children: [
-                                                                  Text(
-                                                                    demo.name,
-                                                                    maxLines: 1,
-                                                                    overflow:
-                                                                        TextOverflow
-                                                                            .ellipsis,
-                                                                    style:
-                                                                        const TextStyle(
-                                                                      fontFamily:
-                                                                          'Pretendard',
-                                                                      color: Color(
-                                                                          0xFFF4F4F4),
-                                                                      fontSize:
-                                                                          15,
-                                                                      fontWeight:
-                                                                          FontWeight
-                                                                              .w600,
-                                                                      height:
-                                                                          22 /
-                                                                              15,
-                                                                    ),
-                                                                  ),
-                                                                  const SizedBox(
-                                                                      height:
-                                                                          8),
-                                                                  Container(
-                                                                    height: 1,
-                                                                    color: Colors
-                                                                        .white
-                                                                        .withValues(
-                                                                            alpha:
-                                                                                0.22),
-                                                                  ),
-                                                                  const SizedBox(
-                                                                      height:
-                                                                          8),
-                                                                  Text(
-                                                                    L10n.translate(
-                                                                      context,
-                                                                      'Tap to import demo project',
-                                                                    ),
-                                                                    style:
-                                                                        TextStyle(
-                                                                      fontFamily:
-                                                                          'Pretendard',
-                                                                      color: Colors
-                                                                          .white
-                                                                          .withValues(
-                                                                              alpha: 0.80),
-                                                                      fontSize:
-                                                                          12,
-                                                                      height:
-                                                                          22 /
-                                                                              12,
-                                                                    ),
-                                                                  ),
-                                                                ],
-                                                              ),
+                                                          ),
+                                                          onTap: () {
+                                                            if (_selectionMode) {
+                                                              _toggleBundledDemoSelection(
+                                                                demo,
+                                                              );
+                                                              return;
+                                                            }
+                                                            _importBundledDemoAndOpen(
+                                                              demo,
+                                                            );
+                                                          },
+                                                          splashFactory:
+                                                              InkRipple
+                                                                  .splashFactory,
+                                                          splashColor: Colors
+                                                              .white
+                                                              .withValues(
+                                                                  alpha: 0.12),
+                                                          highlightColor: Colors
+                                                              .white
+                                                              .withValues(
+                                                                  alpha: 0.04),
+                                                          overlayColor:
+                                                              WidgetStateProperty
+                                                                  .resolveWith<
+                                                                      Color?>(
+                                                            (states) {
+                                                              if (states
+                                                                  .contains(
+                                                                WidgetState
+                                                                    .pressed,
+                                                              )) {
+                                                                return Colors
+                                                                    .white
+                                                                    .withValues(
+                                                                        alpha:
+                                                                            0.14);
+                                                              }
+                                                              if (states
+                                                                  .contains(
+                                                                WidgetState
+                                                                    .hovered,
+                                                              )) {
+                                                                return Colors
+                                                                    .white
+                                                                    .withValues(
+                                                                        alpha:
+                                                                            0.08);
+                                                              }
+                                                              if (states
+                                                                  .contains(
+                                                                WidgetState
+                                                                    .focused,
+                                                              )) {
+                                                                return Colors
+                                                                    .white
+                                                                    .withValues(
+                                                                        alpha:
+                                                                            0.10);
+                                                              }
+                                                              return Colors
+                                                                  .transparent;
+                                                            },
+                                                          ),
+                                                          child:
+                                                              MixroomShellSurface(
+                                                            padding:
+                                                                const EdgeInsets
+                                                                    .fromLTRB(
+                                                              18,
+                                                              16,
+                                                              12,
+                                                              16,
                                                             ),
-                                                            const SizedBox(
-                                                                width: 8),
-                                                            if (_selectionMode)
-                                                              Padding(
-                                                                padding:
-                                                                    const EdgeInsets
+                                                            color: selected
+                                                                ? const Color
+                                                                    .fromRGBO(
+                                                                    193,
+                                                                    221,
+                                                                    249,
+                                                                    0.34,
+                                                                  )
+                                                                : const Color
+                                                                    .fromRGBO(
+                                                                    244,
+                                                                    244,
+                                                                    244,
+                                                                    0.30,
+                                                                  ),
+                                                            child: Row(
+                                                              crossAxisAlignment:
+                                                                  CrossAxisAlignment
+                                                                      .start,
+                                                              children: [
+                                                                Expanded(
+                                                                  child: Column(
+                                                                    crossAxisAlignment:
+                                                                        CrossAxisAlignment
+                                                                            .start,
+                                                                    children: [
+                                                                      Text(
+                                                                        demo.name,
+                                                                        maxLines:
+                                                                            1,
+                                                                        overflow:
+                                                                            TextOverflow.ellipsis,
+                                                                        style:
+                                                                            const TextStyle(
+                                                                          fontFamily:
+                                                                              'Pretendard',
+                                                                          color:
+                                                                              Color(0xFFF4F4F4),
+                                                                          fontSize:
+                                                                              15,
+                                                                          fontWeight:
+                                                                              FontWeight.w600,
+                                                                          height:
+                                                                              22 / 15,
+                                                                        ),
+                                                                      ),
+                                                                      const SizedBox(
+                                                                          height:
+                                                                              8),
+                                                                      Container(
+                                                                        height:
+                                                                            1,
+                                                                        color: Colors
+                                                                            .white
+                                                                            .withValues(alpha: 0.22),
+                                                                      ),
+                                                                      const SizedBox(
+                                                                          height:
+                                                                              8),
+                                                                      Text(
+                                                                        L10n.translate(
+                                                                          context,
+                                                                          'Tap to import demo project',
+                                                                        ),
+                                                                        style:
+                                                                            TextStyle(
+                                                                          fontFamily:
+                                                                              'Pretendard',
+                                                                          color: Colors
+                                                                              .white
+                                                                              .withValues(alpha: 0.80),
+                                                                          fontSize:
+                                                                              12,
+                                                                          height:
+                                                                              22 / 12,
+                                                                        ),
+                                                                      ),
+                                                                    ],
+                                                                  ),
+                                                                ),
+                                                                const SizedBox(
+                                                                    width: 8),
+                                                                if (_selectionMode)
+                                                                  Padding(
+                                                                    padding: const EdgeInsets
                                                                         .only(
                                                                         top:
                                                                             12),
-                                                                child: selected
-                                                                    ? SvgPicture
-                                                                        .asset(
-                                                                        kMixroomShellCheckboxCheckedAsset,
-                                                                        width:
-                                                                            22,
-                                                                        height:
-                                                                            22,
-                                                                      )
-                                                                    : Container(
-                                                                        width:
-                                                                            22,
-                                                                        height:
-                                                                            22,
-                                                                        decoration:
-                                                                            BoxDecoration(
-                                                                          shape:
-                                                                              BoxShape.circle,
-                                                                          border:
-                                                                              Border.all(
-                                                                            color:
-                                                                                Colors.white.withValues(alpha: 0.6),
+                                                                    child: selected
+                                                                        ? SvgPicture.asset(
+                                                                            kMixroomShellCheckboxCheckedAsset,
+                                                                            width:
+                                                                                22,
+                                                                            height:
+                                                                                22,
+                                                                          )
+                                                                        : Container(
+                                                                            width:
+                                                                                22,
+                                                                            height:
+                                                                                22,
+                                                                            decoration:
+                                                                                BoxDecoration(
+                                                                              shape: BoxShape.circle,
+                                                                              border: Border.all(
+                                                                                color: Colors.white.withValues(alpha: 0.6),
+                                                                              ),
+                                                                            ),
                                                                           ),
-                                                                        ),
-                                                                      ),
-                                                              )
-                                                            else
-                                                              MixroomShellRoundButton(
-                                                                size: 40,
-                                                                iconExtent: 18,
-                                                                icon:
-                                                                    const Icon(
-                                                                  Icons
-                                                                      .file_download_outlined,
-                                                                  color: Colors
-                                                                      .white,
-                                                                  size: 20,
-                                                                ),
-                                                                onTap: () =>
-                                                                    _importBundledDemoAndOpen(
-                                                                  demo,
-                                                                ),
-                                                              ),
-                                                          ],
+                                                                  )
+                                                                else
+                                                                  MixroomShellRoundButton(
+                                                                    size: 40,
+                                                                    iconExtent:
+                                                                        18,
+                                                                    icon:
+                                                                        const Icon(
+                                                                      Icons
+                                                                          .file_download_outlined,
+                                                                      color: Colors
+                                                                          .white,
+                                                                      size: 20,
+                                                                    ),
+                                                                    onTap: () =>
+                                                                        _importBundledDemoAndOpen(
+                                                                      demo,
+                                                                    ),
+                                                                  ),
+                                                              ],
+                                                            ),
+                                                          ),
                                                         ),
                                                       ),
                                                     ),
@@ -4450,205 +4498,197 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                                     attributionLine ??
                                                         '$availabilityLabel • $locationLabel',
                                                   ].join(' • ');
-                                                  return Material(
-                                                    color: Colors.transparent,
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                            24),
-                                                    clipBehavior:
-                                                        Clip.antiAlias,
-                                                    child: InkWell(
-                                                      onTap: inFlight
-                                                          ? null
-                                                          : () =>
-                                                              _openCloudProject(
-                                                                cloud,
-                                                              ),
-                                                      splashFactory: InkRipple
-                                                          .splashFactory,
-                                                      splashColor: Colors.white
-                                                          .withValues(
-                                                              alpha: 0.12),
-                                                      highlightColor: Colors
-                                                          .white
-                                                          .withValues(
-                                                              alpha: 0.04),
-                                                      child:
-                                                          MixroomShellSurface(
-                                                        padding:
-                                                            const EdgeInsets
-                                                                .fromLTRB(
-                                                          18,
-                                                          16,
-                                                          12,
-                                                          16,
-                                                        ),
-                                                        color: const Color
-                                                            .fromRGBO(
-                                                          244,
-                                                          244,
-                                                          244,
-                                                          0.30,
-                                                        ),
-                                                        child: Row(
-                                                          crossAxisAlignment:
-                                                              CrossAxisAlignment
-                                                                  .start,
-                                                          children: [
-                                                            Expanded(
-                                                              child: Column(
-                                                                crossAxisAlignment:
-                                                                    CrossAxisAlignment
-                                                                        .start,
-                                                                children: [
-                                                                  Row(
-                                                                    children: [
-                                                                      Expanded(
-                                                                        child:
-                                                                            Text(
-                                                                          cloud
-                                                                              .name,
-                                                                          maxLines:
-                                                                              1,
-                                                                          overflow:
-                                                                              TextOverflow.ellipsis,
-                                                                          style:
-                                                                              const TextStyle(
-                                                                            fontFamily:
-                                                                                'Pretendard',
-                                                                            color:
-                                                                                Color(0xFFF4F4F4),
-                                                                            fontSize:
-                                                                                15,
-                                                                            fontWeight:
-                                                                                FontWeight.w600,
-                                                                            height:
-                                                                                22 / 15,
-                                                                          ),
-                                                                        ),
-                                                                      ),
-                                                                      const SizedBox(
-                                                                          width:
-                                                                              8),
-                                                                      Icon(
-                                                                        !cloud.canWrite
-                                                                            ? Icons.lock_rounded
-                                                                            : local != null
-                                                                                ? Icons.cloud_done_rounded
-                                                                                : Icons.cloud_download_rounded,
-                                                                        color: !cloud.canWrite
-                                                                            ? Colors.white.withValues(alpha: 0.64)
-                                                                            : const Color(0xFFA4C2FF),
-                                                                        size:
-                                                                            18,
-                                                                      ),
-                                                                    ],
+                                                  return Semantics(
+                                                    button: true,
+                                                    enabled: !inFlight,
+                                                    label:
+                                                        'Open cloud project ${cloud.name}',
+                                                    child: ExcludeSemantics(
+                                                      child: Material(
+                                                        color:
+                                                            Colors.transparent,
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(24),
+                                                        clipBehavior:
+                                                            Clip.antiAlias,
+                                                        child: InkWell(
+                                                          onTap: inFlight
+                                                              ? null
+                                                              : () =>
+                                                                  _openCloudProject(
+                                                                    cloud,
                                                                   ),
-                                                                  const SizedBox(
-                                                                      height:
-                                                                          8),
-                                                                  Container(
-                                                                    height: 1,
-                                                                    color: Colors
-                                                                        .white
-                                                                        .withValues(
-                                                                            alpha:
-                                                                                0.22),
-                                                                  ),
-                                                                  const SizedBox(
-                                                                      height:
-                                                                          8),
-                                                                  Column(
+                                                          splashFactory:
+                                                              InkRipple
+                                                                  .splashFactory,
+                                                          splashColor: Colors
+                                                              .white
+                                                              .withValues(
+                                                                  alpha: 0.12),
+                                                          highlightColor: Colors
+                                                              .white
+                                                              .withValues(
+                                                                  alpha: 0.04),
+                                                          child:
+                                                              MixroomShellSurface(
+                                                            padding:
+                                                                const EdgeInsets
+                                                                    .fromLTRB(
+                                                              18,
+                                                              16,
+                                                              12,
+                                                              16,
+                                                            ),
+                                                            color: const Color
+                                                                .fromRGBO(
+                                                              244,
+                                                              244,
+                                                              244,
+                                                              0.30,
+                                                            ),
+                                                            child: Row(
+                                                              crossAxisAlignment:
+                                                                  CrossAxisAlignment
+                                                                      .start,
+                                                              children: [
+                                                                Expanded(
+                                                                  child: Column(
                                                                     crossAxisAlignment:
                                                                         CrossAxisAlignment
                                                                             .start,
                                                                     children: [
-                                                                      Text(
-                                                                        primaryDetailLine,
-                                                                        maxLines:
-                                                                            1,
-                                                                        overflow:
-                                                                            TextOverflow.ellipsis,
-                                                                        style:
-                                                                            TextStyle(
-                                                                          fontFamily:
-                                                                              'Pretendard',
-                                                                          color: Colors
-                                                                              .white
-                                                                              .withValues(alpha: 0.80),
-                                                                          fontSize:
-                                                                              12,
-                                                                          height:
-                                                                              18 / 12,
-                                                                        ),
+                                                                      Row(
+                                                                        children: [
+                                                                          Expanded(
+                                                                            child:
+                                                                                Text(
+                                                                              cloud.name,
+                                                                              maxLines: 1,
+                                                                              overflow: TextOverflow.ellipsis,
+                                                                              style: const TextStyle(
+                                                                                fontFamily: 'Pretendard',
+                                                                                color: Color(0xFFF4F4F4),
+                                                                                fontSize: 15,
+                                                                                fontWeight: FontWeight.w600,
+                                                                                height: 22 / 15,
+                                                                              ),
+                                                                            ),
+                                                                          ),
+                                                                          const SizedBox(
+                                                                              width: 8),
+                                                                          Icon(
+                                                                            !cloud.canWrite
+                                                                                ? Icons.lock_rounded
+                                                                                : local != null
+                                                                                    ? Icons.cloud_done_rounded
+                                                                                    : Icons.cloud_download_rounded,
+                                                                            color: !cloud.canWrite
+                                                                                ? Colors.white.withValues(alpha: 0.64)
+                                                                                : const Color(0xFFA4C2FF),
+                                                                            size:
+                                                                                18,
+                                                                          ),
+                                                                        ],
                                                                       ),
                                                                       const SizedBox(
                                                                           height:
-                                                                              2),
-                                                                      Text(
-                                                                        secondaryDetailLine,
-                                                                        maxLines:
+                                                                              8),
+                                                                      Container(
+                                                                        height:
                                                                             1,
-                                                                        overflow:
-                                                                            TextOverflow.ellipsis,
-                                                                        style:
-                                                                            TextStyle(
-                                                                          fontFamily:
-                                                                              'Pretendard',
-                                                                          color: Colors
-                                                                              .white
-                                                                              .withValues(alpha: 0.62),
-                                                                          fontSize:
-                                                                              11,
+                                                                        color: Colors
+                                                                            .white
+                                                                            .withValues(alpha: 0.22),
+                                                                      ),
+                                                                      const SizedBox(
                                                                           height:
-                                                                              17 / 11,
-                                                                        ),
+                                                                              8),
+                                                                      Column(
+                                                                        crossAxisAlignment:
+                                                                            CrossAxisAlignment.start,
+                                                                        children: [
+                                                                          Text(
+                                                                            primaryDetailLine,
+                                                                            maxLines:
+                                                                                1,
+                                                                            overflow:
+                                                                                TextOverflow.ellipsis,
+                                                                            style:
+                                                                                TextStyle(
+                                                                              fontFamily: 'Pretendard',
+                                                                              color: Colors.white.withValues(alpha: 0.80),
+                                                                              fontSize: 12,
+                                                                              height: 18 / 12,
+                                                                            ),
+                                                                          ),
+                                                                          const SizedBox(
+                                                                              height: 2),
+                                                                          Text(
+                                                                            secondaryDetailLine,
+                                                                            maxLines:
+                                                                                1,
+                                                                            overflow:
+                                                                                TextOverflow.ellipsis,
+                                                                            style:
+                                                                                TextStyle(
+                                                                              fontFamily: 'Pretendard',
+                                                                              color: Colors.white.withValues(alpha: 0.62),
+                                                                              fontSize: 11,
+                                                                              height: 17 / 11,
+                                                                            ),
+                                                                          ),
+                                                                        ],
                                                                       ),
                                                                     ],
                                                                   ),
-                                                                ],
-                                                              ),
-                                                            ),
-                                                            const SizedBox(
-                                                                width: 8),
-                                                            if (inFlight)
-                                                              const Padding(
-                                                                padding: EdgeInsets
-                                                                    .only(
-                                                                        top:
-                                                                            10),
-                                                                child: SizedBox(
-                                                                  width: 22,
-                                                                  height: 22,
-                                                                  child:
-                                                                      CircularProgressIndicator(
-                                                                    strokeWidth:
-                                                                        2,
+                                                                ),
+                                                                const SizedBox(
+                                                                    width: 8),
+                                                                if (inFlight)
+                                                                  const Padding(
+                                                                    padding: EdgeInsets
+                                                                        .only(
+                                                                            top:
+                                                                                10),
+                                                                    child:
+                                                                        SizedBox(
+                                                                      width: 22,
+                                                                      height:
+                                                                          22,
+                                                                      child:
+                                                                          CircularProgressIndicator(
+                                                                        strokeWidth:
+                                                                            2,
+                                                                      ),
+                                                                    ),
+                                                                  )
+                                                                else
+                                                                  MixroomShellRoundButton(
+                                                                    key:
+                                                                        anchorKey,
+                                                                    size: 40,
+                                                                    iconExtent:
+                                                                        18,
+                                                                    icon:
+                                                                        const Icon(
+                                                                      Icons
+                                                                          .more_horiz_rounded,
+                                                                      color: Colors
+                                                                          .white,
+                                                                      size: 22,
+                                                                    ),
+                                                                    onTap: () =>
+                                                                        _showCloudProjectItemMenu(
+                                                                      anchorKey:
+                                                                          anchorKey,
+                                                                      project:
+                                                                          cloud,
+                                                                    ),
                                                                   ),
-                                                                ),
-                                                              )
-                                                            else
-                                                              MixroomShellRoundButton(
-                                                                key: anchorKey,
-                                                                size: 40,
-                                                                iconExtent: 18,
-                                                                icon:
-                                                                    const Icon(
-                                                                  Icons
-                                                                      .more_horiz_rounded,
-                                                                  color: Colors
-                                                                      .white,
-                                                                  size: 22,
-                                                                ),
-                                                                onTap: () =>
-                                                                    _showCloudProjectItemMenu(
-                                                                  anchorKey:
-                                                                      anchorKey,
-                                                                  project:
-                                                                      cloud,
-                                                                ),
-                                                              ),
-                                                          ],
+                                                              ],
+                                                            ),
+                                                          ),
                                                         ),
                                                       ),
                                                     ),
@@ -4678,240 +4718,259 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                                 );
                                                 final selected =
                                                     _isSelected(project);
-                                                return Material(
-                                                  color: Colors.transparent,
-                                                  borderRadius:
-                                                      BorderRadius.circular(24),
-                                                  clipBehavior: Clip.antiAlias,
-                                                  child: InkWell(
-                                                    onLongPress: () =>
-                                                        _toggleSelection(
-                                                            project),
-                                                    onTap: () {
-                                                      if (_selectionMode) {
-                                                        _toggleSelection(
-                                                            project);
-                                                        return;
-                                                      }
-                                                      _openProject(project.dir);
-                                                    },
-                                                    splashFactory:
-                                                        InkRipple.splashFactory,
-                                                    splashColor: Colors.white
-                                                        .withValues(
-                                                            alpha: 0.12),
-                                                    highlightColor: Colors.white
-                                                        .withValues(
-                                                            alpha: 0.04),
-                                                    overlayColor:
-                                                        WidgetStateProperty
-                                                            .resolveWith<
-                                                                Color?>(
-                                                      (states) {
-                                                        if (states.contains(
-                                                          WidgetState.pressed,
-                                                        )) {
-                                                          return Colors.white
-                                                              .withValues(
-                                                                  alpha: 0.14);
-                                                        }
-                                                        if (states.contains(
-                                                          WidgetState.hovered,
-                                                        )) {
-                                                          return Colors.white
-                                                              .withValues(
-                                                                  alpha: 0.08);
-                                                        }
-                                                        if (states.contains(
-                                                          WidgetState.focused,
-                                                        )) {
-                                                          return Colors.white
-                                                              .withValues(
-                                                                  alpha: 0.10);
-                                                        }
-                                                        return Colors
-                                                            .transparent;
-                                                      },
-                                                    ),
-                                                    child: MixroomShellSurface(
-                                                      padding: const EdgeInsets
-                                                          .fromLTRB(
-                                                        18,
-                                                        16,
-                                                        12,
-                                                        16,
-                                                      ),
-                                                      color: selected
-                                                          ? const Color
-                                                              .fromRGBO(
-                                                              193,
-                                                              221,
-                                                              249,
-                                                              0.34,
-                                                            )
-                                                          : const Color
-                                                              .fromRGBO(
-                                                              244,
-                                                              244,
-                                                              244,
-                                                              0.30,
-                                                            ),
-                                                      child: Row(
-                                                        crossAxisAlignment:
-                                                            CrossAxisAlignment
-                                                                .start,
-                                                        children: [
-                                                          Expanded(
-                                                            child: Column(
-                                                              crossAxisAlignment:
-                                                                  CrossAxisAlignment
-                                                                      .start,
-                                                              children: [
-                                                                Row(
+                                                return Semantics(
+                                                  button: true,
+                                                  enabled: true,
+                                                  label:
+                                                      'Open project ${project.name}, $localSubtitle',
+                                                  child: ExcludeSemantics(
+                                                    child: Material(
+                                                      color: Colors.transparent,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              24),
+                                                      clipBehavior:
+                                                          Clip.antiAlias,
+                                                      child: InkWell(
+                                                        onLongPress: () =>
+                                                            _toggleSelection(
+                                                                project),
+                                                        onTap: () {
+                                                          if (_selectionMode) {
+                                                            _toggleSelection(
+                                                                project);
+                                                            return;
+                                                          }
+                                                          _openProject(
+                                                              project.dir);
+                                                        },
+                                                        splashFactory: InkRipple
+                                                            .splashFactory,
+                                                        splashColor: Colors
+                                                            .white
+                                                            .withValues(
+                                                                alpha: 0.12),
+                                                        highlightColor: Colors
+                                                            .white
+                                                            .withValues(
+                                                                alpha: 0.04),
+                                                        overlayColor:
+                                                            WidgetStateProperty
+                                                                .resolveWith<
+                                                                    Color?>(
+                                                          (states) {
+                                                            if (states.contains(
+                                                              WidgetState
+                                                                  .pressed,
+                                                            )) {
+                                                              return Colors
+                                                                  .white
+                                                                  .withValues(
+                                                                      alpha:
+                                                                          0.14);
+                                                            }
+                                                            if (states.contains(
+                                                              WidgetState
+                                                                  .hovered,
+                                                            )) {
+                                                              return Colors
+                                                                  .white
+                                                                  .withValues(
+                                                                      alpha:
+                                                                          0.08);
+                                                            }
+                                                            if (states.contains(
+                                                              WidgetState
+                                                                  .focused,
+                                                            )) {
+                                                              return Colors
+                                                                  .white
+                                                                  .withValues(
+                                                                      alpha:
+                                                                          0.10);
+                                                            }
+                                                            return Colors
+                                                                .transparent;
+                                                          },
+                                                        ),
+                                                        child:
+                                                            MixroomShellSurface(
+                                                          padding:
+                                                              const EdgeInsets
+                                                                  .fromLTRB(
+                                                            18,
+                                                            16,
+                                                            12,
+                                                            16,
+                                                          ),
+                                                          color: selected
+                                                              ? const Color
+                                                                  .fromRGBO(
+                                                                  193,
+                                                                  221,
+                                                                  249,
+                                                                  0.34,
+                                                                )
+                                                              : const Color
+                                                                  .fromRGBO(
+                                                                  244,
+                                                                  244,
+                                                                  244,
+                                                                  0.30,
+                                                                ),
+                                                          child: Row(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            children: [
+                                                              Expanded(
+                                                                child: Column(
+                                                                  crossAxisAlignment:
+                                                                      CrossAxisAlignment
+                                                                          .start,
                                                                   children: [
-                                                                    Expanded(
-                                                                      child:
-                                                                          Text(
-                                                                        project
-                                                                            .name,
-                                                                        maxLines:
-                                                                            1,
-                                                                        overflow:
-                                                                            TextOverflow.ellipsis,
-                                                                        style:
-                                                                            const TextStyle(
-                                                                          fontFamily:
-                                                                              'Pretendard',
-                                                                          color:
-                                                                              Color(0xFFF4F4F4),
-                                                                          fontSize:
-                                                                              15,
-                                                                          fontWeight:
-                                                                              FontWeight.w600,
-                                                                          height:
-                                                                              22 / 15,
+                                                                    Row(
+                                                                      children: [
+                                                                        Expanded(
+                                                                          child:
+                                                                              Text(
+                                                                            project.name,
+                                                                            maxLines:
+                                                                                1,
+                                                                            overflow:
+                                                                                TextOverflow.ellipsis,
+                                                                            style:
+                                                                                const TextStyle(
+                                                                              fontFamily: 'Pretendard',
+                                                                              color: Color(0xFFF4F4F4),
+                                                                              fontSize: 15,
+                                                                              fontWeight: FontWeight.w600,
+                                                                              height: 22 / 15,
+                                                                            ),
+                                                                          ),
                                                                         ),
+                                                                        if (cloudLinked) ...[
+                                                                          const SizedBox(
+                                                                              width: 8),
+                                                                          Tooltip(
+                                                                            message:
+                                                                                _localCloudSyncedLabel(
+                                                                              project,
+                                                                              cloud,
+                                                                            ),
+                                                                            child:
+                                                                                Icon(
+                                                                              Icons.cloud_done_rounded,
+                                                                              color: const Color(0xFFA4C2FF),
+                                                                              size: 18,
+                                                                            ),
+                                                                          ),
+                                                                        ],
+                                                                      ],
+                                                                    ),
+                                                                    const SizedBox(
+                                                                        height:
+                                                                            8),
+                                                                    Container(
+                                                                      height: 1,
+                                                                      color: Colors
+                                                                          .white
+                                                                          .withValues(
+                                                                              alpha: 0.22),
+                                                                    ),
+                                                                    const SizedBox(
+                                                                        height:
+                                                                            8),
+                                                                    Text(
+                                                                      cloudLinked
+                                                                          ? '$localSubtitle • ${_localCloudSyncedLabel(project, cloud)}'
+                                                                          : localSubtitle,
+                                                                      maxLines:
+                                                                          1,
+                                                                      overflow:
+                                                                          TextOverflow
+                                                                              .ellipsis,
+                                                                      style:
+                                                                          TextStyle(
+                                                                        fontFamily:
+                                                                            'Pretendard',
+                                                                        color: Colors
+                                                                            .white
+                                                                            .withValues(alpha: 0.80),
+                                                                        fontSize:
+                                                                            12,
+                                                                        height:
+                                                                            22 /
+                                                                                12,
                                                                       ),
                                                                     ),
-                                                                    if (cloudLinked) ...[
-                                                                      const SizedBox(
-                                                                          width:
-                                                                              8),
-                                                                      Tooltip(
-                                                                        message:
-                                                                            _localCloudSyncedLabel(
-                                                                          project,
-                                                                          cloud,
-                                                                        ),
-                                                                        child:
-                                                                            Icon(
-                                                                          Icons
-                                                                              .cloud_done_rounded,
-                                                                          color:
-                                                                              const Color(0xFFA4C2FF),
-                                                                          size:
-                                                                              18,
-                                                                        ),
-                                                                      ),
-                                                                    ],
                                                                   ],
                                                                 ),
-                                                                const SizedBox(
-                                                                    height: 8),
-                                                                Container(
-                                                                  height: 1,
-                                                                  color: Colors
-                                                                      .white
-                                                                      .withValues(
-                                                                          alpha:
-                                                                              0.22),
-                                                                ),
-                                                                const SizedBox(
-                                                                    height: 8),
-                                                                Text(
-                                                                  cloudLinked
-                                                                      ? '$localSubtitle • ${_localCloudSyncedLabel(project, cloud)}'
-                                                                      : localSubtitle,
-                                                                  maxLines: 1,
-                                                                  overflow:
-                                                                      TextOverflow
-                                                                          .ellipsis,
-                                                                  style:
-                                                                      TextStyle(
-                                                                    fontFamily:
-                                                                        'Pretendard',
-                                                                    color: Colors
-                                                                        .white
-                                                                        .withValues(
-                                                                            alpha:
-                                                                                0.80),
-                                                                    fontSize:
-                                                                        12,
-                                                                    height:
-                                                                        22 / 12,
-                                                                  ),
-                                                                ),
-                                                              ],
-                                                            ),
-                                                          ),
-                                                          const SizedBox(
-                                                              width: 8),
-                                                          if (_selectionMode)
-                                                            Padding(
-                                                              padding:
-                                                                  const EdgeInsets
-                                                                      .only(
-                                                                      top: 12),
-                                                              child: selected
-                                                                  ? SvgPicture
-                                                                      .asset(
-                                                                      kMixroomShellCheckboxCheckedAsset,
-                                                                      width: 22,
-                                                                      height:
-                                                                          22,
-                                                                    )
-                                                                  : Container(
-                                                                      width: 22,
-                                                                      height:
-                                                                          22,
-                                                                      decoration:
-                                                                          BoxDecoration(
-                                                                        shape: BoxShape
-                                                                            .circle,
-                                                                        border:
-                                                                            Border.all(
-                                                                          color: Colors
-                                                                              .white
-                                                                              .withValues(alpha: 0.6),
-                                                                        ),
-                                                                      ),
-                                                                    ),
-                                                            )
-                                                          else if (cloudInFlight)
-                                                            const Padding(
-                                                              padding: EdgeInsets
-                                                                  .only(
-                                                                      top: 10),
-                                                              child: SizedBox(
-                                                                width: 22,
-                                                                height: 22,
-                                                                child:
-                                                                    CircularProgressIndicator(
-                                                                  strokeWidth:
-                                                                      2,
-                                                                ),
                                                               ),
-                                                            )
-                                                          else
-                                                            _buildProjectTrailingActions(
-                                                              context: context,
-                                                              project: project,
-                                                              keyToken:
-                                                                  keyToken,
-                                                              compact:
-                                                                  useCompactProjectMenus,
-                                                            ),
-                                                        ],
+                                                              const SizedBox(
+                                                                  width: 8),
+                                                              if (_selectionMode)
+                                                                Padding(
+                                                                  padding:
+                                                                      const EdgeInsets
+                                                                          .only(
+                                                                          top:
+                                                                              12),
+                                                                  child: selected
+                                                                      ? SvgPicture.asset(
+                                                                          kMixroomShellCheckboxCheckedAsset,
+                                                                          width:
+                                                                              22,
+                                                                          height:
+                                                                              22,
+                                                                        )
+                                                                      : Container(
+                                                                          width:
+                                                                              22,
+                                                                          height:
+                                                                              22,
+                                                                          decoration:
+                                                                              BoxDecoration(
+                                                                            shape:
+                                                                                BoxShape.circle,
+                                                                            border:
+                                                                                Border.all(
+                                                                              color: Colors.white.withValues(alpha: 0.6),
+                                                                            ),
+                                                                          ),
+                                                                        ),
+                                                                )
+                                                              else if (cloudInFlight)
+                                                                const Padding(
+                                                                  padding:
+                                                                      EdgeInsets
+                                                                          .only(
+                                                                              top: 10),
+                                                                  child:
+                                                                      SizedBox(
+                                                                    width: 22,
+                                                                    height: 22,
+                                                                    child:
+                                                                        CircularProgressIndicator(
+                                                                      strokeWidth:
+                                                                          2,
+                                                                    ),
+                                                                  ),
+                                                                )
+                                                              else
+                                                                _buildProjectTrailingActions(
+                                                                  context:
+                                                                      context,
+                                                                  project:
+                                                                      project,
+                                                                  keyToken:
+                                                                      keyToken,
+                                                                  compact:
+                                                                      useCompactProjectMenus,
+                                                                ),
+                                                            ],
+                                                          ),
+                                                        ),
                                                       ),
                                                     ),
                                                   ),

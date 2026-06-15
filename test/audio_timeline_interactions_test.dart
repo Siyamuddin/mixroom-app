@@ -115,11 +115,28 @@ Offset _magnetButtonCenter(WidgetTester tester) {
   return topLeft + const Offset(21.0, 20.0);
 }
 
+Future<void> _openRowHeaderMenu(WidgetTester tester, int row) async {
+  final headerRect = tester.getRect(
+    find.byKey(ValueKey('timeline_row_header_$row')),
+  );
+  await tester.longPressAt(headerRect.centerLeft + const Offset(22, 0));
+  await tester.pumpAndSettle();
+}
+
+Offset _tabletHeaderGainPoint(WidgetTester tester, int row) {
+  final rect = tester.getRect(
+    find.byKey(ValueKey('timeline_tablet_row_gain_$row')),
+  );
+  return rect.centerRight - const Offset(6, 0);
+}
+
 Widget _buildHarness({
   required List<AudioTrack> clips,
   required Future<void> Function(int clipIndex, double newStartMs, int newRow)
       onMoveClipCommit,
+  AudioCanvasTimelineController? controller,
   List<TimelineRow>? rowsOverride,
+  List<TrackGroup>? trackGroupsOverride,
   void Function(
     int clipIndex,
     double newTrimStartMs,
@@ -146,9 +163,51 @@ Widget _buildHarness({
   Future<void> Function()? onStopClipLoopPreview,
   Future<void> Function()? onAddInstrumentLane,
   Future<void> Function()? onOpenCaptureDeck,
+  Future<void> Function()? onGroupRowsPressed,
   Future<void> Function(int row)? onChangeInstrumentLane,
   Future<void> Function(int row, double timeMs)?
       onCreateMidiClipInInstrumentLane,
+  Future<void> Function(int row, bool muted)? onMuteRow,
+  Future<void> Function(int row, bool soloed)? onSoloRow,
+  Future<void> Function(int row, double gain)? onSetRowGain,
+  void Function(int row, double oldGain, double newGain)? onRowGainCommit,
+  Future<void> Function(int row, double pan)? onSetRowPan,
+  void Function(int row, double oldPan, double newPan)? onRowPanCommit,
+  Future<void> Function(int row, int color)? onSetRowColor,
+  Future<void> Function(int row, String pathOrName)? onInsertRowEffect,
+  Future<void> Function(
+    int row,
+    int effectIndex,
+    String name,
+    bool applyingPreset,
+  )? onRemoveRowEffect,
+  Future<void> Function(int row, int from, int to)? onReorderRowEffects,
+  Future<void> Function(int row, int effectIndex, bool bypass)?
+      onSetRowEffectBypassed,
+  Future<void> Function(
+    int row,
+    int effectIndex,
+    String paramId,
+    dynamic value,
+  )? onSetRowEffectParam,
+  Future<void> Function(
+    int row,
+    int effectIndex,
+    String paramId,
+    dynamic oldValue,
+    dynamic newValue,
+  )? onPluginParamCommit,
+  void Function(int row, int effectIndex)? onRowEffectSelected,
+  Future<void> Function(List<int> rows)? onCreateRowGroup,
+  Future<void> Function(int row)? onRemoveRowFromGroup,
+  Future<void> Function(String groupId)? onToggleRowGroupCollapsed,
+  Future<void> Function(String groupId, String name)? onRenameRowGroup,
+  bool rowGroupingSelectionMode = false,
+  Set<int> groupingSelectedRows = const <int>{},
+  void Function(int row)? onToggleGroupingRowSelection,
+  bool useTabletDawLayout = false,
+  int selectedClipIndex = -1,
+  List<int> selectedClipIndices = const <int>[],
   bool Function(int clipIndex)? canReplaceSamplerSource,
   Future<void> Function(int clipIndex)? onReplaceSamplerSource,
   bool hasCopiedClip = false,
@@ -156,6 +215,9 @@ Widget _buildHarness({
   bool hasCopiedRowEffects = false,
   void Function(bool magnetEnabled, int quantizeDivisionsPerBar)?
       onSnapSettingsChanged,
+  bool loopEnabled = false,
+  int loopStartMs = 0,
+  int loopEndMs = 0,
 }) {
   final rows = rowsOverride ??
       <TimelineRow>[
@@ -186,7 +248,9 @@ Widget _buildHarness({
         width: _kTestTimelineWidth,
         height: _kTestTimelineHeight,
         child: AudioCanvasTimeline(
+          controller: controller,
           rows: rows,
+          trackGroups: trackGroupsOverride ?? const <TrackGroup>[],
           clips: clips,
           clipOverlapMode: 'off',
           rowGain: rowGain,
@@ -234,13 +298,22 @@ Widget _buildHarness({
           onAddRow: () async {},
           onAddInstrumentLane: onAddInstrumentLane,
           onOpenCaptureDeck: onOpenCaptureDeck,
+          onGroupRowsPressed: onGroupRowsPressed,
           onInsertRowAbove: (_) async {},
           onInsertRowBelow: (_) async {},
           onChangeInstrumentLane: onChangeInstrumentLane,
           onDeleteRow: (_) async {},
           onMoveRow: (_, __) async {},
           onRenameRow: (_, __) async {},
+          onRenameRowGroup: onRenameRowGroup,
           onSetRowIcon: (_, __) async {},
+          onSetRowColor: onSetRowColor,
+          onCreateRowGroup: onCreateRowGroup,
+          onRemoveRowFromGroup: onRemoveRowFromGroup,
+          onToggleRowGroupCollapsed: onToggleRowGroupCollapsed,
+          rowGroupingSelectionMode: rowGroupingSelectionMode,
+          groupingSelectedRows: groupingSelectedRows,
+          onToggleGroupingRowSelection: onToggleGroupingRowSelection,
           onMoveClipCommit: onMoveClipCommit,
           onTrimClip: (_, __, ___, {newStartMs}) {},
           onTrimClipCommit: onTrimClipCommit ??
@@ -251,6 +324,8 @@ Widget _buildHarness({
           maxDuration: const Duration(seconds: 30),
           bpm: 120.0,
           beatsPerBar: 4,
+          selectedClipIndex: selectedClipIndex,
+          selectedClipIndices: selectedClipIndices,
           isRecording: false,
           recordingRowIndex: null,
           recordingStartMs: 0.0,
@@ -262,22 +337,22 @@ Widget _buildHarness({
             growable: false,
           ),
           getRowEffectBypassState: (_, __) async => false,
-          insertRowEffect: (_, __) async {},
-          removeRowEffect: (_, __, ___, ____) async {},
-          reorderRowEffects: (_, __, ___) async {},
-          setRowEffectBypassed: (_, __, ___) async {},
+          insertRowEffect: onInsertRowEffect ?? (_, __) async {},
+          removeRowEffect: onRemoveRowEffect ?? (_, __, ___, ____) async {},
+          reorderRowEffects: onReorderRowEffects ?? (_, __, ___) async {},
+          setRowEffectBypassed: onSetRowEffectBypassed ?? (_, __, ___) async {},
           getRowPluginParameters: (_, __) async =>
               const <Map<String, dynamic>>[],
-          setRowEffectParam: (_, __, ___, ____) async {},
+          setRowEffectParam: onSetRowEffectParam ?? (_, __, ___, ____) async {},
           scanPlugins: () async => const <Map<String, dynamic>>[],
           setTrackAutomationPoints: (_, __) async {},
           onAutomationCommit: (_, __, ___) {},
-          setRowGain: (_, __) async {},
-          onRowGainCommit: (_, __, ___) {},
-          muteRow: (_, __) async {},
-          soloRow: (_, __) async {},
-          setRowPan: (_, __) async {},
-          onRowPanCommit: (_, __, ___) {},
+          setRowGain: onSetRowGain ?? (_, __) async {},
+          onRowGainCommit: onRowGainCommit ?? (_, __, ___) {},
+          muteRow: onMuteRow ?? (_, __) async {},
+          soloRow: onSoloRow ?? (_, __) async {},
+          setRowPan: onSetRowPan ?? (_, __) async {},
+          onRowPanCommit: onRowPanCommit ?? (_, __, ___) {},
           setClipGain: (_, __) async {},
           onClipGainCommit: (_, __, ___) {},
           setClipPitch: (_, __) async {},
@@ -308,9 +383,13 @@ Widget _buildHarness({
           onSelectionChanged: onSelectionChanged,
           onLoopRegionChanged: null,
           onLoopToggle: null,
+          loopEnabled: loopEnabled,
+          loopStartMs: loopStartMs,
+          loopEndMs: loopEndMs,
           mode: 'Pro',
-          onPluginParamCommit: null,
+          onPluginParamCommit: onPluginParamCommit,
           onPresetCommit: null,
+          onRowEffectSelected: onRowEffectSelected,
           onCopyRowEffects: onCopyRowEffects,
           onPasteRowEffects: onPasteRowEffects,
           onClearRowEffects: onClearRowEffects,
@@ -327,6 +406,7 @@ Widget _buildHarness({
           externalSampleDragActive: false,
           tutorialHighlighter: null,
           bottomDockInset: 0.0,
+          useTabletDawLayout: useTabletDawLayout,
         ),
       ),
     ),
@@ -489,6 +569,33 @@ void main() {
     expect(snapStates.last, isTrue);
   });
 
+  testWidgets('external loop state renders the timeline loop region',
+      (tester) async {
+    final clips = <AudioTrack>[await _buildClip()];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: clips,
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('timeline_loop_region')), findsNothing);
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: clips,
+        onMoveClipCommit: (_, __, ___) async {},
+        loopEnabled: true,
+        loopStartMs: 0,
+        loopEndMs: 4000,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('timeline_loop_region')), findsOneWidget);
+  });
+
   testWidgets('audio clips cannot be dropped onto instrument lanes',
       (tester) async {
     final rows = <TimelineRow>[
@@ -627,6 +734,796 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(instrumentAdds, 1);
+  });
+
+  testWidgets('collapsed row group header shows folded child count',
+      (tester) async {
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Drums', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 2, name: 'Bass', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 3, name: 'Keys', iconId: 0, groupId: 'band'),
+    ];
+    final groups = <TrackGroup>[
+      const TrackGroup(
+        id: 'band',
+        name: 'Band',
+        rowIds: <int>[1, 2, 3],
+        collapsed: true,
+      ),
+    ];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        trackGroupsOverride: groups,
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('+2'), findsOneWidget);
+  });
+
+  testWidgets('collapsed row group child rows do not occupy lane geometry',
+      (tester) async {
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Drums', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 2, name: 'Bass', iconId: 0, groupId: 'band'),
+      TimelineRow(
+        rowId: 3,
+        name: 'Keys',
+        iconId: 0,
+        kind: TimelineRowKind.instrument,
+      ),
+    ];
+    final groups = <TrackGroup>[
+      const TrackGroup(
+        id: 'band',
+        name: 'Band',
+        rowIds: <int>[1, 2],
+        collapsed: true,
+      ),
+    ];
+    final createRequests = <int>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        trackGroupsOverride: groups,
+        onMoveClipCommit: (_, __, ___) async {},
+        onCreateMidiClipInInstrumentLane: (row, _) async {
+          createRequests.add(row);
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.longPressAt(_laneCenter(tester, row: 1));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Add MIDI Region'), findsOneWidget);
+
+    await tester.tap(find.text('Add MIDI Region'));
+    await tester.pumpAndSettle();
+
+    expect(createRequests, <int>[2]);
+  });
+
+  testWidgets('collapsed row group paints a member clip summary without errors',
+      (tester) async {
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Guitar', iconId: 0, groupId: 'band'),
+      TimelineRow(
+        rowId: 2,
+        name: 'Keys',
+        iconId: 1,
+        kind: TimelineRowKind.instrument,
+        groupId: 'band',
+      ),
+    ];
+    final groups = <TrackGroup>[
+      const TrackGroup(
+        id: 'band',
+        name: 'Band',
+        rowIds: <int>[1, 2],
+        collapsed: true,
+      ),
+    ];
+    final audioClip = await _buildClip(row: 0, rowId: 1);
+    final midiClip = await _buildSamplerClip(row: 1, rowId: 2);
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: <AudioTrack>[audioClip, midiClip],
+        rowsOverride: rows,
+        trackGroupsOverride: groups,
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('+1'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('group header mute fans out to grouped rows only',
+      (tester) async {
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Drums', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 2, name: 'Bass', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 3, name: 'Vocal', iconId: 0),
+    ];
+    final groups = <TrackGroup>[
+      const TrackGroup(
+        id: 'band',
+        name: 'Band',
+        rowIds: <int>[1, 2],
+        collapsed: true,
+      ),
+    ];
+    final muteRequests = <MapEntry<int, bool>>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        trackGroupsOverride: groups,
+        onMoveClipCommit: (_, __, ___) async {},
+        onMuteRow: (row, muted) async {
+          muteRequests.add(MapEntry<int, bool>(row, muted));
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('M').first);
+    await tester.pumpAndSettle();
+
+    expect(
+      muteRequests.map((entry) => '${entry.key}:${entry.value}').toList(),
+      <String>['0:true', '1:true'],
+    );
+  });
+
+  testWidgets('group header solo fans out to grouped rows only',
+      (tester) async {
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Drums', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 2, name: 'Bass', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 3, name: 'Vocal', iconId: 0),
+    ];
+    final groups = <TrackGroup>[
+      const TrackGroup(
+        id: 'band',
+        name: 'Band',
+        rowIds: <int>[1, 2],
+        collapsed: true,
+      ),
+    ];
+    final soloRequests = <MapEntry<int, bool>>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        trackGroupsOverride: groups,
+        onMoveClipCommit: (_, __, ___) async {},
+        onSoloRow: (row, soloed) async {
+          soloRequests.add(MapEntry<int, bool>(row, soloed));
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('S').first);
+    await tester.pumpAndSettle();
+
+    expect(
+      soloRequests.map((entry) => '${entry.key}:${entry.value}').toList(),
+      <String>['0:true', '1:true'],
+    );
+  });
+
+  testWidgets('row grouping mode toggles row headers without expanding rows',
+      (tester) async {
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Drums', iconId: 0),
+      TimelineRow(rowId: 2, name: 'Bass', iconId: 0),
+    ];
+    final toggledRows = <int>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        rowGroupingSelectionMode: true,
+        groupingSelectedRows: const <int>{1},
+        onToggleGroupingRowSelection: toggledRows.add,
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('timeline_row_header_0')));
+    await tester.pumpAndSettle();
+
+    expect(toggledRows, <int>[0]);
+    expect(find.text('Volume'), findsNothing);
+  });
+
+  testWidgets('tablet row grouping mode toggles tablet row headers',
+      (tester) async {
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Drums', iconId: 0),
+      TimelineRow(rowId: 2, name: 'Bass', iconId: 0),
+    ];
+    final toggledRows = <int>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        rowGroupingSelectionMode: true,
+        groupingSelectedRows: const <int>{1},
+        onToggleGroupingRowSelection: toggledRows.add,
+        useTabletDawLayout: true,
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester
+        .tap(find.byKey(const ValueKey('timeline_tablet_row_header_0')));
+    await tester.pumpAndSettle();
+
+    expect(toggledRows, <int>[0]);
+    expect(find.text('Volume'), findsNothing);
+  });
+
+  testWidgets('tablet group folder toggles children without expanding header',
+      (tester) async {
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Drums', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 2, name: 'Bass', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 3, name: 'Vocal', iconId: 0),
+    ];
+    final groups = <TrackGroup>[
+      const TrackGroup(
+        id: 'band',
+        name: 'Band',
+        rowIds: <int>[1, 2],
+      ),
+    ];
+    final toggledGroups = <String>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        trackGroupsOverride: groups,
+        useTabletDawLayout: true,
+        onToggleRowGroupCollapsed: (groupId) async {
+          toggledGroups.add(groupId);
+        },
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final headerRect = tester.getRect(
+      find.byKey(const ValueKey('timeline_tablet_row_header_0')),
+    );
+    await tester.tapAt(headerRect.topLeft + const Offset(55, 40));
+    await tester.pumpAndSettle();
+
+    expect(toggledGroups, <String>['band']);
+    expect(find.byKey(const ValueKey('expanded_row_1')), findsNothing);
+    expect(find.text('Volume'), findsNothing);
+  });
+
+  testWidgets('tablet grouping footer shows selected count and group CTA',
+      (tester) async {
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Drums', iconId: 0),
+      TimelineRow(rowId: 2, name: 'Bass', iconId: 0),
+      TimelineRow(rowId: 3, name: 'Vocal', iconId: 0),
+    ];
+    var groupPressed = 0;
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        rowGroupingSelectionMode: true,
+        groupingSelectedRows: const <int>{0, 1},
+        onGroupRowsPressed: () async {
+          groupPressed += 1;
+        },
+        useTabletDawLayout: true,
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Group Rows'), findsOneWidget);
+    expect(find.text('2'), findsOneWidget);
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        rowGroupingSelectionMode: true,
+        groupingSelectedRows: const <int>{0, 1},
+        onGroupRowsPressed: () async {
+          groupPressed += 1;
+        },
+        useTabletDawLayout: true,
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const ValueKey('tablet_footer_group_rows_button')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(groupPressed, 1);
+  });
+
+  testWidgets('tablet row header gain updates and commits the touched row',
+      (tester) async {
+    final liveUpdates = <({int row, double gain})>[];
+    final commits = <({int row, double oldGain, double newGain})>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: <TimelineRow>[
+          TimelineRow(rowId: 1, name: 'Track 1', iconId: 0),
+          TimelineRow(rowId: 2, name: 'Track 2', iconId: 0),
+        ],
+        useTabletDawLayout: true,
+        onSetRowGain: (row, gain) async {
+          liveUpdates.add((row: row, gain: gain));
+        },
+        onRowGainCommit: (row, oldGain, newGain) {
+          commits.add((row: row, oldGain: oldGain, newGain: newGain));
+        },
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tapAt(_tabletHeaderGainPoint(tester, 1));
+    await tester.pumpAndSettle();
+
+    expect(liveUpdates.map((entry) => entry.row), contains(1));
+    expect(liveUpdates.map((entry) => entry.row), isNot(contains(0)));
+    expect(commits.map((entry) => entry.row), contains(1));
+    expect(commits.map((entry) => entry.row), isNot(contains(0)));
+    expect(commits.last.oldGain, closeTo(1.0, 0.001));
+    expect(commits.last.newGain, isNot(closeTo(1.0, 0.001)));
+  });
+
+  testWidgets('tablet row header gain does not trigger header long press',
+      (tester) async {
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: <TimelineRow>[
+          TimelineRow(rowId: 1, name: 'Track 1', iconId: 0),
+          TimelineRow(rowId: 2, name: 'Track 2', iconId: 0),
+        ],
+        useTabletDawLayout: true,
+        onSetRowColor: (_, __) async {},
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.longPressAt(_tabletHeaderGainPoint(tester, 1));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('row_color_choice_1_1')), findsNothing);
+
+    final headerRect = tester.getRect(
+      find.byKey(const ValueKey('timeline_tablet_row_header_1')),
+    );
+    await tester.longPressAt(headerRect.topLeft + const Offset(46, 24));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('row_color_choice_1_1')), findsOneWidget);
+  });
+
+  testWidgets('tablet row header gain value accepts typed dB', (tester) async {
+    final liveUpdates = <({int row, double gain})>[];
+    final commits = <({int row, double oldGain, double newGain})>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: <TimelineRow>[
+          TimelineRow(rowId: 1, name: 'Track 1', iconId: 0),
+          TimelineRow(rowId: 2, name: 'Track 2', iconId: 0),
+        ],
+        useTabletDawLayout: true,
+        onSetRowGain: (row, gain) async {
+          liveUpdates.add((row: row, gain: gain));
+        },
+        onRowGainCommit: (row, oldGain, newGain) {
+          commits.add((row: row, oldGain: oldGain, newGain: newGain));
+        },
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const ValueKey('timeline_tablet_row_gain_value_1')),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('tablet_header_gain_db_field')),
+      '-6',
+    );
+    await tester.tap(find.byKey(const ValueKey('tablet_header_gain_db_apply')));
+    await tester.pumpAndSettle();
+
+    expect(liveUpdates.map((entry) => entry.row), contains(1));
+    expect(liveUpdates.map((entry) => entry.row), isNot(contains(0)));
+    expect(commits.map((entry) => entry.row), contains(1));
+    expect(commits.map((entry) => entry.row), isNot(contains(0)));
+    expect(commits.last.oldGain, closeTo(1.0, 0.001));
+    expect(commits.last.newGain, closeTo(1.8, 0.001));
+  });
+
+  testWidgets('tablet group header gain does not fan out to child rows',
+      (tester) async {
+    final liveUpdates = <({int row, double gain})>[];
+    final commits = <({int row, double oldGain, double newGain})>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: <TimelineRow>[
+          TimelineRow(rowId: 1, name: 'Drums', iconId: 0, groupId: 'band'),
+          TimelineRow(rowId: 2, name: 'Bass', iconId: 0, groupId: 'band'),
+          TimelineRow(rowId: 3, name: 'Vox', iconId: 0),
+        ],
+        trackGroupsOverride: const <TrackGroup>[
+          TrackGroup(
+            id: 'band',
+            name: 'Band',
+            rowIds: <int>[1, 2],
+          ),
+        ],
+        useTabletDawLayout: true,
+        onSetRowGain: (row, gain) async {
+          liveUpdates.add((row: row, gain: gain));
+        },
+        onRowGainCommit: (row, oldGain, newGain) {
+          commits.add((row: row, oldGain: oldGain, newGain: newGain));
+        },
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tapAt(_tabletHeaderGainPoint(tester, 0));
+    await tester.pumpAndSettle();
+
+    expect(liveUpdates.map((entry) => entry.row), isNot(contains(1)));
+    expect(liveUpdates.map((entry) => entry.row), isNot(contains(2)));
+    expect(commits.map((entry) => entry.row), isNot(contains(1)));
+    expect(commits.map((entry) => entry.row), isNot(contains(2)));
+  });
+
+  testWidgets('row long-press menu applies inline row color swatch',
+      (tester) async {
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Drums', iconId: 0),
+      TimelineRow(rowId: 2, name: 'Bass', iconId: 0),
+    ];
+    final colorRequests = <MapEntry<int, int>>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        onSetRowColor: (row, color) async {
+          colorRequests.add(MapEntry<int, int>(row, color));
+        },
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _openRowHeaderMenu(tester, 0);
+
+    await tester.tap(find.byKey(const ValueKey('row_color_choice_0_1')));
+    await tester.pumpAndSettle();
+
+    expect(
+      colorRequests.map((entry) => '${entry.key}:${entry.value}').toList(),
+      <String>['0:${const Color(0xFFFFA654).toARGB32()}'],
+    );
+  });
+
+  testWidgets('group header row color fans out to grouped rows only',
+      (tester) async {
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Drums', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 2, name: 'Bass', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 3, name: 'Vocal', iconId: 0),
+    ];
+    final groups = <TrackGroup>[
+      const TrackGroup(
+        id: 'band',
+        name: 'Band',
+        rowIds: <int>[1, 2],
+        collapsed: true,
+      ),
+    ];
+    final colorRequests = <MapEntry<int, int>>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        trackGroupsOverride: groups,
+        onSetRowColor: (row, color) async {
+          colorRequests.add(MapEntry<int, int>(row, color));
+        },
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _openRowHeaderMenu(tester, 0);
+
+    await tester.tap(find.byKey(const ValueKey('row_color_choice_0_1')));
+    await tester.pumpAndSettle();
+
+    expect(
+      colorRequests.map((entry) => '${entry.key}:${entry.value}').toList(),
+      <String>[
+        '0:${const Color(0xFFFFA654).toARGB32()}',
+        '1:${const Color(0xFFFFA654).toARGB32()}',
+      ],
+    );
+  });
+
+  testWidgets('row menu groups selected clip rows from long press',
+      (tester) async {
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Drums', iconId: 0),
+      TimelineRow(rowId: 2, name: 'Bass', iconId: 0),
+      TimelineRow(rowId: 3, name: 'Vocal', iconId: 0),
+    ];
+    final clips = <AudioTrack>[
+      await _buildClip(row: 0, rowId: 1),
+      await _buildClip(row: 1, rowId: 2),
+    ];
+    final groupRequests = <List<int>>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: clips,
+        rowsOverride: rows,
+        selectedClipIndex: 0,
+        selectedClipIndices: const <int>[0, 1],
+        onCreateRowGroup: (rows) async {
+          groupRequests.add(rows.toList(growable: false));
+        },
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _openRowHeaderMenu(tester, 0);
+
+    expect(find.text('Group Selected Rows'), findsOneWidget);
+
+    await tester.tap(find.text('Group Selected Rows'));
+    await tester.pumpAndSettle();
+
+    expect(groupRequests, <List<int>>[
+      <int>[0, 1],
+    ]);
+  });
+
+  testWidgets('row menu hides create group action for a single row',
+      (tester) async {
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Drums', iconId: 0),
+      TimelineRow(rowId: 2, name: 'Bass', iconId: 0),
+    ];
+    final groupRequests = <List<int>>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        onCreateRowGroup: (rows) async {
+          groupRequests.add(rows.toList(growable: false));
+        },
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _openRowHeaderMenu(tester, 0);
+
+    expect(find.text('Create Row Group'), findsNothing);
+    expect(find.text('Group Selected Rows'), findsNothing);
+    expect(groupRequests, isEmpty);
+  });
+
+  testWidgets('row menu folds and removes an existing row group',
+      (tester) async {
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Drums', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 2, name: 'Bass', iconId: 0, groupId: 'band'),
+    ];
+    final groups = <TrackGroup>[
+      const TrackGroup(
+        id: 'band',
+        name: 'Band',
+        rowIds: <int>[1, 2],
+      ),
+    ];
+    final toggledGroups = <String>[];
+    final removedRows = <int>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        trackGroupsOverride: groups,
+        onToggleRowGroupCollapsed: (groupId) async {
+          toggledGroups.add(groupId);
+        },
+        onRemoveRowFromGroup: (row) async {
+          removedRows.add(row);
+        },
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _openRowHeaderMenu(tester, 0);
+    expect(find.text('Collapse Group'), findsOneWidget);
+    expect(find.text('Remove From Group'), findsOneWidget);
+
+    await tester.tap(find.text('Collapse Group'));
+    await tester.pumpAndSettle();
+    expect(toggledGroups, <String>['band']);
+
+    await _openRowHeaderMenu(tester, 1);
+    await tester.tap(find.text('Remove From Group'));
+    await tester.pumpAndSettle();
+    expect(removedRows, <int>[1]);
+  });
+
+  testWidgets('group header menu renames the group instead of the row',
+      (tester) async {
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Drums', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 2, name: 'Bass', iconId: 0, groupId: 'band'),
+    ];
+    final groups = <TrackGroup>[
+      const TrackGroup(
+        id: 'band',
+        name: 'Band',
+        rowIds: <int>[1, 2],
+      ),
+    ];
+    final renamedGroups = <String, String>{};
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        trackGroupsOverride: groups,
+        onRenameRowGroup: (groupId, name) async {
+          renamedGroups[groupId] = name;
+        },
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _openRowHeaderMenu(tester, 0);
+    expect(find.text('Rename Group'), findsOneWidget);
+    expect(find.text('Rename Row'), findsNothing);
+
+    await tester.tap(find.text('Rename Group'));
+    await tester.pumpAndSettle();
+    expect(find.text('Rename Group'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'Rhythm Bus');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(renamedGroups, <String, String>{'band': 'Rhythm Bus'});
+  });
+
+  testWidgets('group volume panel gain controls group bus only',
+      (tester) async {
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Drums', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 2, name: 'Bass', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 3, name: 'Vocal', iconId: 0),
+    ];
+    final groups = <TrackGroup>[
+      const TrackGroup(
+        id: 'band',
+        name: 'Band',
+        rowIds: <int>[1, 2],
+        collapsed: true,
+      ),
+    ];
+    final gainCommits = <int>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        trackGroupsOverride: groups,
+        onMoveClipCommit: (_, __, ___) async {},
+        onRowGainCommit: (row, _, __) {
+          gainCommits.add(row);
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tapAt(const Offset(24, _kRulerHeight + 40.0));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(PrettyGainSlider), const Offset(120, 0));
+    await tester.pumpAndSettle();
+
+    expect(gainCommits, <int>[0]);
+  });
+
+  testWidgets('group volume panel pan controls group bus only', (tester) async {
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Drums', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 2, name: 'Bass', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 3, name: 'Vocal', iconId: 0),
+    ];
+    final groups = <TrackGroup>[
+      const TrackGroup(
+        id: 'band',
+        name: 'Band',
+        rowIds: <int>[1, 2],
+        collapsed: true,
+      ),
+    ];
+    final panCommits = <int>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        trackGroupsOverride: groups,
+        onMoveClipCommit: (_, __, ___) async {},
+        onRowPanCommit: (row, _, __) {
+          panCommits.add(row);
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tapAt(const Offset(24, _kRulerHeight + 40.0));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(PrettyStereoSlider), const Offset(120, 0));
+    await tester.pumpAndSettle();
+
+    expect(panCommits, <int>[0]);
   });
 
   testWidgets('invalid copied clips do not block instrument-lane MIDI menu',
@@ -1044,6 +1941,48 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsNothing);
   });
 
+  testWidgets('tablet effects tab shows horizontal device chain controls',
+      (tester) async {
+    final controller = AudioCanvasTimelineController();
+    final selectedEffects = <MapEntry<int, int>>[];
+    final bypassRequests = <String>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: <AudioTrack>[await _buildClip()],
+        controller: controller,
+        useTabletDawLayout: true,
+        rowEffects: const <String>['EQ', 'Delay', 'Reverb'],
+        onRowEffectSelected: (row, effectIndex) {
+          selectedEffects.add(MapEntry<int, int>(row, effectIndex));
+        },
+        onSetRowEffectBypassed: (row, effectIndex, bypass) async {
+          bypassRequests.add('$row:$effectIndex:$bypass');
+        },
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    controller.ensureRowExpanded(0, tab: 1);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('device_add_effect')), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('device_effect_bypass_0_1')), findsOneWidget);
+
+    await tester.tap(find.text('Delay'));
+    await tester.pumpAndSettle();
+    expect(
+      selectedEffects.map((entry) => '${entry.key}:${entry.value}').toList(),
+      <String>['0:1'],
+    );
+
+    await tester.tap(find.byKey(const ValueKey('device_effect_bypass_0_1')));
+    await tester.pumpAndSettle();
+    expect(bypassRequests, <String>['0:1:true']);
+  });
+
   testWidgets('row effects menu exposes copy, paste, and clear actions',
       (tester) async {
     bool copied = false;
@@ -1112,6 +2051,114 @@ void main() {
     expect(clearedRow, 0);
   });
 
+  testWidgets('group effects menu paste and clear target the group header bus',
+      (tester) async {
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Drums', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 2, name: 'Bass', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 3, name: 'Vocal', iconId: 0),
+    ];
+    final groups = <TrackGroup>[
+      const TrackGroup(
+        id: 'band',
+        name: 'Band',
+        rowIds: <int>[1, 2],
+        collapsed: true,
+      ),
+    ];
+    final pastedRows = <int>[];
+    final clearedRows = <int>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        trackGroupsOverride: groups,
+        onMoveClipCommit: (_, __, ___) async {},
+        rowEffects: const <String>['EQ'],
+        onPasteRowEffects: (row) async {
+          pastedRows.add(row);
+        },
+        onClearRowEffects: (row) async {
+          clearedRows.add(row);
+        },
+        hasCopiedRowEffects: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tapAt(const Offset(24, _kRulerHeight + 40.0));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Effects'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('row_effects_menu_0')));
+    await tester.pumpAndSettle();
+    await tester
+        .tap(find.byKey(const ValueKey('row_effects_menu_action_0_paste')));
+    await tester.pumpAndSettle();
+    expect(pastedRows, <int>[0]);
+
+    await tester.tap(find.byKey(const ValueKey('row_effects_menu_0')));
+    await tester.pumpAndSettle();
+    await tester
+        .tap(find.byKey(const ValueKey('row_effects_menu_action_0_clear')));
+    await tester.pumpAndSettle();
+    expect(clearedRows, <int>[0]);
+  });
+
+  testWidgets('group header effect actions target the group header bus',
+      (tester) async {
+    final controller = AudioCanvasTimelineController();
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Drums', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 2, name: 'Bass', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 3, name: 'Vocal', iconId: 0),
+    ];
+    final groups = <TrackGroup>[
+      const TrackGroup(
+        id: 'band',
+        name: 'Band',
+        rowIds: <int>[1, 2],
+      ),
+    ];
+    final insertRequests = <String>[];
+    final bypassRequests = <String>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        controller: controller,
+        rowsOverride: rows,
+        trackGroupsOverride: groups,
+        useTabletDawLayout: true,
+        onMoveClipCommit: (_, __, ___) async {},
+        rowEffects: const <String>['EQ'],
+        onInsertRowEffect: (row, pathOrName) async {
+          insertRequests.add('$row:$pathOrName');
+        },
+        onSetRowEffectBypassed: (row, effectIndex, bypass) async {
+          bypassRequests.add('$row:$effectIndex:$bypass');
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    controller.ensureRowExpanded(0, tab: 1);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('device_effect_bypass_0_0')));
+    await tester.pumpAndSettle();
+    expect(bypassRequests, <String>['0:0:true']);
+
+    await tester.tap(find.byKey(const ValueKey('device_add_effect')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('EQ Parametric'));
+    await tester.pumpAndSettle();
+
+    expect(insertRequests, <String>['0:EQ Parametric']);
+  });
+
   testWidgets('trim handle zone stays inert while clip is unselected',
       (tester) async {
     final clips = <AudioTrack>[await _buildClip()];
@@ -1156,7 +2203,7 @@ void main() {
 
     await tester.tap(find.byIcon(Icons.near_me_outlined));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Paint'));
+    await tester.tap(find.byKey(const ValueKey('timeline_tool_menu_paint')));
     await tester.pumpAndSettle();
 
     final gesture = await tester.startGesture(
@@ -1170,6 +2217,45 @@ void main() {
 
     await gesture.up();
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('tool selector menu is wide enough for single-line labels',
+      (tester) async {
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.near_me_outlined));
+    await tester.pumpAndSettle();
+
+    final itemRect =
+        tester.getRect(find.byKey(const ValueKey('timeline_tool_menu_paint')));
+    expect(itemRect.width, greaterThanOrEqualTo(176.0));
+    final paintText = tester.widget<Text>(find.text('Paint').last);
+    expect(paintText.maxLines, 1);
+    expect(paintText.overflow, TextOverflow.ellipsis);
+  });
+
+  testWidgets('quantize menu is constrained to trigger width', (tester) async {
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    const triggerWidth = 30.0;
+    await tester.longPressAt(_magnetButtonCenter(tester));
+    await tester.pumpAndSettle();
+
+    final itemRect =
+        tester.getRect(find.byKey(const ValueKey('timeline_quantize_menu_4')));
+    expect(itemRect.width, closeTo(triggerWidth, 0.5));
   });
 
   testWidgets('automation tab opens point-lane editor for selected target',

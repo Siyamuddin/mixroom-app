@@ -1142,6 +1142,29 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           JuceBridge.setRowPanJNI(args.intValue("row"), args.floatValue("pan"))
           result.success(null)
         }
+        "configureTrackGroups" -> {
+          @Suppress("UNCHECKED_CAST")
+          val groups = args["groups"] as? List<Map<String, Any>> ?: emptyList()
+          JuceBridge.configureTrackGroupsJNI(groups)
+          result.success(null)
+        }
+        "assignRowToGroup" -> {
+          JuceBridge.assignRowToGroupJNI(
+            args.intValue("row"),
+            args.stringValue("groupId", ""),
+          )
+          result.success(null)
+        }
+        "setTrackGroupMixState" -> {
+          JuceBridge.setTrackGroupMixStateJNI(
+            args.stringValue("groupId"),
+            args.floatValue("gain"),
+            args.floatValue("pan"),
+            args.boolValue("muted"),
+            args.boolValue("soloed"),
+          )
+          result.success(null)
+        }
         "setRowPanAutomationPoints" -> {
           JuceBridge.setRowPanAutomationPointsJNI(
             args.intValue("row"),
@@ -1380,6 +1403,13 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         "setMetronomeBpm" -> {
           JuceBridge.setMetronomeBpmJNI(args.doubleValue("bpm"))
+          result.success(null)
+        }
+        "setMetronomeTimeSignature" -> {
+          JuceBridge.setMetronomeTimeSignatureJNI(
+            args.intValue("numerator"),
+            args.intValue("denominator")
+          )
           result.success(null)
         }
         "setMetronomeTransportMs" -> {

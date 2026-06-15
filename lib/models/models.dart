@@ -343,6 +343,7 @@ class TimelineRow {
   Map<String, double> instrumentParams;
   String roleOverride;
   String groupId;
+  int color;
   String inputDeviceName;
   int inputChannelStart;
   int inputChannelCount;
@@ -357,6 +358,7 @@ class TimelineRow {
     Map<String, double>? instrumentParams,
     String roleOverride = '',
     this.groupId = '',
+    this.color = 0,
     this.inputDeviceName = '',
     this.inputChannelStart = 0,
     this.inputChannelCount = 1,
@@ -375,6 +377,7 @@ class TimelineRow {
     Map<String, double>? instrumentParams,
     String? roleOverride,
     String? groupId,
+    int? color,
     String? inputDeviceName,
     int? inputChannelStart,
     int? inputChannelCount,
@@ -389,6 +392,7 @@ class TimelineRow {
       instrumentParams: instrumentParams ?? this.instrumentParams,
       roleOverride: roleOverride ?? this.roleOverride,
       groupId: groupId ?? this.groupId,
+      color: color ?? this.color,
       inputDeviceName: inputDeviceName ?? this.inputDeviceName,
       inputChannelStart: inputChannelStart ?? this.inputChannelStart,
       inputChannelCount: inputChannelCount ?? this.inputChannelCount,

@@ -1,8 +1,10 @@
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:mixroom/helpers/glass_ui_tokens.dart';
+import 'package:mixroom/helpers/orientation_policy.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/providers/locale_provider.dart';
@@ -10,6 +12,10 @@ import 'package:provider/provider.dart';
 
 const String kMixroomSignInBackgroundAsset =
     'assets/auth/sign_in_background.webp';
+const String kMixroomSignInBackgroundTileAsset =
+    'assets/auth/sign_in_background_tile.png';
+const String kMixroomLaunchBackgroundNoLogoTabletAsset =
+    'assets/auth/launch_background_no_logo_tablet.png';
 const String kMixroomLaunchSplashAsset = 'assets/mixroom_launch_screen.webp';
 const String kMixroomBrandMarkAsset = 'assets/auth/brand_mark.png';
 const String kMixroomWordmarkAsset = 'assets/auth/wordmark.png';
@@ -31,6 +37,25 @@ const String kMixroomGoogleSocialIconAsset = 'assets/auth/icon_google.svg';
 const String kMixroomAppleSocialIconAsset = 'assets/auth/icon_apple.svg';
 const String kMixroomKakaoSocialIconAsset = 'assets/auth/icon_kakao.svg';
 
+bool mixroomUseTabletLandscapeAuthLayout(BuildContext context) {
+  final platform = PlatformCapabilities.current;
+  final size = MediaQuery.sizeOf(context);
+  return platform.isMobile &&
+      isTabletLogicalSize(size) &&
+      size.width >= size.height;
+}
+
+bool mixroomUseTabletDesktopAuthLayout(BuildContext context) {
+  return PlatformCapabilities.current.isDesktop ||
+      mixroomUseTabletLandscapeAuthLayout(context);
+}
+
+bool mixroomUseTabletDesktopAuthBackground(BuildContext context) {
+  final platform = PlatformCapabilities.current;
+  final size = MediaQuery.sizeOf(context);
+  return platform.isDesktop || (platform.isMobile && isTabletLogicalSize(size));
+}
+
 class MixroomAuthBackground extends StatelessWidget {
   const MixroomAuthBackground({
     super.key,
@@ -41,8 +66,16 @@ class MixroomAuthBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final useDesktopSplashFit = assetPath == kMixroomLaunchSplashAsset &&
-        PlatformCapabilities.current.isDesktop;
+    final platform = PlatformCapabilities.current;
+    final useLaunchBackgroundWithoutLogo =
+        assetPath == kMixroomSignInBackgroundAsset &&
+            mixroomUseTabletDesktopAuthBackground(context);
+    if (useLaunchBackgroundWithoutLogo) {
+      return const _MixroomLaunchBackgroundWithoutLogo();
+    }
+
+    final useDesktopSplashFit =
+        assetPath == kMixroomLaunchSplashAsset && platform.isDesktop;
     return ColoredBox(
       color: const Color(0xFF090909),
       child: Image.asset(
@@ -57,69 +90,88 @@ class MixroomAuthBackground extends StatelessWidget {
   }
 }
 
+class MixroomAuthPageScaffold extends StatelessWidget {
+  const MixroomAuthPageScaffold({
+    super.key,
+    required this.body,
+    this.resizeToAvoidBottomInset,
+  });
+
+  final Widget body;
+  final bool? resizeToAvoidBottomInset;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      clipBehavior: Clip.none,
+      children: [
+        const _MixroomFullBleedAuthBackground(),
+        Scaffold(
+          backgroundColor: Colors.transparent,
+          resizeToAvoidBottomInset: resizeToAvoidBottomInset,
+          body: body,
+        ),
+      ],
+    );
+  }
+}
+
+class _MixroomFullBleedAuthBackground extends StatelessWidget {
+  const _MixroomFullBleedAuthBackground();
+
+  @override
+  Widget build(BuildContext context) {
+    final displaySize = currentFlutterDisplayLogicalSize();
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = displaySize == null
+            ? constraints.maxWidth
+            : math.max(constraints.maxWidth, displaySize.width);
+        final height = displaySize == null
+            ? constraints.maxHeight
+            : math.max(constraints.maxHeight, displaySize.height);
+
+        return OverflowBox(
+          alignment: Alignment.center,
+          minWidth: width,
+          maxWidth: width,
+          minHeight: height,
+          maxHeight: height,
+          child: const SizedBox.expand(
+            child: MixroomAuthBackground(),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _MixroomLaunchBackgroundWithoutLogo extends StatelessWidget {
+  const _MixroomLaunchBackgroundWithoutLogo();
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: const Color(0xFF020402),
+      child: Image.asset(
+        kMixroomLaunchBackgroundNoLogoTabletAsset,
+        fit: BoxFit.cover,
+        width: double.infinity,
+        height: double.infinity,
+        alignment: Alignment.center,
+        filterQuality: FilterQuality.high,
+      ),
+    );
+  }
+}
+
 class MixroomLaunchSplash extends StatelessWidget {
   const MixroomLaunchSplash({super.key});
 
   @override
   Widget build(BuildContext context) {
-    if (PlatformCapabilities.current.isDesktop) {
-      return Scaffold(
-        backgroundColor: const Color(0xFF090909),
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            const MixroomAuthBackground(
-              assetPath: kMixroomSignInBackgroundAsset,
-            ),
-            IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: <Color>[
-                      Colors.black.withValues(alpha: 0.22),
-                      Colors.transparent,
-                      const Color(0xFF2D7CC5).withValues(alpha: 0.14),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Image.asset(
-                    kMixroomBrandMarkAsset,
-                    width: 96,
-                    height: 96,
-                    fit: BoxFit.contain,
-                    filterQuality: FilterQuality.high,
-                  ),
-                  const SizedBox(height: 20),
-                  Image.asset(
-                    kMixroomWordmarkAsset,
-                    width: 238,
-                    height: 34,
-                    fit: BoxFit.contain,
-                    filterQuality: FilterQuality.high,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-    return const Scaffold(
-      backgroundColor: Color(0xFF090909),
-      body: SizedBox.expand(
-        child: MixroomAuthBackground(
-          assetPath: kMixroomLaunchSplashAsset,
-        ),
-      ),
-    );
+    return const ColoredBox(color: Color(0xFF090909));
   }
 }
 
@@ -377,6 +429,62 @@ class MixroomAuthTopBar extends StatelessWidget {
             child: MixroomLocaleSelector(),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class MixroomAuthBackCircleButton extends StatelessWidget {
+  const MixroomAuthBackCircleButton({
+    super.key,
+    required this.onTap,
+  });
+
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    return Opacity(
+      opacity: enabled ? 1 : 0.45,
+      child: SizedBox(
+        width: 48,
+        height: 48,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Color.fromRGBO(244, 244, 244, 0.40),
+                Color.fromRGBO(25, 94, 160, 0.40),
+              ],
+              stops: [0.56, 1.0],
+            ),
+            boxShadow: const [
+              BoxShadow(
+                color: Color.fromRGBO(0, 0, 0, 0.25),
+                blurRadius: 15,
+                spreadRadius: 8,
+              ),
+            ],
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(24),
+              onTap: onTap,
+              child: Center(
+                child: SvgPicture.asset(
+                  kMixroomBackArrowAsset,
+                  width: 10,
+                  height: 18,
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -759,6 +867,120 @@ class _MixroomPressFeedbackState extends State<_MixroomPressFeedback> {
   }
 }
 
+class MixroomAuthConsentRow extends StatelessWidget {
+  const MixroomAuthConsentRow({
+    super.key,
+    required this.value,
+    required this.onChanged,
+    this.label,
+    this.richLabel,
+  }) : assert(label != null || richLabel != null);
+
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  final String? label;
+  final Widget? richLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onChanged != null;
+    final textStyle = const TextStyle(
+      fontFamily: 'Pretendard',
+      color: Color.fromRGBO(244, 244, 244, 0.86),
+      fontSize: 13,
+      height: 18 / 13,
+      fontWeight: FontWeight.w400,
+    );
+
+    return Semantics(
+      button: true,
+      checked: value,
+      child: _MixroomPressFeedback(
+        enabled: enabled,
+        pressScale: 0.985,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: enabled ? () => onChanged!(!value) : null,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 5),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 140),
+                    curve: Curves.easeOutCubic,
+                    width: 16,
+                    height: 16,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: value
+                          ? const Color.fromRGBO(244, 244, 244, 0.13)
+                          : Colors.transparent,
+                      border: Border.all(
+                        color: value
+                            ? const Color(0xFFF4F4F4)
+                            : const Color.fromRGBO(244, 244, 244, 0.76),
+                        width: 1.3,
+                      ),
+                    ),
+                    child: value
+                        ? const Icon(
+                            Icons.check_rounded,
+                            color: Color(0xFFF4F4F4),
+                            size: 11,
+                          )
+                        : null,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: DefaultTextStyle(
+                      style: textStyle,
+                      child: richLabel ?? Text(label!),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class MixroomAuthInlineLink extends StatelessWidget {
+  const MixroomAuthInlineLink({
+    super.key,
+    required this.label,
+    required this.onTap,
+  });
+
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontFamily: 'Pretendard',
+          color: Color(0xFFF4F4F4),
+          fontSize: 13,
+          height: 18 / 13,
+          fontWeight: FontWeight.w500,
+          decoration: TextDecoration.underline,
+          decorationColor: Color(0xFFF4F4F4),
+        ),
+      ),
+    );
+  }
+}
+
 class MixroomFieldActionIconButton extends StatelessWidget {
   const MixroomFieldActionIconButton({
     super.key,
@@ -990,7 +1212,6 @@ class MixroomSocialIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isApple = assetPath == kMixroomAppleSocialAsset;
     final iconAsset = switch (assetPath) {
       kMixroomGoogleSocialAsset => kMixroomGoogleSocialIconAsset,
       kMixroomAppleSocialAsset => kMixroomAppleSocialIconAsset,
@@ -1003,20 +1224,35 @@ class MixroomSocialIconButton extends StatelessWidget {
       kMixroomKakaoSocialAsset => const Size(24.96, 23.01),
       _ => const Size(22, 22),
     };
-    final iconWidget = SvgPicture.asset(
-      iconAsset,
-      width: iconSize.width,
-      height: iconSize.height,
-    );
-    final buttonChild = isApple
-        ? SvgPicture.asset(
-            assetPath,
+    final buttonChild = assetPath == kMixroomAppleSocialAsset
+        ? SizedBox(
             width: 48,
             height: 48,
+            child: DecoratedBox(
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Color.fromRGBO(0, 0, 0, 0.25),
+                    blurRadius: 15,
+                    spreadRadius: 8,
+                  ),
+                ],
+              ),
+              child: SvgPicture.asset(
+                kMixroomAppleSocialAsset,
+                width: 48,
+                height: 48,
+              ),
+            ),
           )
         : _MixroomCircularGlassButton(
             size: 48,
-            icon: iconWidget,
+            icon: SvgPicture.asset(
+              iconAsset,
+              width: iconSize.width,
+              height: iconSize.height,
+            ),
           );
     return Semantics(
       button: true,

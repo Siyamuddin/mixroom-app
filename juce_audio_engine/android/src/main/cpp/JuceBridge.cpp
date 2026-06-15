@@ -12,10 +12,61 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <vector>
+
+namespace juce
+{
+    extern jobject androidApkContext;
+    extern jobject juceContext;
+}
 
 namespace
 {
+std::mutex juceAndroidRuntimeMutex;
+bool juceAndroidClassesInitialized = false;
+bool juceAndroidThreadInitialized = false;
+bool juceAndroidGuiInitialized = false;
+
+bool ensureJuceAndroidRuntimeInitialised(JNIEnv *env)
+{
+    if (env == nullptr)
+        return false;
+
+    if (juce::androidApkContext == nullptr || juce::juceContext == nullptr)
+    {
+        __android_log_print(ANDROID_LOG_ERROR, "JUCE", "Android context is not set before JUCE runtime initialisation.");
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(juceAndroidRuntimeMutex);
+
+    if (!juceAndroidClassesInitialized)
+    {
+        juce::JNIClassBase::initialiseAllClasses(env, juce::androidApkContext);
+        if (env->ExceptionCheck())
+        {
+            __android_log_print(ANDROID_LOG_ERROR, "JUCE", "Failed to initialise JUCE JNI classes.");
+            return false;
+        }
+        juceAndroidClassesInitialized = true;
+    }
+
+    if (!juceAndroidThreadInitialized)
+    {
+        juce::Thread::initialiseJUCE(env, juce::juceContext);
+        juceAndroidThreadInitialized = true;
+    }
+
+    if (!juceAndroidGuiInitialized)
+    {
+        juce::initialiseJuce_GUI();
+        juceAndroidGuiInitialized = true;
+    }
+
+    return true;
+}
+
 void flushPendingMessageThreadTasks()
 {
     if (auto *mm = juce::MessageManager::getInstanceWithoutCreating())
@@ -253,6 +304,98 @@ juce::var javaObjectToVar(JNIEnv *env, jobject valueObj)
     }
 
     return {};
+}
+
+juce::Array<juce::NamedValueSet> parseTrackGroups(JNIEnv *env, jobject groupsList)
+{
+    juce::Array<juce::NamedValueSet> out;
+    if (groupsList == nullptr)
+        return out;
+
+    jclass listClass = env->FindClass("java/util/List");
+    if (!env->IsInstanceOf(groupsList, listClass))
+        return out;
+
+    jmethodID sizeMethod = env->GetMethodID(listClass, "size", "()I");
+    jmethodID getMethod = env->GetMethodID(listClass, "get", "(I)Ljava/lang/Object;");
+    jclass mapClass = env->FindClass("java/util/Map");
+    jmethodID mapGet = env->GetMethodID(mapClass, "get", "(Ljava/lang/Object;)Ljava/lang/Object;");
+    jclass stringClass = env->FindClass("java/lang/String");
+
+    jstring keyId = env->NewStringUTF("id");
+    jstring keyRowIds = env->NewStringUTF("rowIds");
+    jstring keyGain = env->NewStringUTF("gain");
+    jstring keyPan = env->NewStringUTF("pan");
+    jstring keyMuted = env->NewStringUTF("muted");
+    jstring keySoloed = env->NewStringUTF("soloed");
+
+    const jint count = env->CallIntMethod(groupsList, sizeMethod);
+    out.ensureStorageAllocated((int)count);
+    for (jint i = 0; i < count; ++i)
+    {
+        jobject entry = env->CallObjectMethod(groupsList, getMethod, i);
+        if (entry == nullptr || !env->IsInstanceOf(entry, mapClass))
+        {
+            if (entry != nullptr)
+                env->DeleteLocalRef(entry);
+            continue;
+        }
+
+        jobject idObj = env->CallObjectMethod(entry, mapGet, keyId);
+        jobject rowIdsObj = env->CallObjectMethod(entry, mapGet, keyRowIds);
+        jobject gainObj = env->CallObjectMethod(entry, mapGet, keyGain);
+        jobject panObj = env->CallObjectMethod(entry, mapGet, keyPan);
+        jobject mutedObj = env->CallObjectMethod(entry, mapGet, keyMuted);
+        jobject soloedObj = env->CallObjectMethod(entry, mapGet, keySoloed);
+
+        juce::NamedValueSet values;
+        values.set("id",
+                   idObj != nullptr && env->IsInstanceOf(idObj, stringClass)
+                       ? juceStringFromJString(env, (jstring)idObj)
+                       : juce::String());
+
+        juce::Array<juce::var> rowIds;
+        if (rowIdsObj != nullptr && env->IsInstanceOf(rowIdsObj, listClass))
+        {
+            const jint rowCount = env->CallIntMethod(rowIdsObj, sizeMethod);
+            rowIds.ensureStorageAllocated((int)rowCount);
+            for (jint rowIndex = 0; rowIndex < rowCount; ++rowIndex)
+            {
+                jobject rowIdObj = env->CallObjectMethod(rowIdsObj, getMethod, rowIndex);
+                rowIds.add(javaObjectToInt(env, rowIdObj, -1));
+                if (rowIdObj != nullptr)
+                    env->DeleteLocalRef(rowIdObj);
+            }
+        }
+        values.set("rowIds", juce::var(rowIds));
+        values.set("gain", (float)javaObjectToDouble(env, gainObj, 2.0));
+        values.set("pan", (float)javaObjectToDouble(env, panObj, 0.5));
+        values.set("muted", (bool)javaObjectToVar(env, mutedObj));
+        values.set("soloed", (bool)javaObjectToVar(env, soloedObj));
+        out.add(values);
+
+        if (idObj != nullptr)
+            env->DeleteLocalRef(idObj);
+        if (rowIdsObj != nullptr)
+            env->DeleteLocalRef(rowIdsObj);
+        if (gainObj != nullptr)
+            env->DeleteLocalRef(gainObj);
+        if (panObj != nullptr)
+            env->DeleteLocalRef(panObj);
+        if (mutedObj != nullptr)
+            env->DeleteLocalRef(mutedObj);
+        if (soloedObj != nullptr)
+            env->DeleteLocalRef(soloedObj);
+        env->DeleteLocalRef(entry);
+    }
+
+    env->DeleteLocalRef(keyId);
+    env->DeleteLocalRef(keyRowIds);
+    env->DeleteLocalRef(keyGain);
+    env->DeleteLocalRef(keyPan);
+    env->DeleteLocalRef(keyMuted);
+    env->DeleteLocalRef(keySoloed);
+    return out;
 }
 
 std::vector<AutomationPoint> parseAutomationPoints(JNIEnv *env, jobject pointsList, float maxValue = 3.0f)
@@ -1031,6 +1174,7 @@ void setJuceAndroidContext(JNIEnv *env, jobject context)
 
     juce::androidApkContext = env->NewGlobalRef(context);
     juce::juceContext = juce::androidApkContext;
+    ensureJuceAndroidRuntimeInitialised(env);
     __android_log_print(ANDROID_LOG_INFO, "JUCE", "✅ Global context set successfully.");
 }
 
@@ -1067,21 +1211,10 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_initialiseEngineJNI(JNIEnv *env,
     // ✅ This is the correct call in recent JUCE versions
     // juce::Thread::initialiseJUCE(env, context);
 
-    juce::JNIClassBase::initialiseAllClasses(env, juce::androidApkContext);
+    if (!ensureJuceAndroidRuntimeInitialised(env))
+        return;
+
     __android_log_print(ANDROID_LOG_INFO, "JUCE", "🧠 JNI passed step1");
-    // Fix: this must be called once before any audio code is used on Android
-    static bool juceThreadInitialized = false;
-    if (!juceThreadInitialized)
-    {
-        juce::Thread::initialiseJUCE(env, juce::juceContext); // context must be set first
-        juceThreadInitialized = true;
-    }
-    static bool juceGuiInitialized = false;
-    if (!juceGuiInitialized)
-    {
-        juce::initialiseJuce_GUI();
-        juceGuiInitialized = true;
-    }
     __android_log_print(ANDROID_LOG_INFO, "JUCE", "🧠 JNI passed step2");
     JuceEngine::get().initialiseEngine();
 }
@@ -1433,8 +1566,11 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getConnectedMidiInputDevicesJNI(
 }
 
 extern "C" JNIEXPORT jdouble JNICALL
-Java_com_mixroom_juce_1audio_1engine_JuceBridge_getHostSampleRateJNI(JNIEnv *, jclass)
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getHostSampleRateJNI(JNIEnv *env, jclass)
 {
+    if (!ensureJuceAndroidRuntimeInitialised(env))
+        return 44100.0;
+
     std::atomic<double> result{44100.0};
     juce::MessageManager::getInstance()->callSync([&result]
                                                   { result = JuceEngine::get().getHostSampleRate(); });
@@ -2166,6 +2302,37 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setRowPanJNI(JNIEnv *, jclass, j
                                                   { JuceEngine::get().setRowPan((int)row, (float)pan); });
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_configureTrackGroupsJNI(JNIEnv *env, jclass, jobject groupsList)
+{
+    auto groups = parseTrackGroups(env, groupsList);
+    juce::MessageManager::getInstance()->callSync([groups]() mutable
+                                                  { JuceEngine::get().configureTrackGroups(groups); });
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_assignRowToGroupJNI(JNIEnv *env, jclass, jint row, jstring groupId)
+{
+    const juce::String id = juceStringFromJString(env, groupId);
+    juce::MessageManager::getInstance()->callSync([row, id]
+                                                  { JuceEngine::get().assignRowToGroup((int)row, id); });
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_setTrackGroupMixStateJNI(
+    JNIEnv *env,
+    jclass,
+    jstring groupId,
+    jfloat gain,
+    jfloat pan,
+    jboolean muted,
+    jboolean soloed)
+{
+    const juce::String id = juceStringFromJString(env, groupId);
+    juce::MessageManager::getInstance()->callSync([id, gain, pan, muted, soloed]
+                                                  { JuceEngine::get().setTrackGroupMixState(id, (float)gain, (float)pan, muted != JNI_FALSE, soloed != JNI_FALSE); });
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_insertMasterEffectJNI(JNIEnv *env, jclass, jstring pluginPath)
 {
@@ -2345,6 +2512,13 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMetronomeBpmJNI(JNIEnv *, jcl
 {
     juce::MessageManager::callAsync([bpm]
                                     { JuceEngine::get().setMetronomeBpm((double)bpm); });
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMetronomeTimeSignatureJNI(JNIEnv *, jclass, jint numerator, jint denominator)
+{
+    juce::MessageManager::callAsync([numerator, denominator]
+                                    { JuceEngine::get().setMetronomeTimeSignature((int)numerator, (int)denominator); });
 }
 
 extern "C" JNIEXPORT void JNICALL

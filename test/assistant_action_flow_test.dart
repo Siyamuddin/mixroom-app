@@ -102,6 +102,7 @@ class _FakeProjectStateBuilder extends ProjectStateBuilder {
     double masterPan0to1 = 0.5,
     Map<int, String> roleOverrides = const {},
     List<TimelineRow> timelineRows = const <TimelineRow>[],
+    List<TrackGroup> trackGroups = const <TrackGroup>[],
   }) async {
     final rowStates = List<RowState>.generate(rows, (row) {
       final rowTracks = audioTracks.where((t) => t.rowIndex == row).toList();
@@ -172,6 +173,7 @@ class _FakeProjectStateBuilder extends ProjectStateBuilder {
       masterPan0to1: masterPan0to1,
       maxRows: rows,
       rows: rowStates,
+      trackGroups: trackGroups,
       masterEffects: masterEffects,
       overlapMatrix: overlapMatrix,
       overlapRatioMatrix: overlapRatioMatrix,
@@ -289,6 +291,22 @@ void main() {
                 },
               },
               {
+                'type': 'row_group_edit',
+                'data': {
+                  'operation': 'create',
+                  'row_indices': [0, 1],
+                  'group_name': 'Drum Bus',
+                },
+              },
+              {
+                'type': 'row_color_edit',
+                'data': {
+                  'operation': 'set',
+                  'target': {'row_index': 0},
+                  'color_name': 'orange',
+                },
+              },
+              {
                 'type': 'automation_edit',
                 'data': {
                   'operation': 'set_points',
@@ -364,7 +382,7 @@ void main() {
       );
 
       expect(result.hasAssistantActions, isTrue);
-      expect(result.assistantActions.length, 10);
+      expect(result.assistantActions.length, 12);
       expect(
         result.assistantActions.map((a) => a.type).toSet(),
         equals(const {
@@ -374,6 +392,8 @@ void main() {
           'clarify',
           'clip_edit',
           'effect_edit',
+          'row_group_edit',
+          'row_color_edit',
           'automation_edit',
           'midi_compose',
           'stem_separate',
@@ -1918,6 +1938,123 @@ void main() {
       expect(
         result.assistantActions.last.data['target']['target_id'],
         startsWith('masterfxid:'),
+      );
+    });
+
+    test('passes group-scoped row actions through with group context',
+        () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'daw_assistant_actions',
+          {
+            'assistant_message': 'Drum bus compression queued.',
+            'actions': [
+              {
+                'type': 'ensure_effect',
+                'data': {
+                  'target': {
+                    'scope': 'group',
+                    'group_id': 'drum_bus',
+                    'group_name': 'Drum Bus',
+                  },
+                  'effect_name_contains': 'compressor',
+                },
+              },
+              {
+                'type': 'adjust_effect_param_by_name',
+                'data': {
+                  'target': {
+                    'scope': 'group',
+                    'group_id': 'drum_bus',
+                  },
+                  'effect_name_contains': 'compressor',
+                  'param_name': 'Threshold',
+                  'mode': 'set',
+                  'value': -18.0,
+                },
+              },
+            ],
+          },
+          text: 'Drum bus compression queued.',
+        ),
+      );
+
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 3),
+        mixModel: LocalMixingModel(),
+      );
+      final tracks = <AudioTrack>[
+        await _makeAudioTrack(path: '/tmp/kick.wav', row: 0, label: 'Kick'),
+        await _makeAudioTrack(path: '/tmp/snare.wav', row: 1, label: 'Snare'),
+      ];
+      final rows = <TimelineRow>[
+        TimelineRow(
+          rowId: 101,
+          name: 'Kick',
+          iconId: 0,
+          groupId: 'drum_bus',
+        ),
+        TimelineRow(
+          rowId: 102,
+          name: 'Snare',
+          iconId: 0,
+          groupId: 'drum_bus',
+        ),
+        TimelineRow(rowId: 103, name: 'Vocal', iconId: 0),
+      ];
+      final groups = <TrackGroup>[
+        TrackGroup(
+          id: 'drum_bus',
+          name: 'Drum Bus',
+          rowIds: <int>[101, 102],
+          collapsed: true,
+          effects: <EffectSnapshot>[
+            EffectSnapshot(
+              'mixroom://compressor',
+              false,
+              const <String, dynamic>{},
+              displayName: 'Compressor',
+            ),
+          ],
+        ),
+      ];
+
+      final result = await pipeline.handleUserText(
+        text: 'Compress the drum bus.',
+        audioTracks: tracks,
+        rowGain: const [1.0, 1.0, 1.0],
+        rowPan: const [0.5, 0.5, 0.5],
+        rowAutomation: List<List<AutomationPoint>>.generate(
+          3,
+          (_) => <AutomationPoint>[
+            AutomationPoint(x: 0, volume: 1.0),
+          ],
+        ),
+        bpmFallback: 120.0,
+        timelineRows: rows,
+        trackGroups: groups,
+      );
+
+      expect(fakeLlm.seenProjectSnapshot, contains('Group "Drum Bus"'));
+      expect(fakeLlm.seenProjectSnapshot, contains('group_id=drum_bus'));
+      expect(fakeLlm.seenProjectSnapshot, contains('member_tracks=1,2'));
+      expect(fakeLlm.seenProjectSnapshot, contains('fx_chain=[Compressor]'));
+      expect(fakeLlm.seenProjectSnapshot, contains('Track 1:'));
+      expect(fakeLlm.seenProjectSnapshot, contains('group_id=drum_bus'));
+      expect(result.hasAssistantActions, isTrue);
+      expect(result.assistantActions, hasLength(2));
+      expect(
+        result.assistantActions.first.data['target']['scope'],
+        equals('group'),
+      );
+      expect(
+        result.assistantActions.first.data['target']['group_id'],
+        equals('drum_bus'),
+      );
+      expect(
+        result.assistantActions.last.data['target']['group_id'],
+        equals('drum_bus'),
       );
     });
   });

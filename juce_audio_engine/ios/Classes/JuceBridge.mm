@@ -2697,6 +2697,57 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
                                                   { JuceEngine::get().setRowPan((int)row, pan); });
 }
 
++ (void)configureTrackGroupsObjC:(NSArray<NSDictionary *> *)groups
+{
+    juce::Array<juce::NamedValueSet> cppGroups;
+    for (NSDictionary *group in groups ?: @[])
+    {
+        if (![group isKindOfClass:[NSDictionary class]])
+            continue;
+
+        juce::NamedValueSet values;
+        values.set("id", juceStringFromNSString(group[@"id"] ?: @""));
+
+        juce::Array<juce::var> rowIds;
+        NSArray *rawRowIds = group[@"rowIds"];
+        if ([rawRowIds isKindOfClass:[NSArray class]])
+        {
+            for (id value in rawRowIds)
+            {
+                if ([value respondsToSelector:@selector(integerValue)])
+                    rowIds.add((int)[value integerValue]);
+            }
+        }
+        values.set("rowIds", juce::var(rowIds));
+        values.set("gain", group[@"gain"] != nil ? [group[@"gain"] floatValue] : 2.0f);
+        values.set("pan", group[@"pan"] != nil ? [group[@"pan"] floatValue] : 0.5f);
+        values.set("muted", group[@"muted"] != nil ? (bool)[group[@"muted"] boolValue] : false);
+        values.set("soloed", group[@"soloed"] != nil ? (bool)[group[@"soloed"] boolValue] : false);
+        cppGroups.add(values);
+    }
+
+    juce::MessageManager::getInstance()->callSync([cppGroups]
+                                                  { JuceEngine::get().configureTrackGroups(cppGroups); });
+}
+
++ (void)assignRowToGroupObjC:(NSInteger)row groupId:(NSString *)groupId
+{
+    const juce::String juceGroupId = juceStringFromNSString(groupId ?: @"");
+    juce::MessageManager::getInstance()->callSync([row, juceGroupId]
+                                                  { JuceEngine::get().assignRowToGroup((int)row, juceGroupId); });
+}
+
++ (void)setTrackGroupMixStateObjC:(NSString *)groupId
+                             gain:(float)gain
+                              pan:(float)pan
+                            muted:(BOOL)muted
+                           soloed:(BOOL)soloed
+{
+    const juce::String juceGroupId = juceStringFromNSString(groupId ?: @"");
+    juce::MessageManager::getInstance()->callSync([juceGroupId, gain, pan, muted, soloed]
+                                                  { JuceEngine::get().setTrackGroupMixState(juceGroupId, gain, pan, (bool)muted, (bool)soloed); });
+}
+
 #pragma mark - Master bus FX and controls
 
 + (BOOL)insertMasterEffectObjC:(NSString *)pluginPath
@@ -3596,6 +3647,13 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 {
     juce::MessageManager::callAsync([bpm]
                                     { JuceEngine::get().setMetronomeBpm(bpm); });
+}
+
++ (void)setMetronomeTimeSignatureObjC:(NSInteger)numerator
+                          denominator:(NSInteger)denominator
+{
+    juce::MessageManager::callAsync([numerator, denominator]
+                                    { JuceEngine::get().setMetronomeTimeSignature((int)numerator, (int)denominator); });
 }
 
 + (void)setMetronomeTransportMsObjC:(double)ms

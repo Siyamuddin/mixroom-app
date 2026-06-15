@@ -66,6 +66,7 @@ class ChatPipeline {
     String projectKey = '',
     List<String> rowNames = const [],
     List<TimelineRow> timelineRows = const <TimelineRow>[],
+    List<TrackGroup> trackGroups = const <TrackGroup>[],
     String librarySnapshot = '',
     double masterGain0to3 = 1.0,
     double masterPan0to1 = 0.5,
@@ -117,6 +118,7 @@ class ChatPipeline {
         masterPan0to1: masterPan0to1,
         roleOverrides: _roleOverrides,
         timelineRows: timelineRows,
+        trackGroups: trackGroups,
       );
       projectBuildStopwatch.stop();
       projectStatsMs = projectBuildStopwatch.elapsedMilliseconds;
@@ -1033,6 +1035,36 @@ class ChatPipeline {
         'top_occupied_track=${occupiedRows.first + 1} bottom_occupied_track=${occupiedRows.last + 1}',
       );
     }
+    if (p.trackGroups.isNotEmpty) {
+      final rowById = <int, RowState>{
+        for (final row in p.rows)
+          if (row.rowId >= 0) row.rowId: row,
+      };
+      for (final group in p.trackGroups) {
+        final groupName = group.name.trim().isEmpty
+            ? 'Group'
+            : group.name.trim().replaceAll('"', "'");
+        final memberRows = group.rowIds
+            .map((rowId) => rowById[rowId])
+            .whereType<RowState>()
+            .map((row) => row.rowIndex + 1)
+            .toList(growable: false);
+        final activeFxCount =
+            group.effects.where((effect) => !effect.bypassed).length;
+        b.writeln(
+          'Group "${groupName}": '
+          'group_id=${group.id} '
+          'member_tracks=${memberRows.isEmpty ? "none" : memberRows.join(",")} '
+          'collapsed=${group.collapsed} '
+          'gain=${group.gain.toStringAsFixed(2)} '
+          'pan=${group.pan.toStringAsFixed(2)} '
+          'muted=${group.muted} soloed=${group.soloed} '
+          'color=${group.color == 0 ? "unset" : group.color.toRadixString(16)} '
+          'fx_count=${group.effects.length} active_fx_count=$activeFxCount '
+          'fx_chain=[${group.effects.map((effect) => effect.displayName.trim().isNotEmpty ? effect.displayName.trim() : effect.effectId).join(" > ")}]',
+        );
+      }
+    }
 
     for (final r in p.rows) {
       final rowTracks = tracksByRow[r.rowIndex] ?? const <AudioTrack>[];
@@ -1093,6 +1125,8 @@ class ChatPipeline {
       b.writeln(
         'Track ${r.rowIndex + 1}: '
         '${rowName.isEmpty ? '' : 'row_name="$rowName" '}'
+        '${r.groupId.trim().isEmpty ? '' : 'group_id=${r.groupId.trim()} '}'
+        'row_color=${r.rowColor == 0 ? "unset" : r.rowColor.toRadixString(16)} '
         'row_position=$rowPosition '
         'occupied_row_position=${_occupiedRowPositionSummary(r.rowIndex, occupiedRows)} '
         '$laneSummary'

@@ -24,6 +24,7 @@ class SampleDragData {
 
 class SampleBrowserPanel extends StatefulWidget {
   final List<String> rootFolders;
+  final Set<String> fixedRootFolders;
   final String? auditioningPath;
   final Future<void> Function(String filePath) onAuditionTap;
   final Future<void> Function(String filePath) onInsertSample;
@@ -44,6 +45,7 @@ class SampleBrowserPanel extends StatefulWidget {
   const SampleBrowserPanel({
     super.key,
     required this.rootFolders,
+    this.fixedRootFolders = const <String>{},
     required this.auditioningPath,
     required this.onAuditionTap,
     required this.onInsertSample,
@@ -75,7 +77,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   static const Color _kPanelAccent = Color(0xFF78D9FF);
   static const Duration _kFolderHoldDelay = Duration(milliseconds: 180);
   static const double _kFolderHoldMoveTolerance = 14.0;
-  static const int _kPreviewWaveformBars = 128;
+  static const int _kPreviewWaveformMobileBars = 128;
+  static const int _kPreviewWaveformMaxBars = 640;
   static const int _kPreviewWaveformPcmRate = 8000;
   static const Set<String> _kAudioExtensions = <String>{
     '.wav',
@@ -257,6 +260,12 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
       default:
         return true;
     }
+  }
+
+  bool _isFixedRoot(String rootPath) {
+    final normalized = p.normalize(rootPath);
+    return widget.fixedRootFolders
+        .any((root) => p.normalize(root) == normalized);
   }
 
   String _decodeDisplayLabel(String value) {
@@ -544,7 +553,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   }
 
   Future<void> _ensureWaveformForFile(String filePath) async {
-    if (_waveformByFile.containsKey(filePath)) return;
+    final cached = _waveformByFile[filePath];
+    if (cached != null && cached.length >= _kPreviewWaveformMaxBars) return;
     if (_waveformLoading.contains(filePath)) return;
     _waveformLoading.add(filePath);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -606,11 +616,14 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
         return const <double>[];
       }
 
-      final out =
-          List<double>.filled(_kPreviewWaveformBars, 0.0, growable: false);
-      for (int i = 0; i < _kPreviewWaveformBars; i++) {
-        int start = (i * totalSamples / _kPreviewWaveformBars).floor();
-        int end = ((i + 1) * totalSamples / _kPreviewWaveformBars).floor();
+      final out = List<double>.filled(
+        _kPreviewWaveformMaxBars,
+        0.0,
+        growable: false,
+      );
+      for (int i = 0; i < _kPreviewWaveformMaxBars; i++) {
+        int start = (i * totalSamples / _kPreviewWaveformMaxBars).floor();
+        int end = ((i + 1) * totalSamples / _kPreviewWaveformMaxBars).floor();
         start = start.clamp(0, totalSamples);
         end = end.clamp(0, totalSamples);
         if (end <= start) {
@@ -651,6 +664,19 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
       if (v < 0.0) return 0.0;
       return v;
     }).toList(growable: false);
+  }
+
+  int _previewWaveformBarCountForWidth(double width) {
+    if (!width.isFinite || width <= 0) {
+      return _kPreviewWaveformMobileBars;
+    }
+    if (width <= 360) {
+      return _kPreviewWaveformMobileBars;
+    }
+    return (width / 2.25)
+        .round()
+        .clamp(_kPreviewWaveformMobileBars, _kPreviewWaveformMaxBars)
+        .toInt();
   }
 
   void _ensureDuration(String filePath) {
@@ -731,20 +757,23 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
         itemBuilder: (context, index) {
           final root = widget.rootFolders[index];
           final selected = root == _selectedRoot;
+          final fixed = _isFixedRoot(root);
           final label = _displayNameForPath(root);
           return Listener(
-            onPointerDown: (event) =>
-                _startFolderHold(root, label, event.position),
-            onPointerMove: (event) => _updateFolderHoldMove(event.position),
-            onPointerUp: (_) => _endFolderHold(),
-            onPointerCancel: (_) => _endFolderHold(),
+            onPointerDown: fixed
+                ? null
+                : (event) => _startFolderHold(root, label, event.position),
+            onPointerMove:
+                fixed ? null : (event) => _updateFolderHoldMove(event.position),
+            onPointerUp: fixed ? null : (_) => _endFolderHold(),
+            onPointerCancel: fixed ? null : (_) => _endFolderHold(),
             child: InputChip(
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               visualDensity: const VisualDensity(horizontal: -3, vertical: -3),
               selected: selected,
               showCheckmark: false,
               avatar: Icon(
-                Icons.folder_outlined,
+                fixed ? Icons.folder_special_outlined : Icons.folder_outlined,
                 size: 14,
                 color: Colors.white.withOpacity(selected ? 0.95 : 0.75),
               ),
@@ -778,6 +807,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   Future<void> _showFolderActions(
       String rootPath, String label, Offset globalPosition) async {
     if (!mounted) return;
+    if (_isFixedRoot(rootPath)) return;
     final overlay =
         Overlay.of(context).context.findRenderObject() as RenderBox?;
     if (overlay == null) return;
@@ -1393,6 +1423,10 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                                     waveform: waveform,
                                     progress: progress,
                                     active: widget.previewPlaying,
+                                    targetBarCount:
+                                        _previewWaveformBarCountForWidth(
+                                      constraints.maxWidth,
+                                    ),
                                   ),
                                 ),
                         ),
@@ -1591,25 +1625,63 @@ class _WaveformPreviewPainter extends CustomPainter {
   final List<double> waveform;
   final double progress;
   final bool active;
+  final int targetBarCount;
 
   const _WaveformPreviewPainter({
     required this.waveform,
     required this.progress,
     required this.active,
+    required this.targetBarCount,
   });
+
+  List<double> _barsForPaint() {
+    final count = targetBarCount.clamp(32, 640).toInt();
+    if (waveform.isEmpty) {
+      return List<double>.generate(
+        count,
+        (i) => 0.14 + (math.sin(i * 0.47).abs() * 0.08),
+        growable: false,
+      );
+    }
+    if (waveform.length == count) return waveform;
+
+    final out = List<double>.filled(count, 0.0, growable: false);
+    for (int i = 0; i < count; i++) {
+      var start = (i * waveform.length / count).floor();
+      var end = ((i + 1) * waveform.length / count).ceil();
+      start = start.clamp(0, waveform.length - 1);
+      end = end.clamp(start + 1, waveform.length);
+
+      var sum = 0.0;
+      var peak = 0.0;
+      for (int j = start; j < end; j++) {
+        final v = waveform[j].clamp(0.0, 1.0);
+        sum += v;
+        if (v > peak) peak = v;
+      }
+      final avg = sum / (end - start);
+      out[i] = math.max(avg, peak * 0.72).clamp(0.0, 1.0);
+    }
+    return out;
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
-    final bars = waveform.isEmpty ? List<double>.filled(64, 0.18) : waveform;
+    final bars = _barsForPaint();
+    final dxStep = size.width / bars.length;
+    final strokeWidth = dxStep < 2.15
+        ? 1.15
+        : dxStep < 2.7
+            ? 1.35
+            : 1.7;
     final barPaint = Paint()
       ..color = const Color(0x66FFFFFF)
       ..strokeCap = StrokeCap.round
-      ..strokeWidth = 1.7;
+      ..strokeWidth = strokeWidth;
     final playedPaint = Paint()
       ..color = active ? const Color(0xFF7EECC2) : const Color(0xFF7DB4FF)
       ..strokeCap = StrokeCap.round
-      ..strokeWidth = 1.7;
-    final dxStep = size.width / bars.length;
+      ..strokeWidth = strokeWidth;
     final centerY = size.height / 2;
     final playedX = size.width * progress.clamp(0.0, 1.0);
 
@@ -1633,7 +1705,8 @@ class _WaveformPreviewPainter extends CustomPainter {
   bool shouldRepaint(covariant _WaveformPreviewPainter oldDelegate) {
     return oldDelegate.waveform != waveform ||
         oldDelegate.progress != progress ||
-        oldDelegate.active != active;
+        oldDelegate.active != active ||
+        oldDelegate.targetBarCount != targetBarCount;
   }
 }
 

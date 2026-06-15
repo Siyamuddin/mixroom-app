@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:mixroom/helpers/orientation_policy.dart';
+import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/feedback_models.dart';
 
@@ -186,7 +188,7 @@ Widget _mixroomShellChromeOverlay({
 }
 
 double mixroomShellBottomPadding(BuildContext context) {
-  if (mixroomUsesDesktopRailNavigation) {
+  if (mixroomUsesSideRailNavigation(context)) {
     return 28;
   }
   return mixroomShellDockBottomInset(context) + kMixroomMainDockOverlapInset;
@@ -207,6 +209,23 @@ double mixroomShellDockBottomInset(BuildContext context) {
 
 bool get mixroomUsesDesktopRailNavigation =>
     !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
+
+bool mixroomUsesTabletLandscapeShell(BuildContext context) {
+  final platform = PlatformCapabilities.current;
+  final size = MediaQuery.sizeOf(context);
+  final displaySize = currentFlutterDisplayLogicalSize();
+  return platform.isMobile &&
+      isTabletLogicalWindowOrDisplaySize(
+        logicalWindowSize: size,
+        logicalDisplaySize: displaySize,
+      ) &&
+      size.width >= size.height;
+}
+
+bool mixroomUsesSideRailNavigation(BuildContext context) {
+  return mixroomUsesDesktopRailNavigation ||
+      mixroomUsesTabletLandscapeShell(context);
+}
 
 class MixroomDesktopTitleBar extends StatelessWidget {
   const MixroomDesktopTitleBar({super.key});

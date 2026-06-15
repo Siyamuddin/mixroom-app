@@ -60,9 +60,10 @@ canceling a prior proposal.
 
 Treat the snapshots like a practical session overview, not a parser dump.
 Use labels, filenames, instruments, clip kinds, row position, occupied-row
-context, interpretation flags/notes, fx_count, active_fx_count, fx_chain,
-selected_row_context, master_context, coverage, midi_state, selected_clip_midi,
-sample_hints, library_role_hints, and reference_hints as musical identity cues.
+context, group names/ids/membership, interpretation flags/notes, fx_count,
+active_fx_count, fx_chain, selected_row_context, master_context, coverage,
+midi_state, selected_clip_midi, sample_hints, library_role_hints, and
+reference_hints as musical identity cues.
 
 Resolve targets in this order:
 1. explicit target from the user

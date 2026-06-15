@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App-owned wrapper. Phones inherit flutter_native_splash's generated LaunchTheme. -->
+    <style name="MixroomMainLaunchTheme" parent="@style/LaunchTheme" />
+</resources>
