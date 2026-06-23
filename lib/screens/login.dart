@@ -30,9 +30,11 @@ class LoginScreen extends StatefulWidget {
   const LoginScreen({
     super.key,
     this.initialMode = LoginEntryMode.signIn,
+    this.onModeChanged,
   });
 
   final LoginEntryMode initialMode;
+  final ValueChanged<LoginEntryMode>? onModeChanged;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -382,6 +384,7 @@ class _LoginScreenState extends State<LoginScreen> {
   void _switchMode(LoginEntryMode next) {
     if (_mode == next) return;
     FocusScope.of(context).unfocus();
+    widget.onModeChanged?.call(next);
     setState(() {
       _mode = next;
       _registerStep = _RegisterStep.account;

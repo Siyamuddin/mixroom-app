@@ -85,6 +85,8 @@ class L10n {
           'Echo': 'Echo',
           'Reverb': 'Reverb',
           'Back': 'Back',
+          'Press back again to exit Mixroom':
+              'Press back again to exit Mixroom',
           'Export': 'Export',
           'EXPORT': 'EXPORT',
           'Exported file saved!': 'Exported file saved!',
@@ -2023,6 +2025,8 @@ class L10n {
           'Echo': '에코',
           'Reverb': '리버브',
           'Back': '뒤로',
+          'Press back again to exit Mixroom':
+              'Mixroom을 종료하려면 뒤로 버튼을 한 번 더 누르세요',
           'Export': '파일로 저장',
           'EXPORT': '파일로 저장',
           'Exported file saved!': '파일 저장이 완료되었습니다!',
@@ -3851,6 +3855,7 @@ class L10n {
           'Echo': '回声',
           'Reverb': '混响',
           'Back': '返回',
+          'Press back again to exit Mixroom': '再按一次返回键退出 Mixroom',
           'Export': '导出',
           'EXPORT': '导出',
           'Exported file saved!': '导出文件已保存!',
@@ -4649,6 +4654,8 @@ class L10n {
           'Echo': 'エコー',
           'Reverb': 'リバーブ',
           'Back': '戻る',
+          'Press back again to exit Mixroom':
+              'Mixroomを終了するには、もう一度戻るボタンを押してください',
           'Export': 'エクスポート',
           'EXPORT': 'エクスポート',
           'Exported file saved!': 'ファイルをエクスポートしました!',
