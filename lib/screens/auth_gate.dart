@@ -35,6 +35,7 @@ class _AuthGateState extends State<AuthGate> {
 
   String? _lastStageKey;
   LoginEntryMode _signedOutLoginMode = LoginEntryMode.signIn;
+  VoidCallback? _signedOutVisibleBackHandler;
   DateTime? _lastAndroidExitBackPressedAt;
 
   bool get _usesAndroidBackGuard =>
@@ -68,18 +69,29 @@ class _AuthGateState extends State<AuthGate> {
     });
   }
 
+  void _handleSignedOutVisibleBackHandlerChanged(VoidCallback? handler) {
+    _signedOutVisibleBackHandler = handler;
+    _lastAndroidExitBackPressedAt = null;
+  }
+
   void _handleAndroidBack({
     required bool didPop,
     required String stageKey,
+    Future<void> Function()? stageBackHandler,
   }) {
     if (didPop || !_usesAndroidBackGuard) return;
 
+    if (stageBackHandler != null) {
+      stageBackHandler();
+      _lastAndroidExitBackPressedAt = null;
+      return;
+    }
+
+    final visibleBackHandler = _signedOutVisibleBackHandler;
     if ((stageKey == 'signed_out' || stageKey == 'signed_out_null_user') &&
-        _signedOutLoginMode != LoginEntryMode.signIn) {
-      setState(() {
-        _signedOutLoginMode = LoginEntryMode.signIn;
-        _lastAndroidExitBackPressedAt = null;
-      });
+        visibleBackHandler != null) {
+      visibleBackHandler();
+      _lastAndroidExitBackPressedAt = null;
       return;
     }
 
@@ -110,6 +122,7 @@ class _AuthGateState extends State<AuthGate> {
       builder: (context, auth, appUser, _) {
         late final Widget destination;
         late final String stageKey;
+        Future<void> Function()? stageBackHandler;
 
         if (auth.isInitializing) {
           destination = const MixroomLaunchSplash();
@@ -118,6 +131,8 @@ class _AuthGateState extends State<AuthGate> {
           destination = LoginScreen(
             initialMode: _signedOutLoginMode,
             onModeChanged: _handleSignedOutModeChanged,
+            onVisibleBackHandlerChanged:
+                _handleSignedOutVisibleBackHandlerChanged,
           );
           stageKey = 'signed_out';
         } else {
@@ -126,6 +141,8 @@ class _AuthGateState extends State<AuthGate> {
             destination = LoginScreen(
               initialMode: _signedOutLoginMode,
               onModeChanged: _handleSignedOutModeChanged,
+              onVisibleBackHandlerChanged:
+                  _handleSignedOutVisibleBackHandlerChanged,
             );
             stageKey = 'signed_out_null_user';
           } else if (appUser.isResolvingPostSignIn || !appUser.isInitialized) {
@@ -141,14 +158,19 @@ class _AuthGateState extends State<AuthGate> {
             appUser.current,
             appUser,
           )) {
+            Future<void> requiredProfileBackHandler() {
+              return _handleRequiredProfileBack(signedInUser);
+            }
+
+            final requiredProfileBusy = auth.isBusy || appUser.isLoading;
+            stageBackHandler =
+                requiredProfileBusy ? () async {} : requiredProfileBackHandler;
             destination = _RequiredProfileCompletionGate(
               user: signedInUser,
               profile: appUser.current!,
-              busy: appUser.isLoading,
+              busy: requiredProfileBusy,
               error: appUser.lastError,
-              onBack: auth.isBusy
-                  ? null
-                  : () => _handleRequiredProfileBack(signedInUser),
+              onBack: requiredProfileBusy ? null : requiredProfileBackHandler,
             );
             stageKey = 'required_profile';
           } else if (appUser.hasPendingSignupProfileSync) {
@@ -188,6 +210,7 @@ class _AuthGateState extends State<AuthGate> {
             _handleAndroidBack(
               didPop: didPop,
               stageKey: stageKey,
+              stageBackHandler: stageBackHandler,
             );
           },
           child: AnimatedSwitcher(

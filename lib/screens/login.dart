@@ -26,15 +26,19 @@ enum LoginEntryMode { signIn, createAccount }
 
 enum _RegisterStep { account, profile }
 
+enum _LoginVisibleBackAction { none, disabled, signIn, registerAccountStep }
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({
     super.key,
     this.initialMode = LoginEntryMode.signIn,
     this.onModeChanged,
+    this.onVisibleBackHandlerChanged,
   });
 
   final LoginEntryMode initialMode;
   final ValueChanged<LoginEntryMode>? onModeChanged;
+  final ValueChanged<VoidCallback?>? onVisibleBackHandlerChanged;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -82,6 +86,7 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _registerBirthdateError;
   String? _registerInlineError;
   String? _registerInlineInfo;
+  _LoginVisibleBackAction? _reportedVisibleBackAction;
 
   @override
   void initState() {
@@ -103,6 +108,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
+    widget.onVisibleBackHandlerChanged?.call(null);
     _confirmationCodeTimer?.cancel();
     _emailController.dispose();
     _confirmationCodeController.dispose();
@@ -378,6 +384,44 @@ class _LoginScreenState extends State<LoginScreen> {
       _registerBirthdateError = null;
       _registerInlineError = null;
       _registerInlineInfo = null;
+    });
+  }
+
+  _LoginVisibleBackAction _visibleBackAction({required bool busy}) {
+    if (_mode == LoginEntryMode.signIn) {
+      return _LoginVisibleBackAction.none;
+    }
+    if (busy) {
+      return _LoginVisibleBackAction.disabled;
+    }
+    if (_registerStep == _RegisterStep.profile) {
+      return _LoginVisibleBackAction.registerAccountStep;
+    }
+    return _LoginVisibleBackAction.signIn;
+  }
+
+  VoidCallback? _visibleBackHandler({required bool busy}) {
+    switch (_visibleBackAction(busy: busy)) {
+      case _LoginVisibleBackAction.registerAccountStep:
+        return _goBackRegisterStep;
+      case _LoginVisibleBackAction.signIn:
+        return () => _switchMode(LoginEntryMode.signIn);
+      case _LoginVisibleBackAction.disabled:
+        return () {};
+      case _LoginVisibleBackAction.none:
+        return null;
+    }
+  }
+
+  void _reportVisibleBackHandlerAfterFrame({required bool busy}) {
+    final action = _visibleBackAction(busy: busy);
+    if (_reportedVisibleBackAction == action) return;
+    _reportedVisibleBackAction = action;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      widget.onVisibleBackHandlerChanged?.call(
+        _visibleBackHandler(busy: busy),
+      );
     });
   }
 
@@ -1166,6 +1210,8 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
     final busy = auth.isBusy;
+    _reportVisibleBackHandlerAfterFrame(busy: busy);
+
     final supportsSocialSignIn = !kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.android ||
             defaultTargetPlatform == TargetPlatform.iOS ||
