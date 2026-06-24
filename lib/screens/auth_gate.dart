@@ -3,7 +3,9 @@
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:http/http.dart' as http;
 import 'package:mixroom/config/app_api_config.dart';
@@ -29,8 +31,15 @@ class AuthGate extends StatefulWidget {
 }
 
 class _AuthGateState extends State<AuthGate> {
+  static const Duration _androidExitBackInterval = Duration(seconds: 2);
+
   String? _lastStageKey;
   LoginEntryMode _signedOutLoginMode = LoginEntryMode.signIn;
+  VoidCallback? _signedOutVisibleBackHandler;
+  DateTime? _lastAndroidExitBackPressedAt;
+
+  bool get _usesAndroidBackGuard =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
   bool _needsRequiredProfile(
     AppUserSnapshot? profile,
@@ -52,23 +61,89 @@ class _AuthGateState extends State<AuthGate> {
     await context.read<AuthService>().signOut();
   }
 
+  void _handleSignedOutModeChanged(LoginEntryMode mode) {
+    if (_signedOutLoginMode == mode) return;
+    setState(() {
+      _signedOutLoginMode = mode;
+      _lastAndroidExitBackPressedAt = null;
+    });
+  }
+
+  void _handleSignedOutVisibleBackHandlerChanged(VoidCallback? handler) {
+    _signedOutVisibleBackHandler = handler;
+    _lastAndroidExitBackPressedAt = null;
+  }
+
+  void _handleAndroidBack({
+    required bool didPop,
+    required String stageKey,
+    Future<void> Function()? stageBackHandler,
+  }) {
+    if (didPop || !_usesAndroidBackGuard) return;
+
+    if (stageBackHandler != null) {
+      stageBackHandler();
+      _lastAndroidExitBackPressedAt = null;
+      return;
+    }
+
+    final visibleBackHandler = _signedOutVisibleBackHandler;
+    if ((stageKey == 'signed_out' || stageKey == 'signed_out_null_user') &&
+        visibleBackHandler != null) {
+      visibleBackHandler();
+      _lastAndroidExitBackPressedAt = null;
+      return;
+    }
+
+    final now = DateTime.now();
+    final previous = _lastAndroidExitBackPressedAt;
+    if (previous != null &&
+        now.difference(previous) <= _androidExitBackInterval) {
+      SystemNavigator.pop();
+      return;
+    }
+
+    _lastAndroidExitBackPressedAt = now;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content:
+              Text(L10n.translate(context, 'Press back again to exit Mixroom')),
+          duration: _androidExitBackInterval,
+        ),
+      );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer2<AuthService, AppUserService>(
       builder: (context, auth, appUser, _) {
         late final Widget destination;
         late final String stageKey;
+        Future<void> Function()? stageBackHandler;
 
         if (auth.isInitializing) {
           destination = const MixroomLaunchSplash();
           stageKey = 'auth_initializing';
         } else if (!auth.isSignedIn) {
-          destination = LoginScreen(initialMode: _signedOutLoginMode);
+          destination = LoginScreen(
+            initialMode: _signedOutLoginMode,
+            onModeChanged: _handleSignedOutModeChanged,
+            onVisibleBackHandlerChanged:
+                _handleSignedOutVisibleBackHandlerChanged,
+          );
           stageKey = 'signed_out';
         } else {
           final signedInUser = auth.signedInUser;
           if (signedInUser == null) {
-            destination = LoginScreen(initialMode: _signedOutLoginMode);
+            destination = LoginScreen(
+              initialMode: _signedOutLoginMode,
+              onModeChanged: _handleSignedOutModeChanged,
+              onVisibleBackHandlerChanged:
+                  _handleSignedOutVisibleBackHandlerChanged,
+            );
             stageKey = 'signed_out_null_user';
           } else if (appUser.isResolvingPostSignIn || !appUser.isInitialized) {
             destination = _SignupCompletionGate(
@@ -83,14 +158,19 @@ class _AuthGateState extends State<AuthGate> {
             appUser.current,
             appUser,
           )) {
+            Future<void> requiredProfileBackHandler() {
+              return _handleRequiredProfileBack(signedInUser);
+            }
+
+            final requiredProfileBusy = auth.isBusy || appUser.isLoading;
+            stageBackHandler =
+                requiredProfileBusy ? () async {} : requiredProfileBackHandler;
             destination = _RequiredProfileCompletionGate(
               user: signedInUser,
               profile: appUser.current!,
-              busy: appUser.isLoading,
+              busy: requiredProfileBusy,
               error: appUser.lastError,
-              onBack: auth.isBusy
-                  ? null
-                  : () => _handleRequiredProfileBack(signedInUser),
+              onBack: requiredProfileBusy ? null : requiredProfileBackHandler,
             );
             stageKey = 'required_profile';
           } else if (appUser.hasPendingSignupProfileSync) {
@@ -124,34 +204,44 @@ class _AuthGateState extends State<AuthGate> {
           }
         });
 
-        return AnimatedSwitcher(
-          duration: const Duration(milliseconds: 320),
-          switchInCurve: Curves.easeOutCubic,
-          switchOutCurve: Curves.easeInCubic,
-          transitionBuilder: (child, animation) {
-            final curved = CurvedAnimation(
-              parent: animation,
-              curve: Curves.easeOutCubic,
-            );
-            final slide = Tween<Offset>(
-              begin: const Offset(0.08, 0),
-              end: Offset.zero,
-            ).animate(curved);
-            return FadeTransition(
-              opacity: CurvedAnimation(
-                parent: animation,
-                curve: Curves.easeOut,
-              ),
-              child: SlideTransition(
-                position: slide,
-                child: child,
-              ),
+        return PopScope(
+          canPop: !_usesAndroidBackGuard,
+          onPopInvokedWithResult: (didPop, _) {
+            _handleAndroidBack(
+              didPop: didPop,
+              stageKey: stageKey,
+              stageBackHandler: stageBackHandler,
             );
           },
-          child: KeyedSubtree(
-            key: ValueKey(
-                showLoginLoadingShell ? 'login_loading_shell' : stageKey),
-            child: animatedChild,
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 320),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (child, animation) {
+              final curved = CurvedAnimation(
+                parent: animation,
+                curve: Curves.easeOutCubic,
+              );
+              final slide = Tween<Offset>(
+                begin: const Offset(0.08, 0),
+                end: Offset.zero,
+              ).animate(curved);
+              return FadeTransition(
+                opacity: CurvedAnimation(
+                  parent: animation,
+                  curve: Curves.easeOut,
+                ),
+                child: SlideTransition(
+                  position: slide,
+                  child: child,
+                ),
+              );
+            },
+            child: KeyedSubtree(
+              key: ValueKey(
+                  showLoginLoadingShell ? 'login_loading_shell' : stageKey),
+              child: animatedChild,
+            ),
           ),
         );
       },
