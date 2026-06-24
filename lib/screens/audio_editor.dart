@@ -3858,6 +3858,12 @@ const String _kDesktopShortcutOpenChat = 'open_chat';
 const String _kDesktopShortcutCloseChat = 'close_chat';
 const String _kDesktopShortcutCopyClips = 'copy_clips';
 const String _kDesktopShortcutPasteClips = 'paste_clips';
+const String _kDesktopShortcutStepDuplicateClips = 'step_duplicate_clips';
+const String _kDesktopShortcutSelectTool = 'select_tool';
+const String _kDesktopShortcutStretchTool = 'stretch_tool';
+const String _kDesktopShortcutPaintTool = 'paint_tool';
+const String _kDesktopShortcutCutTool = 'cut_tool';
+const String _kDesktopShortcutDeleteTool = 'delete_tool';
 const String _kDesktopPanelSampleBrowser = 'sample_browser';
 const String _kDesktopPanelPianoRoll = 'piano_roll';
 const String _kDesktopPanelPitchLab = 'pitch_lab';
@@ -8104,7 +8110,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _handleDesktopOpenChatShortcut() {
-    if (_isEditorTextEntryActive() || _isThinking) return;
+    if (_isEditorTextEntryActive()) return;
     _handleBottomChatBarTap(trackUiClick: false);
   }
 
@@ -8646,6 +8652,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           meta: Platform.isMacOS,
           control: !Platform.isMacOS,
         );
+      case _kDesktopShortcutStepDuplicateClips:
+        return DesktopShortcutBinding(
+          keyId: LogicalKeyboardKey.keyB.keyId,
+          meta: Platform.isMacOS,
+          control: !Platform.isMacOS,
+        );
+      case _kDesktopShortcutSelectTool:
+        return DesktopShortcutBinding(keyId: LogicalKeyboardKey.digit1.keyId);
+      case _kDesktopShortcutStretchTool:
+        return DesktopShortcutBinding(keyId: LogicalKeyboardKey.digit2.keyId);
+      case _kDesktopShortcutPaintTool:
+        return DesktopShortcutBinding(keyId: LogicalKeyboardKey.digit3.keyId);
+      case _kDesktopShortcutCutTool:
+        return DesktopShortcutBinding(keyId: LogicalKeyboardKey.digit4.keyId);
+      case _kDesktopShortcutDeleteTool:
+        return DesktopShortcutBinding(keyId: LogicalKeyboardKey.digit5.keyId);
     }
     return DesktopShortcutBinding(keyId: LogicalKeyboardKey.space.keyId);
   }
@@ -8662,11 +8684,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             _kDesktopShortcutToggleSoloSelectedRow, 'Toggle Selected Solo'),
         MapEntry(
             _kDesktopShortcutToggleMuteSelectedRow, 'Toggle Selected Mute'),
+        MapEntry(_kDesktopShortcutSelectTool, 'Select Tool'),
+        MapEntry(_kDesktopShortcutStretchTool, 'Stretch Tool'),
+        MapEntry(_kDesktopShortcutPaintTool, 'Paint Tool'),
+        MapEntry(_kDesktopShortcutCutTool, 'Cut Tool'),
+        MapEntry(_kDesktopShortcutDeleteTool, 'Delete Tool'),
         MapEntry(_kDesktopShortcutOpenChat, 'Open / Focus Chat'),
         MapEntry(_kDesktopShortcutUndo, 'Undo'),
         MapEntry(_kDesktopShortcutRedo, 'Redo'),
         MapEntry(_kDesktopShortcutCopyClips, 'Copy Selected Clips'),
         MapEntry(_kDesktopShortcutPasteClips, 'Paste Copied Clips'),
+        MapEntry(
+          _kDesktopShortcutStepDuplicateClips,
+          'Step Duplicate Selected Clips',
+        ),
         MapEntry(_kDesktopShortcutCloseChat, 'Close Chat'),
       ];
 
@@ -63709,6 +63740,35 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           onClearCopiedClip: _clearCopiedClip,
                                           onStepDuplicateClips:
                                               _handleStepDuplicateClips,
+                                          copyClipsShortcutBinding:
+                                              _desktopShortcutBindingFor(
+                                            _kDesktopShortcutCopyClips,
+                                          ),
+                                          pasteClipsShortcutBinding:
+                                              _desktopShortcutBindingFor(
+                                            _kDesktopShortcutPasteClips,
+                                          ),
+                                          stepDuplicateClipsShortcutBinding:
+                                              _desktopShortcutBindingFor(
+                                            _kDesktopShortcutStepDuplicateClips,
+                                          ),
+                                          toolShortcutBindings: <DesktopShortcutBinding>[
+                                            _desktopShortcutBindingFor(
+                                              _kDesktopShortcutSelectTool,
+                                            ),
+                                            _desktopShortcutBindingFor(
+                                              _kDesktopShortcutStretchTool,
+                                            ),
+                                            _desktopShortcutBindingFor(
+                                              _kDesktopShortcutPaintTool,
+                                            ),
+                                            _desktopShortcutBindingFor(
+                                              _kDesktopShortcutCutTool,
+                                            ),
+                                            _desktopShortcutBindingFor(
+                                              _kDesktopShortcutDeleteTool,
+                                            ),
+                                          ],
                                           onOpenMidiClip: _openMidiClipEditor,
                                           canOpenMidiInstrumentUi:
                                               _canOpenMidiInstrumentUiForClipIndex,

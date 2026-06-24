@@ -14,6 +14,7 @@ import 'package:mixroom/widgets/sample_browser_panel.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
 import 'package:mixroom/helpers/automation_clip_clone_helper.dart';
 import 'package:mixroom/helpers/dbfs_meter_visuals.dart';
+import 'package:mixroom/helpers/desktop_editor_prefs.dart';
 import 'package:mixroom/helpers/desktop_slider_wheel_sensitivity.dart';
 import 'package:mixroom/helpers/glass_ui_tokens.dart';
 import 'package:mixroom/helpers/halo.dart';
@@ -545,6 +546,10 @@ class AudioCanvasTimeline extends StatefulWidget {
   final void Function(List<int> clipIndices)? onCopyClips;
   final Future<bool> Function(List<int> clipIndices, double pasteStartMs)?
       onStepDuplicateClips;
+  final DesktopShortcutBinding? copyClipsShortcutBinding;
+  final DesktopShortcutBinding? pasteClipsShortcutBinding;
+  final DesktopShortcutBinding? stepDuplicateClipsShortcutBinding;
+  final List<DesktopShortcutBinding>? toolShortcutBindings;
   final Future<void> Function(List<int> clipIndices)? onDeleteClips;
   final Future<void> Function(int clipIndex, double cutTimeMs)? onCutClipAt;
   final Future<void> Function(List<int> clipIndices)? onGlueClips;
@@ -735,6 +740,10 @@ class AudioCanvasTimeline extends StatefulWidget {
     this.onClearCopiedClip,
     this.onCopyClips,
     this.onStepDuplicateClips,
+    this.copyClipsShortcutBinding,
+    this.pasteClipsShortcutBinding,
+    this.stepDuplicateClipsShortcutBinding,
+    this.toolShortcutBindings,
     this.onDeleteClips,
     this.onCutClipAt,
     this.onGlueClips,
@@ -2791,8 +2800,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _publishTopControlsState();
   }
 
-  _TimelineTool? _timelineToolForShortcutKey(LogicalKeyboardKey key) {
-    final index = switch (key) {
+  int _fallbackTimelineToolShortcutIndex(LogicalKeyboardKey key) {
+    return switch (key) {
       LogicalKeyboardKey.digit1 || LogicalKeyboardKey.numpad1 => 0,
       LogicalKeyboardKey.digit2 || LogicalKeyboardKey.numpad2 => 1,
       LogicalKeyboardKey.digit3 || LogicalKeyboardKey.numpad3 => 2,
@@ -2800,6 +2809,65 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       LogicalKeyboardKey.digit5 || LogicalKeyboardKey.numpad5 => 4,
       _ => -1,
     };
+  }
+
+  bool _isUnmodifiedShortcutBinding(DesktopShortcutBinding binding) {
+    return !binding.meta && !binding.control && !binding.shift && !binding.alt;
+  }
+
+  bool _matchesDefaultToolNumpadShortcut(
+    KeyEvent event,
+    DesktopShortcutBinding binding,
+    int index,
+  ) {
+    if (!_isUnmodifiedShortcutBinding(binding)) return false;
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isMetaPressed ||
+        keyboard.isControlPressed ||
+        keyboard.isShiftPressed ||
+        keyboard.isAltPressed) {
+      return false;
+    }
+    final expectedDigit = switch (index) {
+      0 => LogicalKeyboardKey.digit1,
+      1 => LogicalKeyboardKey.digit2,
+      2 => LogicalKeyboardKey.digit3,
+      3 => LogicalKeyboardKey.digit4,
+      4 => LogicalKeyboardKey.digit5,
+      _ => null,
+    };
+    final expectedNumpad = switch (index) {
+      0 => LogicalKeyboardKey.numpad1,
+      1 => LogicalKeyboardKey.numpad2,
+      2 => LogicalKeyboardKey.numpad3,
+      3 => LogicalKeyboardKey.numpad4,
+      4 => LogicalKeyboardKey.numpad5,
+      _ => null,
+    };
+    if (expectedDigit == null || expectedNumpad == null) return false;
+    return binding.logicalKey == expectedDigit &&
+        event.logicalKey == expectedNumpad;
+  }
+
+  _TimelineTool? _timelineToolForShortcutEvent(KeyEvent event) {
+    final bindings = widget.toolShortcutBindings;
+    if (bindings != null) {
+      for (int i = 0;
+          i < bindings.length && i < _TimelineTool.values.length;
+          i++) {
+        if (_matchesTimelineShortcut(
+              event,
+              bindings[i],
+              LogicalKeyboardKey.space,
+            ) ||
+            _matchesDefaultToolNumpadShortcut(event, bindings[i], i)) {
+          return _TimelineTool.values[i];
+        }
+      }
+      return null;
+    }
+
+    final index = _fallbackTimelineToolShortcutIndex(event.logicalKey);
     if (index < 0 || index >= _TimelineTool.values.length) return null;
     return _TimelineTool.values[index];
   }
@@ -4308,6 +4376,39 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _stepDuplicateShortcutNextPasteMs = null;
   }
 
+  bool _matchesTimelineShortcut(
+    KeyEvent event,
+    DesktopShortcutBinding? binding,
+    LogicalKeyboardKey fallbackKey,
+  ) {
+    if (binding == null) {
+      final keyboard = HardwareKeyboard.instance;
+      return event.logicalKey == fallbackKey &&
+          (keyboard.isMetaPressed || keyboard.isControlPressed);
+    }
+    final key = binding.logicalKey;
+    if (key == null || event.logicalKey != key) return false;
+    final keyboard = HardwareKeyboard.instance;
+    if (binding.shift != keyboard.isShiftPressed) return false;
+    if (binding.alt != keyboard.isAltPressed) return false;
+    if (Platform.isMacOS) {
+      if (binding.meta != keyboard.isMetaPressed) return false;
+      if (binding.control != keyboard.isControlPressed) return false;
+    } else {
+      final wantsPrimary = binding.meta || binding.control;
+      final primaryPressed = keyboard.isControlPressed;
+      if (wantsPrimary != primaryPressed) return false;
+      if (!wantsPrimary && keyboard.isMetaPressed) return false;
+    }
+    return true;
+  }
+
+  bool _isStepDuplicateShortcutKey(LogicalKeyboardKey key) {
+    final bindingKey = widget.stepDuplicateClipsShortcutBinding?.logicalKey;
+    return key == LogicalKeyboardKey.keyB ||
+        (bindingKey != null && key == bindingKey);
+  }
+
   bool _stepDuplicateSelectedClipsFromShortcut({required bool isRepeat}) {
     final duplicate = widget.onStepDuplicateClips;
     if (duplicate == null) return false;
@@ -5225,7 +5326,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   KeyEventResult _handleTimelineKeyEvent(FocusNode node, KeyEvent event) {
     if (event is KeyUpEvent) {
-      if (event.logicalKey == LogicalKeyboardKey.keyB ||
+      if (_isStepDuplicateShortcutKey(event.logicalKey) ||
           event.logicalKey == LogicalKeyboardKey.metaLeft ||
           event.logicalKey == LogicalKeyboardKey.metaRight ||
           event.logicalKey == LogicalKeyboardKey.controlLeft ||
@@ -5245,33 +5346,43 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final primaryShortcutPressed =
         keyboard.isMetaPressed || keyboard.isControlPressed;
     if (!isRepeat &&
-        !primaryShortcutPressed &&
-        !keyboard.isAltPressed &&
-        !keyboard.isShiftPressed) {
-      final tool = _timelineToolForShortcutKey(event.logicalKey);
-      if (tool != null) {
-        _selectTimelineTool(tool);
-        return KeyEventResult.handled;
-      }
-    }
-    if (!isRepeat &&
-        primaryShortcutPressed &&
-        event.logicalKey == LogicalKeyboardKey.keyC) {
+        _matchesTimelineShortcut(
+          event,
+          widget.copyClipsShortcutBinding,
+          LogicalKeyboardKey.keyC,
+        )) {
       if (_activeSelectedClipIndices().isEmpty) return KeyEventResult.ignored;
       _copySelectedClips();
       return KeyEventResult.handled;
     }
     if (!isRepeat &&
-        primaryShortcutPressed &&
-        event.logicalKey == LogicalKeyboardKey.keyV) {
+        _matchesTimelineShortcut(
+          event,
+          widget.pasteClipsShortcutBinding,
+          LogicalKeyboardKey.keyV,
+        )) {
       return _pasteClipboardFromTimelineShortcut()
           ? KeyEventResult.handled
           : KeyEventResult.ignored;
     }
-    if (primaryShortcutPressed && event.logicalKey == LogicalKeyboardKey.keyB) {
+    if (_matchesTimelineShortcut(
+      event,
+      widget.stepDuplicateClipsShortcutBinding,
+      LogicalKeyboardKey.keyB,
+    )) {
       return _stepDuplicateSelectedClipsFromShortcut(isRepeat: isRepeat)
           ? KeyEventResult.handled
           : KeyEventResult.ignored;
+    }
+    if (!isRepeat &&
+        !primaryShortcutPressed &&
+        !keyboard.isAltPressed &&
+        !keyboard.isShiftPressed) {
+      final tool = _timelineToolForShortcutEvent(event);
+      if (tool != null) {
+        _selectTimelineTool(tool);
+        return KeyEventResult.handled;
+      }
     }
     if (isRepeat || event.logicalKey != LogicalKeyboardKey.escape) {
       return KeyEventResult.ignored;
