@@ -51,6 +51,10 @@
                              segments:(NSArray<NSDictionary *> *)segments;
 + (NSArray<NSDictionary *> *)scanPluginsObjC:(NSArray<NSString *> * _Nullable)searchPaths;
 + (NSArray<NSDictionary *> *)rescanPluginsObjC:(NSArray<NSString *> * _Nullable)searchPaths;
++ (NSArray<NSDictionary *> *)getQuarantinedPluginsObjC;
++ (BOOL)isPluginQuarantinedObjC:(NSString *)pluginId;
++ (void)clearPluginQuarantineObjC:(NSString *)pluginId;
++ (void)clearAllPluginQuarantinesObjC;
 + (NSDictionary<NSString *, id> *)getEngineDiagnosticsObjC;
 + (void)bypassPluginObjC:(NSInteger)trackIndex
              effectIndex:(NSInteger)effectIndex
@@ -112,6 +116,7 @@
 + (BOOL)setMidiClipPluginStateObjC:(NSInteger)clipIndex
                         stateBase64:(NSString *)stateBase64;
 + (void)setHostedPluginWindowsDetachedObjC:(BOOL)detached;
++ (void)setDesktopKeyboardMidiForwardingEnabledObjC:(BOOL)enabled;
 + (NSArray<NSDictionary *> *)consumeLiveMidiInputEventsObjC;
 + (NSArray<NSDictionary *> *)getConnectedMidiInputDevicesObjC;
 + (void)unloadClipObjC:(NSInteger)clipIndex;
@@ -267,9 +272,15 @@
 + (NSString *)getCurrentOutputDeviceNameObjC;
 + (BOOL)prepareRecordingInputsObjC:(NSInteger)desiredInputChannels
                             reason:(NSString *)reason;
++ (BOOL)configureAudioDeviceObjC:(double)sampleRate
+                       bufferSize:(NSInteger)bufferSize
+              desiredInputChannels:(NSInteger)desiredInputChannels
+                            reason:(NSString *)reason;
 + (BOOL)preparePlaybackRouteObjC:(NSString *)reason;
 + (void)refreshAudioRouteObjC:(NSString *)reason;
 + (void)setLiveInputMonitoringEnabledObjC:(BOOL)enabled;
++ (void)setMidiInputChannelFilterObjC:(NSInteger)channel;
++ (NSNumber *)getMidiInputChannelFilterObjC;
 
 + (BOOL)startRecordingObjC:(NSString *)path
               channelStart:(NSInteger)start

@@ -46,14 +46,19 @@ static const void *kMixroomHostedPluginWindowHelperKey =
 static const void *kMixroomEmbeddedPluginChromeHelperKey =
     &kMixroomEmbeddedPluginChromeHelperKey;
 static BOOL gMixroomHostedPluginWindowsDetached = NO;
+static BOOL gMixroomDesktopKeyboardMidiForwardingEnabled = NO;
 extern "C" void mixroomSetHostedPluginWindowsDetached(BOOL detached);
+extern "C" void mixroomSetDesktopKeyboardMidiForwardingEnabled(BOOL enabled);
 extern "C" void mixroomRequestHostedPluginEditorClose(void *ownerHandle);
+extern "C" void mixroomRequestHostedPluginAutomationForOwner(void *ownerHandle);
 extern "C" void mixroomSetHostedPluginWindowDetachedForOwner(void *ownerHandle,
                                                              bool detached);
 extern "C" void *mixroomGetFlutterHostNativeView(void);
 extern "C" bool mixroomGetNativeViewSize(void *nativeView,
                                           double *width,
                                           double *height);
+extern "C" bool mixroomGetFlutterHostWindowContentSize(double *width,
+                                                        double *height);
 extern "C" void mixroomSetNativeViewFrameScale(void *nativeView,
                                                 double x,
                                                 double y,
@@ -80,7 +85,84 @@ static NSRect mixroomScreenContentRectForWindow(NSWindow *window) {
     if (NSIsEmptyRect(rect)) {
         rect = window.frame;
     }
+    NSScreen *screen = window.screen ?: NSScreen.mainScreen;
+    if (screen != nil && !NSIsEmptyRect(screen.visibleFrame)) {
+        rect = NSIntersectionRect(rect, screen.visibleFrame);
+        if (NSIsEmptyRect(rect)) {
+            rect = screen.visibleFrame;
+        }
+    }
     return rect;
+}
+
+static void mixroomPositionHostedPluginWindowInHost(NSWindow *pluginWindow,
+                                                    NSWindow *hostWindow,
+                                                    BOOL forceCenter) {
+    if (pluginWindow == nil || hostWindow == nil) {
+        return;
+    }
+    NSRect hostRect = mixroomScreenContentRectForWindow(hostWindow);
+    if (NSIsEmptyRect(hostRect)) {
+        return;
+    }
+
+    NSScreen *screen = hostWindow.screen ?: pluginWindow.screen ?: NSScreen.mainScreen;
+    NSRect visibleRect = screen != nil && !NSIsEmptyRect(screen.visibleFrame)
+                             ? screen.visibleFrame
+                             : hostRect;
+    NSRect usableRect = visibleRect;
+    usableRect = NSInsetRect(usableRect, 24.0, 24.0);
+    if (usableRect.size.width < 360.0 || usableRect.size.height < 240.0) {
+        usableRect = visibleRect;
+    }
+    if (NSIsEmptyRect(usableRect)) {
+        return;
+    }
+
+    NSSize desiredContentSize =
+        pluginWindow.contentView != nil ? pluginWindow.contentView.bounds.size : NSZeroSize;
+    for (NSView *subview in pluginWindow.contentView.subviews) {
+        desiredContentSize.width =
+            MAX(desiredContentSize.width, MAX(subview.bounds.size.width, subview.frame.size.width));
+        desiredContentSize.height =
+            MAX(desiredContentSize.height, MAX(subview.bounds.size.height, subview.frame.size.height));
+    }
+    const CGFloat maxContentWidth = MAX(320.0, MIN(1400.0, usableRect.size.width));
+    const CGFloat maxContentHeight = MAX(220.0, MIN(920.0, usableRect.size.height));
+    if (desiredContentSize.width > 0.0 && desiredContentSize.height > 0.0) {
+        desiredContentSize.width =
+            MIN(MAX(desiredContentSize.width, 320.0), maxContentWidth);
+        desiredContentSize.height =
+            MIN(MAX(desiredContentSize.height, 220.0), maxContentHeight);
+    }
+
+    NSRect frame = pluginWindow.frame;
+    if (desiredContentSize.width > 0.0 && desiredContentSize.height > 0.0) {
+        NSRect contentFrame = [pluginWindow frameRectForContentRect:
+            NSMakeRect(0.0, 0.0, desiredContentSize.width, desiredContentSize.height)];
+        frame.size.width = MAX(frame.size.width, contentFrame.size.width);
+        frame.size.height = MAX(frame.size.height, contentFrame.size.height);
+    }
+
+    NSRect maxContentFrame = [pluginWindow frameRectForContentRect:
+        NSMakeRect(0.0, 0.0, maxContentWidth, maxContentHeight)];
+    const CGFloat maxWidth =
+        MAX(320.0, MIN(maxContentFrame.size.width, usableRect.size.width));
+    const CGFloat maxHeight =
+        MAX(220.0, MIN(maxContentFrame.size.height, usableRect.size.height));
+    frame.size.width = MIN(MAX(frame.size.width, 320.0), maxWidth);
+    frame.size.height = MIN(MAX(frame.size.height, 220.0), maxHeight);
+
+    if (forceCenter || !NSIntersectsRect(frame, hostRect)) {
+        frame.origin.x = NSMidX(hostRect) - (frame.size.width / 2.0);
+        frame.origin.y = NSMidY(hostRect) - (frame.size.height / 2.0);
+    }
+
+    frame.origin.x = MIN(MAX(frame.origin.x, NSMinX(usableRect)),
+                         NSMaxX(usableRect) - frame.size.width);
+    frame.origin.y = MIN(MAX(frame.origin.y, NSMinY(usableRect)),
+                         NSMaxY(usableRect) - frame.size.height);
+    [pluginWindow setFrame:frame display:YES animate:NO];
 }
 
 static NSWindow *mixroomFindFlutterHostWindow(void) {
@@ -136,6 +218,34 @@ extern "C" bool mixroomGetNativeViewSize(void *nativeView,
     return size.width > 0.0 && size.height > 0.0;
 }
 
+extern "C" bool mixroomGetFlutterHostWindowContentSize(double *width,
+                                                        double *height) {
+    __block NSSize size = NSZeroSize;
+    void (^readSize)(void) = ^{
+        NSWindow *hostWindow = mixroomFindFlutterHostWindow();
+        NSScreen *screen = hostWindow.screen ?: NSScreen.mainScreen;
+        NSRect rect = screen != nil ? screen.visibleFrame : NSZeroRect;
+        if (NSIsEmptyRect(rect)) {
+            rect = mixroomScreenContentRectForWindow(hostWindow);
+        }
+        if (!NSIsEmptyRect(rect)) {
+            size = rect.size;
+        }
+    };
+    if ([NSThread isMainThread]) {
+        readSize();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), readSize);
+    }
+    if (width != nullptr) {
+        *width = (double)size.width;
+    }
+    if (height != nullptr) {
+        *height = (double)size.height;
+    }
+    return size.width > 0.0 && size.height > 0.0;
+}
+
 extern "C" void mixroomSetNativeViewFrameScale(void *nativeView,
                                                 double x,
                                                 double y,
@@ -171,11 +281,11 @@ extern "C" void mixroomSetNativeViewFrameScale(void *nativeView,
 @class MixroomEmbeddedPluginChromeHelper;
 
 @interface MixroomEmbeddedPluginChromeView : NSVisualEffectView
-@property(nonatomic, weak) MixroomEmbeddedPluginChromeHelper *helper;
+@property(nonatomic, assign) MixroomEmbeddedPluginChromeHelper *helper;
 @end
 
 @interface MixroomEmbeddedPluginChromeHelper : NSObject
-@property(nonatomic, weak) NSView *pluginView;
+@property(nonatomic, assign) NSView *pluginView;
 @property(nonatomic, strong) MixroomEmbeddedPluginChromeView *barView;
 @property(nonatomic, strong) NSTextField *titleField;
 @property(nonatomic, strong) CATextLayer *titleLayer;
@@ -187,7 +297,7 @@ extern "C" void mixroomSetNativeViewFrameScale(void *nativeView,
 @property(nonatomic, assign) CGFloat scale;
 @property(nonatomic, assign) NSPoint dragStartPoint;
 @property(nonatomic, assign) NSRect dragStartPluginFrame;
-@property(nonatomic, strong) id keyMonitor;
+@property(nonatomic, assign) id keyMonitor;
 - (instancetype)initWithPluginView:(NSView *)pluginView
                               title:(NSString *)title
                         ownerHandle:(void *)ownerHandle
@@ -197,17 +307,24 @@ extern "C" void mixroomSetNativeViewFrameScale(void *nativeView,
 - (void)dragWithEvent:(NSEvent *)event;
 - (void)closePlugin;
 - (void)detach;
+- (void)invalidate;
 @end
 
 @implementation MixroomEmbeddedPluginChromeView
 
 - (void)mouseDown:(NSEvent *)event {
     [self.window makeFirstResponder:self];
-    [self.helper beginDragWithEvent:event];
+    MixroomEmbeddedPluginChromeHelper *helper = self.helper;
+    if (helper != nil) {
+        [helper beginDragWithEvent:event];
+    }
 }
 
 - (void)mouseDragged:(NSEvent *)event {
-    [self.helper dragWithEvent:event];
+    MixroomEmbeddedPluginChromeHelper *helper = self.helper;
+    if (helper != nil) {
+        [helper dragWithEvent:event];
+    }
 }
 
 - (BOOL)acceptsFirstResponder {
@@ -216,7 +333,10 @@ extern "C" void mixroomSetNativeViewFrameScale(void *nativeView,
 
 - (void)keyDown:(NSEvent *)event {
     if (event.keyCode == 53) {
-        [self.helper closePlugin];
+        MixroomEmbeddedPluginChromeHelper *helper = self.helper;
+        if (helper != nil) {
+            [helper closePlugin];
+        }
         return;
     }
     [super keyDown:event];
@@ -295,10 +415,10 @@ extern "C" void mixroomSetNativeViewFrameScale(void *nativeView,
             [_barView addSubview:button];
         }
 
-        __weak MixroomEmbeddedPluginChromeHelper *weakSelf = self;
+        MixroomEmbeddedPluginChromeHelper *blockSelf = self;
         _keyMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
                                                             handler:^NSEvent *(NSEvent *event) {
-            MixroomEmbeddedPluginChromeHelper *strongSelf = weakSelf;
+            MixroomEmbeddedPluginChromeHelper *strongSelf = blockSelf;
             if (strongSelf == nil || event.keyCode != 53) {
                 return event;
             }
@@ -334,8 +454,10 @@ extern "C" void mixroomSetNativeViewFrameScale(void *nativeView,
 }
 
 - (void)closePlugin {
-    if (self.ownerHandle != nullptr) {
-        mixroomRequestHostedPluginEditorClose(self.ownerHandle);
+    void *ownerHandle = self.ownerHandle;
+    [self invalidate];
+    if (ownerHandle != nullptr) {
+        mixroomRequestHostedPluginEditorClose(ownerHandle);
     }
 }
 
@@ -427,12 +549,19 @@ extern "C" void mixroomSetNativeViewFrameScale(void *nativeView,
                                         controlHeight);
 }
 
-- (void)dealloc {
+- (void)invalidate {
     if (self.keyMonitor != nil) {
         [NSEvent removeMonitor:self.keyMonitor];
         self.keyMonitor = nil;
     }
+    self.barView.helper = nil;
     [self.barView removeFromSuperview];
+    self.pluginView = nil;
+    self.ownerHandle = nullptr;
+}
+
+- (void)dealloc {
+    [self invalidate];
 }
 
 @end
@@ -490,7 +619,7 @@ extern "C" void mixroomReleaseEmbeddedPluginChrome(void *nativeView) {
         MixroomEmbeddedPluginChromeHelper *helper =
             objc_getAssociatedObject(pluginView, kMixroomEmbeddedPluginChromeHelperKey);
         if (helper != nil) {
-            [helper.barView removeFromSuperview];
+            [helper invalidate];
             objc_setAssociatedObject(pluginView,
                                      kMixroomEmbeddedPluginChromeHelperKey,
                                      nil,
@@ -575,15 +704,105 @@ extern "C" void mixroomScheduleOttPluginEditorAutotest(void) {
 }
 
 @interface MixroomHostedPluginWindowHelper : NSObject
-@property(nonatomic, weak) NSWindow *window;
-@property(nonatomic, strong) id eventMonitor;
+@property(nonatomic, strong) NSWindow *window;
+@property(nonatomic, assign) id eventMonitor;
 @property(nonatomic, strong) id closeObserver;
+@property(nonatomic, strong) NSTitlebarAccessoryViewController *automationAccessory;
+@property(nonatomic, strong) NSButton *automationButton;
 @property(nonatomic, copy) NSDictionary<NSString *, id> *metadata;
+@property(nonatomic, strong) NSMutableSet<NSNumber *> *heldDesktopMidiKeyCodes;
 @property(nonatomic, assign) BOOL positionedOnce;
+@property(nonatomic, assign) BOOL closing;
 - (instancetype)initWithWindow:(NSWindow *)window
                       metadata:(NSDictionary<NSString *, id> *)metadata;
 - (void)applyWindowMode;
+- (void)removeEventMonitorIfNeeded;
+- (void)installAutomationAccessoryIfNeededForWindow:(id)window;
+- (void)removeDuplicateAutomationAccessoriesFromWindow:(id)window;
+- (void)removeAutomationAccessoryFromWindow:(id)window;
+- (void)releaseHeldDesktopMidiNotes;
+- (void)requestAutomation:(id)sender;
 @end
+
+static MixroomHostedPluginWindowHelper *mixroomHostedPluginHelperForWindow(
+    NSWindow *window) {
+    if (window == nil) {
+        return nil;
+    }
+    id helper = objc_getAssociatedObject(
+        window,
+        kMixroomHostedPluginWindowHelperKey);
+    if (![helper isKindOfClass:MixroomHostedPluginWindowHelper.class]) {
+        return nil;
+    }
+    return (MixroomHostedPluginWindowHelper *)helper;
+}
+
+static NSInteger mixroomDesktopMidiPitchForMacKeyCode(unsigned short keyCode) {
+    switch (keyCode) {
+        case 0: return 60;   // A
+        case 13: return 61;  // W
+        case 1: return 62;   // S
+        case 14: return 63;  // E
+        case 2: return 64;   // D
+        case 3: return 65;   // F
+        case 17: return 66;  // T
+        case 5: return 67;   // G
+        case 16: return 68;  // Y
+        case 4: return 69;   // H
+        case 32: return 70;  // U
+        case 38: return 71;  // J
+        case 40: return 72;  // K
+        case 31: return 73;  // O
+        case 37: return 74;  // L
+        case 35: return 75;  // P
+        case 41: return 76;  // ;
+        case 39: return 77;  // '
+        default: return -1;
+    }
+}
+
+static BOOL mixroomRemoveTitlebarAccessoryFromWindow(
+    id window,
+    NSTitlebarAccessoryViewController *accessory) {
+    if (window == nil ||
+        accessory == nil ||
+        ![window respondsToSelector:@selector(titlebarAccessoryViewControllers)] ||
+        ![window respondsToSelector:@selector(removeTitlebarAccessoryViewControllerAtIndex:)]) {
+        return NO;
+    }
+    NSArray<NSTitlebarAccessoryViewController *> *controllers =
+        [(NSWindow *)window titlebarAccessoryViewControllers];
+    const NSUInteger index = [controllers indexOfObject:accessory];
+    if (index == NSNotFound) {
+        return NO;
+    }
+    @try {
+        [(NSWindow *)window removeTitlebarAccessoryViewControllerAtIndex:(NSInteger)index];
+        return YES;
+    } @catch (NSException *exception) {
+        NSLog(@"Mixroom: ignored hosted plugin titlebar accessory removal exception: %@", exception);
+        return NO;
+    }
+}
+
+static void mixroomRetainObjectThroughPendingAppKitLayerFlush(id object) {
+    if (object == nil) {
+        return;
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        static NSMutableArray *retainedObjects = nil;
+        if (retainedObjects == nil) {
+            retainedObjects = [[NSMutableArray alloc] init];
+        }
+        [retainedObjects addObject:object];
+        dispatch_after(
+            dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+            dispatch_get_main_queue(), ^{
+                [retainedObjects removeObject:object];
+            });
+    });
+}
 
 @implementation MixroomHostedPluginWindowHelper
 
@@ -593,27 +812,46 @@ extern "C" void mixroomScheduleOttPluginEditorAutotest(void) {
     if (self == nil) {
         return nil;
     }
-    _window = window;
-    _metadata = [metadata copy];
-    __weak MixroomHostedPluginWindowHelper *weakSelf = self;
-    _closeObserver = [[NSNotificationCenter defaultCenter]
+    self.window = window;
+    self.metadata = metadata;
+    self.heldDesktopMidiKeyCodes = [NSMutableSet set];
+    self.closing = NO;
+    MixroomHostedPluginWindowHelper *blockSelf = self;
+    self.closeObserver = [[NSNotificationCenter defaultCenter]
         addObserverForName:NSWindowWillCloseNotification
                     object:window
                      queue:[NSOperationQueue mainQueue]
                 usingBlock:^(NSNotification * _Nonnull note) {
-                    MixroomHostedPluginWindowHelper *strongSelf = weakSelf;
+                    MixroomHostedPluginWindowHelper *strongSelf = blockSelf;
                     if (strongSelf == nil) {
                         return;
                     }
-                    if (strongSelf.eventMonitor != nil) {
-                        [NSEvent removeMonitor:strongSelf.eventMonitor];
+                    strongSelf.closing = YES;
+                    NSWindow *closingWindow =
+                        [note.object isKindOfClass:NSWindow.class]
+                            ? (NSWindow *)note.object
+                            : strongSelf.window;
+                    [strongSelf removeEventMonitorIfNeeded];
+                    [strongSelf releaseHeldDesktopMidiNotes];
+                    if (closingWindow.parentWindow != nil) {
+                        [closingWindow.parentWindow removeChildWindow:closingWindow];
                     }
-                    if (strongSelf.window.parentWindow != nil) {
-                        [strongSelf.window.parentWindow removeChildWindow:strongSelf.window];
-                    }
+                    [strongSelf removeAutomationAccessoryFromWindow:closingWindow];
                     NSMutableDictionary<NSString *, id> *payload =
                         [NSMutableDictionary dictionaryWithDictionary:strongSelf.metadata ?: @{}];
                     payload[@"event"] = @"pluginEditorClosed";
+                    if (strongSelf.closeObserver != nil) {
+                        [[NSNotificationCenter defaultCenter] removeObserver:strongSelf.closeObserver];
+                        strongSelf.closeObserver = nil;
+                    }
+                    if (closingWindow != nil) {
+                        objc_setAssociatedObject(
+                            closingWindow,
+                            kMixroomHostedPluginWindowHelperKey,
+                            nil,
+                            OBJC_ASSOCIATION_ASSIGN);
+                    }
+                    strongSelf.window = nil;
                     dispatch_after(
                         dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)),
                         dispatch_get_main_queue(), ^{
@@ -625,12 +863,13 @@ extern "C" void mixroomScheduleOttPluginEditorAutotest(void) {
                 }];
     _eventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:
         (NSEventMaskKeyDown |
+         NSEventMaskKeyUp |
          NSEventMaskRightMouseDown |
          NSEventMaskOtherMouseDown |
          NSEventMaskLeftMouseDown)
         handler:^NSEvent * _Nullable(NSEvent *event) {
-            MixroomHostedPluginWindowHelper *strongSelf = weakSelf;
-            if (strongSelf == nil || strongSelf.window == nil) {
+            MixroomHostedPluginWindowHelper *strongSelf = blockSelf;
+            if (strongSelf == nil || strongSelf.closing || strongSelf.window == nil) {
                 return event;
             }
             const BOOL targetsWindow =
@@ -642,6 +881,58 @@ extern "C" void mixroomScheduleOttPluginEditorAutotest(void) {
                  strongSelf.window.isKeyWindow);
             if (!targetsWindow && !strongSelf.window.isKeyWindow) {
                 return event;
+            }
+            const BOOL isMidiClipWindow =
+                [strongSelf.metadata[@"scopeKind"] integerValue] == 3 &&
+                [strongSelf.metadata[@"clipId"] integerValue] >= 0;
+            const NSEventModifierFlags modifierMask =
+                event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+            const BOOL hasCommandControlOrOption =
+                (modifierMask & (NSEventModifierFlagCommand |
+                                 NSEventModifierFlagControl |
+                                 NSEventModifierFlagOption)) != 0;
+            const BOOL isKeyEvent =
+                event.type == NSEventTypeKeyDown ||
+                event.type == NSEventTypeKeyUp;
+            if (isKeyEvent &&
+                gMixroomDesktopKeyboardMidiForwardingEnabled &&
+                isMidiClipWindow &&
+                !hasCommandControlOrOption) {
+                const NSInteger pitch =
+                    mixroomDesktopMidiPitchForMacKeyCode(event.keyCode);
+                if (pitch >= 0) {
+                    NSMutableSet<NSNumber *> *heldKeys =
+                        strongSelf.heldDesktopMidiKeyCodes;
+                    if (heldKeys == nil) {
+                        heldKeys = [NSMutableSet set];
+                        strongSelf.heldDesktopMidiKeyCodes = heldKeys;
+                    }
+                    NSNumber *keyNumber = @(event.keyCode);
+                    if (event.type == NSEventTypeKeyDown) {
+                        if (![heldKeys containsObject:keyNumber]) {
+                            [heldKeys addObject:keyNumber];
+                            JuceEngine::get().sendLiveMidiInputEventForClip(
+                                (int)[strongSelf.metadata[@"clipId"] integerValue],
+                                true,
+                                1,
+                                (int)pitch,
+                                0.92f);
+                        }
+                        return nil;
+                    }
+                    if (event.type == NSEventTypeKeyUp) {
+                        if ([heldKeys containsObject:keyNumber]) {
+                            [heldKeys removeObject:keyNumber];
+                            JuceEngine::get().sendLiveMidiInputEventForClip(
+                                (int)[strongSelf.metadata[@"clipId"] integerValue],
+                                false,
+                                1,
+                                (int)pitch,
+                                0.0f);
+                        }
+                        return nil;
+                    }
+                }
             }
             if (event.type == NSEventTypeKeyDown &&
                 event.keyCode == 49 &&
@@ -656,7 +947,10 @@ extern "C" void mixroomScheduleOttPluginEditorAutotest(void) {
                 const uintptr_t ownerValue =
                     (uintptr_t)[strongSelf.metadata[@"ownerPtr"] unsignedLongLongValue];
                 if (ownerValue != 0) {
-                    mixroomRequestHostedPluginEditorClose((void *)ownerValue);
+                    [strongSelf releaseHeldDesktopMidiNotes];
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        mixroomRequestHostedPluginEditorClose((void *)ownerValue);
+                    });
                 }
                 return nil;
             }
@@ -711,6 +1005,19 @@ extern "C" void mixroomScheduleOttPluginEditorAutotest(void) {
     return hostWindow != window ? hostWindow : (NSApp.mainWindow ?: NSApp.keyWindow);
 }
 
+- (void)removeEventMonitorIfNeeded {
+    id monitor = self.eventMonitor;
+    self.eventMonitor = nil;
+    if (monitor == nil) {
+        return;
+    }
+    @try {
+        [NSEvent removeMonitor:monitor];
+    } @catch (NSException *exception) {
+        NSLog(@"Mixroom: ignored hosted plugin event monitor removal exception: %@", exception);
+    }
+}
+
 - (void)applyWindowMode {
     NSWindow *pluginWindow = self.window;
     if (pluginWindow == nil) {
@@ -730,11 +1037,20 @@ extern "C" void mixroomScheduleOttPluginEditorAutotest(void) {
         [pluginWindow standardWindowButton:NSWindowMiniaturizeButton];
     NSButton *zoomButton =
         [pluginWindow standardWindowButton:NSWindowZoomButton];
+    const NSInteger scopeKind = [self.metadata[@"scopeKind"] integerValue];
+    const BOOL supportsAutomationButton = scopeKind == 1 || scopeKind == 2 || scopeKind == 3;
 
     NSWindow *hostWindow = [self mixroomHostWindow];
     if (gMixroomHostedPluginWindowsDetached || !usesMixroomShell) {
-        if (pluginWindow.parentWindow != nil) {
-            [pluginWindow.parentWindow removeChildWindow:pluginWindow];
+        if (gMixroomHostedPluginWindowsDetached) {
+            if (pluginWindow.parentWindow != nil) {
+                [pluginWindow.parentWindow removeChildWindow:pluginWindow];
+            }
+        } else if (hostWindow != nil && pluginWindow.parentWindow != hostWindow) {
+            if (pluginWindow.parentWindow != nil) {
+                [pluginWindow.parentWindow removeChildWindow:pluginWindow];
+            }
+            [hostWindow addChildWindow:pluginWindow ordered:NSWindowAbove];
         }
         pluginWindow.styleMask |= NSWindowStyleMaskTitled;
         pluginWindow.styleMask |= NSWindowStyleMaskClosable;
@@ -754,6 +1070,18 @@ extern "C" void mixroomScheduleOttPluginEditorAutotest(void) {
         closeButton.hidden = NO;
         miniButton.hidden = NO;
         zoomButton.hidden = NO;
+        if (supportsAutomationButton) {
+            [self installAutomationAccessoryIfNeededForWindow:pluginWindow];
+        } else {
+            [self removeAutomationAccessoryFromWindow:pluginWindow];
+        }
+        if (hostWindow != nil) {
+            mixroomPositionHostedPluginWindowInHost(
+                pluginWindow,
+                hostWindow,
+                !self.positionedOnce);
+            self.positionedOnce = YES;
+        }
         return;
     }
 
@@ -771,6 +1099,7 @@ extern "C" void mixroomScheduleOttPluginEditorAutotest(void) {
     closeButton.hidden = YES;
     miniButton.hidden = YES;
     zoomButton.hidden = YES;
+    [self removeAutomationAccessoryFromWindow:pluginWindow];
 
     const BOOL wasChildOfHost = hostWindow != nil &&
         pluginWindow.parentWindow == hostWindow;
@@ -782,34 +1111,139 @@ extern "C" void mixroomScheduleOttPluginEditorAutotest(void) {
     }
 
     if (hostWindow != nil) {
-        const NSRect hostRect = mixroomScreenContentRectForWindow(hostWindow);
-        NSRect frame = pluginWindow.frame;
-        const CGFloat maxWidth = MAX(320.0, hostRect.size.width - 80.0);
-        const CGFloat maxHeight = MAX(220.0, hostRect.size.height - 80.0);
-        frame.size.width = MIN(frame.size.width, maxWidth);
-        frame.size.height = MIN(frame.size.height, maxHeight);
-        if (!self.positionedOnce || !NSIntersectsRect(frame, hostRect)) {
-            frame.origin.x =
-                NSMidX(hostRect) - (frame.size.width / 2.0);
-            frame.origin.y =
-                NSMidY(hostRect) - (frame.size.height / 2.0);
-        }
-        frame.origin.x = MIN(MAX(frame.origin.x, NSMinX(hostRect)),
-                             NSMaxX(hostRect) - frame.size.width);
-        frame.origin.y = MIN(MAX(frame.origin.y, NSMinY(hostRect)),
-                             NSMaxY(hostRect) - frame.size.height);
-        [pluginWindow setFrame:frame display:YES];
+        mixroomPositionHostedPluginWindowInHost(
+            pluginWindow,
+            hostWindow,
+            !self.positionedOnce);
         self.positionedOnce = YES;
     }
 }
 
-- (void)dealloc {
-    if (_eventMonitor != nil) {
-        [NSEvent removeMonitor:_eventMonitor];
+- (void)installAutomationAccessoryIfNeededForWindow:(id)window {
+    if (window == nil ||
+        ![window respondsToSelector:@selector(addTitlebarAccessoryViewController:)]) {
+        return;
     }
+    [self removeDuplicateAutomationAccessoriesFromWindow:window];
+    if (self.automationAccessory != nil) {
+        return;
+    }
+    NSButton *button = [NSButton buttonWithTitle:@"Automate"
+                                         target:self
+                                         action:@selector(requestAutomation:)];
+    button.bezelStyle = NSBezelStyleTexturedRounded;
+    button.font = [NSFont systemFontOfSize:12.0 weight:NSFontWeightSemibold];
+    button.toolTip = @"Automate the last touched plugin parameter";
+    button.focusRingType = NSFocusRingTypeNone;
+    button.frame = NSMakeRect(0.0, 0.0, 86.0, 26.0);
+
+    NSTitlebarAccessoryViewController *accessory =
+        [[NSTitlebarAccessoryViewController alloc] init];
+    accessory.view = button;
+    accessory.layoutAttribute = NSLayoutAttributeRight;
+    @try {
+        [(NSWindow *)window addTitlebarAccessoryViewController:accessory];
+    } @catch (NSException *exception) {
+        NSLog(@"Mixroom: ignored hosted plugin titlebar accessory add exception: %@", exception);
+        return;
+    }
+    self.automationButton = button;
+    self.automationAccessory = accessory;
+}
+
+- (void)removeDuplicateAutomationAccessoriesFromWindow:(id)window {
+    if (window == nil ||
+        ![window respondsToSelector:@selector(titlebarAccessoryViewControllers)] ||
+        ![window respondsToSelector:@selector(removeTitlebarAccessoryViewControllerAtIndex:)]) {
+        return;
+    }
+    for (NSTitlebarAccessoryViewController *accessory in
+         [[(NSWindow *)window titlebarAccessoryViewControllers] copy]) {
+        if (accessory == self.automationAccessory) {
+            continue;
+        }
+        if (![accessory.view isKindOfClass:NSButton.class]) {
+            continue;
+        }
+        NSButton *button = (NSButton *)accessory.view;
+        if (![button.title isEqualToString:@"Automate"]) {
+            continue;
+        }
+        button.target = nil;
+        button.action = nil;
+        mixroomRemoveTitlebarAccessoryFromWindow(window, accessory);
+        mixroomRetainObjectThroughPendingAppKitLayerFlush(button);
+        mixroomRetainObjectThroughPendingAppKitLayerFlush(accessory);
+    }
+}
+
+- (void)removeAutomationAccessoryFromWindow:(id)window {
+    NSTitlebarAccessoryViewController *accessory = self.automationAccessory;
+    NSButton *button = self.automationButton;
+    if (button != nil) {
+        button.target = nil;
+        button.action = nil;
+    }
+    if (window != nil && accessory != nil) {
+        mixroomRemoveTitlebarAccessoryFromWindow(window, accessory);
+    }
+    if (button != nil) {
+        mixroomRetainObjectThroughPendingAppKitLayerFlush(button);
+    }
+    if (accessory != nil) {
+        mixroomRetainObjectThroughPendingAppKitLayerFlush(accessory);
+        if (accessory.view != nil) {
+            mixroomRetainObjectThroughPendingAppKitLayerFlush(accessory.view);
+        }
+    }
+    self.automationAccessory = nil;
+    self.automationButton = nil;
+}
+
+- (void)releaseHeldDesktopMidiNotes {
+    NSMutableSet<NSNumber *> *heldKeys = self.heldDesktopMidiKeyCodes;
+    if (heldKeys == nil) {
+        self.heldDesktopMidiKeyCodes = [NSMutableSet set];
+        return;
+    }
+    if (heldKeys.count == 0) {
+        return;
+    }
+    const int clipId = (int)[self.metadata[@"clipId"] integerValue];
+    for (NSNumber *keyNumber in [heldKeys copy]) {
+        if (![keyNumber isKindOfClass:NSNumber.class]) {
+            continue;
+        }
+        const NSInteger pitch =
+            mixroomDesktopMidiPitchForMacKeyCode((unsigned short)keyNumber.unsignedShortValue);
+        if (pitch >= 0 && clipId >= 0) {
+            JuceEngine::get().sendLiveMidiInputEventForClip(
+                clipId,
+                false,
+                1,
+                (int)pitch,
+                0.0f);
+        }
+    }
+    [heldKeys removeAllObjects];
+}
+
+- (void)requestAutomation:(id)sender {
+    const uintptr_t ownerValue =
+        (uintptr_t)[self.metadata[@"ownerPtr"] unsignedLongLongValue];
+    if (ownerValue != 0) {
+        mixroomRequestHostedPluginAutomationForOwner((void *)ownerValue);
+    }
+}
+
+- (void)dealloc {
+    self.closing = YES;
+    [self removeEventMonitorIfNeeded];
+    [self releaseHeldDesktopMidiNotes];
     if (_closeObserver != nil) {
         [[NSNotificationCenter defaultCenter] removeObserver:_closeObserver];
     }
+    [self removeAutomationAccessoryFromWindow:self.window];
 }
 
 @end
@@ -848,7 +1282,7 @@ static BOOL mixroomShouldAdoptPluginAuxiliaryWindow(NSWindow *window,
     if (window == nil || window == hostWindow) {
         return NO;
     }
-    if (objc_getAssociatedObject(window, kMixroomHostedPluginWindowHelperKey) != nil) {
+    if (mixroomHostedPluginHelperForWindow(window) != nil) {
         return NO;
     }
     if (window.parentWindow == hostWindow) {
@@ -862,8 +1296,7 @@ static BOOL mixroomShouldAdoptPluginAuxiliaryWindow(NSWindow *window,
     if ([className isEqualToString:@"TUINSWindow"]) {
         return NO;
     }
-    if ([className hasPrefix:@"JUCEWindow_"] &&
-        (window.frame.size.width < 80.0 || window.frame.size.height < 80.0)) {
+    if ([className hasPrefix:@"JUCEWindow_"]) {
         return NO;
     }
 
@@ -890,6 +1323,7 @@ extern "C" void mixroomAdoptHostedPluginAuxiliaryWindows(int scopeKind,
                                         effectIndex,
                                         clipId,
                                         ownerHandle);
+        metadata[@"primaryWindow"] = @NO;
         for (NSWindow *window in NSApp.windows) {
             if (!mixroomShouldAdoptPluginAuxiliaryWindow(window, hostWindow)) {
                 continue;
@@ -915,6 +1349,52 @@ extern "C" void mixroomAdoptHostedPluginAuxiliaryWindows(int scopeKind,
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.00 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(),
                    adoptAttempt);
+}
+
+extern "C" void mixroomCloseHostedPluginNativeWindowsForOwner(void *ownerHandle) {
+    if (ownerHandle == nullptr) {
+        return;
+    }
+
+    void (^closeWindows)(void) = ^{
+        NSArray<NSWindow *> *windows = [NSApp.windows copy];
+        for (NSWindow *window in windows) {
+            MixroomHostedPluginWindowHelper *helper =
+                mixroomHostedPluginHelperForWindow(window);
+            if (helper == nil) {
+                continue;
+            }
+
+            const uintptr_t ownerValue =
+                (uintptr_t)[helper.metadata[@"ownerPtr"] unsignedLongLongValue];
+            if (ownerValue != (uintptr_t)ownerHandle) {
+                continue;
+            }
+            if ([helper.metadata[@"primaryWindow"] boolValue]) {
+                continue;
+            }
+
+            helper.closing = YES;
+            [helper removeEventMonitorIfNeeded];
+            [helper releaseHeldDesktopMidiNotes];
+            [helper removeAutomationAccessoryFromWindow:window];
+            if (window.parentWindow != nil) {
+                [window.parentWindow removeChildWindow:window];
+            }
+            objc_setAssociatedObject(
+                window,
+                kMixroomHostedPluginWindowHelperKey,
+                nil,
+                OBJC_ASSOCIATION_ASSIGN);
+            [window close];
+        }
+    };
+
+    if ([NSThread isMainThread]) {
+        closeWindows();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), closeWindows);
+    }
 }
 
 extern "C" void mixroomConfigureHostedPluginWindow(void *nativeHandle,
@@ -952,6 +1432,7 @@ extern "C" void mixroomConfigureHostedPluginWindow(void *nativeHandle,
         metadata[@"clipId"] = @(clipId);
         metadata[@"ownerPtr"] = @((unsigned long long)(uintptr_t)ownerHandle);
         metadata[@"mixroomShell"] = @(usesMixroomShell);
+        metadata[@"primaryWindow"] = @YES;
         switch (scopeKind) {
             case 1:
                 metadata[@"scope"] = @"track_fx";
@@ -970,14 +1451,20 @@ extern "C" void mixroomConfigureHostedPluginWindow(void *nativeHandle,
         pluginWindow.releasedWhenClosed = NO;
 
         MixroomHostedPluginWindowHelper *helper =
-            [[MixroomHostedPluginWindowHelper alloc] initWithWindow:pluginWindow
-                                                           metadata:metadata];
+            mixroomHostedPluginHelperForWindow(pluginWindow);
+        if (helper == nil) {
+            helper = [[MixroomHostedPluginWindowHelper alloc] initWithWindow:pluginWindow
+                                                                   metadata:metadata];
+            objc_setAssociatedObject(
+                pluginWindow,
+                kMixroomHostedPluginWindowHelperKey,
+                helper,
+                OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        } else {
+            helper.window = pluginWindow;
+            helper.metadata = metadata;
+        }
         [helper applyWindowMode];
-        objc_setAssociatedObject(
-            pluginWindow,
-            kMixroomHostedPluginWindowHelperKey,
-            helper,
-            OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         configureAttempt = nil;
     };
     if ([NSThread isMainThread]) {
@@ -992,11 +1479,25 @@ extern "C" void mixroomSetHostedPluginWindowsDetached(BOOL detached) {
     dispatch_async(dispatch_get_main_queue(), ^{
         for (NSWindow *window in NSApp.windows) {
             MixroomHostedPluginWindowHelper *helper =
-                (MixroomHostedPluginWindowHelper *)objc_getAssociatedObject(
-                    window,
-                    kMixroomHostedPluginWindowHelperKey);
+                mixroomHostedPluginHelperForWindow(window);
             if (helper != nil) {
                 [helper applyWindowMode];
+            }
+        }
+    });
+}
+
+extern "C" void mixroomSetDesktopKeyboardMidiForwardingEnabled(BOOL enabled) {
+    gMixroomDesktopKeyboardMidiForwardingEnabled = enabled;
+    if (enabled) {
+        return;
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        for (NSWindow *window in NSApp.windows) {
+            MixroomHostedPluginWindowHelper *helper =
+                mixroomHostedPluginHelperForWindow(window);
+            if (helper != nil) {
+                [helper releaseHeldDesktopMidiNotes];
             }
         }
     });
@@ -1006,15 +1507,17 @@ extern "C" void mixroomRequestHostedPluginEditorClose(void *ownerHandle) {
     JuceEngine::get().requestHostedPluginEditorCloseForOwner(ownerHandle);
 }
 
+extern "C" void mixroomRequestHostedPluginAutomationForOwner(void *ownerHandle) {
+    JuceEngine::get().requestHostedPluginAutomationForOwner(ownerHandle);
+}
+
 extern "C" void mixroomSetHostedPluginWindowDetachedForOwner(void *ownerHandle,
                                                              bool detached) {
     JuceEngine::get().setHostedPluginEditorDetachedForOwner(ownerHandle, detached);
     dispatch_async(dispatch_get_main_queue(), ^{
         for (NSWindow *window in NSApp.windows) {
             MixroomHostedPluginWindowHelper *helper =
-                (MixroomHostedPluginWindowHelper *)objc_getAssociatedObject(
-                    window,
-                    kMixroomHostedPluginWindowHelperKey);
+                mixroomHostedPluginHelperForWindow(window);
             if (helper == nil) {
                 continue;
             }
@@ -1046,6 +1549,12 @@ extern "C" bool mixroomGetNativeViewSize(void *nativeView,
     return false;
 }
 
+extern "C" bool mixroomGetFlutterHostWindowContentSize(double *width,
+                                                        double *height) {
+    juce::ignoreUnused(width, height);
+    return false;
+}
+
 extern "C" void mixroomSetNativeViewFrameScale(void *nativeView,
                                                 double x,
                                                 double y,
@@ -1064,6 +1573,10 @@ extern "C" void mixroomConfigureEmbeddedPluginChrome(void *nativeView,
 
 extern "C" void mixroomReleaseEmbeddedPluginChrome(void *nativeView) {
     juce::ignoreUnused(nativeView);
+}
+
+extern "C" void mixroomCloseHostedPluginNativeWindowsForOwner(void *ownerHandle) {
+    juce::ignoreUnused(ownerHandle);
 }
 
 extern "C" void mixroomConfigureHostedPluginWindow(void *nativeHandle,
@@ -1095,7 +1608,15 @@ extern "C" void mixroomSetHostedPluginWindowsDetached(BOOL detached) {
     juce::ignoreUnused(detached);
 }
 
+extern "C" void mixroomSetDesktopKeyboardMidiForwardingEnabled(BOOL enabled) {
+    juce::ignoreUnused(enabled);
+}
+
 extern "C" void mixroomRequestHostedPluginEditorClose(void *ownerHandle) {
+    juce::ignoreUnused(ownerHandle);
+}
+
+extern "C" void mixroomRequestHostedPluginAutomationForOwner(void *ownerHandle) {
     juce::ignoreUnused(ownerHandle);
 }
 
@@ -1849,8 +2370,21 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 + (void)shutdownEngineObjC
 {
     // juceLogToFlutter("🔻 JuceBridge: shutdownEngineObjC called");
-    juce::MessageManager::callAsync([]
-                                    { JuceEngine::get().shutdownEngine(); });
+#if JUCE_MAC && !JUCE_IOS
+    if (auto *messageManager = juce::MessageManager::getInstance())
+    {
+        if (messageManager->isThisTheMessageThread())
+            JuceEngine::get().shutdownEngine();
+        else
+            messageManager->callSync([] { JuceEngine::get().shutdownEngine(); });
+    }
+    else
+    {
+        JuceEngine::get().shutdownEngine();
+    }
+#else
+    juce::MessageManager::callAsync([] { JuceEngine::get().shutdownEngine(); });
+#endif
 }
 
 // DEPRECATED: use loadClipObjC:rowId:path:startSec:lengthSec:inFileOffsetSec: instead
@@ -2098,6 +2632,21 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
             if (e.contains("value"))
                 d[@"value"] = extractVar(e["value"]);
 
+            if (e.contains("displayMin"))
+                d[@"displayMin"] = extractVar(e["displayMin"]);
+            if (e.contains("displayMid"))
+                d[@"displayMid"] = extractVar(e["displayMid"]);
+            if (e.contains("displayMax"))
+                d[@"displayMax"] = extractVar(e["displayMax"]);
+            if (e.contains("displayDefault"))
+                d[@"displayDefault"] = extractVar(e["displayDefault"]);
+            if (e.contains("displayValue"))
+                d[@"displayValue"] = extractVar(e["displayValue"]);
+            if (e.contains("defaultNormalized"))
+                d[@"defaultNormalized"] = extractVar(e["defaultNormalized"]);
+            if (e.contains("valueNormalized"))
+                d[@"valueNormalized"] = extractVar(e["valueNormalized"]);
+
             // Choices: choice_0, choice_1, ...
             for (int i = 0; ; ++i)
             {
@@ -2163,6 +2712,21 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 
             if (e.contains("value"))
                 d[@"value"] = extractVar(e["value"]);
+
+            if (e.contains("displayMin"))
+                d[@"displayMin"] = extractVar(e["displayMin"]);
+            if (e.contains("displayMid"))
+                d[@"displayMid"] = extractVar(e["displayMid"]);
+            if (e.contains("displayMax"))
+                d[@"displayMax"] = extractVar(e["displayMax"]);
+            if (e.contains("displayDefault"))
+                d[@"displayDefault"] = extractVar(e["displayDefault"]);
+            if (e.contains("displayValue"))
+                d[@"displayValue"] = extractVar(e["displayValue"]);
+            if (e.contains("defaultNormalized"))
+                d[@"defaultNormalized"] = extractVar(e["defaultNormalized"]);
+            if (e.contains("valueNormalized"))
+                d[@"valueNormalized"] = extractVar(e["valueNormalized"]);
 
             for (int i = 0; ; ++i)
             {
@@ -2380,6 +2944,8 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
                     @"id" : ident,
                     @"format" : formatName
                 } mutableCopy];
+                entry[@"quarantined"] = @(
+                    JuceEngine::get().isHostedPluginQuarantined(desc.fileOrIdentifier));
                 if (manufacturer.length > 0) {
                     entry[@"manufacturer"] = manufacturer;
                 }
@@ -2439,6 +3005,8 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
                     @"id" : ident,
                     @"format" : formatName,
                 } mutableCopy];
+                entry[@"quarantined"] = @(
+                    JuceEngine::get().isHostedPluginQuarantined(desc.fileOrIdentifier));
                 if (manufacturer.length > 0) {
                     entry[@"manufacturer"] = manufacturer;
                 }
@@ -2459,6 +3027,73 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
         resultArray = [NSMutableArray array];
 
     return resultArray;
+}
+
++ (NSArray<NSDictionary *> *)getQuarantinedPluginsObjC
+{
+    NSMutableArray<NSDictionary *> *resultArray = nil;
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        mm->callSync([&resultArray]
+                     {
+            NSMutableArray<NSDictionary *> *arr = [NSMutableArray array];
+            const auto records = JuceEngine::get().getQuarantinedHostedPlugins();
+            for (const auto &record : records)
+            {
+                NSMutableDictionary<NSString *, id> *entry =
+                    [NSMutableDictionary dictionary];
+                for (const auto &value : record)
+                {
+                    NSString *key =
+                        [NSString stringWithUTF8String:value.name.toString().toRawUTF8()] ?: @"";
+                    NSString *stringValue =
+                        [NSString stringWithUTF8String:value.value.toString().toRawUTF8()] ?: @"";
+                    if (key.length > 0)
+                        entry[key] = stringValue;
+                }
+                if (entry.count > 0)
+                    [arr addObject:[entry copy]];
+            }
+            resultArray = [arr copy]; });
+    }
+    return resultArray ?: @[];
+}
+
++ (BOOL)isPluginQuarantinedObjC:(NSString *)pluginId
+{
+    if (pluginId == nil || pluginId.length == 0)
+        return NO;
+
+    bool quarantined = false;
+    const juce::String juceId = juceStringFromNSString(pluginId);
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        mm->callSync([&]
+                     { quarantined = JuceEngine::get().isHostedPluginQuarantined(juceId); });
+    }
+    return quarantined;
+}
+
++ (void)clearPluginQuarantineObjC:(NSString *)pluginId
+{
+    if (pluginId == nil || pluginId.length == 0)
+        return;
+
+    const juce::String juceId = juceStringFromNSString(pluginId);
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        mm->callSync([&]
+                     { JuceEngine::get().clearHostedPluginQuarantine(juceId); });
+    }
+}
+
++ (void)clearAllPluginQuarantinesObjC
+{
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        mm->callSync([]
+                     { JuceEngine::get().clearAllHostedPluginQuarantines(); });
+    }
 }
 
 + (NSDictionary<NSString *, id> *)getEngineDiagnosticsObjC
@@ -2535,15 +3170,24 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     if (pluginPath == nil || pluginPath.length == 0)
         return NO;
 
+    NSLog(@"[MixroomPluginRestore] bridge insertTrackEffect convert start row=%ld path=%@", (long)trackRow, pluginPath ?: @"");
     juce::String jucePath = juceStringFromNSString(pluginPath);
+    NSLog(@"[MixroomPluginRestore] bridge insertTrackEffect convert done row=%ld path=%@", (long)trackRow, pluginPath ?: @"");
     bool success = false;
 
+#if JUCE_MAC && !JUCE_IOS
+    NSLog(@"[MixroomPluginRestore] bridge insertTrackEffect engine call start row=%ld path=%@", (long)trackRow, pluginPath ?: @"");
+    success = JuceEngine::get().insertTrackEffect((int)trackRow, jucePath);
+    NSLog(@"[MixroomPluginRestore] bridge insertTrackEffect engine call done row=%ld path=%@ success=%@", (long)trackRow, pluginPath ?: @"", success ? @"YES" : @"NO");
+#else
     if (auto *mm = juce::MessageManager::getInstance())
     {
         mm->callSync([&]
                      { success = JuceEngine::get().insertTrackEffect((int)trackRow, jucePath); });
     }
+#endif
 
+#if !(JUCE_MAC && !JUCE_IOS)
     [[NSNotificationCenter defaultCenter] postNotificationName:@"JUCERowEffectLoaded"
                                                         object:nil
                                                       userInfo:@{
@@ -2552,6 +3196,7 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
                                                           @"path" : pluginPath ?: @"",
                                                           @"success" : @(success)
                                                       }];
+#endif
     return success ? YES : NO;
 }
 
@@ -2620,11 +3265,18 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 {
     bool applied = false;
     const juce::String state = juceStringFromNSString(stateBase64 ?: @"");
+#if JUCE_MAC && !JUCE_IOS
+    applied = JuceEngine::get().setTrackEffectStateBase64(
+        (int)trackRow,
+        (int)effectIndex,
+        state);
+#else
     if (auto *mm = juce::MessageManager::getInstance())
     {
         mm->callSync([trackRow, effectIndex, &applied, state]
                      { applied = JuceEngine::get().setTrackEffectStateBase64((int)trackRow, (int)effectIndex, state); });
     }
+#endif
     return (BOOL)applied;
 }
 
@@ -2758,11 +3410,15 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     juce::String jucePath = juceStringFromNSString(pluginPath);
     bool success = false;
 
+#if JUCE_MAC && !JUCE_IOS
+    success = JuceEngine::get().insertMasterEffect(jucePath);
+#else
     if (auto *mm = juce::MessageManager::getInstance())
     {
         mm->callSync([&]
                      { success = JuceEngine::get().insertMasterEffect(jucePath); });
     }
+#endif
 
     [[NSNotificationCenter defaultCenter] postNotificationName:@"JUCEMasterEffectLoaded"
                                                         object:nil
@@ -2825,11 +3481,17 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 {
     bool applied = false;
     const juce::String state = juceStringFromNSString(stateBase64 ?: @"");
+#if JUCE_MAC && !JUCE_IOS
+    applied = JuceEngine::get().setMasterEffectStateBase64(
+        (int)effectIndex,
+        state);
+#else
     if (auto *mm = juce::MessageManager::getInstance())
     {
         mm->callSync([effectIndex, &applied, state]
                      { applied = JuceEngine::get().setMasterEffectStateBase64((int)effectIndex, state); });
     }
+#endif
     return (BOOL)applied;
 }
 
@@ -3141,6 +3803,11 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     mixroomSetHostedPluginWindowsDetached(detached);
 }
 
++ (void)setDesktopKeyboardMidiForwardingEnabledObjC:(BOOL)enabled
+{
+    mixroomSetDesktopKeyboardMidiForwardingEnabled(enabled);
+}
+
 + (BOOL)setMidiClipPluginStateObjC:(NSInteger)clipIndex
                         stateBase64:(NSString *)stateBase64
 {
@@ -3148,8 +3815,14 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
         stateBase64 != nil ? juceStringFromNSString(stateBase64)
                            : juce::String();
     bool applied = false;
+#if JUCE_MAC && !JUCE_IOS
+    applied = JuceEngine::get().setMidiClipPluginStateBase64(
+        (int)clipIndex,
+        state);
+#else
     juce::MessageManager::getInstance()->callSync([&]
                                                   { applied = JuceEngine::get().setMidiClipPluginStateBase64((int)clipIndex, state); });
+#endif
     return (BOOL)applied;
 }
 
@@ -3218,26 +3891,42 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 
 + (void)setClipGainObjC:(NSInteger)clipIndex gain:(float)gain
 {
+#if JUCE_MAC && !JUCE_IOS
+    JuceEngine::get().setClipGain((int)clipIndex, gain);
+#else
     juce::MessageManager::getInstance()->callSync([clipIndex, gain]
                                                   { JuceEngine::get().setClipGain((int)clipIndex, gain); });
+#endif
 }
 
 + (void)setClipExtraGainLinearObjC:(NSInteger)clipIndex gain:(float)gain
 {
+#if JUCE_MAC && !JUCE_IOS
+    JuceEngine::get().setClipExtraGainLinear((int)clipIndex, gain);
+#else
     juce::MessageManager::getInstance()->callSync([clipIndex, gain]
                                                   { JuceEngine::get().setClipExtraGainLinear((int)clipIndex, gain); });
+#endif
 }
 
 + (void)muteClipObjC:(NSInteger)clipIndex shouldMute:(BOOL)shouldMute
 {
+#if JUCE_MAC && !JUCE_IOS
+    JuceEngine::get().muteClip((int)clipIndex, (bool)shouldMute);
+#else
     juce::MessageManager::getInstance()->callSync([clipIndex, shouldMute]
                                                   { JuceEngine::get().muteClip((int)clipIndex, (bool)shouldMute); });
+#endif
 }
 
 + (void)setClipPanObjC:(NSInteger)clipIndex pan:(float)pan
 {
+#if JUCE_MAC && !JUCE_IOS
+    JuceEngine::get().setClipPan((int)clipIndex, pan);
+#else
     juce::MessageManager::getInstance()->callSync([clipIndex, pan]
                                                   { JuceEngine::get().setClipPan((int)clipIndex, pan); });
+#endif
 }
 
 + (void)setClipFadesObjC:(NSInteger)clipIndex
@@ -3245,34 +3934,54 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
               fadeOutSec:(double)fadeOutSec
                fadeCurve:(NSInteger)fadeCurve
 {
+#if JUCE_MAC && !JUCE_IOS
+    JuceEngine::get().setClipFades((int)clipIndex, fadeInSec, fadeOutSec, (int)fadeCurve);
+#else
     juce::MessageManager::getInstance()->callSync([clipIndex, fadeInSec, fadeOutSec, fadeCurve]
                                                   { JuceEngine::get().setClipFades((int)clipIndex, fadeInSec, fadeOutSec, (int)fadeCurve); });
+#endif
 }
 
 + (void)setClipPitchObjC:(NSInteger)clipIndex semitones:(float)semitones
 {
+#if JUCE_MAC && !JUCE_IOS
+    JuceEngine::get().setClipPitch((int)clipIndex, semitones);
+#else
     juce::MessageManager::getInstance()->callSync([clipIndex, semitones]
                                                   { JuceEngine::get().setClipPitch((int)clipIndex, semitones); });
+#endif
 }
 
 + (void)setClipReversedObjC:(NSInteger)clipIndex reversed:(BOOL)reversed
 {
+#if JUCE_MAC && !JUCE_IOS
+    JuceEngine::get().setClipReversed((int)clipIndex, (bool)reversed);
+#else
     juce::MessageManager::getInstance()->callSync([clipIndex, reversed]
                                                   { JuceEngine::get().setClipReversed((int)clipIndex, (bool)reversed); });
+#endif
 }
 
 + (void)setClipStretchOptionsObjC:(NSInteger)clipIndex
                        tempoRatio:(double)tempoRatio
                     preservePitch:(BOOL)preservePitch
 {
+#if JUCE_MAC && !JUCE_IOS
+    JuceEngine::get().setClipStretchOptions((int)clipIndex, tempoRatio, (bool)preservePitch);
+#else
     juce::MessageManager::getInstance()->callSync([clipIndex, tempoRatio, preservePitch]
                                                   { JuceEngine::get().setClipStretchOptions((int)clipIndex, tempoRatio, (bool)preservePitch); });
+#endif
 }
 
 + (void)moveClipToRowObjC:(NSInteger)clipIndex newRowId:(NSInteger)newRowId
 {
+#if JUCE_MAC && !JUCE_IOS
+    JuceEngine::get().moveClipToRow((int)clipIndex, (int)newRowId);
+#else
     juce::MessageManager::getInstance()->callSync([clipIndex, newRowId]
                                                   { JuceEngine::get().moveClipToRow((int)clipIndex, (int)newRowId); });
+#endif
 }
 
 + (void)setClipTimeObjC:(NSInteger)clipIndex
@@ -3280,8 +3989,12 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
               lengthSec:(double)lengthSec
         inFileOffsetSec:(double)inFileOffsetSec
 {
+#if JUCE_MAC && !JUCE_IOS
+    JuceEngine::get().setClipTime((int)clipIndex, startSec, lengthSec, inFileOffsetSec);
+#else
     juce::MessageManager::getInstance()->callSync([clipIndex, startSec, lengthSec, inFileOffsetSec]
                                                   { JuceEngine::get().setClipTime((int)clipIndex, startSec, lengthSec, inFileOffsetSec); });
+#endif
 }
 
 #pragma mark - Row management
@@ -3745,6 +4458,19 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     return JuceEngine::get().prepareRecordingInputs((int)desiredInputChannels, why);
 }
 
++ (BOOL)configureAudioDeviceObjC:(double)sampleRate
+                       bufferSize:(NSInteger)bufferSize
+              desiredInputChannels:(NSInteger)desiredInputChannels
+                            reason:(NSString *)reason
+{
+    const auto why = reason == nil ? juce::String("dart") : juceStringFromNSString(reason);
+    return JuceEngine::get().configureAudioDevice(
+        sampleRate,
+        (int)bufferSize,
+        (int)desiredInputChannels,
+        why);
+}
+
 + (BOOL)preparePlaybackRouteObjC:(NSString *)reason
 {
     const auto why = reason == nil ? juce::String("dart") : juceStringFromNSString(reason);
@@ -3761,12 +4487,28 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 {
     if (auto *mm = juce::MessageManager::getInstance())
     {
+        if (mm->isThisTheMessageThread())
+        {
+            JuceEngine::get().setLiveInputMonitoringEnabled(enabled);
+            return;
+        }
+
         mm->callSync([enabled]
                      { JuceEngine::get().setLiveInputMonitoringEnabled(enabled); });
         return;
     }
 
     JuceEngine::get().setLiveInputMonitoringEnabled(enabled);
+}
+
++ (void)setMidiInputChannelFilterObjC:(NSInteger)channel
+{
+    JuceEngine::get().setMidiInputChannelFilter((int)channel);
+}
+
++ (NSNumber *)getMidiInputChannelFilterObjC
+{
+    return @(JuceEngine::get().getMidiInputChannelFilter());
 }
 
 + (BOOL)startRecordingObjC:(NSString *)path

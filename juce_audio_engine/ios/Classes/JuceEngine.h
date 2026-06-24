@@ -19,6 +19,7 @@
 #include <mutex>
 #include <regex>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 extern "C" void juceLogToFlutter(const char *msg);
@@ -37,12 +38,15 @@ extern "C" void mixroomPostHostedPluginAutomationSelection(
     const char *paramId,
     const char *paramName);
 extern "C" void mixroomRequestHostedPluginEditorClose(void *ownerHandle);
+extern "C" void mixroomRequestHostedPluginAutomationForOwner(void *ownerHandle);
 extern "C" void mixroomSetHostedPluginWindowDetachedForOwner(void *ownerHandle,
                                                              bool detached);
 extern "C" void *mixroomGetFlutterHostNativeView(void);
 extern "C" bool mixroomGetNativeViewSize(void *nativeView,
                                           double *width,
                                           double *height);
+extern "C" bool mixroomGetFlutterHostWindowContentSize(double *width,
+                                                        double *height);
 extern "C" void mixroomSetNativeViewFrameScale(void *nativeView,
                                                 double x,
                                                 double y,
@@ -54,6 +58,7 @@ extern "C" void mixroomConfigureEmbeddedPluginChrome(void *nativeView,
                                                       void *ownerHandle,
                                                       double scale);
 extern "C" void mixroomReleaseEmbeddedPluginChrome(void *nativeView);
+extern "C" void mixroomCloseHostedPluginNativeWindowsForOwner(void *ownerHandle);
 extern "C" void mixroomAdoptHostedPluginAuxiliaryWindows(int scopeKind,
                                                           int row,
                                                           int effectIndex,
@@ -169,7 +174,108 @@ private:
     juce::AudioProcessorEditor &editor;
 };
 
+class HostedPluginParameterTouchTracker final
+    : public juce::AudioProcessorParameter::Listener
+{
+public:
+    explicit HostedPluginParameterTouchTracker(juce::AudioProcessor *processorIn)
+        : processor(processorIn)
+    {
+        if (processor == nullptr)
+            return;
+        const auto parameters = processor->getParameters();
+        for (auto *parameter : parameters)
+        {
+            if (parameter == nullptr)
+                continue;
+            parameter->addListener(this);
+            listenedParameters.push_back(parameter);
+        }
+    }
+
+    ~HostedPluginParameterTouchTracker() override
+    {
+        for (auto *parameter : listenedParameters)
+        {
+            if (parameter != nullptr)
+                parameter->removeListener(this);
+        }
+    }
+
+    void parameterValueChanged(int parameterIndex, float) override
+    {
+        noteParameterIndex(parameterIndex);
+    }
+
+    void parameterGestureChanged(int parameterIndex, bool gestureIsStarting) override
+    {
+        if (gestureIsStarting)
+            noteParameterIndex(parameterIndex);
+    }
+
+    void noteParameterIndex(int parameterIndex) noexcept
+    {
+        if (parameterIndex >= 0)
+            lastTouchedParameterIndex.store(parameterIndex,
+                                            std::memory_order_relaxed);
+    }
+
+    int getLastTouchedParameterIndex() const noexcept
+    {
+        return lastTouchedParameterIndex.load(std::memory_order_relaxed);
+    }
+
+private:
+    juce::AudioProcessor *processor = nullptr;
+    std::vector<juce::AudioProcessorParameter *> listenedParameters;
+    std::atomic<int> lastTouchedParameterIndex{-1};
+};
+
 class HostedPluginEditorShell;
+
+inline void mixroomResolveHostedPluginEditorMaxSize(int &maxEditorWidth,
+                                                    int &maxEditorHeight)
+{
+    maxEditorWidth = 1400;
+    maxEditorHeight = 920;
+#if JUCE_MAC
+    double hostWidth = 0.0;
+    double hostHeight = 0.0;
+    const bool hasHostWindow =
+        mixroomGetFlutterHostWindowContentSize(&hostWidth, &hostHeight);
+    if (hasHostWindow)
+    {
+        const int displayMaxWidth =
+            juce::jmax(360, (int)std::round(hostWidth) - 48);
+        const int displayMaxHeight =
+            juce::jmax(220, (int)std::round(hostHeight) - 48);
+        maxEditorWidth =
+            juce::jmax(360,
+                       juce::jmin(displayMaxWidth,
+                                  1400));
+        maxEditorHeight =
+            juce::jmax(220,
+                       juce::jmin(displayMaxHeight,
+                                  920));
+    }
+    else if (auto *display =
+                 juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+    {
+        const int displayMaxWidth =
+            juce::jmax(360, display->userArea.getWidth() - 48);
+        const int displayMaxHeight =
+            juce::jmax(220, display->userArea.getHeight() - 48);
+        maxEditorWidth =
+            juce::jmax(360,
+                       juce::jmin(displayMaxWidth,
+                                  1400));
+        maxEditorHeight =
+            juce::jmax(220,
+                       juce::jmin(displayMaxHeight,
+                                  920));
+    }
+#endif
+}
 
 class HostedPluginEditorWindow : public juce::DocumentWindow
 {
@@ -191,6 +297,11 @@ public:
     }
 
     bool showAutomationContextMenuAtContentPoint(juce::Point<int> contentPoint);
+    bool requestAutomationForLastTouchedParameter();
+    bool supportsAutomationRequests() const noexcept
+    {
+        return automationScopeSupported();
+    }
 
     void presentFromHost()
     {
@@ -199,11 +310,25 @@ public:
 #endif
         setVisible(true);
         toFront(true);
+#if JUCE_MAC
+        juce::Component::SafePointer<HostedPluginEditorWindow> safeThis(this);
+        juce::Timer::callAfterDelay(160, [safeThis]()
+                                    {
+            if (safeThis != nullptr)
+            {
+                mixroomAdoptHostedPluginAuxiliaryWindows(
+                    static_cast<int>(safeThis->metadata.scope),
+                    safeThis->metadata.row,
+                    safeThis->metadata.effectIndex,
+                    safeThis->metadata.clipId,
+                    safeThis.getComponent());
+            } });
+#endif
     }
 
     void requestCloseFromHost()
     {
-        closeButtonPressed();
+        requestDestroyFromHost();
     }
 
     void requestDestroyFromHost()
@@ -226,15 +351,21 @@ public:
         if (closeRequested)
             return;
         closeRequested = true;
+        destroyOnClose = true;
         releaseEmbeddedNativeChrome();
         setVisible(false);
         auto onClose = onCloseFn;
-        if (!destroyOnClose)
-            closeRequested = false;
+#if JUCE_MAC
+        juce::Timer::callAfterDelay(250, [onClose = std::move(onClose)]() mutable
+                                    {
+            if (onClose)
+                onClose(); });
+#else
         juce::MessageManager::callAsync([onClose = std::move(onClose)]() mutable
                                         {
             if (onClose)
                 onClose(); });
+#endif
     }
 
 private:
@@ -244,9 +375,12 @@ private:
     void fitMacNativePluginEditorWindow();
     void setEmbeddedNativeChromeActive(bool isActive);
     void releaseEmbeddedNativeChrome();
+    bool postAutomationRequestForParameterIndex(int parameterIndex);
+    bool automationScopeSupported() const noexcept;
 
     HostedPluginEditorMetadata metadata;
     juce::AudioProcessor *parameterProcessor = nullptr;
+    HostedPluginParameterTouchTracker parameterTouchTracker;
     std::unique_ptr<HostedPluginEditorHostContext> hostContext;
     juce::String editorTitle;
     bool automationMenuOpen = false;
@@ -304,6 +438,21 @@ public:
         optionsButton.onClick = [this]()
         {
             juce::PopupMenu menu;
+            if (auto *window =
+                    dynamic_cast<HostedPluginEditorWindow *>(&owner))
+            {
+                if (window->supportsAutomationRequests())
+                {
+                    menu.addItem("Automate Last Touched Parameter",
+                                 true,
+                                 false,
+                                 [window]()
+                                 {
+                                     window->requestAutomationForLastTouchedParameter();
+                                 });
+                    menu.addSeparator();
+                }
+            }
             menu.addItem(isDetached ? "Dock Plugin Window" : "Float Plugin Window",
                          true,
                          false,
@@ -462,17 +611,6 @@ public:
 
     void mouseDown(const juce::MouseEvent &event) override
     {
-        if (event.mods.isPopupMenu())
-        {
-            if (auto *window =
-                    dynamic_cast<HostedPluginEditorWindow *>(&owner))
-            {
-                const auto eventInShell = event.getEventRelativeTo(this);
-                if (window->showAutomationContextMenuAtContentPoint(
-                        eventInShell.getPosition()))
-                    return;
-            }
-        }
         if (_headerBounds().contains(event.getPosition()))
             dragger.startDraggingComponent(&owner, event);
     }
@@ -519,6 +657,7 @@ inline HostedPluginEditorWindow::HostedPluginEditorWindow(
                            false),
       metadata(metadataIn),
       parameterProcessor(parameterProcessorIn),
+      parameterTouchTracker(parameterProcessorIn),
       onCloseFn(std::move(onClose))
 {
     setUsingNativeTitleBar(false);
@@ -529,16 +668,9 @@ inline HostedPluginEditorWindow::HostedPluginEditorWindow(
         std::make_unique<HostedPluginEditorHostContext>(metadata, *editor);
     editor->setHostContext(hostContext.get());
 
-    int maxEditorWidth = 1360;
-    int maxEditorHeight = 820;
-#if JUCE_MAC
-    if (auto *display =
-            juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
-    {
-        maxEditorWidth = juce::jmax(360, display->userArea.getWidth() - 48);
-        maxEditorHeight = juce::jmax(220, display->userArea.getHeight() - 48);
-    }
-#endif
+    int maxEditorWidth = 1400;
+    int maxEditorHeight = 920;
+    mixroomResolveHostedPluginEditorMaxSize(maxEditorWidth, maxEditorHeight);
     const int naturalEditorWidth = juce::jmax(editor->getWidth(), 360);
     const int naturalEditorHeight = juce::jmax(editor->getHeight(), 220);
     const bool editorResizable = editor->isResizable();
@@ -559,29 +691,26 @@ inline HostedPluginEditorWindow::HostedPluginEditorWindow(
     if (macEditorScale < 0.999f)
         editor->setScaleFactor(macEditorScale);
 
-    const bool isInstrumentEditor =
-        metadata.scope == HostedPluginEditorScopeKind::midiClip;
-    if (isInstrumentEditor &&
-        (editorResizable || naturalEditorWidth < 900 || naturalEditorHeight < 560))
-    {
-        initialWidth = juce::jmax(initialWidth, 1120);
-        initialHeight = juce::jmax(initialHeight, 720);
-    }
     if (macEditorScale < 0.999f)
     {
-        initialWidth = juce::jmax(360, editor->getWidth());
-        initialHeight = juce::jmax(220, editor->getHeight());
+        initialWidth = juce::jmax(
+            360,
+            (int)std::round((float)naturalEditorWidth * macEditorScale));
+        initialHeight = juce::jmax(
+            220,
+            (int)std::round((float)naturalEditorHeight * macEditorScale));
     }
-    if (editorResizable)
-    {
-        initialWidth = juce::jmin(initialWidth, maxEditorWidth);
-        initialHeight = juce::jmin(initialHeight, maxEditorHeight);
-    }
+    initialWidth = juce::jmin(initialWidth, maxEditorWidth);
+    initialHeight = juce::jmin(initialHeight, maxEditorHeight);
 #endif
     int minWidth = initialWidth;
     int minHeight = initialHeight;
     int maxWidth = initialWidth;
     int maxHeight = initialHeight;
+#if JUCE_MAC
+    maxWidth = maxEditorWidth;
+    maxHeight = maxEditorHeight;
+#endif
     if (auto *constrainer = editor->getConstrainer())
     {
         minWidth =
@@ -599,22 +728,28 @@ inline HostedPluginEditorWindow::HostedPluginEditorWindow(
         maxWidth = juce::jmax(maxWidth, initialWidth);
         maxHeight = juce::jmax(maxHeight, initialHeight);
     }
-    setResizable(editorResizable, editorResizable);
+    setResizable(
+#if JUCE_MAC
+        true,
+        true
+#else
+        editorResizable,
+        editorResizable
+#endif
+    );
 
 #if JUCE_MAC
     setUsingNativeTitleBar(true);
     setTitleBarHeight(0);
     setTitleBarButtonsRequired(
-        editorResizable ? juce::DocumentWindow::allButtons
-                        : (juce::DocumentWindow::closeButton |
-                           juce::DocumentWindow::minimiseButton),
+        juce::DocumentWindow::allButtons,
         true);
     setContentOwned(editor, true);
     setResizeLimits(
-        editorResizable ? minWidth : initialWidth,
-        editorResizable ? minHeight : initialHeight,
-        editorResizable ? maxWidth : initialWidth,
-        editorResizable ? maxHeight : initialHeight);
+        juce::jmin(minWidth, initialWidth),
+        juce::jmin(minHeight, initialHeight),
+        juce::jmax(maxWidth, initialWidth),
+        juce::jmax(maxHeight, initialHeight));
     setContentComponentSize(initialWidth, initialHeight);
     embeddedNativeViewScale = 1.0f;
     attachToDesktopWindowFallback();
@@ -674,12 +809,6 @@ inline HostedPluginEditorWindow::HostedPluginEditorWindow(
                                 {
         if (safeThis != nullptr)
             safeThis->fitMacNativePluginEditorWindow(); });
-    mixroomAdoptHostedPluginAuxiliaryWindows(
-        static_cast<int>(metadata.scope),
-        metadata.row,
-        metadata.effectIndex,
-        metadata.clipId,
-        this);
 #else
     if (showInitially)
         presentFromHost();
@@ -688,10 +817,14 @@ inline HostedPluginEditorWindow::HostedPluginEditorWindow(
 #if JUCE_MAC
     if (showInitially)
     {
-        juce::Timer::callAfterDelay(24, [safeThis]()
+        juce::Component::SafePointer<HostedPluginEditorWindow> safeThis(this);
+        juce::Timer::callAfterDelay(80, [safeThis]()
                                     {
             if (safeThis != nullptr)
-                safeThis->presentFromHost(); });
+            {
+                safeThis->fitMacNativePluginEditorWindow();
+                safeThis->presentFromHost();
+            } });
     }
 #endif
 }
@@ -798,6 +931,7 @@ inline void HostedPluginEditorWindow::attachToDesktopWindowFallback()
 {
     embeddedInFlutterHostView = false;
     setEmbeddedNativeChromeActive(false);
+    setVisible(false);
     centreWithSize(getWidth(), getHeight());
     addToDesktop();
     configureDesktopPeerWindow();
@@ -838,24 +972,13 @@ inline void HostedPluginEditorWindow::fitMacNativePluginEditorWindow()
     if (editor == nullptr)
         return;
 
-    int maxEditorWidth = 1360;
-    int maxEditorHeight = 820;
-    if (auto *display =
-            juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
-    {
-        maxEditorWidth = juce::jmax(360, display->userArea.getWidth() - 48);
-        maxEditorHeight = juce::jmax(220, display->userArea.getHeight() - 48);
-    }
+    int maxEditorWidth = 1400;
+    int maxEditorHeight = 920;
+    mixroomResolveHostedPluginEditorMaxSize(maxEditorWidth, maxEditorHeight);
 
     int targetWidth = juce::jmax(editor->getWidth(), getContentComponent()->getWidth());
     int targetHeight =
         juce::jmax(editor->getHeight(), getContentComponent()->getHeight());
-    if (metadata.scope == HostedPluginEditorScopeKind::midiClip &&
-        (editor->isResizable() || targetWidth < 900 || targetHeight < 560))
-    {
-        targetWidth = juce::jmax(targetWidth, 1120);
-        targetHeight = juce::jmax(targetHeight, 720);
-    }
 
     const bool needsScale =
         targetWidth > maxEditorWidth || targetHeight > maxEditorHeight;
@@ -867,17 +990,19 @@ inline void HostedPluginEditorWindow::fitMacNativePluginEditorWindow()
             juce::jmin((float)maxEditorWidth / (float)juce::jmax(1, targetWidth),
                        (float)maxEditorHeight / (float)juce::jmax(1, targetHeight)));
         editor->setScaleFactor(fitScale);
-        targetWidth = juce::jmax(360, juce::jmin(maxEditorWidth, editor->getWidth()));
-        targetHeight = juce::jmax(220, juce::jmin(maxEditorHeight, editor->getHeight()));
+        targetWidth = juce::jmax(
+            360,
+            juce::jmin(maxEditorWidth,
+                       (int)std::round((float)targetWidth * fitScale)));
+        targetHeight = juce::jmax(
+            220,
+            juce::jmin(maxEditorHeight,
+                       (int)std::round((float)targetHeight * fitScale)));
     }
 
-    if (editor->isResizable())
-    {
-        targetWidth = juce::jlimit(360, maxEditorWidth, targetWidth);
-        targetHeight = juce::jlimit(220, maxEditorHeight, targetHeight);
-    }
+    targetWidth = juce::jlimit(360, maxEditorWidth, targetWidth);
+    targetHeight = juce::jlimit(220, maxEditorHeight, targetHeight);
 
-    if (editor->isResizable())
     {
         int minWidth = 280;
         int minHeight = 180;
@@ -896,10 +1021,6 @@ inline void HostedPluginEditorWindow::fitMacNativePluginEditorWindow()
         maxHeight = juce::jmax(maxHeight, targetHeight);
         setResizeLimits(minWidth, minHeight, maxWidth, maxHeight);
     }
-    else
-    {
-        setResizeLimits(targetWidth, targetHeight, targetWidth, targetHeight);
-    }
 
     if (std::abs(targetWidth - getContentComponent()->getWidth()) <= 2 &&
         std::abs(targetHeight - getContentComponent()->getHeight()) <= 2)
@@ -910,11 +1031,54 @@ inline void HostedPluginEditorWindow::fitMacNativePluginEditorWindow()
 #endif
 }
 
+inline bool HostedPluginEditorWindow::automationScopeSupported() const noexcept
+{
+    return metadata.scope == HostedPluginEditorScopeKind::trackEffect ||
+           metadata.scope == HostedPluginEditorScopeKind::masterEffect ||
+           metadata.scope == HostedPluginEditorScopeKind::midiClip;
+}
+
+inline bool HostedPluginEditorWindow::postAutomationRequestForParameterIndex(
+    int parameterIndex)
+{
+    if (!automationScopeSupported())
+        return false;
+    if (parameterProcessor == nullptr)
+        return false;
+
+    juce::String parameterId;
+    juce::String parameterName;
+    const auto parameters = parameterProcessor->getParameters();
+    if (parameterIndex >= 0 && parameterIndex < (int)parameters.size())
+    {
+        auto *parameter = parameters[(size_t)parameterIndex];
+        if (parameter != nullptr)
+        {
+            parameterId = mixroomParameterIdForAutomation(parameter);
+            parameterName = parameter->getName(128).trim();
+        }
+    }
+
+    mixroomPostHostedPluginAutomationSelection(
+        static_cast<int>(metadata.scope),
+        metadata.row,
+        metadata.effectIndex,
+        metadata.clipId,
+        parameterId.toRawUTF8(),
+        parameterName.toRawUTF8());
+    return true;
+}
+
+inline bool HostedPluginEditorWindow::requestAutomationForLastTouchedParameter()
+{
+    return postAutomationRequestForParameterIndex(
+        parameterTouchTracker.getLastTouchedParameterIndex());
+}
+
 inline bool HostedPluginEditorWindow::showAutomationContextMenuAtContentPoint(
     juce::Point<int> contentPoint)
 {
-    if (metadata.scope != HostedPluginEditorScopeKind::trackEffect &&
-        metadata.scope != HostedPluginEditorScopeKind::masterEffect)
+    if (!automationScopeSupported())
         return false;
 
     auto *shell = dynamic_cast<HostedPluginEditorShell *>(getContentComponent());
@@ -954,6 +1118,7 @@ inline bool HostedPluginEditorWindow::showAutomationContextMenuAtContentPoint(
     const auto parameters = parameterProcessor->getParameters();
     if (parameterIndex >= 0 && parameterIndex < (int)parameters.size())
     {
+        parameterTouchTracker.noteParameterIndex(parameterIndex);
         auto *parameter = parameters[(size_t)parameterIndex];
         if (parameter != nullptr)
         {
@@ -2576,6 +2741,7 @@ public:
         }
 
         activeLiveNotes.clear();
+        activeTimelineNotes.clear();
         cachedNotes.clear();
         cachedSampledDefinition.reset();
         cachedSampledAttackOverride = false;
@@ -2619,6 +2785,7 @@ public:
             blockTransportStartSec->load(std::memory_order_relaxed);
         const double blockDurationSec = (double)numSamples / sr;
         double blockStart = incomingBlockStart;
+        bool discontinuity = true;
         const bool previousHostPlaying =
             steadyWasPlaying.exchange(hostPlaying, std::memory_order_relaxed);
         const double expectedBlockStart =
@@ -2629,7 +2796,7 @@ public:
             const bool hadExpected = std::isfinite(expectedBlockStart);
             const double continuityToleranceSec =
                 juce::jmax(4.0 / sr, 0.002);
-            const bool discontinuity =
+            discontinuity =
                 !hadExpected ||
                 !previousHostPlaying ||
                 std::abs(incomingBlockStart - expectedBlockStart) >
@@ -2644,11 +2811,14 @@ public:
         {
             steadyBlockStartSec.store(incomingBlockStart,
                                       std::memory_order_relaxed);
+            activeTimelineNotes.clear();
         }
 
         const double blockEnd = blockStart + blockDurationSec;
 
         refreshCachedState();
+        if (hostPlaying && discontinuity)
+            activeTimelineNotes.clear();
         applyPendingLiveMidiEvents();
 
         const bool sampledMode =
@@ -2709,9 +2879,11 @@ public:
                             : 0.0;
                     std::vector<size_t> blockNoteIndices;
                     std::vector<int> blockNotePitches;
+                    std::vector<double> blockNoteEndSourceSecs;
                     std::vector<SampledRegion> timelineRegions;
                     blockNoteIndices.reserve(cachedNotes.size());
                     blockNotePitches.reserve(cachedNotes.size());
+                    blockNoteEndSourceSecs.reserve(cachedNotes.size());
                     if (sampledMode)
                     {
                         timelineRegions.reserve(cachedNotes.size());
@@ -2783,14 +2955,30 @@ public:
                             noteStartSourceSec +
                             noteLengthSourceSec +
                             (noteReleaseSec * safeRatio);
-                        if (noteEndSourceSec <= blockSourceStartSec ||
-                            noteStartSourceSec >= blockSourceEndSec)
+                        if (noteEndSourceSec <= blockSourceStartSec)
+                        {
+                            activeTimelineNotes.erase(noteIndex);
+                            continue;
+                        }
+
+                        if (noteStartSourceSec >= blockSourceEndSec)
                         {
                             continue;
                         }
 
+                        const bool noteStartsInBlock =
+                            noteStartSourceSec >= blockSourceStartSec &&
+                            noteStartSourceSec < blockSourceEndSec;
+                        const bool noteAlreadyActive =
+                            activeTimelineNotes.find(noteIndex) != activeTimelineNotes.end();
+                        if (!noteStartsInBlock && !noteAlreadyActive)
+                            continue;
+                        if (noteStartsInBlock)
+                            activeTimelineNotes.insert(noteIndex);
+
                         blockNoteIndices.push_back(noteIndex);
                         blockNotePitches.push_back(notePitchBase);
+                        blockNoteEndSourceSecs.push_back(noteEndSourceSec);
                         if (sampledMode)
                             timelineRegions.push_back(effectiveRegion);
                     }
@@ -2943,6 +3131,15 @@ public:
                         {
                             outL[outIndex] += 0.5f * (mixL + mixR);
                         }
+                    }
+
+                    for (size_t activeIndex = 0;
+                         activeIndex < blockNoteIndices.size() &&
+                         activeIndex < blockNoteEndSourceSecs.size();
+                         ++activeIndex)
+                    {
+                        if (blockNoteEndSourceSecs[activeIndex] <= blockSourceEndSec)
+                            activeTimelineNotes.erase(blockNoteIndices[activeIndex]);
                     }
                 }
             }
@@ -5182,6 +5379,7 @@ private:
         cachedSampledReleaseOverride = local.sampledReleaseOverride;
         cachedSourceTempoBpm = local.sourceTempoBpm;
         liveSampleSequenceCounter = 0;
+        activeTimelineNotes.clear();
     }
 
     static juce::CriticalSection &flutterAssetRootLock()
@@ -5219,6 +5417,7 @@ private:
     std::vector<LiveMidiEvent> pendingLiveMidiEvents;
     std::vector<ActiveLiveNote> activeLiveNotes;
     int liveSampleSequenceCounter = 0;
+    std::unordered_set<size_t> activeTimelineNotes;
     std::atomic<double> steadyBlockStartSec{
         std::numeric_limits<double>::quiet_NaN()};
     std::atomic<bool> steadyWasPlaying{false};
@@ -5278,6 +5477,10 @@ public:
     void setAdditionalPluginSearchPaths(const juce::StringArray &paths);
     juce::Array<juce::PluginDescription> getKnownPlugins();
     juce::Array<juce::PluginDescription> rescanPlugins(const juce::StringArray &paths = {});
+    juce::Array<juce::NamedValueSet> getQuarantinedHostedPlugins() const;
+    bool isHostedPluginQuarantined(const juce::String &pluginId) const;
+    void clearHostedPluginQuarantine(const juce::String &pluginId);
+    void clearAllHostedPluginQuarantines();
     juce::NamedValueSet getEngineDiagnostics();
     void insertPluginEffect(int trackIdx, const juce::String &pluginPath, std::function<void(bool)> callback);
     void shutdownEngine();
@@ -5325,6 +5528,11 @@ public:
                                 int channel,
                                 int pitch,
                                 float velocity);
+    bool sendLiveMidiInputEventForClip(int clipId,
+                                       bool noteOn,
+                                       int channel,
+                                       int pitch,
+                                       float velocity);
     struct LiveMidiInputEvent
     {
         int clipId = -1;
@@ -5416,6 +5624,7 @@ public:
     bool showHostedPluginAutomationContextMenu(const HostedPluginEditorMetadata &metadata,
                                                int contentX,
                                                int contentY);
+    void requestHostedPluginAutomationForOwner(void *ownerHandle);
     void requestHostedPluginEditorCloseForOwner(void *ownerHandle);
     void setHostedPluginEditorDetachedForOwner(void *ownerHandle, bool detached);
     void bypassRowEffect(int rowIndex, int effectIndex, bool shouldBypass);
@@ -5507,6 +5716,12 @@ public:
     int getNumInputChannels() const;
     void setLiveInputMonitoringEnabled(bool enabled);
     bool isLiveInputMonitoringEnabled() const noexcept;
+    bool configureAudioDevice(double sampleRate,
+                              int bufferSize,
+                              int desiredInputChannels,
+                              const juce::String &reason);
+    void setMidiInputChannelFilter(int channel) noexcept;
+    int getMidiInputChannelFilter() const noexcept;
     void routeLiveInputToRow(int row, int channelCount, int channelStart = 0);
     bool prepareRecordingInputs(int desiredInputChannels,
                                 const juce::String &reason);
@@ -5576,7 +5791,8 @@ private:
     void rewireTrackChain(int trackIdx,
                           juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync); // clip-level FX+gain+pan → row
     void rewireMasterFxChain(
-        juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync); // master FX chain
+        juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync,
+        bool callerHoldsGraphLock = false); // master FX chain
     void rebuildClipProcessorsFromStoredStateLocked(
         juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::none);
     void reapplyClipProcessorStateLocked();
@@ -5587,10 +5803,12 @@ private:
     void commitClipGraphMutationLocked(bool armOutputSafety = true) noexcept;
     void rewireTrackBusFxChain(
         int trackRow,
-        juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync); // row-level FX between input and automation
+        juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync,
+        bool callerHoldsGraphLock = false); // row-level FX between input and automation
     void rewireTrackGroupFxChain(
         const juce::String &groupId,
-        juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync);
+        juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync,
+        bool callerHoldsGraphLock = false);
     void reconnectAllRowOutputsToBuses(
         juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync);
     int getTrackIndexForClip(int clipIdx) const; // clip → row mapping
@@ -5637,6 +5855,8 @@ private:
     std::atomic<double> transportSec{0.0};           // source of truth
     std::atomic<double> blockTransportStartSec{0.0}; // set each audio callback block
     std::atomic<double> hostSampleRateAtomic{44100.0};
+    std::atomic<double> preferredAudioSampleRate{44100.0};
+    std::atomic<int> preferredAudioBufferSize{512};
     std::atomic<bool> isPlayingAtomic{false};
     std::atomic<bool> blockIsPlayingAtomic{false};
     std::atomic<double> exportProgressAtomic{0.0};
@@ -5647,6 +5867,7 @@ private:
     std::vector<LiveMidiInputEvent> liveMidiInputPendingForFlutter;
     std::vector<juce::String> midiInputCallbackDeviceIds;
     std::atomic<bool> midiInputCallbacksInitialized{false};
+    std::atomic<int> midiInputChannelFilter{0};
 
     // Basic limits
     static constexpr int kNumTracks = 5;  // legacy fixed-row compatibility paths
@@ -5859,7 +6080,6 @@ private:
     std::unordered_map<int, juce::Array<int>> rowIdToClipIds;
     std::vector<TrackGroupState> trackGroups;
     std::unordered_map<std::string, std::unique_ptr<HostedPluginEditorWindow>> hostedPluginEditorWindows;
-    std::atomic<int> pluginEditorPrewarmSequence{0};
     std::atomic<int> nextRowId{1};
 
     // MASTER bus: rows → master input → [FX...] → gain → pan → output
@@ -5890,9 +6110,11 @@ private:
     const TrackGroupState *trackGroupForLeadRowIndex(int rowIndex) const;
     TrackGroupState *trackGroupForMemberRowId(int rowId);
     void attachTrackGroupBusNodes(TrackGroupState &group,
-                                  juce::AudioProcessorGraph::UpdateKind updateKind);
+                                  juce::AudioProcessorGraph::UpdateKind updateKind,
+                                  bool callerHoldsGraphLock = false);
     void ensureTrackGroupBusNodesAttached(TrackGroupState &group,
-                                          juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync);
+                                          juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync,
+                                          bool callerHoldsGraphLock = false);
     void compactTrackGroupFxChain(TrackGroupState &group);
     juce::Array<juce::AudioProcessorGraph::NodeID> *effectChainForRowApi(int rowIndex);
     juce::StringArray *effectIdsForRowApi(int rowIndex);
@@ -5909,6 +6131,7 @@ private:
     int recordChannelOffset = 0;
     std::atomic<int> recordingRestoreDesiredInputs{0};
     std::atomic<int> desiredInputOpenChannels{0};
+    juce::String preferredInputDeviceName;
     std::atomic<bool> audioRouteRefreshPending{false};
     std::atomic<int> ignoredDeviceChangeCallbacks{0};
     bool liveInputMonitoringEnabled = true;
@@ -5924,15 +6147,13 @@ private:
     int projectClipLoadDepth = 0;
     bool projectClipLoadNeedsGraphRebuild = false;
     bool projectClipLoadNeedsOutputSafety = false;
+    bool projectClipLoadDetachedAudioCallback = false;
     // Recursive because public graph mutation entrypoints can call one another.
     std::recursive_mutex graphRenderMutex;
     bool openPluginEditorWindowForNode(juce::AudioProcessorGraph::NodeID nodeID,
                                        const juce::String &titlePrefix,
                                        HostedPluginEditorMetadata metadata = {},
                                        bool showInitially = true);
-    void prewarmPluginEditorWindowForNode(juce::AudioProcessorGraph::NodeID nodeID,
-                                          const juce::String &titlePrefix,
-                                          HostedPluginEditorMetadata metadata = {});
     void closePluginEditorWindowForNode(juce::AudioProcessorGraph::NodeID nodeID);
     void closeHostedPluginEditorWindowsForRow(const RowState &row);
     void closeAllHostedPluginEditorWindows();
@@ -5954,7 +6175,8 @@ private:
     void attachRowBusNodes(RowState &r,
                            juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync);
     void ensureRowBusNodesAttached(int rowIndex,
-                                   juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync);
+                                   juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync,
+                                   bool callerHoldsGraphLock = false);
     void retargetRowMeterTapPointers();
     void rebuildRowIdIndexCache();
     juce::AudioProcessorGraph::Node::Ptr getRowInputNodeById(int rowId);
@@ -5974,7 +6196,9 @@ private:
     void ensureMasterOutputRouting();
     bool applyPreferredAudioDeviceSetup(int desiredInputChannels,
                                         bool forceReopen,
-                                        const juce::String &reason);
+                                        const juce::String &reason,
+                                        double requestedSampleRate = 0.0,
+                                        int requestedBufferSize = 0);
     void refreshMidiInputCallbacks();
     void clearMidiInputCallbacks();
     void logCurrentAudioDeviceState(const juce::String &reason) const;

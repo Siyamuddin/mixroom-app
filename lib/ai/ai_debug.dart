@@ -26,6 +26,42 @@ void aiDebugLog(String scope, String message) {
   debugPrint('[$loggerName] $message');
 }
 
+void aiDebugBlock(
+  String scope,
+  String title,
+  String message, {
+  int width = 88,
+}) {
+  if (!kAiDebugLogs) return;
+  if (!kAiDebugVerbose && _kAiVerboseOnlyScopes.contains(scope)) return;
+
+  final loggerName = 'AI.$scope';
+  final normalizedTitle = title.trim().isEmpty ? scope : title.trim();
+  final lineWidth = width.clamp(48, 120).toInt();
+  final rule = '=' * lineWidth;
+  final divider = '-' * lineWidth;
+  final timestamp = DateTime.now().toIso8601String();
+  final body = message.trimRight();
+  final indentedBody = body.isEmpty
+      ? '  (empty)'
+      : body
+          .split('\n')
+          .map((line) => line.trim().isEmpty ? '' : '  $line')
+          .join('\n');
+  final block = '''
+
+$rule
+[$loggerName] $normalizedTitle
+$timestamp
+$divider
+$indentedBody
+$rule
+''';
+
+  developer.log(block, name: loggerName);
+  debugPrint(block);
+}
+
 String aiDebugShortMap(
   Map<String, dynamic> map, {
   int maxEntries = 8,

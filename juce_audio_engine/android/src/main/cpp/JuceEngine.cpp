@@ -3368,6 +3368,19 @@ double getSnapshotEndTimeSeconds(const ExportProjectSnapshot &snapshot)
     return endTime;
 }
 
+void sanitiseExportBuffer(juce::AudioBuffer<float> &buffer)
+{
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+    {
+        auto *samples = buffer.getWritePointer(ch);
+        for (int i = 0; i < buffer.getNumSamples(); ++i)
+        {
+            if (!std::isfinite(samples[i]))
+                samples[i] = 0.0f;
+        }
+    }
+}
+
 juce::String renderOfflineSnapshotToFile(
     const ExportProjectSnapshot &snapshot,
     const juce::File &outFile,
@@ -3472,6 +3485,7 @@ juce::String renderOfflineSnapshotToFile(
         const double automationSeconds = hostTransportSeconds;
         applyOfflineAutomationAtTimeSeconds(context, automationSeconds);
         context.graph.processBlock(buffer, midi);
+        sanitiseExportBuffer(buffer);
 
         const int64 validStartSample = std::max<int64>(
             0,

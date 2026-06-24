@@ -681,9 +681,8 @@ class _SignedInShellState extends State<SignedInShell> {
   Widget build(BuildContext context) {
     context.watch<LocaleProvider>();
     final useSideRail = mixroomUsesSideRailNavigation(context);
-    final useDesktopTitleBar = mixroomUsesDesktopRailNavigation;
-    final titleBarHeight =
-        useDesktopTitleBar ? kMixroomDesktopTitleBarHeight : 0.0;
+    final desktopRailTopInset =
+        mixroomUsesDesktopRailNavigation ? 56.0 : 22.0;
     return Scaffold(
       resizeToAvoidBottomInset: false,
       backgroundColor: const Color(0xFF090909),
@@ -695,19 +694,13 @@ class _SignedInShellState extends State<SignedInShell> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   SafeArea(
+                    top: false,
                     right: false,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(
-                        0,
-                        0,
-                        0,
-                        0,
-                      ).copyWith(top: titleBarHeight),
-                      child: MixroomMainSideRail(
-                        selectedTab: _selectedTab,
-                        onTabSelected: _setTab,
-                        onAddTap: _createMusicProject,
-                      ),
+                    child: MixroomMainSideRail(
+                      selectedTab: _selectedTab,
+                      onTabSelected: _setTab,
+                      onAddTap: _createMusicProject,
+                      topContentInset: desktopRailTopInset,
                     ),
                   ),
                   Expanded(
@@ -715,9 +708,7 @@ class _SignedInShellState extends State<SignedInShell> {
                       children: [
                         Positioned.fill(
                           child: Padding(
-                            padding: const EdgeInsets.only(
-                              right: 28,
-                            ).copyWith(top: titleBarHeight),
+                            padding: const EdgeInsets.only(right: 28),
                             child: _buildPage(_selectedTab),
                           ),
                         ),
@@ -763,14 +754,7 @@ class _SignedInShellState extends State<SignedInShell> {
                 ],
               ),
             ),
-          if (useDesktopTitleBar)
-            const Positioned(
-              left: 0,
-              right: 0,
-              top: 0,
-              child: MixroomDesktopTitleBar(),
-            )
-          else if (!useSideRail) ...[
+          if (!useSideRail) ...[
             Positioned.fill(child: _buildPage(_selectedTab)),
             if (_activeAnnouncement != null && _activeAnnouncement!.showsBanner)
               Positioned(

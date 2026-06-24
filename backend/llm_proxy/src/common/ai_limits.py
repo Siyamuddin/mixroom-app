@@ -268,11 +268,11 @@ def calculate_token_cost(total_tokens: int) -> int:
 
 
 def server_max_output_tokens() -> int:
-    raw_value = os.environ.get("LLM_MAX_OUTPUT_TOKENS", "4096").strip() or "4096"
+    raw_value = os.environ.get("LLM_MAX_OUTPUT_TOKENS", "8192").strip() or "8192"
     try:
         parsed = int(raw_value)
     except ValueError:
-        return 4096
+        return 8192
     return max(parsed, 1)
 
 

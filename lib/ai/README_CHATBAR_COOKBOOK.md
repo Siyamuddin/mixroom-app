@@ -104,21 +104,11 @@ This is a practical prompt cookbook for the single chatbar UI, with one-sentence
 - `dialog_tighten_pauses`: "Tighten long pauses in this podcast take."
 - `dialog_lift_quiet`: "Lift the quiet spoken phrases so they are more even."
 
-### 3.5 Automation lane and clip operations
+### 3.5 Automation lane operations
 
 - `set_points`: "Set volume automation points from 0s to 8s."
 - `add_ramp`: "Add a fade-down ramp over the next 2 bars."
 - `clear`: "Clear automation on this lane."
-- `create_clip`: "Create an automation clip for this section."
-- `duplicate_clip`: "Clone that automation clip to the next phrase."
-- `move_clip`: "Move that automation clip 1 bar right."
-- `delete_clip`: "Delete that automation clip."
-- `clear_clips`: "Clear all automation clips on this lane."
-- `mute_clip`: "Mute that automation clip."
-- `unmute_clip`: "Unmute that automation clip."
-- `toggle_clip_mute`: "Toggle mute for the selected automation clip."
-- `set_clip_points`: "Replace points inside that automation clip with a new curve."
-- `make_unique_clip`: "Make just this automation clone unique so I can change it separately."
 - `apply_template`: "Apply a sidechain pump automation template here."
 
 ### 3.6 Automation templates

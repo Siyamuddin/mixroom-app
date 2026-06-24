@@ -1189,6 +1189,7 @@ class BillingProductDefinition {
     required this.managementChannel,
     required this.platforms,
     required this.priceDisplay,
+    this.priceKrw = 0,
     required this.trialDays,
     required this.rank,
   });
@@ -1203,6 +1204,7 @@ class BillingProductDefinition {
   final String managementChannel;
   final List<String> platforms;
   final String priceDisplay;
+  final int priceKrw;
   final int trialDays;
   final int rank;
 
@@ -1222,6 +1224,7 @@ class BillingProductDefinition {
           _asNonEmptyString(json['management_channel'], fallback: 'web'),
       platforms: _asStringList(json['platforms']),
       priceDisplay: (json['price_display'] ?? '').toString(),
+      priceKrw: _asInt(json['price_krw']),
       trialDays: _asInt(json['trial_days']),
       rank: _asInt(json['rank']),
     );
@@ -1239,6 +1242,7 @@ class BillingProductDefinition {
       'management_channel': managementChannel,
       'platforms': platforms,
       'price_display': priceDisplay,
+      'price_krw': priceKrw,
       'trial_days': trialDays,
       'rank': rank,
     };
@@ -1453,6 +1457,7 @@ class BillingCatalogSnapshot {
           managementChannel: 'web_or_mobile',
           platforms: <String>['ios', 'android', 'web'],
           priceDisplay: '\$5/mo',
+          priceKrw: 6600,
           trialDays: 30,
           rank: 10,
         ),
@@ -1467,6 +1472,7 @@ class BillingCatalogSnapshot {
           managementChannel: 'web_or_mobile',
           platforms: <String>['ios', 'android', 'web'],
           priceDisplay: '\$54/yr',
+          priceKrw: 77000,
           trialDays: 30,
           rank: 11,
         ),
@@ -1481,6 +1487,7 @@ class BillingCatalogSnapshot {
           managementChannel: 'web_or_mobile',
           platforms: <String>['ios', 'android', 'web'],
           priceDisplay: '\$20/mo',
+          priceKrw: 29000,
           trialDays: 0,
           rank: 20,
         ),
@@ -1495,6 +1502,7 @@ class BillingCatalogSnapshot {
           managementChannel: 'web_or_mobile',
           platforms: <String>['ios', 'android', 'web'],
           priceDisplay: '\$214.99/yr',
+          priceKrw: 299000,
           trialDays: 0,
           rank: 21,
         ),

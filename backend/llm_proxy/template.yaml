@@ -68,7 +68,7 @@ Parameters:
     Default: 200000
   LlmMaxOutputTokens:
     Type: Number
-    Default: 4096
+    Default: 8192
   MixApplyModelPath:
     Type: String
     Default: ''

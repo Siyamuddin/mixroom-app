@@ -14,6 +14,7 @@ import 'package:mixroom/widgets/sample_browser_panel.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
 import 'package:mixroom/helpers/automation_clip_clone_helper.dart';
 import 'package:mixroom/helpers/dbfs_meter_visuals.dart';
+import 'package:mixroom/helpers/desktop_slider_wheel_sensitivity.dart';
 import 'package:mixroom/helpers/glass_ui_tokens.dart';
 import 'package:mixroom/helpers/halo.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
@@ -22,6 +23,7 @@ import 'package:mixroom/helpers/track_group_reconciler.dart';
 import 'package:mixroom/helpers/mix_change_highlighter.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/widgets/app_shell_figma.dart';
+import 'package:mixroom/widgets/desktop_scrollable_slider.dart';
 import 'package:uuid/uuid.dart';
 
 class _QuantizePreset {
@@ -479,6 +481,7 @@ class AudioCanvasTimeline extends StatefulWidget {
           int row, int effectIndex, String paramId, dynamic value)
       setRowEffectParam;
   final Future<List<Map<String, dynamic>>> Function() scanPlugins;
+  final Future<void> Function(String pluginId)? onTogglePluginFavorite;
   final Future<bool> Function(int row, int effectIndex)? openTrackPluginEditor;
   final Future<void> Function(int row, List<Map<String, dynamic>> points)
       setTrackAutomationPoints;
@@ -530,6 +533,8 @@ class AudioCanvasTimeline extends StatefulWidget {
   final Future<void> Function(int clipIndex, double cutTimeMs)? onCutClipAt;
   final Future<void> Function(List<int> clipIndices)? onGlueClips;
   final void Function(int clipIndex)? onOpenMidiClip;
+  final bool Function(int clipIndex)? canOpenMidiInstrumentUi;
+  final Future<bool> Function(int clipIndex)? onOpenMidiInstrumentUi;
   final Future<void> Function(int row, double timeMs)?
       onCreateMidiClipInInstrumentLane;
   final Future<void> Function(int clipIndex)? onStemSeparation;
@@ -671,6 +676,7 @@ class AudioCanvasTimeline extends StatefulWidget {
     required this.getRowPluginParameters,
     required this.setRowEffectParam,
     required this.scanPlugins,
+    this.onTogglePluginFavorite,
     this.openTrackPluginEditor,
     required this.setTrackAutomationPoints,
     required this.onAutomationCommit,
@@ -713,6 +719,8 @@ class AudioCanvasTimeline extends StatefulWidget {
     this.onCutClipAt,
     this.onGlueClips,
     this.onOpenMidiClip,
+    this.canOpenMidiInstrumentUi,
+    this.onOpenMidiInstrumentUi,
     this.onCreateMidiClipInInstrumentLane,
     this.onStemSeparation,
     this.onSelectionChanged,
@@ -762,6 +770,8 @@ class AudioCanvasTimeline extends StatefulWidget {
 
 class AudioCanvasTimelineController {
   void Function(int row, {int tab})? _ensureRowExpanded;
+  void Function(String targetId)? _showMasterAutomationLane;
+  VoidCallback? _closeMasterAutomationLane;
   VoidCallback? _collapseExpandedRows;
   VoidCallback? _copySelectedClips;
   VoidCallback? _pasteCopiedClipsAfterSelection;
@@ -781,6 +791,8 @@ class AudioCanvasTimelineController {
 
   void _bind({
     required void Function(int row, {int tab}) ensureRowExpanded,
+    required void Function(String targetId) showMasterAutomationLane,
+    required VoidCallback closeMasterAutomationLane,
     required VoidCallback collapseExpandedRows,
     required VoidCallback copySelectedClips,
     required VoidCallback pasteCopiedClipsAfterSelection,
@@ -790,6 +802,8 @@ class AudioCanvasTimelineController {
     required VoidCallback publishTopControlsState,
   }) {
     _ensureRowExpanded = ensureRowExpanded;
+    _showMasterAutomationLane = showMasterAutomationLane;
+    _closeMasterAutomationLane = closeMasterAutomationLane;
     _collapseExpandedRows = collapseExpandedRows;
     _copySelectedClips = copySelectedClips;
     _pasteCopiedClipsAfterSelection = pasteCopiedClipsAfterSelection;
@@ -804,6 +818,8 @@ class AudioCanvasTimelineController {
 
   void _unbind({
     required void Function(int row, {int tab}) ensureRowExpanded,
+    required void Function(String targetId) showMasterAutomationLane,
+    required VoidCallback closeMasterAutomationLane,
     required VoidCallback collapseExpandedRows,
     required VoidCallback copySelectedClips,
     required VoidCallback pasteCopiedClipsAfterSelection,
@@ -814,6 +830,12 @@ class AudioCanvasTimelineController {
   }) {
     if (identical(_ensureRowExpanded, ensureRowExpanded)) {
       _ensureRowExpanded = null;
+    }
+    if (identical(_showMasterAutomationLane, showMasterAutomationLane)) {
+      _showMasterAutomationLane = null;
+    }
+    if (identical(_closeMasterAutomationLane, closeMasterAutomationLane)) {
+      _closeMasterAutomationLane = null;
     }
     if (identical(_collapseExpandedRows, collapseExpandedRows)) {
       _collapseExpandedRows = null;
@@ -843,6 +865,14 @@ class AudioCanvasTimelineController {
 
   void ensureRowExpanded(int row, {int tab = 0}) {
     _ensureRowExpanded?.call(row, tab: tab);
+  }
+
+  void showMasterAutomationLane(String targetId) {
+    _showMasterAutomationLane?.call(targetId);
+  }
+
+  void closeMasterAutomationLane() {
+    _closeMasterAutomationLane?.call();
   }
 
   void collapseExpandedRows() {
@@ -1101,10 +1131,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   static const double _kTimelineAutomationLaneExpandedHeight =
       kRowHeight - (_kTimelineAutomationLaneInset * 2.0);
   static const double _kTimelineAutomationLaneCollapsedHeight = 20.0;
+  static const double _kMasterAutomationLaneHeight = 188.0;
   static const double _kMacWheelZoomSensitivity = 0.0025;
   static const double _kMinTimelinePixelsPerMs = 0.001;
   static const double _kMaxTimelinePixelsPerMs = 1.0;
   bool get _usesTabletDawLayout => widget.useTabletDawLayout;
+  bool get _usesDesktopOrTabletDawLayout =>
+      _usesTabletDawLayout || PlatformCapabilities.current.isDesktop;
+  bool get _allowsMultipleExpandedRows => _usesDesktopOrTabletDawLayout;
   double get _rowHeight => _usesTabletDawLayout
       ? _kTabletRowHeightMax * _tabletRowHeightScale
       : kRowHeight;
@@ -1206,6 +1240,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   String? _automationClipMenuClipId;
   int? _automationEditorRow;
   String? _automationEditorTargetId;
+  String? _masterAutomationEditorTargetId;
   int? _automationTargetPickerRow;
   _AutomationClipClipboardEntry? _automationClipClipboard;
   static _AutomationPointsClipboardEntry? _automationPointsClipboard;
@@ -1866,6 +1901,32 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     return true;
   }
 
+  bool _hasTimelineSelectionFeedback() {
+    return _selectedClipIndex >= 0 ||
+        _selectedClipIndices.isNotEmpty ||
+        _selectedAutomationClipByLane.isNotEmpty ||
+        _automationClipMenuClipId != null ||
+        _clipPopupMs != null ||
+        _showPastePopup ||
+        _trimClipIndex != null ||
+        _stretchClipIndex != null ||
+        _activeTrimHandleX != null;
+  }
+
+  void _clearTimelineSelectionFeedback() {
+    _resetTrimInteractionState();
+    _clearPendingClipTapState();
+    _clearPendingAutomationClipSelection();
+    _clearAutomationClipMenu();
+    _clearClipSelection();
+    _showPastePopup = false;
+    _pasteRow = null;
+    _pasteMs = null;
+    _highlightedSegmentRow = null;
+    _highlightedSegmentStartMs = null;
+    _highlightedSegmentEndMs = null;
+  }
+
   void _beginSelectionBoxAt(Offset localPosition) {
     _cancelDeadZoneHoldTimer();
     _resetDeadZonePointerState();
@@ -1948,8 +2009,16 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           event.localPosition,
           allowStartingOverClip: false,
         )) {
-      _pendingSelectionBoxPointer = event.pointer;
-      _pendingSelectionBoxStart = event.localPosition;
+      if (_hasTimelineSelectionFeedback()) {
+        setState(() {
+          _clearTimelineSelectionFeedback();
+          _pendingSelectionBoxPointer = event.pointer;
+          _pendingSelectionBoxStart = event.localPosition;
+        });
+      } else {
+        _pendingSelectionBoxPointer = event.pointer;
+        _pendingSelectionBoxStart = event.localPosition;
+      }
       return;
     }
     final isPrimaryLikePointer = event.kind != PointerDeviceKind.mouse ||
@@ -2021,6 +2090,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       return;
     }
     if (_activeTool == _TimelineTool.paint) {
+      if (_getGestureClipIndexAt(event.localPosition) == null &&
+          _hasTimelineSelectionFeedback()) {
+        setState(_clearTimelineSelectionFeedback);
+      }
       _isUserInteracting = true;
       _interactionMode = 'paint';
       _resetPaintStrokeState();
@@ -2867,7 +2940,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   int? _rowForLocalY(double localY) {
     if (_rowCount <= 0) return null;
-    double currentY = 0;
+    double currentY = _masterAutomationLanePaintHeight;
     for (int i = 0; i < _rowCount; i++) {
       if (!_isSourceRowVisible(i)) continue;
       final rowTotalHeight = _rowBlockHeightForIndex(i);
@@ -2881,7 +2954,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   double _rowTopForIndex(int row) {
     if (row < 0 || row >= _rowCount) return 0.0;
-    double y = 0.0;
+    double y = _masterAutomationLanePaintHeight;
     for (int i = 0; i < row; i++) {
       if (!_isSourceRowVisible(i)) continue;
       y += _rowBlockHeightForIndex(i);
@@ -3037,6 +3110,42 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         normalized.startsWith('masterfxid:');
   }
 
+  bool get _isMasterAutomationLaneOpen =>
+      _masterAutomationEditorTargetId != null &&
+      _masterAutomationEditorTargetId!.trim().isNotEmpty &&
+      _rowCount > 0;
+
+  double get _masterAutomationLanePaintHeight => _isMasterAutomationLaneOpen &&
+          _automationTargetsForMasterLane().isNotEmpty
+      ? _kMasterAutomationLaneHeight
+      : 0.0;
+
+  List<Map<String, dynamic>> _automationTargetsForMasterLane() {
+    if (_rowCount <= 0) return const <Map<String, dynamic>>[];
+    final targets = <Map<String, dynamic>>[];
+    for (final raw in widget.getAutomationTargetsForRow(0)) {
+      final target = Map<String, dynamic>.from(raw);
+      final id = (target['id'] ?? '').toString().trim();
+      if (id.isEmpty || !_isMasterAutomationTargetId(id)) continue;
+      targets.add(target);
+    }
+    return targets;
+  }
+
+  String _resolveAutomationTargetIdFromTargets(
+    List<Map<String, dynamic>> targets,
+    String preferredTargetId,
+  ) {
+    final preferred = preferredTargetId.trim();
+    if (preferred.isNotEmpty &&
+        targets.any(
+            (target) => (target['id'] ?? '').toString().trim() == preferred)) {
+      return preferred;
+    }
+    if (targets.isEmpty) return preferred.isEmpty ? 'volume' : preferred;
+    return (targets.first['id'] ?? preferred).toString().trim();
+  }
+
   List<Map<String, dynamic>> _automationTargetsForAutomationTab(int row) {
     if (row < 0 || row >= _rowCount) return const <Map<String, dynamic>>[];
     final targets = widget.getAutomationTargetsForRow(row);
@@ -3090,20 +3199,13 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _selectedRowIndex = row;
       widget.onSelectRow(row);
       widget.setSelectedAutomationTargetId(row, resolvedTargetId);
-      for (int i = 0; i < _rowCount; i++) {
-        _rowExpanded[i] = i == row;
-      }
+      _expandRowForFocusedTarget(row);
       _expandedTab[row] = _normalizeExpandedTab(2);
       _automationEditorRow = row;
       _automationEditorTargetId = resolvedTargetId;
       _automationTargetPickerRow = null;
     });
-    for (int i = 0; i < oldExpanded.length && i < _rowExpanded.length; i++) {
-      if (oldExpanded[i] != _rowExpanded[i]) {
-        widget.onRowExpansionChanged?.call(i, _rowExpanded[i]);
-        widget.onTutorialRowExpansionChanged?.call(i, _rowExpanded[i]);
-      }
-    }
+    _notifyRowExpansionChanges(oldExpanded);
     widget.onRowTabSelected?.call(row, 2);
     widget.onTutorialRowTabSelected?.call(row, 2);
     _triggerTimelineHalos(
@@ -3112,6 +3214,45 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         ...haloKeys,
       ],
     );
+  }
+
+  void _expandRowForFocusedTarget(int row) {
+    if (row < 0 || row >= _rowExpanded.length) return;
+    if (_allowsMultipleExpandedRows) {
+      _rowExpanded[row] = true;
+      return;
+    }
+    for (int i = 0; i < _rowExpanded.length; i++) {
+      _rowExpanded[i] = i == row;
+    }
+  }
+
+  void _notifyRowExpansionChanges(
+    List<bool> oldExpanded, {
+    bool notifyToggle = false,
+  }) {
+    var changed = false;
+    for (int i = 0; i < oldExpanded.length && i < _rowExpanded.length; i++) {
+      if (oldExpanded[i] == _rowExpanded[i]) continue;
+      changed = true;
+      if (notifyToggle) {
+        widget.onToggleExpanded(i);
+      }
+      widget.onRowExpansionChanged?.call(i, _rowExpanded[i]);
+      widget.onTutorialRowExpansionChanged?.call(i, _rowExpanded[i]);
+    }
+    if (changed) {
+      final hasFloatingTimelineMenu = _selectedClipIndex >= 0 ||
+          _selectedClipIndices.isNotEmpty ||
+          _clipPopupMs != null ||
+          _showPastePopup ||
+          _pasteRow != null ||
+          _automationClipMenuClipId != null;
+      if (hasFloatingTimelineMenu && mounted) {
+        setState(_clearTimelineSelectionFeedback);
+      }
+      _syncVerticalScrollOffsetAfterGeometryChange();
+    }
   }
 
   String _haloSlug(String raw) {
@@ -3155,6 +3296,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }) {
     if (row < 0 || row >= _rowCount) return;
     final normalizedTab = _normalizeExpandedTab(tab);
+    final oldExpanded = List<bool>.from(_rowExpanded);
     setState(() {
       if (selectRow) {
         _selectedRowIndex = row;
@@ -3165,12 +3307,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         widget.setSelectedAutomationTargetId(row, selectedAutomationTargetId);
       }
       if (expandOnlyThisRow) {
-        for (int i = 0; i < _rowCount; i++) {
-          _rowExpanded[i] = i == row;
-        }
+        _expandRowForFocusedTarget(row);
       }
       _applyExpandedTabStateForRow(row, normalizedTab);
     });
+    _notifyRowExpansionChanges(oldExpanded);
     widget.onRowTabSelected?.call(row, normalizedTab);
     widget.onTutorialRowTabSelected?.call(row, normalizedTab);
   }
@@ -3212,9 +3353,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     widget.setSelectedAutomationTargetId(row, resolvedTargetId);
     _selectedRowIndex = row;
     widget.onSelectRow(row);
-    for (int i = 0; i < _rowCount; i++) {
-      _rowExpanded[i] = i == row;
-    }
+    _expandRowForFocusedTarget(row);
     _expandedTab[row] = _normalizeExpandedTab(2);
     _automationEditorRow = row;
     _automationEditorTargetId = resolvedTargetId;
@@ -4008,6 +4147,31 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   final ScrollController _verticalScrollController = ScrollController();
   double _verticalScrollOffset = 0.0;
 
+  void _syncVerticalScrollOffsetFromController({bool clampToExtent = false}) {
+    if (!_verticalScrollController.hasClients) return;
+    var nextOffset = _verticalScrollController.offset;
+    if (clampToExtent) {
+      final maxScroll = _verticalScrollController.position.maxScrollExtent;
+      nextOffset = nextOffset.clamp(0.0, math.max(0.0, maxScroll)).toDouble();
+      if ((nextOffset - _verticalScrollController.offset).abs() > 0.01) {
+        _verticalScrollController.jumpTo(nextOffset);
+      }
+    }
+    _verticalScrollOffset = nextOffset;
+  }
+
+  void _syncVerticalScrollOffsetAfterGeometryChange() {
+    _syncVerticalScrollOffsetFromController(clampToExtent: true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_verticalScrollController.hasClients) return;
+      final before = _verticalScrollOffset;
+      _syncVerticalScrollOffsetFromController(clampToExtent: true);
+      if ((before - _verticalScrollOffset).abs() > 0.01) {
+        setState(() {});
+      }
+    });
+  }
+
   double get _maxDurationMs => widget.maxDuration.inMilliseconds.toDouble();
   int get _rowCount => widget.rows.length;
   double get _currentPlayheadMs =>
@@ -4019,6 +4183,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _syncLoopStateFromWidget();
     widget.controller?._bind(
       ensureRowExpanded: ensureRowExpanded,
+      showMasterAutomationLane: showMasterAutomationLane,
+      closeMasterAutomationLane: closeMasterAutomationLane,
       collapseExpandedRows: collapseExpandedRows,
       copySelectedClips: _copySelectedClips,
       pasteCopiedClipsAfterSelection: _pasteCopiedClipsAfterSelection,
@@ -4030,7 +4196,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _syncRowUiState();
     _verticalScrollController.addListener(() {
       setState(() {
-        _verticalScrollOffset = _verticalScrollController.offset;
+        _syncVerticalScrollOffsetFromController();
       });
     });
     widget.registerRowFxRefresher?.call(_refreshRowFx);
@@ -4058,6 +4224,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (!identical(oldWidget.controller, widget.controller)) {
       oldWidget.controller?._unbind(
         ensureRowExpanded: ensureRowExpanded,
+        showMasterAutomationLane: showMasterAutomationLane,
+        closeMasterAutomationLane: closeMasterAutomationLane,
         collapseExpandedRows: collapseExpandedRows,
         copySelectedClips: _copySelectedClips,
         pasteCopiedClipsAfterSelection: _pasteCopiedClipsAfterSelection,
@@ -4068,6 +4236,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       );
       widget.controller?._bind(
         ensureRowExpanded: ensureRowExpanded,
+        showMasterAutomationLane: showMasterAutomationLane,
+        closeMasterAutomationLane: closeMasterAutomationLane,
         collapseExpandedRows: collapseExpandedRows,
         copySelectedClips: _copySelectedClips,
         pasteCopiedClipsAfterSelection: _pasteCopiedClipsAfterSelection,
@@ -4170,6 +4340,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _cancelMagnetHoldTimer();
     widget.controller?._unbind(
       ensureRowExpanded: ensureRowExpanded,
+      showMasterAutomationLane: showMasterAutomationLane,
+      closeMasterAutomationLane: closeMasterAutomationLane,
       collapseExpandedRows: collapseExpandedRows,
       copySelectedClips: _copySelectedClips,
       pasteCopiedClipsAfterSelection: _pasteCopiedClipsAfterSelection,
@@ -4462,14 +4634,20 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
     setState(() {
       if (!wasSelected) {
-        if (_automationEditorRow != null && _automationEditorRow != tappedRow) {
+        if (!_allowsMultipleExpandedRows &&
+            _automationEditorRow != null &&
+            _automationEditorRow != tappedRow) {
           _automationEditorRow = null;
           _automationEditorTargetId = null;
         }
         _selectedRowIndex = tappedRow;
         widget.onSelectRow(tappedRow);
-        for (int i = 0; i < _rowExpanded.length; i++) {
-          _rowExpanded[i] = false;
+        if (_allowsMultipleExpandedRows) {
+          _rowExpanded[tappedRow] = true;
+        } else {
+          for (int i = 0; i < _rowExpanded.length; i++) {
+            _rowExpanded[i] = false;
+          }
         }
         return;
       }
@@ -4479,18 +4657,16 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         _automationEditorRow = null;
         _automationEditorTargetId = null;
       }
-      for (int i = 0; i < _rowExpanded.length; i++) {
-        _rowExpanded[i] = shouldExpand && i == tappedRow;
+      if (_allowsMultipleExpandedRows) {
+        _rowExpanded[tappedRow] = shouldExpand;
+      } else {
+        for (int i = 0; i < _rowExpanded.length; i++) {
+          _rowExpanded[i] = shouldExpand && i == tappedRow;
+        }
       }
     });
 
-    for (int i = 0; i < oldExpanded.length && i < _rowExpanded.length; i++) {
-      if (oldExpanded[i] != _rowExpanded[i]) {
-        widget.onToggleExpanded(i);
-        widget.onRowExpansionChanged?.call(i, _rowExpanded[i]);
-        widget.onTutorialRowExpansionChanged?.call(i, _rowExpanded[i]);
-      }
-    }
+    _notifyRowExpansionChanges(oldExpanded, notifyToggle: true);
   }
 
   void ensureRowExpanded(int row, {int tab = 0}) {
@@ -4500,9 +4676,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     setState(() {
       _selectedRowIndex = row;
       widget.onSelectRow(row);
-      for (int i = 0; i < _rowCount; i++) {
-        _rowExpanded[i] = i == row;
-      }
+      _expandRowForFocusedTarget(row);
       _expandedTab[row] = normalizedTab;
       if (normalizedTab != 2) {
         _automationEditorRow = null;
@@ -4510,14 +4684,35 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         _automationTargetPickerRow = null;
       }
     });
-    for (int i = 0; i < oldExpanded.length && i < _rowExpanded.length; i++) {
-      if (oldExpanded[i] != _rowExpanded[i]) {
-        widget.onRowExpansionChanged?.call(i, _rowExpanded[i]);
-        widget.onTutorialRowExpansionChanged?.call(i, _rowExpanded[i]);
-      }
-    }
+    _notifyRowExpansionChanges(oldExpanded);
     widget.onRowTabSelected?.call(row, normalizedTab);
     widget.onTutorialRowTabSelected?.call(row, normalizedTab);
+  }
+
+  void showMasterAutomationLane(String targetId) {
+    final normalizedTargetId = targetId.trim();
+    if (normalizedTargetId.isEmpty || !_isMasterAutomationTargetId(targetId)) {
+      return;
+    }
+    setState(() {
+      _masterAutomationEditorTargetId = normalizedTargetId;
+      _clearAutomationClipMenu();
+      _automationTargetPickerRow = null;
+    });
+    _syncVerticalScrollOffsetAfterGeometryChange();
+  }
+
+  void closeMasterAutomationLane() {
+    if (_masterAutomationEditorTargetId == null) return;
+    setState(() {
+      _masterAutomationEditorTargetId = null;
+      if (_automationRangeSelectionRow == 0 &&
+          _automationRangeSelectionTargetId != null &&
+          _isMasterAutomationTargetId(_automationRangeSelectionTargetId!)) {
+        _clearAutomationRangeSelectionMode();
+      }
+    });
+    _syncVerticalScrollOffsetAfterGeometryChange();
   }
 
   void collapseExpandedRows() {
@@ -4530,6 +4725,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _automationEditorRow = null;
       _automationEditorTargetId = null;
       _automationTargetPickerRow = null;
+      _clearTimelineSelectionFeedback();
     });
     for (int i = 0; i < oldExpanded.length && i < _rowExpanded.length; i++) {
       if (oldExpanded[i] != _rowExpanded[i]) {
@@ -4537,6 +4733,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         widget.onTutorialRowExpansionChanged?.call(i, _rowExpanded[i]);
       }
     }
+    _syncVerticalScrollOffsetAfterGeometryChange();
   }
 
   void _syncRowUiState() {
@@ -4564,6 +4761,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         .removeWhere((row, _) => row < 0 || row >= _rowCount);
     _automationLaneFocusByRow
         .removeWhere((row, _) => row < 0 || row >= _rowCount);
+    if (_rowCount <= 0) {
+      _masterAutomationEditorTargetId = null;
+    }
   }
 
   void _reconcileRowUiStateByRowId(List<TimelineRow> oldRows) {
@@ -4688,6 +4888,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   double _getPlayheadPx(BuildContext context) {
+    if (PlatformCapabilities.current.isDesktop) {
+      return (_currentPlayheadMs - _scrollOffsetMs) * _pixelsPerMs;
+    }
     if (_usesTabletDawLayout) {
       return _getTabletDeviceCenterPlayheadPx(context);
     }
@@ -4743,7 +4946,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   double get _totalTimelineHeight {
-    double total = 0.0;
+    double total = _masterAutomationLanePaintHeight;
     for (int i = 0; i < _rowCount; i++) {
       if (!_isSourceRowVisible(i)) continue;
       total += _rowBlockHeightForIndex(i);
@@ -4767,7 +4970,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   void _recalculateRowYPositions() {
     _rowYPositions.clear();
 
-    double y = 0;
+    double y = _masterAutomationLanePaintHeight;
     for (int i = 0; i < _rowCount; i++) {
       _rowYPositions.add(y);
       if (_isSourceRowVisible(i)) {
@@ -5169,9 +5372,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   void _focusAutomationEditorForRow(int row, String targetId) {
     if (row < 0 || row >= _rowCount) return;
+    final oldExpanded = List<bool>.from(_rowExpanded);
     setState(() {
       _setAutomationEditorFor(row, targetId);
     });
+    _notifyRowExpansionChanges(oldExpanded);
   }
 
   double _defaultAutomationClipLengthMs() {
@@ -5257,6 +5462,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   Future<void> _revealRowAutomationTarget(int row, String targetId) async {
     if (row < 0 || row >= _rowCount) return;
+    if (_usesDesktopOrTabletDawLayout &&
+        widget.onRevealAutomationTarget != null) {
+      await widget.onRevealAutomationTarget!(row, targetId);
+      return;
+    }
     final targetMeta = _automationTargetMetaById(row, targetId);
     final isOrphan = targetMeta?['isOrphan'] == true;
     final effectIndex = (targetMeta?['effectIndex'] as num?)?.toInt() ?? -1;
@@ -5367,6 +5577,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _openAutomationClipEditor(_TimelineAutomationClipVisual clipVisual) {
+    final oldExpanded = List<bool>.from(_rowExpanded);
     setState(() {
       _setSelectedAutomationClipFor(
         clipVisual.row,
@@ -5380,6 +5591,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         clipVisual.clip.startMs + clipVisual.clip.lengthMs,
       );
     });
+    _notifyRowExpansionChanges(oldExpanded);
   }
 
   Future<void> _revealAutomationTargetForClip(
@@ -5391,11 +5603,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       clipVisual.clip.id,
       lane: clipVisual.clip.lane,
     );
-    await widget.onRevealAutomationTarget?.call(
-      clipVisual.row,
-      clipVisual.targetId,
-    );
-    if (!mounted) return;
     await _revealRowAutomationTarget(clipVisual.row, clipVisual.targetId);
   }
 
@@ -6196,57 +6403,62 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final color = enabled
         ? const Color(0xFFF4F5F7)
         : Colors.white.withValues(alpha: 0.74);
-    return Opacity(
-      opacity: onTap == null ? 0.45 : 1.0,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap == null ? null : () => unawaited(onTap()),
-          borderRadius: BorderRadius.circular(999),
-          child: Ink(
-            padding: EdgeInsets.symmetric(
-              horizontal: compact ? 9 : 10,
-              vertical: compact ? 5 : 6,
-            ),
-            decoration: BoxDecoration(
-              color: enabled
-                  ? activeColor.withValues(alpha: 0.28)
-                  : Colors.white.withValues(alpha: 0.075),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(
-                color: enabled
-                    ? Colors.white.withValues(alpha: 0.30)
-                    : Colors.white.withValues(alpha: 0.15),
+    return Semantics(
+      button: true,
+      toggled: enabled,
+      label: L10n.translate(context, 'Normalize'),
+      child: Opacity(
+        opacity: onTap == null ? 0.45 : 1.0,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap == null ? null : () => unawaited(onTap()),
+            borderRadius: BorderRadius.circular(999),
+            child: Ink(
+              padding: EdgeInsets.symmetric(
+                horizontal: compact ? 8 : 10,
+                vertical: compact ? 5 : 6,
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.16),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
+              decoration: BoxDecoration(
+                color: enabled
+                    ? activeColor.withValues(alpha: 0.34)
+                    : Colors.white.withValues(alpha: 0.075),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: enabled
+                      ? Colors.white.withValues(alpha: 0.42)
+                      : Colors.white.withValues(alpha: 0.15),
                 ),
-              ],
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  enabled
-                      ? Icons.check_circle_rounded
-                      : Icons.radio_button_unchecked_rounded,
-                  size: compact ? 11 : 12,
-                  color: color,
-                ),
-                SizedBox(width: compact ? 4 : 5),
-                Text(
-                  L10n.translate(context, 'Normalize'),
-                  style: TextStyle(
-                    color: color,
-                    fontSize: compact ? 10 : 10.8,
-                    fontWeight: FontWeight.w700,
-                    height: 1.0,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.16),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
                   ),
-                ),
-              ],
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    enabled
+                        ? Icons.toggle_on_rounded
+                        : Icons.toggle_off_rounded,
+                    size: compact ? 18 : 20,
+                    color: color,
+                  ),
+                  SizedBox(width: compact ? 4 : 5),
+                  Text(
+                    L10n.translate(context, 'Normalize'),
+                    style: TextStyle(
+                      color: color,
+                      fontSize: compact ? 10 : 10.8,
+                      fontWeight: FontWeight.w800,
+                      height: 1.0,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -6544,7 +6756,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                     inactiveTrackColor: inactiveTrackColor,
                                     thumbColor: thumbColor,
                                   ),
-                                  child: Slider(
+                                  child: DesktopScrollableSlider(
                                     value:
                                         clip.pitchSemitones.clamp(-12.0, 12.0),
                                     min: -12.0,
@@ -6924,6 +7136,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     );
   }
 
+  double _contentYToTimelineViewportY(double contentY) {
+    return contentY - _verticalScrollOffset;
+  }
+
   Widget _buildAutomationClipMenuOverlay(
     double viewportWidth,
     double viewportHeight,
@@ -6955,13 +7171,15 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final left = (_headerWidth + anchorPx - (popupWidth / 2.0))
         .clamp(minLeft, maxLeft)
         .toDouble();
-    final minTop = _verticalScrollOffset + 2.0;
+    const double minTop = 2.0;
     final maxTop = math.max(
       minTop,
-      _verticalScrollOffset + viewportHeight - popupHeight - 2.0,
+      viewportHeight - popupHeight - 2.0,
     );
-    final preferredAbove = visual.rect.top - popupHeight - 4.0;
-    final preferredBelow = visual.rect.bottom + 4.0;
+    final visibleTop = _contentYToTimelineViewportY(visual.rect.top);
+    final visibleBottom = _contentYToTimelineViewportY(visual.rect.bottom);
+    final preferredAbove = visibleTop - popupHeight - 4.0;
+    final preferredBelow = visibleBottom + 4.0;
     final top = preferredAbove >= minTop
         ? preferredAbove
         : (preferredBelow <= maxTop
@@ -7184,6 +7402,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         singleSelectionIndex < widget.clips.length &&
         widget.clips[singleSelectionIndex].isMidi &&
         (widget.canReplaceSamplerSource?.call(singleSelectionIndex) ?? false);
+    final canOpenMidiInstrumentUi = hasSingleSelection &&
+        widget.onOpenMidiInstrumentUi != null &&
+        singleSelectionIndex >= 0 &&
+        singleSelectionIndex < widget.clips.length &&
+        widget.clips[singleSelectionIndex].isMidi &&
+        (widget.canOpenMidiInstrumentUi?.call(singleSelectionIndex) ?? false);
     Rect? selectionRect;
     for (final index in selectedIndices) {
       final rect = _getClipRect(index);
@@ -7200,7 +7424,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
             (canGlueSelection ? 1 : 0) +
             (canOpenPitchLab ? 1 : 0) +
             (canCreateSampler ? 1 : 0) +
-            (canReplaceSamplerSource ? 1 : 0);
+            (canReplaceSamplerSource ? 1 : 0) +
+            (canOpenMidiInstrumentUi ? 1 : 0);
     final double popupWidth = math.min(
       popupActionCount * popupActionWidth,
       math.max(84.0, viewportWidth - 8),
@@ -7250,13 +7475,17 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
             .clamp(minLeft, maxLeft)
             .toDouble();
 
-        final minTop = _verticalScrollOffset + 2.0;
+        const double minTop = 2.0;
         final maxTop = math.max(
           minTop,
-          _verticalScrollOffset + viewportHeight - popupHeight - 2.0,
+          viewportHeight - popupHeight - 2.0,
         );
-        final preferredAbove = selectionRect.top - popupHeight - 4.0;
-        final preferredBelow = selectionRect.bottom + 4.0;
+        final visibleSelectionTop =
+            _contentYToTimelineViewportY(selectionRect.top);
+        final visibleSelectionBottom =
+            _contentYToTimelineViewportY(selectionRect.bottom);
+        final preferredAbove = visibleSelectionTop - popupHeight - 4.0;
+        final preferredBelow = visibleSelectionBottom + 4.0;
         if (preferredAbove >= minTop) {
           top = preferredAbove;
         } else if (preferredBelow <= maxTop) {
@@ -7310,6 +7539,25 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
               _openClipSettingsPanel(singleSelectionIndex);
             },
             tooltip: L10n.translate(context, 'Clip settings'),
+          ),
+        ),
+      ]);
+    }
+    if (canOpenMidiInstrumentUi) {
+      popupChildren.addAll(<Widget>[
+        Container(width: 1, height: 16, color: Colors.white24),
+        Expanded(
+          child: _buildClipPopupAction(
+            key: const ValueKey('selected_clip_popup_open_instrument_ui'),
+            icon: Icons.open_in_new_rounded,
+            color: const Color(0xFF8BE7C8),
+            onTap: () async {
+              final openInstrumentUi = widget.onOpenMidiInstrumentUi;
+              if (openInstrumentUi == null) return;
+              setState(_clearClipSelection);
+              await openInstrumentUi(singleSelectionIndex);
+            },
+            tooltip: L10n.translate(context, 'Open synth'),
           ),
         ),
       ]);
@@ -7592,6 +7840,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         final rowsHiddenByCollapsedGroups = rowVisibility.entries
             .expand((entry) => entry.hiddenCollapsedSourceRows)
             .toSet();
+        _syncVerticalScrollOffsetFromController();
         _recalculateRowYPositions();
         _timelineAutomationClipVisualCache = _timelineAutomationClipVisuals();
         final List<double> expandedHeights = List.generate(_rowCount, (i) {
@@ -7712,6 +7961,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                     },
                                   ),
                                   staticTrackHeaders,
+                                  _buildMasterAutomationLane(viewportWidth),
                                 ],
                               ),
                             ),
@@ -7737,6 +7987,15 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                               ),
                             ),
                           ),
+                        _buildSelectedClipPopup(
+                          viewportWidth,
+                          visibleTimelineHeight,
+                        ),
+                        _buildAutomationClipMenuOverlay(
+                          viewportWidth,
+                          visibleTimelineHeight,
+                          timelineAutomationClipVisuals,
+                        ),
                       ],
                     );
                   },
@@ -7857,6 +8116,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                           effectsPanelHeights: _effectsPanelHeights,
                           expandedHeights: expandedHeights,
                           automationLaneHeights: automationLaneHeights,
+                          masterAutomationLaneHeight:
+                              _masterAutomationLanePaintHeight,
                           isRecording: widget.isRecording,
                           recordingRowIndex: widget.recordingRowIndex,
                           recordingStartMs: widget.recordingStartMs,
@@ -7966,6 +8227,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                             effectsPanelHeights: _effectsPanelHeights,
                             expandedHeights: expandedHeights,
                             automationLaneHeights: automationLaneHeights,
+                            masterAutomationLaneHeight:
+                                _masterAutomationLanePaintHeight,
                             isRecording: widget.isRecording,
                             recordingRowIndex: widget.recordingRowIndex,
                             recordingStartMs: widget.recordingStartMs,
@@ -8050,13 +8313,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
             child: _buildAddRowPill(),
           ),
         ),
-        _buildSelectedClipPopup(viewportWidth, visibleTimelineHeight),
         _buildPastePopup(viewportWidth),
-        _buildAutomationClipMenuOverlay(
-          viewportWidth,
-          visibleTimelineHeight,
-          timelineAutomationClipVisuals,
-        ),
         _buildAutomationClipTestOverlay(
           viewportWidth,
           visibleTimelineHeight,
@@ -8135,6 +8392,90 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
 
     return list;
+  }
+
+  Widget _buildMasterAutomationLane(double viewportWidth) {
+    if (!_isMasterAutomationLaneOpen || _rowCount <= 0) {
+      return const SizedBox.shrink();
+    }
+    final targets = _automationTargetsForMasterLane();
+    if (targets.isEmpty) return const SizedBox.shrink();
+    final targetId = _resolveAutomationTargetIdFromTargets(
+      targets,
+      _masterAutomationEditorTargetId ?? '',
+    );
+    return Positioned(
+      left: 0,
+      top: 0,
+      right: 0,
+      height: _masterAutomationLanePaintHeight,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            width: _headerWidth,
+            padding: const EdgeInsets.fromLTRB(9, 10, 8, 10),
+            decoration: BoxDecoration(
+              color: _kTimelineHeaderIdle.withValues(alpha: 0.70),
+              border: Border(
+                right: BorderSide(
+                  color: Colors.white.withValues(alpha: 0.08),
+                ),
+                bottom: BorderSide(
+                  color: Colors.white.withValues(alpha: 0.10),
+                ),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.tune_rounded,
+                  size: 17,
+                  color: _kTimelineShellText.withValues(alpha: 0.88),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  L10n.translate(context, 'Master'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _kTimelineShellText,
+                    fontFamily: 'Pretendard',
+                    fontSize: 11.4,
+                    fontWeight: FontWeight.w800,
+                    height: 1.0,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  L10n.translate(context, 'Automation'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: _kTimelineShellMutedText,
+                    fontFamily: 'Pretendard',
+                    fontSize: 9.2,
+                    fontWeight: FontWeight.w600,
+                    height: 1.0,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(
+            width: viewportWidth,
+            child: _buildAutomationPanel(
+              0,
+              targetId: targetId,
+              availableTargetsOverride: targets,
+              masterLane: true,
+              onClose: closeMasterAutomationLane,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildExpandedRowPanelContent(
@@ -8421,6 +8762,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                     targetParamId: 'volume',
                     targetMin: 0.0,
                     targetMax: 1.0,
+                    targetDefaultNormalized: null,
+                    targetDisplayLabels: const <double, String>{},
                     isVolumeLane: true,
                     highlightStartMs: null,
                     highlightEndMs: null,
@@ -8503,6 +8846,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                         Widget child = PrettyGainSlider(
                           value: widget.rowGain[row],
                           showStepButtons: _usesTabletDawLayout,
+                          stackedLayout: _usesTabletDawLayout,
+                          label: L10n.translate(context, 'Gain'),
                           onLongPress: () {
                             unawaited(
                                 AppHaptics.impact(AppHapticImpact.medium));
@@ -8555,6 +8900,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                         Widget child = PrettyStereoSlider(
                           value: widget.rowPan[row],
                           showStepButtons: _usesTabletDawLayout,
+                          stackedLayout: _usesTabletDawLayout,
+                          label: L10n.translate(context, 'Pan'),
                           onLongPress: () {
                             unawaited(
                                 AppHaptics.impact(AppHapticImpact.medium));
@@ -8628,9 +8975,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     int row, {
     required String targetId,
     VoidCallback? onClose,
+    List<Map<String, dynamic>>? availableTargetsOverride,
+    bool masterLane = false,
   }) {
-    final availableTargets = _automationTargetsForAutomationTab(row);
-    final activeTargetId = _resolveAutomationTabTargetId(row, targetId);
+    final availableTargets =
+        availableTargetsOverride ?? _automationTargetsForAutomationTab(row);
+    final activeTargetId = availableTargetsOverride == null
+        ? _resolveAutomationTabTargetId(row, targetId)
+        : _resolveAutomationTargetIdFromTargets(availableTargets, targetId);
     final activeTarget =
         _automationTargetMetaById(row, activeTargetId) ?? <String, dynamic>{};
     final lanePoints = activeTargetId == 'volume'
@@ -8644,6 +8996,18 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         (activeTarget['paramId'] ?? activeTargetId).toString().trim();
     final targetMin = (activeTarget['min'] as num?)?.toDouble() ?? 0.0;
     final targetMax = (activeTarget['max'] as num?)?.toDouble() ?? 1.0;
+    final targetDefaultNormalized =
+        (activeTarget['defaultNormalized'] as num?)?.toDouble();
+    final targetDisplayLabels = <double, String>{};
+    final rawDisplayLabels = activeTarget['displayLabels'];
+    if (rawDisplayLabels is Map) {
+      rawDisplayLabels.forEach((key, value) {
+        final normalized = double.tryParse(key.toString());
+        final label = value?.toString().trim() ?? '';
+        if (normalized == null || label.isEmpty) return;
+        targetDisplayLabels[normalized.clamp(0.0, 1.0).toDouble()] = label;
+      });
+    }
     final isVolumeTarget =
         (activeTarget['isVolume'] == true) || activeTargetId == 'volume';
     final isOrphanTarget = activeTarget['isOrphan'] == true;
@@ -8652,11 +9016,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       targetParamId: targetParamId.isEmpty ? activeTargetId : targetParamId,
       targetMin: targetMin,
       targetMax: targetMax,
+      pluginDisplayLabels: targetDisplayLabels,
+      pluginDefaultNormalized: targetDefaultNormalized,
       isVolumeLane: isVolumeTarget,
     );
     final targetDisplayTitle = targetFullLabel.isEmpty
         ? (targetLabel.isEmpty ? activeTargetId : targetLabel)
         : targetFullLabel;
+    final pickerRowKey = masterLane ? -1 : row;
     final rangeSelectionActiveForTarget =
         _isAutomationRangeSelectionModeFor(row, activeTargetId);
     final bool hasRangeStart = _automationRangeSelectionStartMs != null;
@@ -8704,14 +9071,23 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     void selectAutomationTarget(String nextTargetId) {
       if (nextTargetId.trim().isEmpty) return;
       setState(() {
-        final resolved = _resolveAutomationTabTargetId(row, nextTargetId);
+        final resolved = availableTargetsOverride == null
+            ? _resolveAutomationTabTargetId(row, nextTargetId)
+            : _resolveAutomationTargetIdFromTargets(
+                availableTargets,
+                nextTargetId,
+              );
         if (_isAutomationRangeSelectionModeFor(row, activeTargetId) &&
             resolved != activeTargetId) {
           _clearAutomationRangeSelectionMode();
         }
-        widget.setSelectedAutomationTargetId(row, resolved);
-        _automationEditorRow = row;
-        _automationEditorTargetId = resolved;
+        if (masterLane) {
+          _masterAutomationEditorTargetId = resolved;
+        } else {
+          widget.setSelectedAutomationTargetId(row, resolved);
+          _automationEditorRow = row;
+          _automationEditorTargetId = resolved;
+        }
         _automationTargetPickerRow = null;
       });
     }
@@ -9122,6 +9498,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                             : targetParamId,
                         targetMin: targetMin,
                         targetMax: targetMax,
+                        targetDefaultNormalized: targetDefaultNormalized,
+                        targetDisplayLabels: targetDisplayLabels,
                         isVolumeLane: isVolumeTarget,
                         highlightStartMs: laneHighlightStartMs,
                         highlightEndMs: laneHighlightEndMs,
@@ -9258,11 +9636,15 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                       return MenuAnchor(
                         alignmentOffset: const Offset(0, 5),
                         onOpen: () {
-                          if (_automationTargetPickerRow == row) return;
-                          setState(() => _automationTargetPickerRow = row);
+                          if (_automationTargetPickerRow == pickerRowKey) {
+                            return;
+                          }
+                          setState(
+                              () => _automationTargetPickerRow = pickerRowKey);
                         },
                         onClose: () {
-                          if (!mounted || _automationTargetPickerRow != row) {
+                          if (!mounted ||
+                              _automationTargetPickerRow != pickerRowKey) {
                             return;
                           }
                           setState(() => _automationTargetPickerRow = null);
@@ -9633,17 +10015,18 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         insertEffectOnRow: widget.insertRowEffect,
         getTrackPluginParameters: widget.getRowPluginParameters,
         scanPlugins: widget.scanPlugins,
+        onTogglePluginFavorite: widget.onTogglePluginFavorite,
         openTrackPluginEditor: widget.openTrackPluginEditor,
         setTrackEffectParam: widget.setRowEffectParam,
         onRequestAutomateParameter: _handleRowEffectAutomationRequest,
         onPluginParamCommit: widget.onPluginParamCommit,
         onPresetCommit: widget.onPresetCommit,
         useDeviceChainLayout: _usesTabletDawLayout,
-        openSelectedEffectInline: !_usesTabletDawLayout,
+        openSelectedEffectInline: !_usesDesktopOrTabletDawLayout,
         selectedEffectIndex: widget.selectedRowEffectRow == row
             ? widget.selectedRowEffectIndex
             : null,
-        onEffectSelected: _usesTabletDawLayout
+        onEffectSelected: _usesDesktopOrTabletDawLayout
             ? (effectIndex) {
                 widget.onRowEffectSelected?.call(
                   row,
@@ -11037,14 +11420,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if ((next - _tabletRowHeightScale).abs() < 0.002) return;
     setState(() {
       _tabletRowHeightScale = next;
-      if (_verticalScrollController.hasClients) {
-        final maxScroll = _verticalScrollController.position.maxScrollExtent;
-        if (_verticalScrollController.offset > maxScroll) {
-          _verticalScrollController.jumpTo(maxScroll);
-          _verticalScrollOffset = maxScroll;
-        }
-      }
+      _syncVerticalScrollOffsetFromController(clampToExtent: true);
     });
+    _syncVerticalScrollOffsetAfterGeometryChange();
   }
 
   double _tabletRailViewportHeight(double visibleTimelineHeight) {
@@ -11970,74 +12348,106 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
             );
           }
 
-          return GestureDetector(
-            key: ValueKey('timeline_tablet_row_gain_$row'),
+          void applyWheelGain(PointerScrollEvent event) {
+            final direction = event.scrollDelta.dy.abs() < 1
+                ? 0.0
+                : event.scrollDelta.dy.sign * -1.0;
+            if (direction == 0) return;
+            final keyboard = HardwareKeyboard.instance;
+            final modifier =
+                DesktopSliderWheelSensitivityStore.multiplierForKeyboard(
+              keyboard,
+            );
+            final next =
+                (headerMixGain + direction * 0.03 * modifier).clamp(0.0, 3.0);
+            if ((next - headerMixGain).abs() < 0.000001) return;
+            _snapshotMixRowsGain(headerMixControlRows);
+            _setMixRowsGainLive(headerMixControlRows, next.toDouble());
+            _commitMixRowsGainFromSnapshot(headerMixControlRows);
+          }
+
+          return Listener(
             behavior: HitTestBehavior.opaque,
-            onTapDown: (details) {
-              _snapshotMixRowsGain(headerMixControlRows);
-              updateGainFromLocalDx(details.localPosition.dx);
-              _commitMixRowsGainFromSnapshot(headerMixControlRows);
+            onPointerSignal: (event) {
+              if (event is! PointerScrollEvent ||
+                  !PlatformCapabilities.current.isDesktop) {
+                return;
+              }
+              GestureBinding.instance.pointerSignalResolver.register(event,
+                  (resolved) {
+                if (resolved is! PointerScrollEvent) return;
+                applyWheelGain(resolved);
+              });
             },
-            onDoubleTap: () {
-              _snapshotMixRowsGain(headerMixControlRows);
-              _setMixRowsGainLive(headerMixControlRows, 2.0);
-              _commitMixRowsGainFromSnapshot(headerMixControlRows);
-            },
-            onHorizontalDragStart: (_) {
-              _snapshotMixRowsGain(headerMixControlRows);
-            },
-            onHorizontalDragUpdate: (details) {
-              updateGainFromLocalDx(details.localPosition.dx);
-            },
-            onHorizontalDragEnd: (_) {
-              _commitMixRowsGainFromSnapshot(headerMixControlRows);
-            },
-            onHorizontalDragCancel: () {
-              _gainDragStartByRow.clear();
-            },
-            child: SizedBox(
-              height: sliderHeight,
-              child: AnimatedBuilder(
-                animation: widget.meters,
-                builder: (_, __) {
-                  final frame = row < widget.meters.rows.length
-                      ? widget.meters.rows[row]
-                      : MeterFrame.zero;
-                  return Stack(
-                    clipBehavior: Clip.none,
-                    alignment: Alignment.centerLeft,
-                    children: [
-                      Positioned.fill(
-                        child: CustomPaint(
-                          painter: _HeaderGainMeterSliderPainter(
-                            frame: frame,
-                            visualInset: visualInset,
-                            trackHeight: trackHeight,
+            child: GestureDetector(
+              key: ValueKey('timeline_tablet_row_gain_$row'),
+              behavior: HitTestBehavior.opaque,
+              onTapDown: (details) {
+                _snapshotMixRowsGain(headerMixControlRows);
+                updateGainFromLocalDx(details.localPosition.dx);
+                _commitMixRowsGainFromSnapshot(headerMixControlRows);
+              },
+              onDoubleTap: () {
+                _snapshotMixRowsGain(headerMixControlRows);
+                _setMixRowsGainLive(headerMixControlRows, 2.0);
+                _commitMixRowsGainFromSnapshot(headerMixControlRows);
+              },
+              onHorizontalDragStart: (_) {
+                _snapshotMixRowsGain(headerMixControlRows);
+              },
+              onHorizontalDragUpdate: (details) {
+                updateGainFromLocalDx(details.localPosition.dx);
+              },
+              onHorizontalDragEnd: (_) {
+                _commitMixRowsGainFromSnapshot(headerMixControlRows);
+              },
+              onHorizontalDragCancel: () {
+                _gainDragStartByRow.clear();
+              },
+              child: SizedBox(
+                height: sliderHeight,
+                child: AnimatedBuilder(
+                  animation: widget.meters,
+                  builder: (_, __) {
+                    final frame = row < widget.meters.rows.length
+                        ? widget.meters.rows[row]
+                        : MeterFrame.zero;
+                    return Stack(
+                      clipBehavior: Clip.none,
+                      alignment: Alignment.centerLeft,
+                      children: [
+                        Positioned.fill(
+                          child: CustomPaint(
+                            painter: _HeaderGainMeterSliderPainter(
+                              frame: frame,
+                              visualInset: visualInset,
+                              trackHeight: trackHeight,
+                            ),
                           ),
                         ),
-                      ),
-                      Positioned(
-                        left: knobLeft,
-                        top: (sliderHeight - knobSize) / 2.0,
-                        child: Container(
-                          width: knobSize,
-                          height: knobSize,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFFF4F4F4),
-                            shape: BoxShape.circle,
-                            boxShadow: <BoxShadow>[
-                              BoxShadow(
-                                color: Color.fromRGBO(0, 0, 0, 0.34),
-                                blurRadius: 5,
-                                offset: Offset(0, 1),
-                              ),
-                            ],
+                        Positioned(
+                          left: knobLeft,
+                          top: (sliderHeight - knobSize) / 2.0,
+                          child: Container(
+                            width: knobSize,
+                            height: knobSize,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFFF4F4F4),
+                              shape: BoxShape.circle,
+                              boxShadow: <BoxShadow>[
+                                BoxShadow(
+                                  color: Color.fromRGBO(0, 0, 0, 0.34),
+                                  blurRadius: 5,
+                                  offset: Offset(0, 1),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                    ],
-                  );
-                },
+                      ],
+                    );
+                  },
+                ),
               ),
             ),
           );
@@ -14916,6 +15326,7 @@ class _TimelinePainter extends CustomPainter {
   final List<double> effectsPanelHeights;
   final List<double> expandedHeights;
   final List<double> automationLaneHeights;
+  final double masterAutomationLaneHeight;
   final bool isRecording;
   final int? recordingRowIndex;
   final double recordingStartMs;
@@ -14983,6 +15394,7 @@ class _TimelinePainter extends CustomPainter {
     required this.effectsPanelHeights,
     required this.expandedHeights,
     required this.automationLaneHeights,
+    required this.masterAutomationLaneHeight,
     required this.isRecording,
     required this.recordingRowIndex,
     required this.recordingStartMs,
@@ -15141,7 +15553,7 @@ class _TimelinePainter extends CustomPainter {
   }
 
   double _rowTopForIndex(int row) {
-    double y = 0.0;
+    double y = masterAutomationLaneHeight;
     for (int i = 0; i < row; i++) {
       if (_isRowHiddenByCollapsedGroup(i)) continue;
       y += _rowBlockHeight(i);
@@ -15278,7 +15690,27 @@ class _TimelinePainter extends CustomPainter {
     canvas.save();
     // canvas.translate(0, -verticalScrollOffset); // ← APPLY VERTICAL SCROLL
     // Keep track of the current vertical position
-    double currentY = 0;
+    if (masterAutomationLaneHeight > 0.0) {
+      final masterRect = Rect.fromLTWH(
+        0,
+        0,
+        viewportWidth,
+        masterAutomationLaneHeight,
+      );
+      canvas.drawRect(
+        masterRect,
+        Paint()..color = _timelineAutomationLaneFillColor(true),
+      );
+      canvas.drawLine(
+        Offset(0, masterAutomationLaneHeight),
+        Offset(viewportWidth, masterAutomationLaneHeight),
+        Paint()
+          ..color = _kTimelineRowDivider
+          ..strokeWidth = 1,
+      );
+    }
+
+    double currentY = masterAutomationLaneHeight;
 
     // convert playheadPx → ms
     final double playheadMs = scrollOffsetMs + playheadPx / pixelsPerMs;
@@ -16847,7 +17279,7 @@ class _TimelinePainter extends CustomPainter {
       ..color = const Color(0xFFF0A957)
       ..strokeWidth = 1.5;
     final blockedRanges = <Offset>[];
-    double rowTop = 0.0;
+    double rowTop = masterAutomationLaneHeight;
     for (int row = 0; row < rowExpanded.length; row++) {
       if (_isRowHiddenByCollapsedGroup(row)) continue;
       final automationLaneHeight = _automationLaneHeightForRow(row);
@@ -16998,6 +17430,7 @@ class _TimelinePainter extends CustomPainter {
         scrollOffsetMs != old.scrollOffsetMs ||
         pixelsPerMs != old.pixelsPerMs ||
         viewportWidth != old.viewportWidth ||
+        masterAutomationLaneHeight != old.masterAutomationLaneHeight ||
         clipOverlapMode != old.clipOverlapMode ||
         (leftVisibleExtensionPx ?? 0.0) !=
             (old.leftVisibleExtensionPx ?? 0.0) ||
@@ -17321,6 +17754,8 @@ class _AutomationLane extends StatefulWidget {
   final String targetParamId;
   final double targetMin;
   final double targetMax;
+  final double? targetDefaultNormalized;
+  final Map<double, String> targetDisplayLabels;
   final bool isVolumeLane;
   final double? highlightStartMs;
   final double? highlightEndMs;
@@ -17345,6 +17780,8 @@ class _AutomationLane extends StatefulWidget {
     required this.targetParamId,
     required this.targetMin,
     required this.targetMax,
+    required this.targetDefaultNormalized,
+    required this.targetDisplayLabels,
     required this.isVolumeLane,
     this.highlightStartMs,
     this.highlightEndMs,
@@ -17408,6 +17845,8 @@ class _AutomationLaneState extends State<_AutomationLane> {
         targetParamId: widget.targetParamId,
         targetMin: widget.targetMin,
         targetMax: widget.targetMax,
+        pluginDisplayLabels: widget.targetDisplayLabels,
+        pluginDefaultNormalized: widget.targetDefaultNormalized,
         isVolumeLane: widget.isVolumeLane,
       );
 
@@ -17752,6 +18191,8 @@ class _AutomationLaneState extends State<_AutomationLane> {
             targetParamId: widget.targetParamId,
             targetMin: widget.targetMin,
             targetMax: widget.targetMax,
+            targetDefaultNormalized: widget.targetDefaultNormalized,
+            targetDisplayLabels: widget.targetDisplayLabels,
             isVolumeLane: widget.isVolumeLane,
             highlightStartMs: widget.highlightStartMs,
             highlightEndMs: widget.highlightEndMs,
@@ -17777,6 +18218,8 @@ class _AutomationPainter extends CustomPainter {
   final String targetParamId;
   final double targetMin;
   final double targetMax;
+  final double? targetDefaultNormalized;
+  final Map<double, String> targetDisplayLabels;
   final bool isVolumeLane;
   final double? highlightStartMs;
   final double? highlightEndMs;
@@ -17791,6 +18234,8 @@ class _AutomationPainter extends CustomPainter {
     required this.targetParamId,
     required this.targetMin,
     required this.targetMax,
+    required this.targetDefaultNormalized,
+    required this.targetDisplayLabels,
     required this.isVolumeLane,
     required this.highlightStartMs,
     required this.highlightEndMs,
@@ -17807,236 +18252,21 @@ class _AutomationPainter extends CustomPainter {
         targetParamId: targetParamId,
         targetMin: targetMin,
         targetMax: targetMax,
+        pluginDisplayLabels: targetDisplayLabels,
+        pluginDefaultNormalized: targetDefaultNormalized,
         isVolumeLane: isVolumeLane,
       );
-
-  double _normalizedToTargetValue(double normalized) {
-    final span = targetMax - targetMin;
-    if (!span.isFinite || span.abs() < 1e-9) {
-      return normalized.clamp(0.0, 1.0).toDouble();
-    }
-    return targetMin + span * normalized.clamp(0.0, 1.0).toDouble();
-  }
 
   double _displayNormalizedForStoredNormalized(double normalized) {
     return _valueFormatter.displayNormalizedForStoredNormalized(normalized);
   }
 
-  double _storedNormalizedForRawValue(double rawValue) {
-    final span = targetMax - targetMin;
-    if (!span.isFinite || span.abs() < 1e-9) {
-      return rawValue.clamp(0.0, 1.0).toDouble();
-    }
-    return ((rawValue - targetMin) / span).clamp(0.0, 1.0).toDouble();
-  }
-
-  String _trimTrailingZeros(String text) {
-    if (!text.contains('.')) return text;
-    return text.replaceFirst(RegExp(r'\.?0+$'), '');
-  }
-
-  String _formatNumber(double value, {int maxDecimals = 2}) {
-    if (!value.isFinite) return value.toString();
-    final absValue = value.abs();
-    final decimals = absValue >= 1000
-        ? 0
-        : (absValue >= 100
-            ? 1
-            : (absValue >= 10 ? math.min(maxDecimals, 1) : maxDecimals));
-    return _trimTrailingZeros(value.toStringAsFixed(decimals));
-  }
-
-  bool _containsAny(String haystack, List<String> needles) {
-    for (final n in needles) {
-      if (haystack.contains(n)) return true;
-    }
-    return false;
-  }
-
-  String get _targetContext {
-    return '${targetLabel.trim().toLowerCase()} ${targetParamId.trim().toLowerCase()}';
-  }
-
-  _AutomationValueKind get _valueKind {
-    if (isVolumeLane) return _AutomationValueKind.volumeDb;
-
-    final context = _targetContext;
-    final min = targetMin;
-    final max = targetMax;
-    final span = max - min;
-    final hasValidRange = span.isFinite && span.abs() >= 1e-9;
-    final looksNormalizedRange = min >= -0.001 && max <= 1.001;
-    final looksPercentRange = min >= -0.1 && max <= 100.1;
-
-    if (_containsAny(context, const [
-          'freq',
-          'frequency',
-          'cutoff',
-          'hz',
-          'highpass',
-          'lowpass',
-          'band'
-        ]) ||
-        (hasValidRange && min >= 0.0 && max >= 1500.0 && max <= 50000.0)) {
-      return _AutomationValueKind.hz;
-    }
-
-    if (_containsAny(context, const [
-      'attack',
-      'release',
-      'decay',
-      'delay',
-      'predelay',
-      'pre-delay',
-      'pre delay',
-      'hold',
-      'time',
-      'ms',
-      'sec',
-      'second'
-    ])) {
-      if (_containsAny(context, const ['ms', 'millisecond']) ||
-          (hasValidRange && max > 20.0)) {
-        return _AutomationValueKind.milliseconds;
-      }
-      return _AutomationValueKind.seconds;
-    }
-
-    if (_containsAny(context, const ['semitone', 'semi-tone'])) {
-      return _AutomationValueKind.semitone;
-    }
-    if (_containsAny(context, const ['cents'])) {
-      return _AutomationValueKind.cents;
-    }
-    if (_containsAny(context, const ['ratio'])) {
-      return _AutomationValueKind.ratio;
-    }
-
-    final hasDbHint =
-        _containsAny(context, const ['db', 'threshold', 'ceiling']);
-    final hasGainHint = _containsAny(
-      context,
-      const ['gain', 'level', 'trim', 'makeup', 'boost', 'attenuation'],
-    );
-    if (hasGainHint && min >= -0.001 && max > 1.001 && max <= 3.001) {
-      return _AutomationValueKind.gainUiDb;
-    }
-    if (hasDbHint || (hasGainHint && (min < 0.0 || max > 2.5))) {
-      return _AutomationValueKind.db;
-    }
-
-    final hasPercentHint = _containsAny(
-      context,
-      const [
-        'mix',
-        'wet',
-        'dry',
-        'amount',
-        'depth',
-        'feedback',
-        'width',
-        'pan',
-        '%'
-      ],
-    );
-    if (looksPercentRange && (hasPercentHint || looksNormalizedRange)) {
-      return _AutomationValueKind.percent;
-    }
-
-    return _AutomationValueKind.generic;
-  }
-
   double get _midGuideNormalized {
-    if (isVolumeLane) return 0.75;
-    if (_valueKind == _AutomationValueKind.gainUiDb) {
-      return _storedNormalizedForRawValue(_kGainAutomationUiUnity);
-    }
-    return 0.5;
-  }
-
-  double _volToDb(double v) {
-    if (v <= 0.0001) return double.negativeInfinity;
-    final clamped = v.clamp(0.0, 1.0).toDouble();
-    final gain =
-        clamped >= 0.75 ? (1.0 + ((clamped - 0.75) / 0.25)) : (clamped / 0.75);
-    if (gain <= 0.0001) return double.negativeInfinity;
-    return 20 * math.log(gain) / math.log(10);
-  }
-
-  double _gainUiToDb(double gainUi) {
-    final min = targetMin.isFinite ? targetMin : 0.0;
-    final max = targetMax.isFinite && targetMax > min ? targetMax : 3.0;
-    final unity = _kGainAutomationUiUnity.clamp(min, max).toDouble();
-    final clamped = gainUi.clamp(min, max).toDouble();
-    if (clamped <= unity) {
-      final t = ((clamped - min) / (unity - min)).clamp(0.0, 1.0).toDouble();
-      return _kGainAutomationDbMin + ((0.0 - _kGainAutomationDbMin) * t);
-    }
-    final t = ((clamped - unity) / (max - unity)).clamp(0.0, 1.0).toDouble();
-    return _kGainAutomationDbMax * t;
+    return _valueFormatter.midGuideStoredNormalized;
   }
 
   String _formatValueLabel(double normalized) {
-    final clamped = normalized.clamp(0.0, 1.0).toDouble();
-
-    if (isVolumeLane) {
-      final db = _volToDb(clamped);
-      if (db.isInfinite) return '-∞';
-      final value = _formatNumber(db.abs(), maxDecimals: 1);
-      final sign = db >= 0 ? '+' : '-';
-      return '$sign$value dB';
-    }
-
-    final raw = _normalizedToTargetValue(clamped);
-    switch (_valueKind) {
-      case _AutomationValueKind.volumeDb:
-        final db = _volToDb(clamped);
-        if (db.isInfinite) return '-∞';
-        final value = _formatNumber(db.abs(), maxDecimals: 1);
-        final sign = db >= 0 ? '+' : '-';
-        return '$sign$value dB';
-      case _AutomationValueKind.gainUiDb:
-        final db = _gainUiToDb(raw);
-        if (db.isInfinite || raw <= targetMin + 0.000001) return '-∞';
-        final value = _formatNumber(db.abs(), maxDecimals: 1);
-        final sign = db >= 0 ? '+' : '-';
-        return '$sign$value dB';
-      case _AutomationValueKind.percent:
-        final min = targetMin;
-        final max = targetMax;
-        final looksNormalizedRange = min >= -0.001 && max <= 1.001;
-        final pct = looksNormalizedRange ? raw * 100.0 : raw;
-        return '${_formatNumber(pct, maxDecimals: 1)}%';
-      case _AutomationValueKind.db:
-        final sign = raw > 0 ? '+' : '';
-        return '$sign${_formatNumber(raw, maxDecimals: 1)} dB';
-      case _AutomationValueKind.hz:
-        if (raw.abs() >= 1000.0) {
-          return '${_formatNumber(raw / 1000.0, maxDecimals: 2)} kHz';
-        }
-        return '${_formatNumber(raw, maxDecimals: raw.abs() >= 100 ? 0 : 1)} Hz';
-      case _AutomationValueKind.seconds:
-        if (raw.abs() < 1.0) {
-          return '${_formatNumber(raw * 1000.0, maxDecimals: 0)} ms';
-        }
-        return '${_formatNumber(raw, maxDecimals: 2)} s';
-      case _AutomationValueKind.milliseconds:
-        if (raw.abs() >= 1000.0) {
-          return '${_formatNumber(raw / 1000.0, maxDecimals: 2)} s';
-        }
-        return '${_formatNumber(raw, maxDecimals: raw.abs() >= 100 ? 0 : 1)} ms';
-      case _AutomationValueKind.ratio:
-        if (raw <= 0.0) return _formatNumber(raw, maxDecimals: 2);
-        return '${_formatNumber(raw, maxDecimals: 2)}:1';
-      case _AutomationValueKind.semitone:
-        final sign = raw > 0 ? '+' : '';
-        return '$sign${_formatNumber(raw, maxDecimals: 1)} st';
-      case _AutomationValueKind.cents:
-        final sign = raw > 0 ? '+' : '';
-        return '$sign${_formatNumber(raw, maxDecimals: 0)} ct';
-      case _AutomationValueKind.generic:
-        return _formatNumber(raw, maxDecimals: 2);
-    }
+    return _valueFormatter.formatValueLabel(normalized);
   }
 
   List<_AutomationAxisTick> _axisTicks() {
@@ -18289,6 +18519,8 @@ class _AutomationPainter extends CustomPainter {
         old.targetParamId != targetParamId ||
         old.targetMin != targetMin ||
         old.targetMax != targetMax ||
+        old.targetDefaultNormalized != targetDefaultNormalized ||
+        old.targetDisplayLabels != targetDisplayLabels ||
         old.highlightStartMs != highlightStartMs ||
         old.highlightEndMs != highlightEndMs ||
         old.isVolumeLane != isVolumeLane;
@@ -18352,6 +18584,8 @@ class _AutomationValueFormatter {
   final String targetParamId;
   final double targetMin;
   final double targetMax;
+  final Map<double, String> pluginDisplayLabels;
+  final double? pluginDefaultNormalized;
   final bool isVolumeLane;
 
   const _AutomationValueFormatter({
@@ -18359,11 +18593,13 @@ class _AutomationValueFormatter {
     required this.targetParamId,
     required this.targetMin,
     required this.targetMax,
+    this.pluginDisplayLabels = const <double, String>{},
+    this.pluginDefaultNormalized,
     required this.isVolumeLane,
   });
 
   String get signature =>
-      '${targetLabel.trim().toLowerCase()}|${targetParamId.trim().toLowerCase()}|$targetMin|$targetMax|$isVolumeLane';
+      '${targetLabel.trim().toLowerCase()}|${targetParamId.trim().toLowerCase()}|$targetMin|$targetMax|$isVolumeLane|${pluginDisplayLabels.entries.map((e) => '${e.key}:${e.value}').join('|')}';
 
   double _normalizedToTargetValue(double normalized) {
     final span = targetMax - targetMin;
@@ -18379,6 +18615,124 @@ class _AutomationValueFormatter {
       return rawValue.clamp(0.0, 1.0).toDouble();
     }
     return ((rawValue - targetMin) / span).clamp(0.0, 1.0).toDouble();
+  }
+
+  double get _logDisplayMin {
+    if (!targetMin.isFinite || !targetMax.isFinite || targetMax <= 0.0) {
+      return double.nan;
+    }
+    if (targetMin > 0.0) return targetMin;
+    switch (valueKind) {
+      case _AutomationValueKind.hz:
+        return math.max(1.0, math.min(20.0, targetMax / 1000.0));
+      case _AutomationValueKind.seconds:
+        return math.max(0.001, targetMax / 1000.0);
+      case _AutomationValueKind.milliseconds:
+        return math.max(1.0, targetMax / 1000.0);
+      case _AutomationValueKind.ratio:
+        return math.max(0.01, targetMax / 1000.0);
+      case _AutomationValueKind.volumeDb:
+      case _AutomationValueKind.gainUiDb:
+      case _AutomationValueKind.percent:
+      case _AutomationValueKind.db:
+      case _AutomationValueKind.semitone:
+      case _AutomationValueKind.cents:
+      case _AutomationValueKind.generic:
+        return double.nan;
+    }
+  }
+
+  bool get _hasLogDisplayRange {
+    final min = _logDisplayMin;
+    if (!min.isFinite || !targetMax.isFinite) return false;
+    return min > 0.0 && targetMax > min;
+  }
+
+  bool get _usesLogDisplay {
+    if (!_hasLogDisplayRange) return false;
+    final ratio = targetMax / _logDisplayMin;
+    switch (valueKind) {
+      case _AutomationValueKind.hz:
+        return ratio >= 2.0;
+      case _AutomationValueKind.seconds:
+      case _AutomationValueKind.milliseconds:
+      case _AutomationValueKind.ratio:
+        return ratio >= 8.0;
+      case _AutomationValueKind.volumeDb:
+      case _AutomationValueKind.gainUiDb:
+      case _AutomationValueKind.percent:
+      case _AutomationValueKind.db:
+      case _AutomationValueKind.semitone:
+      case _AutomationValueKind.cents:
+      case _AutomationValueKind.generic:
+        return false;
+    }
+  }
+
+  double _displayNormalizedForRawValue(double rawValue) {
+    if (!_usesLogDisplay) return _targetValueToNormalized(rawValue);
+    final logMin = _logDisplayMin;
+    if (!logMin.isFinite || logMin <= 0.0) {
+      return _targetValueToNormalized(rawValue);
+    }
+    if (targetMin <= 0.0 && rawValue <= targetMin + 0.000001) {
+      return 0.0;
+    }
+    final minLog = math.log(logMin);
+    final maxLog = math.log(targetMax);
+    final span = maxLog - minLog;
+    if (!span.isFinite || span.abs() < 1e-9) {
+      return _targetValueToNormalized(rawValue);
+    }
+    final safeRaw = rawValue.clamp(logMin, targetMax).toDouble();
+    return ((math.log(safeRaw) - minLog) / span).clamp(0.0, 1.0).toDouble();
+  }
+
+  double _rawValueForDisplayNormalized(double displayNormalized) {
+    final clamped = displayNormalized.clamp(0.0, 1.0).toDouble();
+    if (!_usesLogDisplay) return _normalizedToTargetValue(clamped);
+    if (clamped <= 0.000001) return targetMin;
+    final logMin = _logDisplayMin;
+    if (!logMin.isFinite || logMin <= 0.0) {
+      return _normalizedToTargetValue(clamped);
+    }
+    final minLog = math.log(logMin);
+    final maxLog = math.log(targetMax);
+    final span = maxLog - minLog;
+    if (!span.isFinite || span.abs() < 1e-9) {
+      return _normalizedToTargetValue(clamped);
+    }
+    return math
+        .exp(minLog + (span * clamped))
+        .clamp(targetMin, targetMax)
+        .toDouble();
+  }
+
+  double get midGuideStoredNormalized {
+    if (isVolumeLane) return 0.75;
+    final pluginDefault = pluginDefaultNormalized;
+    if (pluginDefault != null && pluginDefault.isFinite) {
+      return pluginDefault.clamp(0.0, 1.0).toDouble();
+    }
+    if (valueKind == _AutomationValueKind.gainUiDb) {
+      return _targetValueToNormalized(_kGainAutomationUiUnity);
+    }
+    if (_usesLogDisplay) {
+      return _targetValueToNormalized(_rawValueForDisplayNormalized(0.5));
+    }
+    return 0.5;
+  }
+
+  String? _pluginDisplayLabelFor(double normalized) {
+    if (pluginDisplayLabels.isEmpty) return null;
+    final clamped = normalized.clamp(0.0, 1.0).toDouble();
+    for (final entry in pluginDisplayLabels.entries) {
+      if ((entry.key - clamped).abs() <= 0.0005) {
+        final label = entry.value.trim();
+        if (label.isNotEmpty) return label;
+      }
+    }
+    return null;
   }
 
   String _trimTrailingZeros(String text) {
@@ -18547,7 +18901,9 @@ class _AutomationValueFormatter {
 
   double displayNormalizedForStoredNormalized(double normalized) {
     final clamped = normalized.clamp(0.0, 1.0).toDouble();
-    if (valueKind != _AutomationValueKind.gainUiDb) return clamped;
+    if (valueKind != _AutomationValueKind.gainUiDb) {
+      return _displayNormalizedForRawValue(_normalizedToTargetValue(clamped));
+    }
     final raw = _normalizedToTargetValue(clamped);
     if (raw <= targetMin + 0.000001) return 0.0;
     return _dbToVol(_gainUiToDb(raw));
@@ -18555,7 +18911,9 @@ class _AutomationValueFormatter {
 
   double storedNormalizedForDisplayNormalized(double displayNormalized) {
     final clamped = displayNormalized.clamp(0.0, 1.0).toDouble();
-    if (valueKind != _AutomationValueKind.gainUiDb) return clamped;
+    if (valueKind != _AutomationValueKind.gainUiDb) {
+      return _targetValueToNormalized(_rawValueForDisplayNormalized(clamped));
+    }
     if (clamped <= 0.000001) {
       return _targetValueToNormalized(targetMin);
     }
@@ -18611,6 +18969,9 @@ class _AutomationValueFormatter {
       final sign = db >= 0 ? '+' : '-';
       return '$sign$value dB';
     }
+
+    final pluginLabel = _pluginDisplayLabelFor(clamped);
+    if (pluginLabel != null) return pluginLabel;
 
     final raw = _normalizedToTargetValue(clamped);
     switch (valueKind) {
@@ -18834,6 +19195,8 @@ class PrettyStereoSlider extends StatefulWidget {
   final ValueChanged<double> onChangeStart, onChanged, onChangeEnd;
   final VoidCallback? onLongPress;
   final bool showStepButtons;
+  final bool stackedLayout;
+  final String? label;
 
   const PrettyStereoSlider({
     super.key,
@@ -18843,6 +19206,8 @@ class PrettyStereoSlider extends StatefulWidget {
     required this.onChangeEnd,
     this.onLongPress,
     this.showStepButtons = false,
+    this.stackedLayout = false,
+    this.label,
   });
 
   @override
@@ -19081,6 +19446,159 @@ class _PrettyStereoSliderState extends State<PrettyStereoSlider> {
     final labelWidth = widget.showStepButtons ? 42.0 : null;
     final readoutWidth = widget.showStepButtons ? 64.0 : 58.0;
     final readoutText = _panReadoutText(context, widget.value);
+    final labelText = widget.label ?? L10n.translate(context, 'Pan');
+
+    Widget stepButton({
+      required IconData icon,
+      required String tooltip,
+      required VoidCallback onTap,
+    }) {
+      return _SliderStepButton(
+        icon: icon,
+        tooltip: tooltip,
+        onTap: onTap,
+      );
+    }
+
+    Widget valueButton({double width = 58.0}) {
+      return InkWell(
+        borderRadius: BorderRadius.circular(6),
+        onTap: () {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            _showPanAdjustDialog();
+          });
+        },
+        child: SizedBox(
+          width: width,
+          height: 28,
+          child: Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                readoutText,
+                maxLines: 1,
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget sliderTrack() {
+      final activeTrackColor = widget.stackedLayout
+          ? const Color(0xFF778492)
+          : const Color(0xFF4D5566);
+      final inactiveTrackColor = widget.stackedLayout
+          ? const Color(0xFF596574)
+          : const Color(0xFF4D5566);
+      final markerColor = widget.stackedLayout
+          ? Colors.white.withValues(alpha: 0.34)
+          : Colors.white.withValues(alpha: 0.24);
+      final thumbColor = widget.stackedLayout
+          ? const Color(0xFFE8EDF4)
+          : const Color(0xFFB7BECC);
+      final trackBody = SizedBox(
+        height: 24,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Positioned.fill(
+              child: IgnorePointer(
+                child: CustomPaint(
+                  painter: _SliderDefaultMarkerPainter(
+                    positionFraction: 0.5,
+                    color: markerColor,
+                    edgeInset: sliderThumbRadius + 1,
+                  ),
+                ),
+              ),
+            ),
+            SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 6,
+                thumbShape: const RoundSliderThumbShape(
+                    enabledThumbRadius: sliderThumbRadius),
+                overlayShape: SliderComponentShape.noOverlay,
+                showValueIndicator: ShowValueIndicator.onDrag,
+                valueIndicatorTextStyle: const TextStyle(
+                  color: Color.fromARGB(255, 0, 0, 0),
+                  fontSize: 12,
+                ),
+                activeTrackColor: activeTrackColor,
+                inactiveTrackColor: inactiveTrackColor,
+                thumbColor: thumbColor,
+              ),
+              child: DesktopScrollableSlider(
+                value: widget.value,
+                min: 0,
+                max: 1,
+                divisions: 200,
+                label: readoutText,
+                onChangeStart: (v) {
+                  widget.onChangeStart(v);
+                },
+                onChanged: (v) {
+                  setState(() {});
+                  widget.onChanged(v);
+                },
+                onChangeEnd: (v) {
+                  widget.onChangeEnd(v);
+                },
+              ),
+            ),
+          ],
+        ),
+      );
+      return GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onLongPress: widget.onLongPress,
+        onDoubleTap: () {
+          _commitImmediatePan(0.5);
+        },
+        child: trackBody,
+      );
+    }
+
+    if (widget.stackedLayout) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  labelText,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              stepButton(
+                icon: Icons.remove,
+                tooltip: L10n.translate(context, 'Pan left'),
+                onTap: () => _commitImmediatePan(widget.value - 0.005),
+              ),
+              const SizedBox(width: 6),
+              valueButton(width: 64.0),
+              const SizedBox(width: 6),
+              stepButton(
+                icon: Icons.add,
+                tooltip: L10n.translate(context, 'Pan right'),
+                onTap: () => _commitImmediatePan(widget.value + 0.005),
+              ),
+            ],
+          ),
+          const SizedBox(height: 7),
+          sliderTrack(),
+        ],
+      );
+    }
 
     return Row(
       children: [
@@ -19096,7 +19614,7 @@ class _PrettyStereoSliderState extends State<PrettyStereoSlider> {
         ),
         const SizedBox(width: 6),
         if (widget.showStepButtons) ...[
-          _SliderStepButton(
+          stepButton(
             icon: Icons.remove,
             tooltip: L10n.translate(context, 'Pan left'),
             onTap: () => _commitImmediatePan(widget.value - 0.005),
@@ -19104,98 +19622,18 @@ class _PrettyStereoSliderState extends State<PrettyStereoSlider> {
           const SizedBox(width: 3),
         ],
         Expanded(
-          child: GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onLongPress: widget.onLongPress,
-            onDoubleTap: () {
-              _commitImmediatePan(0.5);
-            },
-            child: SizedBox(
-              height: 24,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: CustomPaint(
-                        painter: _SliderDefaultMarkerPainter(
-                          positionFraction: 0.5,
-                          color: Colors.white.withValues(alpha: 0.24),
-                          edgeInset: sliderThumbRadius + 1,
-                        ),
-                      ),
-                    ),
-                  ),
-                  SliderTheme(
-                    data: SliderTheme.of(context).copyWith(
-                      trackHeight: 6,
-                      thumbShape: const RoundSliderThumbShape(
-                          enabledThumbRadius: sliderThumbRadius),
-                      overlayShape: SliderComponentShape.noOverlay,
-                      showValueIndicator: ShowValueIndicator.onDrag,
-                      valueIndicatorTextStyle: const TextStyle(
-                        color: Color.fromARGB(255, 0, 0, 0),
-                        fontSize: 12,
-                      ),
-                      activeTrackColor: const Color(0xFF4D5566),
-                      inactiveTrackColor: const Color(0xFF4D5566),
-                      thumbColor: const Color(0xFFB7BECC),
-                    ),
-                    child: Slider(
-                      value: widget.value,
-                      min: 0,
-                      max: 1,
-                      divisions: 200,
-                      label: readoutText,
-                      onChangeStart: (v) {
-                        widget.onChangeStart(v);
-                      },
-                      onChanged: (v) {
-                        setState(() {});
-                        widget.onChanged(v);
-                      },
-                      onChangeEnd: (v) {
-                        widget.onChangeEnd(v);
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          child: sliderTrack(),
         ),
         if (widget.showStepButtons) ...[
           const SizedBox(width: 3),
-          _SliderStepButton(
+          stepButton(
             icon: Icons.add,
             tooltip: L10n.translate(context, 'Pan right'),
             onTap: () => _commitImmediatePan(widget.value + 0.005),
           ),
         ],
         SizedBox(width: widget.showStepButtons ? 6 : 4),
-        InkWell(
-          borderRadius: BorderRadius.circular(6),
-          onTap: () {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (!mounted) return;
-              _showPanAdjustDialog();
-            });
-          },
-          child: SizedBox(
-            width: readoutWidth,
-            height: 28,
-            child: Center(
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  readoutText,
-                  maxLines: 1,
-                  style: const TextStyle(color: Colors.white, fontSize: 12),
-                ),
-              ),
-            ),
-          ),
-        ),
+        valueButton(width: readoutWidth),
       ],
     );
   }
@@ -19246,6 +19684,8 @@ class PrettyGainSlider extends StatefulWidget {
   final Color thumbColor;
   final VoidCallback? onLongPress;
   final bool showStepButtons;
+  final bool stackedLayout;
+  final String? label;
 
   const PrettyGainSlider({
     super.key,
@@ -19260,6 +19700,8 @@ class PrettyGainSlider extends StatefulWidget {
     this.thumbColor = const Color(0xFFB7BECC),
     this.onLongPress,
     this.showStepButtons = false,
+    this.stackedLayout = false,
+    this.label,
   });
 
   @override
@@ -19520,10 +19962,159 @@ class _PrettyGainSliderState extends State<PrettyGainSlider> {
     final readoutWidth = widget.showStepButtons ? 64.0 : 50.0;
     final visualValue = _gainUiToVisualValue(widget.value);
     final gainReadoutText = _gainReadoutText(widget.value);
+    final labelText = widget.label ?? L10n.translate(context, 'Gain');
     final unityVisualValue = _gainUiToVisualValue(_unity);
     final unityFraction = widget.maxValue <= 0.0
         ? 0.0
         : (unityVisualValue / widget.maxValue).clamp(0.0, 1.0).toDouble();
+
+    Widget stepButton({
+      required IconData icon,
+      required String tooltip,
+      required VoidCallback onTap,
+    }) {
+      return _SliderStepButton(
+        icon: icon,
+        tooltip: tooltip,
+        onTap: onTap,
+      );
+    }
+
+    Widget valueButton({double width = 50.0}) {
+      return InkWell(
+        borderRadius: BorderRadius.circular(6),
+        onTap: () {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            _showGainAdjustDialog();
+          });
+        },
+        child: SizedBox(
+          width: width,
+          height: 28,
+          child: Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                gainReadoutText,
+                maxLines: 1,
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget sliderTrack() {
+      final activeTrackColor =
+          widget.stackedLayout ? const Color(0xFFC2D0DF) : widget.trackColor;
+      final inactiveTrackColor = widget.stackedLayout
+          ? const Color(0xFF596574)
+          : widget.inactiveTrackColor;
+      final markerColor = widget.stackedLayout
+          ? Colors.white.withValues(alpha: 0.36)
+          : Colors.white.withValues(alpha: 0.24);
+      final thumbColor =
+          widget.stackedLayout ? const Color(0xFFF4F7FB) : widget.thumbColor;
+      final trackBody = SizedBox(
+        height: 24,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Positioned.fill(
+              child: IgnorePointer(
+                child: CustomPaint(
+                  painter: _SliderDefaultMarkerPainter(
+                    positionFraction: unityFraction,
+                    color: markerColor,
+                    edgeInset: sliderThumbRadius + 1,
+                  ),
+                ),
+              ),
+            ),
+            SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 6,
+                thumbShape: const RoundSliderThumbShape(
+                    enabledThumbRadius: sliderThumbRadius),
+                overlayShape: SliderComponentShape.noOverlay,
+                activeTrackColor: activeTrackColor,
+                inactiveTrackColor: inactiveTrackColor,
+                thumbColor: thumbColor,
+              ),
+              child: DesktopScrollableSlider(
+                value: visualValue.clamp(0.0, widget.maxValue),
+                min: 0.0,
+                max: widget.maxValue,
+                divisions: 300,
+                onChangeStart: (v) {
+                  widget.onChangeStart(_visualValueToGainUi(v));
+                },
+                onChanged: (v) {
+                  setState(() {});
+                  widget.onChanged(_visualValueToGainUi(v));
+                },
+                onChangeEnd: (v) {
+                  widget.onChangeEnd(_visualValueToGainUi(v));
+                },
+              ),
+            ),
+          ],
+        ),
+      );
+      return GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onLongPress: widget.onLongPress,
+        onDoubleTap: () {
+          _commitImmediateGain(_unity); // reset to unity gain (0 dB)
+        },
+        child: trackBody,
+      );
+    }
+
+    if (widget.stackedLayout) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  labelText,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              stepButton(
+                icon: Icons.remove,
+                tooltip: L10n.translate(context, 'Decrease gain'),
+                onTap: () => _commitImmediateGain(
+                  _dbToGainUi(_gainToDb(widget.value) - 0.25),
+                ),
+              ),
+              const SizedBox(width: 6),
+              valueButton(width: 64.0),
+              const SizedBox(width: 6),
+              stepButton(
+                icon: Icons.add,
+                tooltip: L10n.translate(context, 'Increase gain'),
+                onTap: () => _commitImmediateGain(
+                  _dbToGainUi(_gainToDb(widget.value) + 0.25),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 7),
+          sliderTrack(),
+        ],
+      );
+    }
 
     return Row(
       children: [
@@ -19540,7 +20131,7 @@ class _PrettyGainSliderState extends State<PrettyGainSlider> {
           ),
         if (widget.showLabel) const SizedBox(width: 6),
         if (widget.showStepButtons) ...[
-          _SliderStepButton(
+          stepButton(
             icon: Icons.remove,
             tooltip: L10n.translate(context, 'Decrease gain'),
             onTap: () => _commitImmediateGain(
@@ -19552,63 +20143,11 @@ class _PrettyGainSliderState extends State<PrettyGainSlider> {
 
         // ⭐ FIX: Make slider stretch horizontally
         Expanded(
-          child: GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onLongPress: widget.onLongPress,
-            onDoubleTap: () {
-              _commitImmediateGain(_unity); // reset to unity gain (0 dB)
-            },
-            child: SizedBox(
-              height: 24,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: CustomPaint(
-                        painter: _SliderDefaultMarkerPainter(
-                          positionFraction: unityFraction,
-                          color: Colors.white.withValues(alpha: 0.24),
-                          edgeInset: sliderThumbRadius + 1,
-                        ),
-                      ),
-                    ),
-                  ),
-                  SliderTheme(
-                    data: SliderTheme.of(context).copyWith(
-                      trackHeight: 6,
-                      thumbShape: const RoundSliderThumbShape(
-                          enabledThumbRadius: sliderThumbRadius),
-                      overlayShape: SliderComponentShape.noOverlay,
-                      activeTrackColor: widget.trackColor,
-                      inactiveTrackColor: widget.inactiveTrackColor,
-                      thumbColor: widget.thumbColor,
-                    ),
-                    child: Slider(
-                      value: visualValue.clamp(0.0, widget.maxValue),
-                      min: 0.0,
-                      max: widget.maxValue,
-                      divisions: 300,
-                      onChangeStart: (v) {
-                        widget.onChangeStart(_visualValueToGainUi(v));
-                      },
-                      onChanged: (v) {
-                        setState(() {});
-                        widget.onChanged(_visualValueToGainUi(v));
-                      },
-                      onChangeEnd: (v) {
-                        widget.onChangeEnd(_visualValueToGainUi(v));
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          child: sliderTrack(),
         ),
         if (widget.showStepButtons) ...[
           const SizedBox(width: 3),
-          _SliderStepButton(
+          stepButton(
             icon: Icons.add,
             tooltip: L10n.translate(context, 'Increase gain'),
             onTap: () => _commitImmediateGain(
@@ -19618,29 +20157,7 @@ class _PrettyGainSliderState extends State<PrettyGainSlider> {
         ],
 
         SizedBox(width: widget.showStepButtons ? 6 : 4),
-        InkWell(
-          borderRadius: BorderRadius.circular(6),
-          onTap: () {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (!mounted) return;
-              _showGainAdjustDialog();
-            });
-          },
-          child: SizedBox(
-            width: readoutWidth,
-            height: 28,
-            child: Center(
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  gainReadoutText,
-                  maxLines: 1,
-                  style: const TextStyle(color: Colors.white, fontSize: 12),
-                ),
-              ),
-            ),
-          ),
-        ),
+        valueButton(width: readoutWidth),
 
         // Text("+19 dB", style: TextStyle(color: Colors.white, fontSize: 12)),
       ],

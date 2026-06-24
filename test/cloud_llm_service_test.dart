@@ -2660,10 +2660,10 @@ void main() {
 
       expect(
         requestBody['prompt_cache_key'],
-        'mixroom-daw-v20260422a:ai_chat',
+        'mixroom-daw-v20260422a:ai_chat:ff7d5b4759e7',
       );
       expect(requestBody['prompt_cache_retention'], 'in_memory');
-      expect(requestBody['max_output_tokens'], 4096);
+      expect(requestBody['max_output_tokens'], 8192);
       expect(result.meta?['cached_prompt_tokens'], 7424);
       expect(
         result.meta?['usage']?['input_tokens_details']?['cached_tokens'],

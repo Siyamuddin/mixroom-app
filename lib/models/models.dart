@@ -341,6 +341,7 @@ class TimelineRow {
   String instrumentId;
   String instrumentName;
   Map<String, double> instrumentParams;
+  String hostedInstrumentStateBase64;
   String roleOverride;
   String groupId;
   int color;
@@ -356,6 +357,7 @@ class TimelineRow {
     this.instrumentId = '',
     this.instrumentName = '',
     Map<String, double>? instrumentParams,
+    this.hostedInstrumentStateBase64 = '',
     String roleOverride = '',
     this.groupId = '',
     this.color = 0,
@@ -375,6 +377,7 @@ class TimelineRow {
     String? instrumentId,
     String? instrumentName,
     Map<String, double>? instrumentParams,
+    String? hostedInstrumentStateBase64,
     String? roleOverride,
     String? groupId,
     int? color,
@@ -390,6 +393,8 @@ class TimelineRow {
       instrumentId: instrumentId ?? this.instrumentId,
       instrumentName: instrumentName ?? this.instrumentName,
       instrumentParams: instrumentParams ?? this.instrumentParams,
+      hostedInstrumentStateBase64:
+          hostedInstrumentStateBase64 ?? this.hostedInstrumentStateBase64,
       roleOverride: roleOverride ?? this.roleOverride,
       groupId: groupId ?? this.groupId,
       color: color ?? this.color,

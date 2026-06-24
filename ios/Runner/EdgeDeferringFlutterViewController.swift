@@ -4,6 +4,14 @@ import UIKit
 final class EdgeDeferringFlutterViewController: FlutterViewController {
   private var defersSystemEdges = false
 
+  override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+    UIDevice.current.userInterfaceIdiom == .pad ? .landscape : .portrait
+  }
+
+  override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation {
+    UIDevice.current.userInterfaceIdiom == .pad ? .landscapeRight : .portrait
+  }
+
   func setSystemGestureDeferralEnabled(_ enabled: Bool) {
     guard defersSystemEdges != enabled else { return }
     defersSystemEdges = enabled

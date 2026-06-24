@@ -985,11 +985,13 @@ class MixroomMainSideRail extends StatelessWidget {
     required this.selectedTab,
     required this.onTabSelected,
     required this.onAddTap,
+    this.topContentInset = 22,
   });
 
   final MixroomMainTab selectedTab;
   final ValueChanged<MixroomMainTab> onTabSelected;
   final VoidCallback onAddTap;
+  final double topContentInset;
 
   String _iconForTab(MixroomMainTab tab, bool active) {
     switch (tab) {
@@ -1036,7 +1038,7 @@ class MixroomMainSideRail extends StatelessWidget {
           ],
         ),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 22, 10, 12),
+          padding: EdgeInsets.fromLTRB(10, topContentInset, 10, 12),
           child: Column(
             children: [
               Container(

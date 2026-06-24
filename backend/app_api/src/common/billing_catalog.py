@@ -302,6 +302,7 @@ def normalize_product_definition(raw: Any, *, known_plan_codes: set[str]) -> Dic
         "management_channel": _safe_str(raw.get("management_channel") or "web"),
         "platforms": platforms,
         "price_display": _safe_str(raw.get("price_display")),
+        "price_krw": _safe_int(raw.get("price_krw"), default=0),
         "trial_days": _safe_int(raw.get("trial_days"), default=0),
         "rank": _safe_int(raw.get("rank"), default=999),
     }

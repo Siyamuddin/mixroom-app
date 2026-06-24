@@ -221,7 +221,7 @@ class AssistantActionTimelineReducer {
     var working = state.copyWith(
       clips: state.clips.map((c) => c.copyWith()).toList(growable: true),
       automationLanePoints: _copyLanePoints(state.automationLanePoints),
-      automationClips: _copyAutomationClips(state.automationClips),
+      automationClips: const <String, List<TimelineAutomationClip>>{},
       roleOverrides: Map<int, String>.from(state.roleOverrides),
       selectedClipIndices: List<int>.from(state.selectedClipIndices),
       tutorialMessages: List<String>.from(state.tutorialMessages),
@@ -1331,7 +1331,12 @@ class AssistantActionTimelineReducer {
     final laneKey = '$row::$targetId';
 
     final lanePoints = _copyLanePoints(state.automationLanePoints);
-    final clipMap = _copyAutomationClips(state.automationClips);
+    const emptyClipMap = <String, List<TimelineAutomationClip>>{};
+
+    TimelineActionState laneOnlyState() => state.copyWith(
+          automationLanePoints: lanePoints,
+          automationClips: emptyClipMap,
+        );
 
     List<AutomationPoint> sanitizePoints(List<AutomationPoint> points) {
       final out = points
@@ -1366,87 +1371,6 @@ class AssistantActionTimelineReducer {
       }
       if (out.isEmpty) return fallback;
       return sanitizePoints(out);
-    }
-
-    List<TimelineAutomationClip> clipsForLane() =>
-        List<TimelineAutomationClip>.from(
-            clipMap[laneKey] ?? const <TimelineAutomationClip>[]);
-
-    String newPatternId() =>
-        'pat_${row}_${targetId}_${DateTime.now().microsecondsSinceEpoch}_${clipMap.length}';
-
-    void applySharedPointsToLane(
-      List<TimelineAutomationClip> laneClips,
-      int sourceIndex,
-      List<AutomationPoint> points,
-    ) {
-      final source = laneClips[sourceIndex];
-      final patternId = source.patternId.trim();
-      if (patternId.isEmpty) {
-        laneClips[sourceIndex] = source.copyWith(points: points);
-        return;
-      }
-      for (int i = 0; i < laneClips.length; i++) {
-        final clip = laneClips[i];
-        if (clip.patternId.trim() != patternId) continue;
-        laneClips[i] = clip.copyWith(points: points);
-      }
-    }
-
-    int? resolveClipIndex(List<TimelineAutomationClip> clips) {
-      final explicit = AssistantActionUtils.toActionInt(
-        data['clip_index'] ??
-            target['clip_index'] ??
-            data['automation_clip_index'] ??
-            target['automation_clip_index'],
-      );
-      if (explicit != null && explicit >= 0 && explicit < clips.length) {
-        return explicit;
-      }
-      final id = (data['clip_id'] ?? target['clip_id'] ?? '').toString().trim();
-      if (id.isNotEmpty) {
-        final idx = clips.indexWhere((c) => c.id == id);
-        if (idx >= 0) return idx;
-      }
-      final patternId = (data['pattern_id'] ??
-              target['pattern_id'] ??
-              data['automation_pattern_id'] ??
-              target['automation_pattern_id'] ??
-              '')
-          .toString()
-          .trim();
-      if (patternId.isNotEmpty) {
-        final idx = clips.indexWhere((c) => c.patternId.trim() == patternId);
-        if (idx >= 0) return idx;
-      }
-      final atMs = AssistantActionUtils.toActionDouble(
-        data['at_ms'] ??
-            target['at_ms'] ??
-            data['time_ms'] ??
-            target['time_ms'] ??
-            data['start_ms'] ??
-            target['start_ms'],
-      );
-      if (atMs != null && atMs.isFinite) {
-        for (int i = 0; i < clips.length; i++) {
-          final clip = clips[i];
-          final endMs = clip.startMs + clip.lengthMs;
-          if (atMs >= clip.startMs && atMs <= endMs) {
-            return i;
-          }
-        }
-        int nearest = 0;
-        double nearestDist = (clips.first.startMs - atMs).abs();
-        for (int i = 1; i < clips.length; i++) {
-          final dist = (clips[i].startMs - atMs).abs();
-          if (dist < nearestDist) {
-            nearest = i;
-            nearestDist = dist;
-          }
-        }
-        return nearest;
-      }
-      return clips.isEmpty ? null : clips.length - 1;
     }
 
     List<AutomationPoint> templatePoints(
@@ -1503,12 +1427,95 @@ class AssistantActionTimelineReducer {
       ];
     }
 
+    double pointValueAt(List<AutomationPoint> points, double x) {
+      final sorted = sanitizePoints(points);
+      if (sorted.isEmpty) return 1.0;
+      if (x <= sorted.first.x) return sorted.first.volume;
+      for (int i = 1; i < sorted.length; i++) {
+        final prev = sorted[i - 1];
+        final next = sorted[i];
+        if (x > next.x) continue;
+        final span = next.x - prev.x;
+        if (span <= 0.0) return next.volume;
+        final t = ((x - prev.x) / span).clamp(0.0, 1.0);
+        return prev.volume + (next.volume - prev.volume) * t;
+      }
+      return sorted.last.volume;
+    }
+
+    List<AutomationPoint> offsetPoints(
+      List<AutomationPoint> points,
+      double offsetMs,
+    ) {
+      return sanitizePoints(points
+          .map((p) => AutomationPoint(
+                x: offsetMs + p.x,
+                volume: p.volume,
+              ))
+          .toList(growable: false));
+    }
+
+    void replaceLaneRange(
+      double startMs,
+      double lengthMs,
+      List<AutomationPoint> localPoints,
+    ) {
+      final start = math.max(0.0, startMs);
+      final end = math.max(start + 20.0, start + lengthMs);
+      final existing = sanitizePoints(
+        List<AutomationPoint>.from(
+          lanePoints[laneKey] ??
+              <AutomationPoint>[AutomationPoint(x: 0.0, volume: 1.0)],
+        ),
+      );
+      final next = <AutomationPoint>[];
+      next.addAll(existing.where((p) => p.x < start || p.x > end));
+      next.addAll(offsetPoints(localPoints, start));
+      lanePoints[laneKey] = sanitizePoints(next);
+    }
+
+    void clearLaneRangeOrAll() {
+      final start = AssistantActionUtils.toActionDouble(
+        data['start_ms'] ?? target['start_ms'] ?? data['from_ms'],
+      );
+      final length = AssistantActionUtils.toActionDouble(
+        data['length_ms'] ?? target['length_ms'] ?? data['duration_ms'],
+      );
+      final end = AssistantActionUtils.toActionDouble(
+        data['end_ms'] ?? target['end_ms'] ?? data['to_ms'],
+      );
+      if (start == null || (!start.isFinite)) {
+        lanePoints[laneKey] = <AutomationPoint>[
+          AutomationPoint(x: 0.0, volume: 1.0),
+        ];
+        return;
+      }
+      final rangeStart = math.max(0.0, start);
+      final rangeEnd = math.max(
+        rangeStart + 20.0,
+        end ?? (rangeStart + (length ?? 0.0)),
+      );
+      final existing = sanitizePoints(
+        List<AutomationPoint>.from(
+          lanePoints[laneKey] ??
+              <AutomationPoint>[AutomationPoint(x: 0.0, volume: 1.0)],
+        ),
+      );
+      final beforeValue = pointValueAt(existing, rangeStart);
+      final afterValue = pointValueAt(existing, rangeEnd);
+      final next = existing
+          .where((p) => p.x < rangeStart || p.x > rangeEnd)
+          .toList(growable: true);
+      next.add(AutomationPoint(x: rangeStart, volume: beforeValue));
+      next.add(AutomationPoint(x: rangeEnd, volume: afterValue));
+      lanePoints[laneKey] = sanitizePoints(next);
+    }
+
     if (operation == 'clear') {
       lanePoints[laneKey] = <AutomationPoint>[
         AutomationPoint(x: 0.0, volume: 1.0),
       ];
-      return state.copyWith(
-          automationLanePoints: lanePoints, automationClips: clipMap);
+      return laneOnlyState();
     }
 
     if (operation == 'set_points') {
@@ -1517,8 +1524,7 @@ class AssistantActionTimelineReducer {
       ];
       final parsed = parsePoints(data['points'], fallback);
       lanePoints[laneKey] = parsed;
-      return state.copyWith(
-          automationLanePoints: lanePoints, automationClips: clipMap);
+      return laneOnlyState();
     }
 
     if (operation == 'add_ramp') {
@@ -1547,12 +1553,10 @@ class AssistantActionTimelineReducer {
       existing.add(AutomationPoint(x: from, volume: startV));
       existing.add(AutomationPoint(x: math.max(from + 20.0, to), volume: endV));
       lanePoints[laneKey] = sanitizePoints(existing);
-      return state.copyWith(
-          automationLanePoints: lanePoints, automationClips: clipMap);
+      return laneOnlyState();
     }
 
     if (operation == 'create_clip' || operation == 'apply_template') {
-      final laneClips = clipsForLane();
       final start = AssistantActionUtils.toActionDouble(
             data['start_ms'] ?? target['start_ms'] ?? data['at_ms'],
           ) ??
@@ -1597,153 +1601,56 @@ class AssistantActionTimelineReducer {
             source?.endMs ?? (sourceStart + eventSpacing * eventCount);
         var cursor = sourceStart;
         int created = 0;
+        final generated = <AutomationPoint>[];
         while (cursor < sourceEnd && created < eventCount) {
-          laneClips.add(
-            TimelineAutomationClip(
-              id: 'ac_${row}_${targetId}_${laneClips.length}_${created}_kick',
-              rowIndex: row,
-              targetId: targetId,
-              patternId: '',
-              startMs: cursor,
-              lengthMs: len,
-              muted: false,
-              points: templatePoints('sidechain_pump', len),
-            ),
+          generated.addAll(
+            offsetPoints(templatePoints('sidechain_pump', len), cursor),
           );
           created++;
           cursor += eventSpacing;
         }
-      } else {
-        laneClips.add(
-          TimelineAutomationClip(
-            id: 'ac_${row}_${targetId}_${laneClips.length}',
-            rowIndex: row,
-            targetId: targetId,
-            patternId: (data['pattern_id'] ?? target['pattern_id'] ?? '')
-                .toString()
-                .trim(),
-            startMs: math.max(0.0, start),
-            lengthMs: len,
-            muted: AssistantActionUtils.toActionBool(
-              data['muted'] ?? target['muted'],
-              fallback: false,
-            ),
-            points: points,
-          ),
+        final existing = List<AutomationPoint>.from(
+          lanePoints[laneKey] ?? const <AutomationPoint>[],
         );
+        existing.addAll(generated);
+        lanePoints[laneKey] = sanitizePoints(existing);
+      } else {
+        replaceLaneRange(start, len, points);
       }
-      clipMap[laneKey] = laneClips;
-      return state.copyWith(
-          automationLanePoints: lanePoints, automationClips: clipMap);
+      return laneOnlyState();
     }
 
-    if (operation == 'duplicate_clip') {
-      final laneClips = clipsForLane();
-      final idx = resolveClipIndex(laneClips);
-      if (idx == null) {
-        return state.copyWith(
-            automationLanePoints: lanePoints, automationClips: clipMap);
-      }
-      final src = laneClips[idx];
-      final copyMode = (data['copy_mode'] ??
-              data['clone_mode'] ??
-              target['copy_mode'] ??
-              target['clone_mode'] ??
-              data['duplicate_mode'] ??
-              target['duplicate_mode'] ??
-              '')
-          .toString()
-          .trim()
-          .toLowerCase();
-      final sharedCopy = copyMode.isEmpty ||
-          copyMode == 'shared' ||
-          copyMode == 'linked' ||
-          copyMode == 'shallow' ||
-          copyMode == 'clone';
-      final patternId = sharedCopy
-          ? (src.patternId.trim().isNotEmpty
-              ? src.patternId.trim()
-              : newPatternId())
-          : '';
-      if (sharedCopy && src.patternId.trim().isEmpty) {
-        laneClips[idx] = src.copyWith(patternId: patternId);
-      }
+    if (operation == 'delete_clip' || operation == 'clear_clips') {
+      clearLaneRangeOrAll();
+      return laneOnlyState();
+    }
+
+    if (operation == 'set_clip_points') {
+      final fallback = lanePoints[laneKey] ??
+          <AutomationPoint>[AutomationPoint(x: 0.0, volume: 1.0)];
+      final parsed = parsePoints(data['points'], fallback);
       final start = AssistantActionUtils.toActionDouble(
-            data['start_ms'] ?? target['start_ms'] ?? data['paste_start_ms'],
-          ) ??
-          (src.startMs + src.lengthMs);
-      laneClips.add(
-        laneClips[idx].copyWith(
-          id: '${src.id}_dup_${laneClips.length}',
-          patternId: patternId,
-          startMs: math.max(0.0, start),
-        ),
+        data['start_ms'] ?? target['start_ms'] ?? data['at_ms'],
       );
-      clipMap[laneKey] = laneClips;
-      return state.copyWith(
-          automationLanePoints: lanePoints, automationClips: clipMap);
+      final len = AssistantActionUtils.toActionDouble(
+        data['length_ms'] ?? target['length_ms'] ?? data['duration_ms'],
+      );
+      if (start != null && start.isFinite && len != null && len.isFinite) {
+        replaceLaneRange(start, len, parsed);
+      } else {
+        lanePoints[laneKey] = parsed;
+      }
+      return laneOnlyState();
     }
 
-    if (operation == 'move_clip' ||
-        operation == 'delete_clip' ||
+    if (operation == 'duplicate_clip' ||
+        operation == 'move_clip' ||
         operation == 'mute_clip' ||
         operation == 'unmute_clip' ||
         operation == 'toggle_clip_mute' ||
-        operation == 'set_clip_points' ||
         operation == 'make_unique_clip' ||
         operation == 'make_unique') {
-      final laneClips = clipsForLane();
-      final idx = resolveClipIndex(laneClips);
-      if (idx == null) {
-        return state.copyWith(
-            automationLanePoints: lanePoints, automationClips: clipMap);
-      }
-      final current = laneClips[idx];
-      if (operation == 'delete_clip') {
-        laneClips.removeAt(idx);
-      } else if (operation == 'move_clip') {
-        final start = AssistantActionUtils.toActionDouble(
-              data['start_ms'] ?? target['start_ms'] ?? data['new_start_ms'],
-            ) ??
-            (current.startMs +
-                (AssistantActionUtils.toActionDouble(
-                        data['delta_ms'] ?? target['delta_ms']) ??
-                    0.0));
-        final len = AssistantActionUtils.toActionDouble(
-              data['length_ms'] ?? target['length_ms'] ?? data['duration_ms'],
-            ) ??
-            current.lengthMs;
-        laneClips[idx] = current.copyWith(
-          startMs: math.max(0.0, start),
-          lengthMs: math.max(40.0, len),
-        );
-      } else if (operation == 'mute_clip') {
-        laneClips[idx] = current.copyWith(muted: true);
-      } else if (operation == 'unmute_clip') {
-        laneClips[idx] = current.copyWith(muted: false);
-      } else if (operation == 'toggle_clip_mute') {
-        laneClips[idx] = current.copyWith(muted: !current.muted);
-      } else if (operation == 'make_unique_clip' ||
-          operation == 'make_unique') {
-        if (current.patternId.trim().isNotEmpty) {
-          laneClips[idx] = current.copyWith(patternId: '');
-        }
-      } else if (operation == 'set_clip_points') {
-        applySharedPointsToLane(
-          laneClips,
-          idx,
-          parsePoints(data['points'], current.points),
-        );
-      }
-      clipMap[laneKey] = laneClips;
-      return state.copyWith(
-          automationLanePoints: lanePoints, automationClips: clipMap);
-    }
-
-    if (operation == 'clear_clips') {
-      clipMap[laneKey] = <TimelineAutomationClip>[];
-      return state.copyWith(
-          automationLanePoints: lanePoints, automationClips: clipMap);
+      return laneOnlyState();
     }
 
     return state;
@@ -2248,16 +2155,6 @@ class AssistantActionTimelineReducer {
       out[k] = v
           .map((p) => AutomationPoint(x: p.x, volume: p.volume))
           .toList(growable: false);
-    });
-    return out;
-  }
-
-  static Map<String, List<TimelineAutomationClip>> _copyAutomationClips(
-    Map<String, List<TimelineAutomationClip>> input,
-  ) {
-    final out = <String, List<TimelineAutomationClip>>{};
-    input.forEach((k, v) {
-      out[k] = v.map((c) => c.copyWith()).toList(growable: false);
     });
     return out;
   }

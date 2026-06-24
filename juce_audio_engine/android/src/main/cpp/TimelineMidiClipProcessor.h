@@ -15,6 +15,7 @@
 #include <mutex>
 #include <regex>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 struct TimelineMidiNote
@@ -183,8 +184,26 @@ public:
         if (outChannels <= 0)
             return;
 
-        const double blockStart = playheadSec.load(std::memory_order_relaxed);
+        const double blockStart =
+            blockTransportStartSec != nullptr
+                ? blockTransportStartSec->load(std::memory_order_relaxed)
+                : playheadSec.load(std::memory_order_relaxed);
         const double blockEnd = blockStart + (double)numSamples / sr;
+        const double expectedBlockStart =
+            steadyBlockStartSec.load(std::memory_order_relaxed);
+        const bool previousHostPlaying =
+            steadyWasPlaying.exchange(hostPlaying, std::memory_order_relaxed);
+        const bool hadExpected = std::isfinite(expectedBlockStart);
+        const double continuityToleranceSec = juce::jmax(4.0 / sr, 0.002);
+        const bool discontinuity =
+            !hostPlaying ||
+            !hadExpected ||
+            !previousHostPlaying ||
+            std::abs(blockStart - expectedBlockStart) > continuityToleranceSec;
+        steadyBlockStartSec.store(hostPlaying ? blockEnd : blockStart,
+                                  std::memory_order_relaxed);
+        if (discontinuity)
+            activeTimelineNotes.clear();
 
         refreshCachedState();
         applyPendingLiveMidiEvents();
@@ -240,6 +259,16 @@ public:
                 {
                     const double inFile = fileOffsetSec.load(std::memory_order_relaxed);
                     const double startTimelineSec = blockStart + ((double)writeStart / sr);
+                    const double endTimelineSec =
+                        startTimelineSec + ((double)framesToRender / sr);
+                    const double blockSourceStartSec =
+                        ((startTimelineSec - cs) * safeRatio) + inFile;
+                    const double blockSourceEndSec =
+                        ((endTimelineSec - cs) * safeRatio) + inFile;
+                    std::vector<size_t> blockNoteIndices;
+                    std::vector<double> blockNoteEndSourceSecs;
+                    blockNoteIndices.reserve(cachedNotes.size());
+                    blockNoteEndSourceSecs.reserve(cachedNotes.size());
                     std::vector<const SampledRegion *> timelineRegions;
                     if (sampledMode)
                     {
@@ -259,6 +288,48 @@ public:
                         }
                     }
 
+                    for (size_t noteIndex = 0; noteIndex < cachedNotes.size(); ++noteIndex)
+                    {
+                        const auto &note = cachedNotes[noteIndex];
+                        const SampledRegion *sampledRegion =
+                            sampledMode ? timelineRegions[noteIndex] : nullptr;
+                        if (sampledMode && sampledRegion == nullptr)
+                            continue;
+
+                        double noteReleaseSec = releaseSec;
+                        if (sampledRegion != nullptr &&
+                            !cachedSampledReleaseOverride)
+                        {
+                            noteReleaseSec =
+                                juce::jmax(0.02, sampledRegion->releaseSec);
+                        }
+
+                        const double noteStartSourceSec = note.startBeat * sourceSecPerBeat;
+                        const double noteLengthSourceSec = juce::jmax(0.001, note.lengthBeats * sourceSecPerBeat);
+                        const double noteEndSourceSec = noteStartSourceSec + noteLengthSourceSec + (noteReleaseSec * safeRatio);
+                        if (noteEndSourceSec <= blockSourceStartSec)
+                        {
+                            activeTimelineNotes.erase(noteIndex);
+                            continue;
+                        }
+
+                        if (noteStartSourceSec >= blockSourceEndSec)
+                            continue;
+
+                        const bool noteStartsInBlock =
+                            noteStartSourceSec >= blockSourceStartSec &&
+                            noteStartSourceSec < blockSourceEndSec;
+                        const bool noteAlreadyActive =
+                            activeTimelineNotes.find(noteIndex) != activeTimelineNotes.end();
+                        if (!noteStartsInBlock && !noteAlreadyActive)
+                            continue;
+                        if (noteStartsInBlock)
+                            activeTimelineNotes.insert(noteIndex);
+
+                        blockNoteIndices.push_back(noteIndex);
+                        blockNoteEndSourceSecs.push_back(noteEndSourceSec);
+                    }
+
                     for (int i = 0; i < framesToRender; ++i)
                     {
                         const double timelineSec = startTimelineSec + ((double)i / sr);
@@ -266,7 +337,7 @@ public:
                         float mixL = 0.0f;
                         float mixR = 0.0f;
 
-                        for (size_t noteIndex = 0; noteIndex < cachedNotes.size(); ++noteIndex)
+                        for (size_t noteIndex : blockNoteIndices)
                         {
                             const auto &note = cachedNotes[noteIndex];
                             const SampledRegion *sampledRegion =
@@ -385,6 +456,15 @@ public:
                         {
                             outL[outIndex] += 0.5f * (mixL + mixR);
                         }
+                    }
+
+                    for (size_t activeIndex = 0;
+                         activeIndex < blockNoteIndices.size() &&
+                         activeIndex < blockNoteEndSourceSecs.size();
+                         ++activeIndex)
+                    {
+                        if (blockNoteEndSourceSecs[activeIndex] <= blockSourceEndSec)
+                            activeTimelineNotes.erase(blockNoteIndices[activeIndex]);
                     }
                 }
             }
@@ -1958,6 +2038,7 @@ private:
         cachedSampledAttackOverride = local.sampledAttackOverride;
         cachedSampledReleaseOverride = local.sampledReleaseOverride;
         cachedSourceTempoBpm = local.sourceTempoBpm;
+        activeTimelineNotes.clear();
     }
 
     static juce::CriticalSection &flutterAssetRootLock()
@@ -1993,6 +2074,10 @@ private:
     int cachedVersion = 0;
     std::vector<LiveMidiEvent> pendingLiveMidiEvents;
     std::vector<ActiveLiveNote> activeLiveNotes;
+    std::unordered_set<size_t> activeTimelineNotes;
+    std::atomic<double> steadyBlockStartSec{
+        std::numeric_limits<double>::quiet_NaN()};
+    std::atomic<bool> steadyWasPlaying{false};
 
     std::vector<TimelineMidiNote> cachedNotes;
     InstrumentPreset cachedPreset;

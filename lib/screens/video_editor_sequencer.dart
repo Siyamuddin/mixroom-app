@@ -18,6 +18,7 @@ import 'package:mixroom/helpers/export_save_dialog.dart';
 import 'package:mixroom/helpers/ffmpeg_waveform.dart';
 import 'package:mixroom/helpers/video_project_manager.dart';
 import 'package:mixroom/helpers/video_sequencer_engine.dart';
+import 'package:mixroom/widgets/desktop_scrollable_slider.dart';
 import 'package:open_file/open_file.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -2505,7 +2506,7 @@ class _VideoSequencerEditorScreenState
                         activeTrackColor: Colors.white,
                         thumbColor: Colors.white,
                       ),
-                      child: Slider(
+                      child: DesktopScrollableSlider(
                         value: draft,
                         min: 0.25,
                         max: 2.0,
@@ -2575,7 +2576,7 @@ class _VideoSequencerEditorScreenState
                         activeTrackColor: Colors.white,
                         thumbColor: Colors.white,
                       ),
-                      child: Slider(
+                      child: DesktopScrollableSlider(
                         value: draft,
                         min: 0,
                         max: 2,
@@ -2669,7 +2670,7 @@ class _VideoSequencerEditorScreenState
                         activeTrackColor: Colors.white,
                         thumbColor: Colors.white,
                       ),
-                      child: Slider(
+                      child: DesktopScrollableSlider(
                         value: draftDurationMs,
                         min: VideoSequencerEngine
                             .minTransitionDuration.inMilliseconds

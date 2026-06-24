@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/services.dart';
+import 'package:mixroom/helpers/desktop_slider_wheel_sensitivity.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class DesktopEditorWindowLayout {
@@ -132,6 +133,8 @@ class DesktopEditorPrefs {
 
   static const String _windowKeyPrefix = 'mixroom.desktop.windows.v1';
   static const String _shortcutKeyPrefix = 'mixroom.desktop.shortcuts.v1';
+  static const String _sliderWheelSensitivityKeyPrefix =
+      'mixroom.desktop.slider_wheel_sensitivity.v1';
   static const String _sampleRootsKeyPrefix = 'mixroom.desktop.sample_roots.v1';
   static const String _pluginPrefsKeyPrefix = 'mixroom.desktop.plugins.v1';
 
@@ -144,6 +147,8 @@ class DesktopEditorPrefs {
       '$_windowKeyPrefix.${_scope(userId)}';
   static String _shortcutKey(String? userId) =>
       '$_shortcutKeyPrefix.${_scope(userId)}';
+  static String _sliderWheelSensitivityKey(String? userId) =>
+      '$_sliderWheelSensitivityKeyPrefix.${_scope(userId)}';
   static String _sampleRootsKey(String? userId) =>
       '$_sampleRootsKeyPrefix.${_scope(userId)}';
   static String _pluginPrefsKey(String? userId) =>
@@ -234,6 +239,43 @@ class DesktopEditorPrefs {
   static Future<void> clearShortcuts(String? userId) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_shortcutKey(userId));
+  }
+
+  static Future<DesktopSliderWheelSensitivity> loadSliderWheelSensitivity(
+    String? userId,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_sliderWheelSensitivityKey(userId));
+    if (raw == null || raw.trim().isEmpty) {
+      return DesktopSliderWheelSensitivity.defaults;
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) {
+        return DesktopSliderWheelSensitivity.defaults;
+      }
+      return DesktopSliderWheelSensitivity.fromJson(
+        Map<String, dynamic>.from(decoded),
+      );
+    } catch (_) {
+      return DesktopSliderWheelSensitivity.defaults;
+    }
+  }
+
+  static Future<void> saveSliderWheelSensitivity(
+    String? userId,
+    DesktopSliderWheelSensitivity sensitivity,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _sliderWheelSensitivityKey(userId),
+      jsonEncode(sensitivity.toJson()),
+    );
+  }
+
+  static Future<void> clearSliderWheelSensitivity(String? userId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_sliderWheelSensitivityKey(userId));
   }
 
   static Future<List<String>> loadSampleBrowserRoots(String? userId) async {

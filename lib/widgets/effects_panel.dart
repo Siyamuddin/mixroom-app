@@ -14,6 +14,7 @@ import 'package:mixroom/helpers/mix_change_highlighter.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/subscription_limits.dart';
 import 'package:mixroom/models/models.dart';
+import 'package:mixroom/widgets/desktop_scrollable_slider.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
 
 const int maxNumEffects = 10;
@@ -27,7 +28,7 @@ void _showPluginUpgradeDialog(
       context: context,
       title: 'Upgrade to use this plugin',
       message:
-          'All plugins and external plugin hosting are available on Starter and higher plans.',
+          'Additional Mixroom plugins are available on Starter and higher plans.',
       icon: Icons.extension_outlined,
       onUpgrade: onUpgradeRequested,
     ),
@@ -49,8 +50,34 @@ const double _kRowDeviceChainListHeight = 132.0;
 const double _kRowDeviceEffectTileHeight = 120.0;
 const double _kRowDeviceEffectTileWidth = 100.0;
 const double _kRowDeviceEffectBlockWidth = 116.0;
+const double _kAddEffectDialogWidth = 620.0;
+const double _kAddEffectDialogHeight = 430.0;
 const Duration _kShaperPreviewPollInterval = Duration(milliseconds: 16);
 const Duration _kDynamicSoftenerPollInterval = Duration(milliseconds: 40);
+
+double _addEffectDialogWidthFor(BuildContext context) {
+  final viewportWidth = MediaQuery.sizeOf(context).width;
+  return math.min(
+    _kAddEffectDialogWidth,
+    math.max(240.0, viewportWidth - 96.0),
+  );
+}
+
+double _addEffectDialogContentHeightFor(BuildContext context) {
+  if (PlatformCapabilities.current.isDesktop) {
+    return _kAddEffectDialogHeight;
+  }
+  final media = MediaQuery.of(context);
+  const dialogVerticalInset = 48.0;
+  const surfaceVerticalPadding = 26.0;
+  const tabBarAndGapHeight = 46.0;
+  final available = media.size.height -
+      media.viewInsets.bottom -
+      dialogVerticalInset -
+      surfaceVerticalPadding -
+      tabBarAndGapHeight;
+  return math.min(_kAddEffectDialogHeight, math.max(220.0, available));
+}
 
 class _MixroomFxCategorySpec {
   final String label;
@@ -174,17 +201,153 @@ IconData _mixroomFxIconForName(String name) {
   return Icons.extension_rounded;
 }
 
+class _MixroomFxPicker extends StatefulWidget {
+  const _MixroomFxPicker({
+    required this.isBasicTier,
+    required this.onInsert,
+    required this.onUpgradeRequested,
+    required this.autoFocusSearch,
+  });
+
+  final bool isBasicTier;
+  final Future<void> Function(String name) onInsert;
+  final VoidCallback? onUpgradeRequested;
+  final bool autoFocusSearch;
+
+  @override
+  State<_MixroomFxPicker> createState() => _MixroomFxPickerState();
+}
+
+class _MixroomFxPickerState extends State<_MixroomFxPicker> {
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
+  TabController? _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(_handleSearchChanged);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next = DefaultTabController.maybeOf(context);
+    if (identical(next, _tabController)) return;
+    _tabController?.removeListener(_handleTabChanged);
+    _tabController = next;
+    _tabController?.addListener(_handleTabChanged);
+    _handleTabChanged();
+  }
+
+  @override
+  void dispose() {
+    _tabController?.removeListener(_handleTabChanged);
+    _searchController
+      ..removeListener(_handleSearchChanged)
+      ..dispose();
+    _searchFocusNode.dispose();
+    super.dispose();
+  }
+
+  void _handleSearchChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _handleTabChanged() {
+    if (!widget.autoFocusSearch) return;
+    if (_tabController?.index != 0) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !widget.autoFocusSearch || _tabController?.index != 0) {
+        return;
+      }
+      _searchFocusNode.requestFocus();
+    });
+  }
+
+  List<_MixroomFxCategorySpec> get _filteredCategories {
+    final query = _searchController.text.trim().toLowerCase();
+    if (query.isEmpty) return _kMixroomFxCategories;
+    final out = <_MixroomFxCategorySpec>[];
+    for (final category in _kMixroomFxCategories) {
+      final categoryLabel = L10n.translate(context, category.label);
+      final categoryMatches = category.label.toLowerCase().contains(query) ||
+          categoryLabel.toLowerCase().contains(query);
+      final effects = category.effects.where((name) {
+        final translated = L10n.translate(context, name);
+        return categoryMatches ||
+            name.toLowerCase().contains(query) ||
+            translated.toLowerCase().contains(query);
+      }).toList(growable: false);
+      if (effects.isEmpty) continue;
+      out.add(
+        _MixroomFxCategorySpec(
+          label: category.label,
+          icon: category.icon,
+          color: category.color,
+          effects: effects,
+        ),
+      );
+    }
+    return out;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filteredCategories = _filteredCategories;
+    final hasSearch = _searchController.text.trim().isNotEmpty;
+    return Column(
+      children: [
+        _EffectPickerSearchField(
+          controller: _searchController,
+          focusNode: _searchFocusNode,
+          hintText: 'Search Mixroom FX',
+          hasSearch: hasSearch,
+        ),
+        Expanded(
+          child: filteredCategories.isEmpty
+              ? Material(
+                  type: MaterialType.transparency,
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+                    title: Text(
+                      'No Mixroom FX match your search',
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.72),
+                        fontSize: 13.0,
+                      ),
+                    ),
+                  ),
+                )
+              : _buildMixroomFxCategoryList(
+                  context: context,
+                  categories: filteredCategories,
+                  isBasicTier: widget.isBasicTier,
+                  onInsert: widget.onInsert,
+                  onUpgradeRequested: widget.onUpgradeRequested,
+                ),
+        ),
+      ],
+    );
+  }
+}
+
 Widget _buildMixroomFxCategoryList({
   required BuildContext context,
+  required List<_MixroomFxCategorySpec> categories,
   required bool isBasicTier,
   required Future<void> Function(String name) onInsert,
   required VoidCallback? onUpgradeRequested,
 }) {
   return ListView.builder(
     padding: const EdgeInsets.fromLTRB(0, 2, 0, 8),
-    itemCount: _kMixroomFxCategories.length,
+    itemCount: categories.length,
     itemBuilder: (context, index) {
-      final category = _kMixroomFxCategories[index];
+      final category = categories[index];
       return Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: Theme(
@@ -319,6 +482,322 @@ Widget _buildMixroomFxCategoryList({
   );
 }
 
+class _EffectPickerSearchField extends StatelessWidget {
+  const _EffectPickerSearchField({
+    required this.controller,
+    required this.focusNode,
+    required this.hintText,
+    required this.hasSearch,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final String hintText;
+  final bool hasSearch;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 2, 4, 8),
+      child: SizedBox(
+        height: 34,
+        child: TextField(
+          controller: controller,
+          focusNode: focusNode,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+          ),
+          cursorColor: Colors.white,
+          textInputAction: TextInputAction.search,
+          decoration: InputDecoration(
+            hintText: hintText,
+            hintStyle: TextStyle(
+              color: Colors.white.withValues(alpha: 0.46),
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+            ),
+            prefixIcon: Icon(
+              Icons.search_rounded,
+              size: 17,
+              color: Colors.white.withValues(alpha: 0.62),
+            ),
+            suffixIcon: hasSearch
+                ? IconButton(
+                    tooltip: 'Clear search',
+                    icon: const Icon(Icons.close_rounded, size: 16),
+                    color: Colors.white.withValues(alpha: 0.70),
+                    splashRadius: 16,
+                    onPressed: controller.clear,
+                  )
+                : null,
+            isDense: true,
+            filled: true,
+            fillColor: Colors.black.withValues(alpha: 0.14),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: Colors.white.withValues(alpha: 0.08),
+              ),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: Colors.white.withValues(alpha: 0.08),
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: _kFxWarmAccent.withValues(alpha: 0.72),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _OnDeviceEffectPicker extends StatefulWidget {
+  const _OnDeviceEffectPicker({
+    required this.effects,
+    required this.onInsert,
+    required this.onUpgradeRequested,
+    required this.onFavoriteToggle,
+    required this.autoFocusSearch,
+  });
+
+  final List<Map<String, dynamic>> effects;
+  final Future<void> Function(String path) onInsert;
+  final VoidCallback? onUpgradeRequested;
+  final Future<void> Function(String pluginId)? onFavoriteToggle;
+  final bool autoFocusSearch;
+
+  @override
+  State<_OnDeviceEffectPicker> createState() => _OnDeviceEffectPickerState();
+}
+
+class _OnDeviceEffectPickerState extends State<_OnDeviceEffectPicker> {
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
+  final Set<String> _favoritePluginIds = <String>{};
+  TabController? _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncFavoritesFromWidget();
+    _searchController.addListener(_handleSearchChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant _OnDeviceEffectPicker oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.effects, widget.effects)) {
+      _syncFavoritesFromWidget();
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next = DefaultTabController.maybeOf(context);
+    if (identical(next, _tabController)) return;
+    _tabController?.removeListener(_handleTabChanged);
+    _tabController = next;
+    _tabController?.addListener(_handleTabChanged);
+    _handleTabChanged();
+  }
+
+  @override
+  void dispose() {
+    _tabController?.removeListener(_handleTabChanged);
+    _searchController
+      ..removeListener(_handleSearchChanged)
+      ..dispose();
+    _searchFocusNode.dispose();
+    super.dispose();
+  }
+
+  void _handleSearchChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _handleTabChanged() {
+    if (!widget.autoFocusSearch) return;
+    if (_tabController?.index != 1) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !widget.autoFocusSearch || _tabController?.index != 1) {
+        return;
+      }
+      _searchFocusNode.requestFocus();
+    });
+  }
+
+  List<Map<String, dynamic>> get _filteredEffects {
+    final query = _searchController.text.trim().toLowerCase();
+    final filtered = query.isEmpty
+        ? List<Map<String, dynamic>>.from(widget.effects)
+        : widget.effects.where((meta) {
+            final fields = <String>[
+              (meta['name'] ?? '').toString(),
+              (meta['id'] ?? '').toString(),
+              (meta['format'] ?? '').toString(),
+              (meta['manufacturer'] ?? '').toString(),
+            ];
+            return fields.any((field) => field.toLowerCase().contains(query));
+          }).toList(growable: false);
+    filtered.sort((a, b) {
+      final aId = (a['id'] ?? '').toString().trim();
+      final bId = (b['id'] ?? '').toString().trim();
+      final aFavorite = _isFavorite(aId);
+      final bFavorite = _isFavorite(bId);
+      if (aFavorite != bFavorite) return aFavorite ? -1 : 1;
+      final aName = (a['name'] ?? aId).toString().trim().toLowerCase();
+      final bName = (b['name'] ?? bId).toString().trim().toLowerCase();
+      return aName.compareTo(bName);
+    });
+    return filtered;
+  }
+
+  void _syncFavoritesFromWidget() {
+    _favoritePluginIds
+      ..clear()
+      ..addAll(widget.effects
+          .where((meta) => meta['favorite'] == true)
+          .map((meta) => (meta['id'] ?? '').toString().trim())
+          .where((id) => id.isNotEmpty));
+  }
+
+  bool _isFavorite(String pluginId) {
+    return pluginId.trim().isNotEmpty && _favoritePluginIds.contains(pluginId);
+  }
+
+  Future<void> _toggleFavorite(String pluginId) async {
+    final trimmed = pluginId.trim();
+    if (trimmed.isEmpty) return;
+    setState(() {
+      if (_favoritePluginIds.contains(trimmed)) {
+        _favoritePluginIds.remove(trimmed);
+      } else {
+        _favoritePluginIds.add(trimmed);
+      }
+    });
+    await widget.onFavoriteToggle?.call(trimmed);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filteredEffects = _filteredEffects;
+    final hasSearch = _searchController.text.trim().isNotEmpty;
+    final emptyLabel = widget.effects.isEmpty
+        ? L10n.translate(context, 'No external plugins found')
+        : 'No plugins match your search';
+
+    return Column(
+      children: [
+        _EffectPickerSearchField(
+          controller: _searchController,
+          focusNode: _searchFocusNode,
+          hintText: 'Search on-device plugins',
+          hasSearch: hasSearch,
+        ),
+        Expanded(
+          child: ListView.separated(
+            itemCount: filteredEffects.isEmpty ? 1 : filteredEffects.length,
+            separatorBuilder: (_, __) => Divider(
+              height: 1,
+              thickness: 1,
+              color: Colors.white.withValues(alpha: 0.07),
+            ),
+            itemBuilder: (context, i) {
+              if (filteredEffects.isEmpty) {
+                return Material(
+                  type: MaterialType.transparency,
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+                    title: Text(
+                      emptyLabel,
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.72),
+                        fontSize: 13.0,
+                      ),
+                    ),
+                  ),
+                );
+              }
+              final meta = filteredEffects[i];
+              final path = (meta['id'] ?? '').toString();
+              if (path.isEmpty) return const SizedBox.shrink();
+              final name = (meta['name'] ?? path).toString();
+              final format = (meta['format'] ?? '').toString();
+              final manufacturer = (meta['manufacturer'] ?? '').toString();
+              final favorite = _isFavorite(path);
+              final details = <String>[
+                if (format.isNotEmpty) format,
+                if (manufacturer.isNotEmpty) manufacturer,
+              ];
+              return Material(
+                type: MaterialType.transparency,
+                child: ListTile(
+                  dense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+                  title: Text(
+                    name,
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13.2,
+                    ),
+                  ),
+                  subtitle: details.isEmpty
+                      ? null
+                      : Text(
+                          details.join(' • '),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.62),
+                            fontSize: 11.0,
+                          ),
+                        ),
+                  trailing: IconButton(
+                    tooltip:
+                        favorite ? 'Remove from favorites' : 'Add to favorites',
+                    icon: Icon(
+                      favorite ? Icons.star_rounded : Icons.star_border_rounded,
+                      size: 19,
+                    ),
+                    color: favorite
+                        ? _kFxWarmAccentBorder
+                        : Colors.white.withValues(alpha: 0.62),
+                    splashRadius: 17,
+                    onPressed: () => unawaited(_toggleFavorite(path)),
+                  ),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await widget.onInsert(path);
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 bool _previewFramesChanged(
   List<double> previous,
   List<double> next, {
@@ -362,6 +841,41 @@ BoxDecoration _mixroomFxSurfaceDecoration({
         spreadRadius: 2,
       ),
     ],
+  );
+}
+
+BoxDecoration _mixroomFxDialogSurfaceDecoration({
+  required BorderRadius borderRadius,
+}) {
+  return BoxDecoration(
+    borderRadius: borderRadius,
+    color: const Color.fromRGBO(244, 244, 244, 0.20),
+    border: Border.all(
+      color: Colors.white.withValues(alpha: 0.14),
+    ),
+  );
+}
+
+Widget _buildAddEffectDialogSurface({
+  required Widget child,
+}) {
+  final borderRadius = BorderRadius.circular(24);
+  return ClipRRect(
+    borderRadius: borderRadius,
+    clipBehavior: Clip.antiAlias,
+    child: BackdropFilter(
+      filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+        decoration: _mixroomFxDialogSurfaceDecoration(
+          borderRadius: borderRadius,
+        ),
+        child: Material(
+          type: MaterialType.transparency,
+          child: child,
+        ),
+      ),
+    ),
   );
 }
 
@@ -480,6 +994,8 @@ Future<String?> _showMixroomChoiceDialog({
       return AlertDialog(
         backgroundColor: const Color(0xFF5F666D),
         surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
+        clipBehavior: Clip.antiAlias,
         insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
         titlePadding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
         contentPadding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
@@ -815,6 +1331,8 @@ class _NumericParamEntryDialogState extends State<_NumericParamEntryDialog> {
     return AlertDialog(
       backgroundColor: const Color(0xFF5F666D),
       surfaceTintColor: Colors.transparent,
+      shadowColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(24),
@@ -1134,7 +1652,7 @@ Widget _buildGenericFloatParamEditor({
                         if (defaultValue == null) return;
                         applyDiscreteValue(defaultValue);
                       },
-                      child: Slider(
+                      child: DesktopScrollableSlider(
                         value: sliderPos,
                         min: 0.0,
                         max: 1.0,
@@ -1827,6 +2345,8 @@ void _showEffectInfoDialog({
         return AlertDialog(
           backgroundColor: const Color(0xFF3B434B),
           surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          clipBehavior: Clip.antiAlias,
           insetPadding:
               const EdgeInsets.symmetric(horizontal: 22, vertical: 24),
           contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
@@ -2120,6 +2640,8 @@ Future<double?> _showGainPercentDialog({
       return AlertDialog(
         backgroundColor: const Color(0xFF5F666D),
         surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
+        clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
           side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
@@ -2270,6 +2792,7 @@ class RowEffectsPanel extends StatefulWidget {
   final Future<List<Map<String, dynamic>>> Function(int row, int effectIndex)
       getTrackPluginParameters;
   final Future<List<Map<String, dynamic>>> Function() scanPlugins;
+  final Future<void> Function(String pluginId)? onTogglePluginFavorite;
   final Future<bool> Function(int row, int effectIndex)? openTrackPluginEditor;
   final Future<void> Function(
           int row, int effectIndex, String paramId, dynamic value)
@@ -2333,6 +2856,7 @@ class RowEffectsPanel extends StatefulWidget {
     required this.insertEffectOnRow,
     required this.getTrackPluginParameters,
     required this.scanPlugins,
+    this.onTogglePluginFavorite,
     this.openTrackPluginEditor,
     required this.setTrackEffectParam,
     this.onRequestAutomateParameter,
@@ -3292,7 +3816,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                         data: SliderTheme.of(context).copyWith(
                           trackShape: const _TightSliderTrackShape(),
                         ),
-                        child: Slider(
+                        child: DesktopScrollableSlider(
                           value: msValue.clamp((param['min'] as num).toDouble(),
                               (param['max'] as num).toDouble()),
                           min: (param['min'] as num).toDouble(),
@@ -3403,7 +3927,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                         data: SliderTheme.of(context).copyWith(
                           trackShape: const _TightSliderTrackShape(),
                         ),
-                        child: Slider(
+                        child: DesktopScrollableSlider(
                           value: rawV,
                           min: minV,
                           max: maxV,
@@ -3543,7 +4067,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                           const RoundSliderThumbShape(enabledThumbRadius: 11),
                       overlayShape: SliderComponentShape.noOverlay,
                     ),
-                    child: Slider(
+                    child: DesktopScrollableSlider(
                       value: rawV,
                       min: minV,
                       max: maxV,
@@ -4996,6 +5520,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
       builder: (_) => AlertDialog(
         backgroundColor: const Color(0xFF5F666D),
         surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
+        clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(24),
           side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
@@ -5283,6 +5809,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
       builder: (_) => AlertDialog(
         backgroundColor: const Color(0xFF5F666D),
         surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
+        clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(24),
           side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
@@ -5335,179 +5863,118 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     // Dialog can use scrolling; this is outside the row panel layout.
     showDialog(
       context: context,
-      builder: (_) {
+      builder: (dialogContext) {
+        final dialogRadius = BorderRadius.circular(24);
+        final autoFocusSearch = PlatformCapabilities.current.isDesktop;
         return DefaultTabController(
           length: 2,
-          child: AlertDialog(
-            backgroundColor: const Color(0xFF5F666D),
+          child: Dialog(
+            insetPadding:
+                const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+            backgroundColor: Colors.transparent,
             surfaceTintColor: Colors.transparent,
-            titlePadding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-            contentPadding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
+            shadowColor: Colors.transparent,
+            elevation: 0,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
-              side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+              borderRadius: dialogRadius,
             ),
-            title: Container(
-              height: 36,
-              padding: const EdgeInsets.all(2),
-              decoration: _mixroomFxInsetDecoration(radius: 18),
-              child: TabBar(
-                dividerColor: Colors.transparent,
-                indicatorSize: TabBarIndicatorSize.tab,
-                indicatorPadding: EdgeInsets.zero,
-                indicator: BoxDecoration(
-                  color: _kFxPanelFillStrong,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.18),
-                  ),
-                ),
-                labelColor: Colors.white,
-                unselectedLabelColor: Colors.white70,
-                labelStyle: const TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w700,
-                ),
-                unselectedLabelStyle: const TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w500,
-                ),
-                tabs: [
-                  const Tab(text: 'FX'),
-                  Tab(text: L10n.translate(context, 'On Device')),
-                ],
-              ),
-            ),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: 390,
-              child: TabBarView(
-                children: [
-                  _buildMixroomFxCategoryList(
-                    context: context,
-                    isBasicTier: _isBasicTier,
-                    onUpgradeRequested: widget.onUpgradeRequested,
-                    onInsert: (name) async {
-                      Navigator.pop(context);
-                      await widget.insertEffectOnRow(widget.rowIndex, name);
-                      await _loadEffects();
-                      final addedIndex = _effects.length - 1;
-                      if (addedIndex >= 0 && addedIndex < _effects.length) {
-                        widget.onTutorialEffectAdded?.call(
-                          widget.rowIndex,
-                          addedIndex,
-                          _effects[addedIndex],
-                        );
-                      }
-                    },
-                  ),
-                  ListView.separated(
-                    itemCount:
-                        externalEffects.isEmpty ? 1 : externalEffects.length,
-                    separatorBuilder: (_, __) => Divider(
-                      height: 1,
-                      thickness: 1,
-                      color: Colors.white.withOpacity(0.07),
-                    ),
-                    itemBuilder: (context, i) {
-                      if (externalEffects.isEmpty) {
-                        return Material(
-                          type: MaterialType.transparency,
-                          child: ListTile(
-                            dense: true,
-                            contentPadding:
-                                const EdgeInsets.symmetric(horizontal: 10),
-                            title: Text(
-                              L10n.translate(
-                                context,
-                                'No external plugins found',
-                              ),
-                              maxLines: 1,
-                              softWrap: false,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.72),
-                                fontSize: 13.0,
-                              ),
-                            ),
-                          ),
-                        );
-                      }
-                      final meta = externalEffects[i];
-                      final path = (meta['id'] ?? '').toString();
-                      if (path.isEmpty) return const SizedBox.shrink();
-                      final name = (meta['name'] ?? path).toString();
-                      final format = (meta['format'] ?? '').toString();
-                      final manufacturer =
-                          (meta['manufacturer'] ?? '').toString();
-                      final isAllowed = !_isBasicTier;
-                      final details = <String>[
-                        if (format.isNotEmpty) format,
-                        if (manufacturer.isNotEmpty) manufacturer,
-                      ];
-                      return Opacity(
-                        opacity: isAllowed ? 1.0 : 0.45,
-                        child: Material(
-                          type: MaterialType.transparency,
-                          child: ListTile(
-                            dense: true,
-                            contentPadding:
-                                const EdgeInsets.symmetric(horizontal: 10),
-                            title: Text(
-                              name,
-                              maxLines: 1,
-                              softWrap: false,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  color: Colors.white, fontSize: 13.2),
-                            ),
-                            subtitle: details.isEmpty
-                                ? null
-                                : Text(
-                                    details.join(' • '),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: Colors.white.withOpacity(0.62),
-                                      fontSize: 11.0,
-                                    ),
-                                  ),
-                            trailing: isAllowed
-                                ? null
-                                : const Icon(
-                                    Icons.lock_outline_rounded,
-                                    size: 18,
-                                    color: Colors.white70,
-                                  ),
-                            onTap: isAllowed
-                                ? () async {
-                                    Navigator.pop(context);
-                                    await widget.insertEffectOnRow(
-                                        widget.rowIndex, path);
-                                    await _loadEffects();
-                                    final addedIndex = _effects.length - 1;
-                                    if (addedIndex >= 0 &&
-                                        addedIndex < _effects.length) {
-                                      await _tryOpenTrackPluginEditor(
-                                          addedIndex);
-                                      widget.onTutorialEffectAdded?.call(
-                                        widget.rowIndex,
-                                        addedIndex,
-                                        _effects[addedIndex],
-                                      );
-                                    }
-                                  }
-                                : () => _showPluginUpgradeDialog(
-                                      context,
-                                      onUpgradeRequested:
-                                          widget.onUpgradeRequested,
-                                    ),
+            clipBehavior: Clip.antiAlias,
+            child: SizedBox(
+              width: _addEffectDialogWidthFor(dialogContext),
+              child: _buildAddEffectDialogSurface(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      height: 36,
+                      padding: const EdgeInsets.all(2),
+                      decoration: _mixroomFxInsetDecoration(radius: 18),
+                      child: TabBar(
+                        dividerColor: Colors.transparent,
+                        indicatorSize: TabBarIndicatorSize.tab,
+                        indicatorPadding: EdgeInsets.zero,
+                        indicator: BoxDecoration(
+                          color: _kFxPanelFillStrong,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.18),
                           ),
                         ),
-                      );
-                    },
-                  ),
-                ],
+                        labelColor: Colors.white,
+                        unselectedLabelColor: Colors.white70,
+                        labelStyle: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        unselectedLabelStyle: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        tabs: [
+                          const Tab(text: 'FX'),
+                          Tab(text: L10n.translate(context, 'On Device')),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Flexible(
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: _addEffectDialogContentHeightFor(dialogContext),
+                        child: TabBarView(
+                          children: [
+                            _MixroomFxPicker(
+                              isBasicTier: _isBasicTier,
+                              onUpgradeRequested: widget.onUpgradeRequested,
+                              autoFocusSearch: autoFocusSearch,
+                              onInsert: (name) async {
+                                Navigator.pop(context);
+                                await widget.insertEffectOnRow(
+                                  widget.rowIndex,
+                                  name,
+                                );
+                                await _loadEffects();
+                                final addedIndex = _effects.length - 1;
+                                if (addedIndex >= 0 &&
+                                    addedIndex < _effects.length) {
+                                  widget.onTutorialEffectAdded?.call(
+                                    widget.rowIndex,
+                                    addedIndex,
+                                    _effects[addedIndex],
+                                  );
+                                }
+                              },
+                            ),
+                            _OnDeviceEffectPicker(
+                              effects: externalEffects,
+                              onUpgradeRequested: widget.onUpgradeRequested,
+                              onFavoriteToggle: widget.onTogglePluginFavorite,
+                              autoFocusSearch: autoFocusSearch,
+                              onInsert: (path) async {
+                                await widget.insertEffectOnRow(
+                                  widget.rowIndex,
+                                  path,
+                                );
+                                await _loadEffects();
+                                final addedIndex = _effects.length - 1;
+                                if (addedIndex >= 0 &&
+                                    addedIndex < _effects.length) {
+                                  await _tryOpenTrackPluginEditor(addedIndex);
+                                  widget.onTutorialEffectAdded?.call(
+                                    widget.rowIndex,
+                                    addedIndex,
+                                    _effects[addedIndex],
+                                  );
+                                }
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -5678,6 +6145,8 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         bool logarithmic = false,
       }) {
         final name = param['name'] as String;
+        final paramId = (param['id'] ?? param['name'] ?? '').toString().trim();
+        final paramName = (param['name'] ?? label).toString().trim();
         return _EqFaderSpec(
           label: label,
           value: (param['value'] as num).toDouble(),
@@ -5745,6 +6214,18 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
               nextValue,
             );
           },
+          onAutomationRequest: (globalPos) => _showAutomateParameterSheet(
+            effectIndex: idx,
+            effectName: effectName,
+            paramId: paramId,
+            paramName: paramName,
+            haloKeys: _paramHaloKeys(
+              effectIndex: idx,
+              effectName: effectName,
+              paramName: paramName,
+            ),
+            anchorGlobalPos: globalPos,
+          ),
         );
       }
 
@@ -5817,6 +6298,18 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
             min: (pHPF['min'] as num).toDouble(),
             max: (pHPF['max'] as num).toDouble(),
             logarithmic: true,
+            onAutomationRequest: (globalPos) => _showAutomateParameterSheet(
+              effectIndex: idx,
+              effectName: effectName,
+              paramId: (pHPF['id'] ?? pHPF['name'] ?? '').toString().trim(),
+              paramName: (pHPF['name'] ?? 'HPF Frequency').toString().trim(),
+              haloKeys: _paramHaloKeys(
+                effectIndex: idx,
+                effectName: effectName,
+                paramName: (pHPF['name'] ?? 'HPF Frequency').toString().trim(),
+              ),
+              anchorGlobalPos: globalPos,
+            ),
             onChangeStart: (_) {
               _EQParamStartValue = (pHPF['value'] as num).toDouble();
             },
@@ -5880,6 +6373,18 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
             min: (pLPF['min'] as num).toDouble(),
             max: (pLPF['max'] as num).toDouble(),
             logarithmic: true,
+            onAutomationRequest: (globalPos) => _showAutomateParameterSheet(
+              effectIndex: idx,
+              effectName: effectName,
+              paramId: (pLPF['id'] ?? pLPF['name'] ?? '').toString().trim(),
+              paramName: (pLPF['name'] ?? 'LPF Frequency').toString().trim(),
+              haloKeys: _paramHaloKeys(
+                effectIndex: idx,
+                effectName: effectName,
+                paramName: (pLPF['name'] ?? 'LPF Frequency').toString().trim(),
+              ),
+              anchorGlobalPos: globalPos,
+            ),
             onChangeStart: (_) {
               _EQParamStartValue = (pLPF['value'] as num).toDouble();
             },
@@ -6742,6 +7247,7 @@ class MasterEffectsPanel extends StatefulWidget {
     String paramName,
   )? onRequestAutomateParameter;
   final Future<List<Map<String, dynamic>>> Function() scanPlugins;
+  final Future<void> Function(String pluginId)? onTogglePluginFavorite;
   final Future<bool> Function(int effectIndex)? openMasterPluginEditor;
   final void Function(
           int effectIndex, String paramId, dynamic oldValue, dynamic newValue)?
@@ -6764,6 +7270,7 @@ class MasterEffectsPanel extends StatefulWidget {
   final Future<List<double>> Function(int effectIndex, int pointCount)
       getMasterStereoScope;
   final MixChangeHighlighter? highlighter;
+  final void Function(VoidCallback refresh)? registerPlaybackRefresh;
   final void Function(
     Future<void> Function(int effectIndex, String paramId) reveal,
   )? registerParameterRevealer;
@@ -6785,6 +7292,7 @@ class MasterEffectsPanel extends StatefulWidget {
     required this.setMasterEffectParam,
     this.onRequestAutomateParameter,
     required this.scanPlugins,
+    this.onTogglePluginFavorite,
     this.openMasterPluginEditor,
     this.onHeightChanged,
     this.onMasterPluginParamCommit,
@@ -6799,6 +7307,7 @@ class MasterEffectsPanel extends StatefulWidget {
     required this.getMasterEqWaveform,
     required this.getMasterStereoScope,
     this.highlighter,
+    this.registerPlaybackRefresh,
     this.registerParameterRevealer,
     this.addTileFollowsEffectsInline = false,
   }) : super(key: key);
@@ -6852,6 +7361,10 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
   List<double> _transientShaperVisual = const <double>[];
   double _eqAnalyzerSampleRate = 44100.0;
   int _eqParametricTabIndex = 0;
+  bool _playbackRefreshBusy = false;
+  DateTime _lastPlaybackRefreshAt = DateTime.fromMillisecondsSinceEpoch(0);
+  static const Duration _kPlaybackRefreshMinInterval =
+      Duration(milliseconds: 90);
 
   bool get _isProEntitled => widget.isProEntitled == true;
 
@@ -7235,7 +7748,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                           const RoundSliderThumbShape(enabledThumbRadius: 11),
                       overlayShape: SliderComponentShape.noOverlay,
                     ),
-                    child: Slider(
+                    child: DesktopScrollableSlider(
                       value: rawV,
                       min: minV,
                       max: maxV,
@@ -7297,6 +7810,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
   void initState() {
     super.initState();
     _loadEffects();
+    widget.registerPlaybackRefresh?.call(_refetchParamsForPlayback);
     widget.registerParameterRevealer?.call(_revealParameter);
   }
 
@@ -7540,7 +8054,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                         data: SliderTheme.of(context).copyWith(
                           trackShape: const _TightSliderTrackShape(),
                         ),
-                        child: Slider(
+                        child: DesktopScrollableSlider(
                           value: msValue.clamp((param['min'] as num).toDouble(),
                               (param['max'] as num).toDouble()),
                           min: (param['min'] as num).toDouble(),
@@ -7649,7 +8163,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                         data: SliderTheme.of(context).copyWith(
                           trackShape: const _TightSliderTrackShape(),
                         ),
-                        child: Slider(
+                        child: DesktopScrollableSlider(
                           value: rawV,
                           min: minV,
                           max: maxV,
@@ -8470,6 +8984,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
       builder: (_) => AlertDialog(
         backgroundColor: const Color(0xFF5F666D),
         surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
+        clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(24),
           side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
@@ -8762,6 +9278,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
       builder: (_) => AlertDialog(
         backgroundColor: const Color(0xFF5F666D),
         surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
+        clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(24),
           side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
@@ -8811,165 +9329,98 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     // Dialog can use scrolling; this is outside the row panel layout.
     showDialog(
       context: context,
-      builder: (_) {
+      builder: (dialogContext) {
+        final dialogRadius = BorderRadius.circular(24);
+        final autoFocusSearch = PlatformCapabilities.current.isDesktop;
         return DefaultTabController(
           length: 2,
-          child: AlertDialog(
-            backgroundColor: const Color(0xFF5F666D),
+          child: Dialog(
+            insetPadding:
+                const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+            backgroundColor: Colors.transparent,
             surfaceTintColor: Colors.transparent,
-            titlePadding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-            contentPadding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
+            shadowColor: Colors.transparent,
+            elevation: 0,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
-              side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+              borderRadius: dialogRadius,
             ),
-            title: Container(
-              height: 36,
-              padding: const EdgeInsets.all(2),
-              decoration: _mixroomFxInsetDecoration(radius: 18),
-              child: TabBar(
-                dividerColor: Colors.transparent,
-                indicatorSize: TabBarIndicatorSize.tab,
-                indicatorPadding: EdgeInsets.zero,
-                indicator: BoxDecoration(
-                  color: _kFxPanelFillStrong,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.18),
-                  ),
-                ),
-                labelColor: Colors.white,
-                unselectedLabelColor: Colors.white70,
-                labelStyle: const TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w700,
-                ),
-                unselectedLabelStyle: const TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w500,
-                ),
-                tabs: [
-                  const Tab(text: 'FX'),
-                  Tab(text: L10n.translate(context, 'On Device')),
-                ],
-              ),
-            ),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: 390,
-              child: TabBarView(
-                children: [
-                  _buildMixroomFxCategoryList(
-                    context: context,
-                    isBasicTier: _isBasicTier,
-                    onUpgradeRequested: widget.onUpgradeRequested,
-                    onInsert: (name) async {
-                      Navigator.pop(context);
-                      await widget.insertMasterEffect(name);
-                      await _loadEffects();
-                    },
-                  ),
-                  ListView.separated(
-                    itemCount:
-                        externalEffects.isEmpty ? 1 : externalEffects.length,
-                    separatorBuilder: (_, __) => Divider(
-                      height: 1,
-                      thickness: 1,
-                      color: Colors.white.withOpacity(0.07),
-                    ),
-                    itemBuilder: (context, i) {
-                      if (externalEffects.isEmpty) {
-                        return Material(
-                          type: MaterialType.transparency,
-                          child: ListTile(
-                            dense: true,
-                            contentPadding:
-                                const EdgeInsets.symmetric(horizontal: 10),
-                            title: Text(
-                              L10n.translate(
-                                context,
-                                'No external plugins found',
-                              ),
-                              maxLines: 1,
-                              softWrap: false,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: Colors.white.withOpacity(0.72),
-                                fontSize: 13.0,
-                              ),
-                            ),
-                          ),
-                        );
-                      }
-                      final meta = externalEffects[i];
-                      final path = (meta['id'] ?? '').toString();
-                      if (path.isEmpty) return const SizedBox.shrink();
-                      final name = (meta['name'] ?? path).toString();
-                      final format = (meta['format'] ?? '').toString();
-                      final manufacturer =
-                          (meta['manufacturer'] ?? '').toString();
-                      final isAllowed = !_isBasicTier;
-                      final details = <String>[
-                        if (format.isNotEmpty) format,
-                        if (manufacturer.isNotEmpty) manufacturer,
-                      ];
-                      return Opacity(
-                        opacity: isAllowed ? 1.0 : 0.45,
-                        child: Material(
-                          type: MaterialType.transparency,
-                          child: ListTile(
-                            dense: true,
-                            contentPadding:
-                                const EdgeInsets.symmetric(horizontal: 10),
-                            title: Text(
-                              name,
-                              maxLines: 1,
-                              softWrap: false,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  color: Colors.white, fontSize: 13.2),
-                            ),
-                            subtitle: details.isEmpty
-                                ? null
-                                : Text(
-                                    details.join(' • '),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: Colors.white.withOpacity(0.62),
-                                      fontSize: 11.0,
-                                    ),
-                                  ),
-                            trailing: isAllowed
-                                ? null
-                                : const Icon(
-                                    Icons.lock_outline_rounded,
-                                    size: 18,
-                                    color: Colors.white70,
-                                  ),
-                            onTap: isAllowed
-                                ? () async {
-                                    Navigator.pop(context);
-                                    await widget.insertMasterEffect(path);
-                                    await _loadEffects();
-                                    final addedIndex = _effects.length - 1;
-                                    if (addedIndex >= 0 &&
-                                        addedIndex < _effects.length) {
-                                      await _tryOpenMasterPluginEditor(
-                                          addedIndex);
-                                    }
-                                  }
-                                : () => _showPluginUpgradeDialog(
-                                      context,
-                                      onUpgradeRequested:
-                                          widget.onUpgradeRequested,
-                                    ),
+            clipBehavior: Clip.antiAlias,
+            child: SizedBox(
+              width: _addEffectDialogWidthFor(dialogContext),
+              child: _buildAddEffectDialogSurface(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      height: 36,
+                      padding: const EdgeInsets.all(2),
+                      decoration: _mixroomFxInsetDecoration(radius: 18),
+                      child: TabBar(
+                        dividerColor: Colors.transparent,
+                        indicatorSize: TabBarIndicatorSize.tab,
+                        indicatorPadding: EdgeInsets.zero,
+                        indicator: BoxDecoration(
+                          color: _kFxPanelFillStrong,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.18),
                           ),
                         ),
-                      );
-                    },
-                  ),
-                ],
+                        labelColor: Colors.white,
+                        unselectedLabelColor: Colors.white70,
+                        labelStyle: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        unselectedLabelStyle: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        tabs: [
+                          const Tab(text: 'FX'),
+                          Tab(text: L10n.translate(context, 'On Device')),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Flexible(
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: _addEffectDialogContentHeightFor(dialogContext),
+                        child: TabBarView(
+                          children: [
+                            _MixroomFxPicker(
+                              isBasicTier: _isBasicTier,
+                              onUpgradeRequested: widget.onUpgradeRequested,
+                              autoFocusSearch: autoFocusSearch,
+                              onInsert: (name) async {
+                                Navigator.pop(context);
+                                await widget.insertMasterEffect(name);
+                                await _loadEffects();
+                              },
+                            ),
+                            _OnDeviceEffectPicker(
+                              effects: externalEffects,
+                              onUpgradeRequested: widget.onUpgradeRequested,
+                              onFavoriteToggle: widget.onTogglePluginFavorite,
+                              autoFocusSearch: autoFocusSearch,
+                              onInsert: (path) async {
+                                await widget.insertMasterEffect(path);
+                                await _loadEffects();
+                                final addedIndex = _effects.length - 1;
+                                if (addedIndex >= 0 &&
+                                    addedIndex < _effects.length) {
+                                  await _tryOpenMasterPluginEditor(addedIndex);
+                                }
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -9058,6 +9509,54 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     });
   }
 
+  bool _sameDisplayedParams(List<Map<String, dynamic>> next) {
+    final current = _currentParams;
+    if (current.length != next.length) return false;
+    for (int i = 0; i < current.length; i++) {
+      final a = current[i];
+      final b = next[i];
+      if ((a['name']?.toString() ?? '') != (b['name']?.toString() ?? '')) {
+        return false;
+      }
+      if (!_paramValuesEqual(a['value'], b['value'])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  Future<void> _refetchParamsForPlayback() async {
+    if (!mounted || _selectedEffectIndex == null || _paramsLoading) return;
+    if (_paramDragStartValue != null || _EQParamStartValue != null) return;
+    if (_playbackRefreshBusy) return;
+
+    final now = DateTime.now();
+    if (now.difference(_lastPlaybackRefreshAt) < _kPlaybackRefreshMinInterval) {
+      return;
+    }
+    _lastPlaybackRefreshAt = now;
+    _playbackRefreshBusy = true;
+
+    try {
+      final idx = _selectedEffectIndex!;
+      if (idx < 0 || idx >= _effects.length) return;
+      if (_isLikelyExternalEffectSlot(idx)) return;
+
+      var params = await widget.getMasterPluginParameters(idx);
+      params = exposedEffectParameters(_effects[idx], params);
+
+      if (!mounted || _selectedEffectIndex != idx) return;
+      if (_sameDisplayedParams(params)) return;
+      setState(() {
+        _currentParams = params;
+      });
+    } catch (_) {
+      // recover on the next playback refresh tick
+    } finally {
+      _playbackRefreshBusy = false;
+    }
+  }
+
   Widget _buildEffectParamsPage(BuildContext context, int idx) {
     if (_paramsLoading) {
       return SizedBox(
@@ -9120,6 +9619,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
         bool logarithmic = false,
       }) {
         final name = param['name'] as String;
+        final paramId = (param['id'] ?? param['name'] ?? '').toString().trim();
+        final paramName = (param['name'] ?? label).toString().trim();
         return _EqFaderSpec(
           label: label,
           value: (param['value'] as num).toDouble(),
@@ -9184,6 +9685,18 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
               nextValue,
             );
           },
+          onAutomationRequest: (globalPos) => _showAutomateParameterSheet(
+            effectIndex: idx,
+            effectName: effectName,
+            paramId: paramId,
+            paramName: paramName,
+            haloKeys: _paramHaloKeys(
+              effectIndex: idx,
+              effectName: effectName,
+              paramName: paramName,
+            ),
+            anchorGlobalPos: globalPos,
+          ),
         );
       }
 
@@ -9256,6 +9769,18 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
             min: (pHPF['min'] as num).toDouble(),
             max: (pHPF['max'] as num).toDouble(),
             logarithmic: true,
+            onAutomationRequest: (globalPos) => _showAutomateParameterSheet(
+              effectIndex: idx,
+              effectName: effectName,
+              paramId: (pHPF['id'] ?? pHPF['name'] ?? '').toString().trim(),
+              paramName: (pHPF['name'] ?? 'HPF Frequency').toString().trim(),
+              haloKeys: _paramHaloKeys(
+                effectIndex: idx,
+                effectName: effectName,
+                paramName: (pHPF['name'] ?? 'HPF Frequency').toString().trim(),
+              ),
+              anchorGlobalPos: globalPos,
+            ),
             onChangeStart: (_) {
               _EQParamStartValue = (pHPF['value'] as num).toDouble();
             },
@@ -9315,6 +9840,18 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
             min: (pLPF['min'] as num).toDouble(),
             max: (pLPF['max'] as num).toDouble(),
             logarithmic: true,
+            onAutomationRequest: (globalPos) => _showAutomateParameterSheet(
+              effectIndex: idx,
+              effectName: effectName,
+              paramId: (pLPF['id'] ?? pLPF['name'] ?? '').toString().trim(),
+              paramName: (pLPF['name'] ?? 'LPF Frequency').toString().trim(),
+              haloKeys: _paramHaloKeys(
+                effectIndex: idx,
+                effectName: effectName,
+                paramName: (pLPF['name'] ?? 'LPF Frequency').toString().trim(),
+              ),
+              anchorGlobalPos: globalPos,
+            ),
             onChangeStart: (_) {
               _EQParamStartValue = (pLPF['value'] as num).toDouble();
             },
@@ -9368,6 +9905,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
       ];
 
       return SingleChildScrollView(
+        primary: false,
+        physics: const ClampingScrollPhysics(),
         // You may want to add padding here if not already handled by internal widgets
         padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 8.0),
         child: Column(
@@ -9498,6 +10037,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
       }
 
       return SingleChildScrollView(
+        primary: false,
+        physics: const ClampingScrollPhysics(),
         padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -9765,6 +10306,8 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
 
     // Generic parameter page (no scroll, full height in row)
     return SingleChildScrollView(
+      primary: false,
+      physics: const ClampingScrollPhysics(),
       // You may want to add padding here if not already handled by internal widgets
       padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 8.0),
       child: Column(
@@ -10106,6 +10649,7 @@ class _EqFaderSpec {
   final ValueChanged<double> onChangeEnd;
   final VoidCallback? onReset;
   final VoidCallback? onValueTap;
+  final ValueChanged<Offset>? onAutomationRequest;
 
   const _EqFaderSpec({
     required this.label,
@@ -10120,6 +10664,7 @@ class _EqFaderSpec {
     required this.onChangeEnd,
     required this.onReset,
     required this.onValueTap,
+    required this.onAutomationRequest,
   });
 }
 
@@ -10309,6 +10854,7 @@ Widget _buildEqFaderRow({
               onChangeEnd: f.onChangeEnd,
               onDoubleTapReset: f.onReset,
               onValueTap: f.onValueTap,
+              onLongPressStart: f.onAutomationRequest,
               width: _eqParametricFaderSlotWidth,
             ),
         ],
@@ -10380,6 +10926,7 @@ Widget _buildEqFilterControlRow({
   required ValueChanged<double> onChangeStart,
   required ValueChanged<double> onChanged,
   required ValueChanged<double> onChangeEnd,
+  ValueChanged<Offset>? onAutomationRequest,
   VoidCallback? onDoubleTapReset,
   List<String> slopeChoices = const [],
   String? selectedSlope,
@@ -10390,100 +10937,112 @@ Widget _buildEqFilterControlRow({
       ? _toLogPos(clampedValue, min, max)
       : ((clampedValue - min) / (max - min)).clamp(0.0, 1.0);
 
-  return Container(
-    padding: const EdgeInsets.fromLTRB(8, 6, 8, 5),
-    decoration: BoxDecoration(
-      color: const Color(0x15000000),
-      borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: const Color(0x33888888)),
-    ),
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                '$label  ${_fmtHz(clampedValue)} Hz',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(fontWeight: FontWeight.w700),
-              ),
-            ),
-            if (slopeChoices.isNotEmpty &&
-                selectedSlope != null &&
-                onSlopeChanged != null) ...[
-              const SizedBox(width: 8),
-              Builder(
-                builder: (fieldContext) {
-                  return _buildMixroomInlineChoiceField(
-                    context: context,
-                    value: selectedSlope,
-                    onTap: () {
-                      unawaited(_showMixroomAnchoredChoiceMenu(
-                        context: context,
-                        anchorContext: fieldContext,
-                        choices: slopeChoices,
-                        currentChoice: selectedSlope,
-                        onSelectedImmediate: onSlopeChanged,
-                      ));
-                    },
-                  );
-                },
-              ),
-            ],
-          ],
-        ),
-        const SizedBox(height: 2),
-        SizedBox(
-          height: 30,
-          child: GestureDetector(
-            behavior: HitTestBehavior.translucent,
-            onDoubleTap: onDoubleTapReset,
-            child: SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                showValueIndicator: ShowValueIndicator.onDrag,
-                trackHeight: 4,
-                trackShape: const _TightSliderTrackShape(),
-                overlayShape: SliderComponentShape.noOverlay,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
-                valueIndicatorTextStyle: const TextStyle(
-                  color: Color(0xFF000000),
-                  fontSize: 11,
+  return GestureDetector(
+    behavior: HitTestBehavior.translucent,
+    onSecondaryTapDown:
+        PlatformCapabilities.current.isDesktop && onAutomationRequest != null
+            ? (details) => onAutomationRequest(details.globalPosition)
+            : null,
+    onLongPressStart:
+        !PlatformCapabilities.current.isDesktop && onAutomationRequest != null
+            ? (details) => onAutomationRequest(details.globalPosition)
+            : null,
+    child: Container(
+      padding: const EdgeInsets.fromLTRB(8, 6, 8, 5),
+      decoration: BoxDecoration(
+        color: const Color(0x15000000),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0x33888888)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '$label  ${_fmtHz(clampedValue)} Hz',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(fontWeight: FontWeight.w700),
                 ),
               ),
-              child: Slider(
-                min: 0.0,
-                max: 1.0,
-                divisions: 220,
-                value: sliderValue,
-                label: '${_fmtHz(clampedValue)} Hz',
-                onChangeStart: (p) {
-                  final v = logarithmic
-                      ? _fromLogPos(p, min, max)
-                      : (min + (max - min) * p.clamp(0.0, 1.0));
-                  onChangeStart(v);
-                },
-                onChanged: (p) {
-                  final v = logarithmic
-                      ? _fromLogPos(p, min, max)
-                      : (min + (max - min) * p.clamp(0.0, 1.0));
-                  onChanged(v);
-                },
-                onChangeEnd: (p) {
-                  final v = logarithmic
-                      ? _fromLogPos(p, min, max)
-                      : (min + (max - min) * p.clamp(0.0, 1.0));
-                  onChangeEnd(v);
-                },
+              if (slopeChoices.isNotEmpty &&
+                  selectedSlope != null &&
+                  onSlopeChanged != null) ...[
+                const SizedBox(width: 8),
+                Builder(
+                  builder: (fieldContext) {
+                    return _buildMixroomInlineChoiceField(
+                      context: context,
+                      value: selectedSlope,
+                      onTap: () {
+                        unawaited(_showMixroomAnchoredChoiceMenu(
+                          context: context,
+                          anchorContext: fieldContext,
+                          choices: slopeChoices,
+                          currentChoice: selectedSlope,
+                          onSelectedImmediate: onSlopeChanged,
+                        ));
+                      },
+                    );
+                  },
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 2),
+          SizedBox(
+            height: 30,
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onDoubleTap: onDoubleTapReset,
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  showValueIndicator: ShowValueIndicator.onDrag,
+                  trackHeight: 4,
+                  trackShape: const _TightSliderTrackShape(),
+                  overlayShape: SliderComponentShape.noOverlay,
+                  thumbShape:
+                      const RoundSliderThumbShape(enabledThumbRadius: 8),
+                  valueIndicatorTextStyle: const TextStyle(
+                    color: Color(0xFF000000),
+                    fontSize: 11,
+                  ),
+                ),
+                child: DesktopScrollableSlider(
+                  min: 0.0,
+                  max: 1.0,
+                  divisions: 220,
+                  value: sliderValue,
+                  label: '${_fmtHz(clampedValue)} Hz',
+                  onChangeStart: (p) {
+                    final v = logarithmic
+                        ? _fromLogPos(p, min, max)
+                        : (min + (max - min) * p.clamp(0.0, 1.0));
+                    onChangeStart(v);
+                  },
+                  onChanged: (p) {
+                    final v = logarithmic
+                        ? _fromLogPos(p, min, max)
+                        : (min + (max - min) * p.clamp(0.0, 1.0));
+                    onChanged(v);
+                  },
+                  onChangeEnd: (p) {
+                    final v = logarithmic
+                        ? _fromLogPos(p, min, max)
+                        : (min + (max - min) * p.clamp(0.0, 1.0));
+                    onChangeEnd(v);
+                  },
+                ),
               ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     ),
   );
 }
@@ -10710,7 +11269,7 @@ Widget _buildEqAuxSlider({
           data: SliderTheme.of(context).copyWith(
             trackShape: const _TightSliderTrackShape(),
           ),
-          child: Slider(
+          child: DesktopScrollableSlider(
             min: 0.0,
             max: 1.0,
             divisions: 220,
@@ -13698,14 +14257,20 @@ class _EqVerticalFaderState extends State<_EqVerticalFader> {
   Widget build(BuildContext context) {
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
+      onSecondaryTapDown: PlatformCapabilities.current.isDesktop &&
+              widget.onLongPressStart != null
+          ? (details) => widget.onLongPressStart!(details.globalPosition)
+          : null,
       onDoubleTap: () {
         setState(() {
           widget.onDoubleTapReset?.call();
         });
       },
-      onLongPressStart: (details) {
-        widget.onLongPressStart?.call(details.globalPosition);
-      },
+      onLongPressStart: PlatformCapabilities.current.isDesktop
+          ? null
+          : (details) {
+              widget.onLongPressStart?.call(details.globalPosition);
+            },
       child: SizedBox(
         width: widget.width, // 👈 respect caller width
         child: Column(
@@ -13747,7 +14312,7 @@ class _EqVerticalFaderState extends State<_EqVerticalFader> {
                     thumbShape:
                         const RoundSliderThumbShape(enabledThumbRadius: 8),
                   ),
-                  child: Slider(
+                  child: DesktopScrollableSlider(
                     value: widget.pos,
                     min: 0.0,
                     max: 1.0,

@@ -625,6 +625,9 @@ class JuceAudioEngine {
         if (raw['isInstrument'] is bool) {
           out['isInstrument'] = raw['isInstrument'] == true;
         }
+        if (raw['quarantined'] is bool) {
+          out['quarantined'] = raw['quarantined'] == true;
+        }
 
         normalized.add(out);
       }
@@ -672,6 +675,9 @@ class JuceAudioEngine {
         if (raw['isInstrument'] is bool) {
           out['isInstrument'] = raw['isInstrument'] == true;
         }
+        if (raw['quarantined'] is bool) {
+          out['quarantined'] = raw['quarantined'] == true;
+        }
 
         normalized.add(out);
       }
@@ -682,6 +688,65 @@ class JuceAudioEngine {
     } on PlatformException catch (e) {
       _logError('rescanPlugins', e);
       return <Map<String, dynamic>>[];
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getQuarantinedPlugins() async {
+    try {
+      final result =
+          await _ch.invokeMethod<List<dynamic>>('getQuarantinedPlugins');
+      if (result == null) return <Map<String, dynamic>>[];
+      return result
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList(growable: false);
+    } on MissingPluginException catch (e) {
+      _logError('getQuarantinedPlugins', e);
+      return <Map<String, dynamic>>[];
+    } on PlatformException catch (e) {
+      _logError('getQuarantinedPlugins', e);
+      return <Map<String, dynamic>>[];
+    }
+  }
+
+  static Future<bool> isPluginQuarantined(String pluginId) async {
+    final trimmed = pluginId.trim();
+    if (trimmed.isEmpty) return false;
+    try {
+      final result = await _ch.invokeMethod<bool>('isPluginQuarantined', {
+        'pluginId': trimmed,
+      });
+      return result == true;
+    } on MissingPluginException catch (e) {
+      _logError('isPluginQuarantined', e);
+      return false;
+    } on PlatformException catch (e) {
+      _logError('isPluginQuarantined', e);
+      return false;
+    }
+  }
+
+  static Future<void> clearPluginQuarantine(String pluginId) async {
+    final trimmed = pluginId.trim();
+    if (trimmed.isEmpty) return;
+    try {
+      await _ch.invokeMethod<void>('clearPluginQuarantine', {
+        'pluginId': trimmed,
+      });
+    } on MissingPluginException catch (e) {
+      _logError('clearPluginQuarantine', e);
+    } on PlatformException catch (e) {
+      _logError('clearPluginQuarantine', e);
+    }
+  }
+
+  static Future<void> clearAllPluginQuarantines() async {
+    try {
+      await _ch.invokeMethod<void>('clearAllPluginQuarantines');
+    } on MissingPluginException catch (e) {
+      _logError('clearAllPluginQuarantines', e);
+    } on PlatformException catch (e) {
+      _logError('clearAllPluginQuarantines', e);
     }
   }
 
@@ -954,6 +1019,22 @@ class JuceAudioEngine {
       return ok ?? false;
     } on PlatformException catch (e) {
       _logError('setLiveMidiInputTargetClip', e);
+      return false;
+    }
+  }
+
+  static Future<bool> setDesktopKeyboardMidiForwardingEnabled(
+      bool enabled) async {
+    try {
+      final ok = await _ch.invokeMethod<bool>(
+        'setDesktopKeyboardMidiForwardingEnabled',
+        {'enabled': enabled},
+      );
+      return ok ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException catch (e) {
+      _logError('setDesktopKeyboardMidiForwardingEnabled', e);
       return false;
     }
   }
@@ -2238,6 +2319,50 @@ class JuceAudioEngine {
     } on PlatformException catch (e) {
       _logError('prepareRecordingInputs', e);
       return false;
+    }
+  }
+
+  static Future<bool> configureAudioDevice({
+    required int sampleRate,
+    required int bufferSize,
+    int desiredInputChannels = -1,
+    String reason = 'dart',
+  }) async {
+    try {
+      final res = await _ch.invokeMethod<bool>('configureAudioDevice', {
+        'sampleRate': sampleRate,
+        'bufferSize': bufferSize,
+        'desiredInputChannels': desiredInputChannels,
+        'reason': reason,
+      });
+      return res ?? false;
+    } on PlatformException catch (e) {
+      _logError('configureAudioDevice', e);
+      return false;
+    } on MissingPluginException catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> setMidiInputChannelFilter(int channel) async {
+    try {
+      await _ch.invokeMethod<void>('setMidiInputChannelFilter', {
+        'channel': channel.clamp(0, 16).toInt(),
+      });
+    } on PlatformException catch (e) {
+      _logError('setMidiInputChannelFilter', e);
+    } on MissingPluginException catch (_) {}
+  }
+
+  static Future<int> getMidiInputChannelFilter() async {
+    try {
+      final res = await _ch.invokeMethod<int>('getMidiInputChannelFilter');
+      return (res ?? 0).clamp(0, 16).toInt();
+    } on PlatformException catch (e) {
+      _logError('getMidiInputChannelFilter', e);
+      return 0;
+    } on MissingPluginException catch (_) {
+      return 0;
     }
   }
 

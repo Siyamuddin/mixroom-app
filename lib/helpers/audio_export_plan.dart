@@ -92,16 +92,37 @@ class AudioExportPlan {
     required double normalizeTargetDb,
     required String resampleQuality,
   }) {
+    final effectiveSampleRate = normalizeSampleRate(
+      format: format,
+      sampleRate: sampleRate,
+    );
+    final channelLayout = channelMode == 'mono' ? 'mono' : 'stereo';
+    final channelFilter = channelMode == 'mono'
+        ? 'pan=mono|c0=0.5*c0+0.5*c1'
+        : 'aformat=channel_layouts=stereo';
+
+    if (format == 'mp3') {
+      final filters = <String>[
+        channelFilter,
+        if (normalize)
+          'loudnorm=I=-14:LRA=11:TP=${normalizeTargetDb.toStringAsFixed(1)}:linear=true',
+        buildMp3EncodePrepFilter(
+          sampleRate: effectiveSampleRate,
+          resampleQuality: resampleQuality,
+        ),
+        'aformat=sample_fmts=s16:channel_layouts=$channelLayout',
+      ];
+      return filters.join(',');
+    }
+
     final filters = <String>[
       buildResampleFilter(
         format: format,
-        sampleRate: sampleRate,
+        sampleRate: effectiveSampleRate,
         wavDithering: wavDithering,
         resampleQuality: resampleQuality,
       ),
-      channelMode == 'mono'
-          ? 'pan=mono|c0=0.5*c0+0.5*c1'
-          : 'aformat=channel_layouts=stereo',
+      channelFilter,
     ];
 
     if (normalize) {
@@ -111,6 +132,25 @@ class AudioExportPlan {
     }
 
     return filters.join(',');
+  }
+
+  static String buildMp3EncodePrepFilter({
+    required int sampleRate,
+    required String resampleQuality,
+  }) {
+    final effectiveSampleRate = normalizeSampleRate(
+      format: 'mp3',
+      sampleRate: sampleRate,
+    );
+    switch (resampleQuality) {
+      case 'draft':
+        return 'aresample=$effectiveSampleRate:resampler=swr:osf=s16:dither_method=triangular';
+      case 'good':
+        return 'aresample=$effectiveSampleRate:resampler=soxr:precision=20:osf=s16:dither_method=triangular';
+      case 'best':
+      default:
+        return 'aresample=$effectiveSampleRate:resampler=soxr:precision=28:osf=s16:dither_method=triangular';
+    }
   }
 
   static List<String> buildFfmpegArgs({
@@ -185,6 +225,8 @@ class AudioExportPlan {
       if (filter.isNotEmpty) ...['-af', filter],
       '-c:a',
       'libmp3lame',
+      '-sample_fmt',
+      's16p',
       if (mp3Mode == 'cbr') ...[
         '-b:a',
         '${mp3BitrateKbps}k',

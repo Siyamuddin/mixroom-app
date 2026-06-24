@@ -162,5 +162,56 @@ void main() {
       expect(restored.effects.single.effectId, 'EQ');
       expect(restored.effects.single.params['gain'], closeTo(0.5, 0.001));
     });
+
+    test('preserves third-party plugin chunk, display name, and bypass', () {
+      final snapshot = RowEffectsSnapshot(
+        2,
+        <EffectSnapshot>[
+          EffectSnapshot(
+            'hosted:vst3:/Library/Audio/Plug-Ins/VST3/OTT.vst3',
+            true,
+            <String, dynamic>{'depth': 0.35},
+            displayName: 'OTT',
+            stateBase64: 'b3R0X3N0YXRlX2Jsb2I=',
+          ),
+        ],
+        rowId: 91,
+      );
+
+      final restored = RowEffectsSnapshotJson.fromJson(snapshot.toJson());
+      final fx = restored.effects.single;
+
+      expect(restored.rowId, 91);
+      expect(fx.effectId, 'hosted:vst3:/Library/Audio/Plug-Ins/VST3/OTT.vst3');
+      expect(fx.displayName, 'OTT');
+      expect(fx.bypassed, isTrue);
+      expect(fx.params['depth'], closeTo(0.35, 0.001));
+      expect(fx.stateBase64, 'b3R0X3N0YXRlX2Jsb2I=');
+    });
+  });
+
+  group('MasterEffectsSnapshot', () {
+    test('preserves third-party master plugin state for retry restore', () {
+      final snapshot = MasterEffectsSnapshot(
+        <EffectSnapshot>[
+          EffectSnapshot(
+            'hosted:au:ValhallaSupermassive',
+            false,
+            <String, dynamic>{'delay_ms': 480.0},
+            displayName: 'ValhallaSupermassive',
+            stateBase64: 'dmFsaGFsbGFfc3RhdGU=',
+          ),
+        ],
+      );
+
+      final restored = MasterEffectsSnapshotJson.fromJson(snapshot.toJson());
+      final fx = restored.effects.single;
+
+      expect(fx.effectId, 'hosted:au:ValhallaSupermassive');
+      expect(fx.displayName, 'ValhallaSupermassive');
+      expect(fx.bypassed, isFalse);
+      expect(fx.params['delay_ms'], closeTo(480.0, 0.001));
+      expect(fx.stateBase64, 'dmFsaGFsbGFfc3RhdGU=');
+    });
   });
 }

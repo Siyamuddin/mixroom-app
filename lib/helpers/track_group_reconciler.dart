@@ -61,6 +61,7 @@ TimelineRow cloneTimelineRowForGroupReconcile(TimelineRow row) {
     instrumentId: row.instrumentId,
     instrumentName: row.instrumentName,
     instrumentParams: Map<String, double>.from(row.instrumentParams),
+    hostedInstrumentStateBase64: row.hostedInstrumentStateBase64,
     roleOverride: row.roleOverride,
     groupId: row.groupId,
     color: row.color,

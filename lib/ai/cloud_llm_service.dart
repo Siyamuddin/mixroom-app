@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:mixroom/core/analytics/analytics_service.dart';
@@ -170,7 +171,7 @@ class LlmResult {
 class CloudLlmService {
   static const _apiUrl = 'https://api.openai.com/v1/responses';
   static const _promptCacheVersion = 'mixroom-daw-v20260422a';
-  static const _directOpenAiMaxOutputTokens = 4096;
+  static const _directOpenAiMaxOutputTokens = 8192;
   static const _defaultPromptCacheRetention = 'in_memory';
   static const _recoverableAuthMessage =
       "I couldn't reach the AI service just now. Please try again in a moment.";
@@ -214,8 +215,22 @@ class CloudLlmService {
     return effort.isEmpty ? null : <String, dynamic>{'effort': effort};
   }
 
-  String _promptCacheKeyForFeature(String aiFeature) =>
-      '$_promptCacheVersion:${aiFeature.trim().isEmpty ? 'ai_chat' : aiFeature.trim()}';
+  String _promptCacheKeyForFeature(
+    String aiFeature, {
+    String? capabilitySignature,
+  }) {
+    final normalizedFeature =
+        aiFeature.trim().isEmpty ? 'ai_chat' : aiFeature.trim();
+    final normalizedCapabilities = (capabilitySignature ?? '').trim().isEmpty
+        ? 'legacy'
+        : capabilitySignature!.trim();
+    final capabilityHash = crypto.sha256
+        .convert(utf8.encode(normalizedCapabilities))
+        .toString()
+        .substring(0, 12);
+    return '$_promptCacheVersion:$normalizedFeature:$capabilityHash';
+  }
+
   String get _promptCacheRetention =>
       _extendedPromptCacheRetentionModels.contains(model.trim().toLowerCase())
           ? '24h'
@@ -233,7 +248,7 @@ class CloudLlmService {
       return 'llm_proxy_system_prompt';
     }
     if (_isUsingDebugSystemPrompt) {
-      return 'kDebugSystemPrompt20';
+      return 'kDebugSystemPrompt_plus_client_overrides';
     }
     return 'missing_direct_openai_prompt';
   }
@@ -241,6 +256,218 @@ class CloudLlmService {
   String get _effectiveSystemPrompt {
     final debugPrompt = kDebugMode ? kDebugSystemPrompt.trim() : '';
     return debugPrompt;
+  }
+
+  static const Set<String> _knownClientCapabilities = <String>{
+    'daw.project_edit.set_tempo',
+    'daw.sample_insert.library',
+    'daw.midi_compose.instrument_insert',
+    'daw.midi_compose.transpose_notes',
+    'daw.midi_compose.audio_to_midi',
+  };
+
+  Map<String, dynamic> _mergedAnalyticsClientContext(
+    Map<String, dynamic> clientContext,
+  ) {
+    final requestContext = AnalyticsService.instance.buildRequestContext();
+    final analyticsClientContext =
+        (requestContext['client_context'] as Map?)?.cast<String, dynamic>() ??
+            <String, dynamic>{};
+    return <String, dynamic>{
+      ...analyticsClientContext,
+      ...clientContext,
+    };
+  }
+
+  Set<String> _readClientCapabilities(Map<String, dynamic> clientContext) {
+    final rawCapabilities = clientContext['ai_capabilities'];
+    if (rawCapabilities is! List) return <String>{};
+    return rawCapabilities
+        .whereType<String>()
+        .map((value) => value.trim())
+        .where((value) =>
+            value.isNotEmpty && _knownClientCapabilities.contains(value))
+        .toSet();
+  }
+
+  List<String> _readStringList(dynamic value, {int maxItems = 80}) {
+    if (value is! List) return const <String>[];
+    final normalized = <String>[];
+    final seen = <String>{};
+    for (final raw in value) {
+      if (raw is! String) continue;
+      final item = raw.trim();
+      if (item.isEmpty || !seen.add(item)) continue;
+      normalized.add(item);
+      if (normalized.length >= maxItems) break;
+    }
+    return normalized;
+  }
+
+  int? _readNonNegativeInt(dynamic value) {
+    if (value is bool) return null;
+    if (value is int) return value >= 0 ? value : null;
+    if (value is String) {
+      final parsed = int.tryParse(value.trim());
+      return parsed != null && parsed >= 0 ? parsed : null;
+    }
+    return null;
+  }
+
+  Map<String, dynamic> _readClientPolicy(Map<String, dynamic> clientContext) {
+    final policy = <String, dynamic>{};
+    for (final key in <String>[
+      'subscription_plan',
+      'plugin_access',
+      'row_creation_policy',
+    ]) {
+      final value = clientContext[key];
+      if (value is String && value.trim().isNotEmpty) {
+        final trimmed = value.trim();
+        policy[key] =
+            trimmed.length > 500 ? trimmed.substring(0, 500) : trimmed;
+      }
+    }
+
+    for (final key in <String>['max_rows', 'current_rows']) {
+      final parsed = _readNonNegativeInt(clientContext[key]);
+      if (parsed != null) policy[key] = parsed;
+    }
+
+    final allowedEffects =
+        _readStringList(clientContext['allowed_builtin_effects']);
+    if (allowedEffects.isNotEmpty) {
+      policy['allowed_builtin_effects'] = allowedEffects;
+    }
+
+    final allowedInstruments =
+        _readStringList(clientContext['allowed_instrument_ids']);
+    if (allowedInstruments.isNotEmpty) {
+      policy['allowed_instrument_ids'] = allowedInstruments;
+    }
+
+    return policy;
+  }
+
+  List<String> _clientPolicyPromptLines(Map<String, dynamic> clientPolicy) {
+    if (clientPolicy.isEmpty) return const <String>[];
+    final lines = <String>['', 'CLIENT ENTITLEMENT POLICY'];
+    final subscriptionPlan =
+        clientPolicy['subscription_plan']?.toString().trim() ?? '';
+    final pluginAccess = clientPolicy['plugin_access']?.toString().trim() ?? '';
+    final rowCreationPolicy =
+        clientPolicy['row_creation_policy']?.toString().trim() ?? '';
+    final maxRows = clientPolicy['max_rows'];
+    final currentRows = clientPolicy['current_rows'];
+    final allowedEffects = clientPolicy['allowed_builtin_effects'];
+    final allowedInstruments = clientPolicy['allowed_instrument_ids'];
+
+    if (subscriptionPlan.isNotEmpty) {
+      lines.add('- Current subscription plan: $subscriptionPlan.');
+    }
+    if (maxRows is int) {
+      var rowLine =
+          '- Maximum project row_index is ${maxRows - 1}; do not emit actions targeting row_index >= $maxRows.';
+      if (currentRows is int) {
+        rowLine += ' Current row count is $currentRows.';
+      }
+      lines.add(rowLine);
+    }
+    if (rowCreationPolicy.isNotEmpty) {
+      lines.add('- Row creation policy: $rowCreationPolicy');
+    }
+    if (pluginAccess.isNotEmpty) {
+      lines.add('- Plugin access: $pluginAccess.');
+    }
+    if (allowedEffects is List && allowedEffects.isNotEmpty) {
+      lines.add(
+        '- Effect/plugin actions may only add or target these built-in effects unless the client explicitly allows all plugins: ${allowedEffects.join(', ')}.',
+      );
+    }
+    if (allowedInstruments is List && allowedInstruments.isNotEmpty) {
+      lines.add(
+        '- New MIDI/instrument actions may only use instrument_id values present in LIBRARY_SNAPSHOT and in this allowed list: ${allowedInstruments.join(', ')}.',
+      );
+    }
+    return lines;
+  }
+
+  String _buildDirectSystemPrompt(
+    Set<String> clientCapabilities,
+    Map<String, dynamic> clientPolicy,
+  ) {
+    final lines = <String>[
+      _effectiveSystemPrompt,
+      '',
+      'CLIENT CAPABILITY OVERRIDES',
+      '- LIBRARY_SNAPSHOT lists the packaged instrument IDs and packaged sample-library paths this client may use.',
+      '- LIBRARY_SNAPSHOT may be compact: instruments may be grouped by category, and sample folders may appear as `Folder: [fileA, fileB]`. In that case the exact library_path is `Folder/fileName`.',
+      '- LIBRARY_SNAPSHOT may include library_role_hints such as kick, snare, hat, clap, loop, bass, or fx. Use those semantic groups first when choosing packaged drum samples.',
+      '- If a request can be satisfied using a packaged instrument ID or packaged sample path from LIBRARY_SNAPSHOT, do not treat it as unsupported generation.',
+      ..._clientPolicyPromptLines(clientPolicy),
+    ];
+    if (clientCapabilities.contains('daw.project_edit.set_tempo')) {
+      lines.add(
+        '- This client supports project_edit set_tempo for direct BPM/project tempo changes. For requests like "make the song faster/slower", include time_stretch_audio=true and preserve_pitch=true so existing audio follows the new tempo. For grid/metronome-only BPM edits, omit or set time_stretch_audio=false.',
+      );
+    } else {
+      lines.add('- This client does not support project_edit set_tempo.');
+    }
+    if (clientCapabilities.contains('daw.sample_insert.library')) {
+      lines.add(
+        '- This client supports sample_insert using exact library_path values or role aliases like role:kick from LIBRARY_SNAPSHOT.',
+      );
+    } else {
+      lines.add(
+        '- This client does not support AI sample/library insertion; do not emit sample_insert.',
+      );
+    }
+    if (clientCapabilities.contains('daw.midi_compose.instrument_insert')) {
+      lines.add(
+        '- This client supports creating a new MIDI clip on a packaged built-in instrument by using midi_compose with instrument_id from LIBRARY_SNAPSHOT plus valid notes/progression.',
+      );
+    } else {
+      lines.add(
+        '- This client may only use midi_compose on an existing editable MIDI/instrument target.',
+      );
+    }
+    if (clientCapabilities.contains('daw.midi_compose.transpose_notes')) {
+      lines.add('- This client supports midi_compose transpose_notes.');
+    } else {
+      lines.add('- This client does not support midi_compose transpose_notes.');
+    }
+    if (clientCapabilities.contains('daw.midi_compose.audio_to_midi')) {
+      lines.add(
+        '- This client supports midi_compose convert_audio_to_midi for transcribing an existing project audio clip into a new MIDI clip below it.',
+      );
+    } else {
+      lines.add(
+        '- This client does not support audio-to-MIDI transcription; do not emit midi_compose convert_audio_to_midi.',
+      );
+    }
+    return lines.join('\n').trim();
+  }
+
+  String _clientCapabilitySignature(Set<String> capabilities) {
+    if (capabilities.isEmpty) return 'legacy';
+    final sorted = capabilities.toList()..sort();
+    return sorted.join(',');
+  }
+
+  String _stableJsonEncode(dynamic value) {
+    if (value is Map) {
+      final keys = value.keys.map((key) => key.toString()).toList()..sort();
+      return '{${keys.map((key) => '${jsonEncode(key)}:${_stableJsonEncode(value[key])}').join(',')}}';
+    }
+    if (value is List) {
+      return '[${value.map(_stableJsonEncode).join(',')}]';
+    }
+    return jsonEncode(value);
+  }
+
+  String _clientPolicySignature(Map<String, dynamic> policy) {
+    if (policy.isEmpty) return 'default_policy';
+    return _stableJsonEncode(policy);
   }
 
   String _defaultReasoningEffort(String modelName) {
@@ -910,16 +1137,6 @@ class CloudLlmService {
                                 'set_points',
                                 'add_ramp',
                                 'clear',
-                                'create_clip',
-                                'duplicate_clip',
-                                'move_clip',
-                                'delete_clip',
-                                'clear_clips',
-                                'mute_clip',
-                                'unmute_clip',
-                                'toggle_clip_mute',
-                                'set_clip_points',
-                                'make_unique_clip',
                                 'apply_template',
                               ],
                             },
@@ -1431,18 +1648,121 @@ class CloudLlmService {
         },
       ];
 
+  void _filterDirectToolSchemas(
+    List<Map<String, dynamic>> tools,
+    Set<String> clientCapabilities,
+  ) {
+    final allowedActionTypes = <String>{
+      'tutorial',
+      'clarify',
+      'clip_edit',
+      'effect_edit',
+      'row_group_edit',
+      'row_color_edit',
+      'automation_edit',
+      'midi_compose',
+      'stem_separate',
+      'role_override',
+      'audio_enhance',
+      if (clientCapabilities.contains('daw.project_edit.set_tempo'))
+        'project_edit',
+      if (clientCapabilities.contains('daw.sample_insert.library'))
+        'sample_insert',
+    };
+
+    for (final tool in tools) {
+      if (tool['name'] != 'daw_assistant_actions') continue;
+      final parameters = tool['parameters'];
+      if (parameters is! Map) continue;
+      final properties = parameters['properties'];
+      if (properties is! Map) continue;
+      final actions = properties['actions'];
+      if (actions is! Map) continue;
+      final items = actions['items'];
+      if (items is! Map) continue;
+
+      final itemProperties = items['properties'];
+      if (itemProperties is Map) {
+        final typeSchema = itemProperties['type'];
+        if (typeSchema is Map) {
+          typeSchema['enum'] = allowedActionTypes.toList(growable: false);
+          return;
+        }
+      }
+
+      final variants = items['oneOf'];
+      if (variants is! List) continue;
+      final removedVariants = <dynamic>[];
+      for (final variant in variants) {
+        if (variant is! Map) {
+          removedVariants.add(variant);
+          continue;
+        }
+        final variantProperties = variant['properties'];
+        if (variantProperties is! Map) {
+          removedVariants.add(variant);
+          continue;
+        }
+        final typeSchema = variantProperties['type'];
+        if (typeSchema is! Map) {
+          removedVariants.add(variant);
+          continue;
+        }
+        final allowedValues = <String>{};
+        final rawEnum = typeSchema['enum'];
+        if (rawEnum is List) {
+          allowedValues.addAll(
+            rawEnum
+                .map((value) => value.toString().trim())
+                .where((value) => value.isNotEmpty),
+          );
+        }
+        final rawConst = typeSchema['const'];
+        if (rawConst != null) {
+          final normalizedConst = rawConst.toString().trim();
+          if (normalizedConst.isNotEmpty) allowedValues.add(normalizedConst);
+        }
+        if (!allowedValues.any(allowedActionTypes.contains)) {
+          removedVariants.add(variant);
+        }
+      }
+      for (final variant in removedVariants) {
+        variants.remove(variant);
+      }
+      return;
+    }
+  }
+
   Map<String, dynamic> _buildOpenAiRequestBody({
     required List<Map<String, dynamic>> inputMessages,
     String? aiFeature,
+    Map<String, dynamic> clientContext = const <String, dynamic>{},
   }) {
     final normalizedAiFeature = _normalizeAiFeatureForProxy(aiFeature);
+    final clientCapabilities = _readClientCapabilities(clientContext);
+    final clientPolicy = _readClientPolicy(clientContext);
+    var capabilitySignature = _clientCapabilitySignature(clientCapabilities);
+    if (clientPolicy.isNotEmpty) {
+      capabilitySignature = [
+        capabilitySignature,
+        _clientPolicySignature(clientPolicy),
+      ].join('|');
+    }
+    final toolSchemas = _directOpenAiToolSchemas();
+    _filterDirectToolSchemas(toolSchemas, clientCapabilities);
     final body = <String, dynamic>{
       'model': model,
-      'instructions': _effectiveSystemPrompt,
-      'prompt_cache_key': _promptCacheKeyForFeature(normalizedAiFeature),
+      'instructions': _buildDirectSystemPrompt(
+        clientCapabilities,
+        clientPolicy,
+      ),
+      'prompt_cache_key': _promptCacheKeyForFeature(
+        normalizedAiFeature,
+        capabilitySignature: capabilitySignature,
+      ),
       'prompt_cache_retention': _promptCacheRetention,
       'input': inputMessages,
-      'tools': _directOpenAiToolSchemas(),
+      'tools': toolSchemas,
       'tool_choice': 'required',
       'parallel_tool_calls': true,
       'max_output_tokens': _directOpenAiMaxOutputTokens,
@@ -1593,6 +1913,38 @@ class CloudLlmService {
           body: jsonEncode(body),
         )
         .timeout(timeoutOverride ?? requestTimeout);
+  }
+
+  void _debugDumpJson(
+    String scope,
+    String label,
+    Object? value, {
+    int maxChars = 12000,
+  }) {
+    if (!kAiDebugLogs || !kAiDebugVerbose) return;
+    String encoded;
+    try {
+      encoded = const JsonEncoder.withIndent('  ').convert(value);
+    } catch (_) {
+      encoded = value.toString();
+    }
+    if (encoded.length > maxChars) {
+      encoded = '${encoded.substring(0, maxChars)}\n... <truncated>';
+    }
+    aiDebugBlock(scope, label, encoded);
+  }
+
+  void _debugDumpRawBody(
+    String scope,
+    String label,
+    String body, {
+    int maxChars = 12000,
+  }) {
+    if (!kAiDebugLogs || !kAiDebugVerbose) return;
+    final trimmed = body.length > maxChars
+        ? '${body.substring(0, maxChars)}\n... <truncated>'
+        : body;
+    aiDebugBlock(scope, label, trimmed);
   }
 
   Future<http.Response> _getJson({
@@ -1920,16 +2272,6 @@ class CloudLlmService {
     'set_points',
     'add_ramp',
     'clear',
-    'create_clip',
-    'duplicate_clip',
-    'move_clip',
-    'delete_clip',
-    'clear_clips',
-    'mute_clip',
-    'unmute_clip',
-    'toggle_clip_mute',
-    'set_clip_points',
-    'make_unique_clip',
     'apply_template',
   };
 
@@ -2050,7 +2392,19 @@ class CloudLlmService {
   }
 
   String _normalizeAutomationEditOperation(Object? raw) {
-    return _normalizeActionToken(raw);
+    final token = _normalizeActionToken(raw);
+    const aliases = <String, String>{
+      'create': 'set_points',
+      'create_clip': 'set_points',
+      'new_clip': 'set_points',
+      'add_clip': 'set_points',
+      'insert_clip': 'set_points',
+      'set_clip_points': 'set_points',
+      'clear_clips': 'clear',
+      'delete_clip': 'clear',
+      'remove_clip': 'clear',
+    };
+    return aliases[token] ?? token;
   }
 
   String _normalizeProjectEditOperation(Object? raw) {
@@ -3053,6 +3407,21 @@ class CloudLlmService {
     return false;
   }
 
+  void _logDroppedDawAction(
+    String reason,
+    String type,
+    Map<String, dynamic> data, {
+    required String userText,
+  }) {
+    final operation = data['operation']?.toString().trim() ?? '';
+    aiDebugLog(
+      'llm-normalize',
+      'dropped daw action reason=$reason type=${type.isEmpty ? "-" : type}'
+          ' operation=${operation.isEmpty ? "-" : operation}'
+          ' prompt="${userText.trim()}" data=${aiDebugShortMap(data)}',
+    );
+  }
+
   List<Map<String, dynamic>> _normalizeDawAssistantActions(
     List rawActions, {
     required String userText,
@@ -3062,12 +3431,24 @@ class CloudLlmService {
     for (final rawAction in rawActions) {
       if (rawAction is! Map) {
         droppedInvalid = true;
+        aiDebugLog(
+          'llm-normalize',
+          'dropped daw action reason=not_map prompt="${userText.trim()}"',
+        );
         continue;
       }
       final action = Map<String, dynamic>.from(rawAction);
       final type = (action['type']?.toString().trim().toLowerCase() ?? '');
       if (!_dawAssistantActionTypes.contains(type)) {
         droppedInvalid = true;
+        _logDroppedDawAction(
+          'unknown_type',
+          type,
+          Map<String, dynamic>.from(
+            action['data'] is Map ? action['data'] as Map : const {},
+          ),
+          userText: userText,
+        );
         continue;
       }
       final rawData = action['data'];
@@ -3103,6 +3484,12 @@ class CloudLlmService {
       final normalizedData = _normalizeDawActionData(type, data, userText);
       if (!_isValidDawActionData(type, normalizedData, userText: userText)) {
         droppedInvalid = true;
+        _logDroppedDawAction(
+          'invalid_payload',
+          type,
+          normalizedData,
+          userText: userText,
+        );
         continue;
       }
       out.add({
@@ -3405,6 +3792,9 @@ class CloudLlmService {
             null,
           );
         }
+        final effectiveClientContext = _mergedAnalyticsClientContext(
+          clientContext,
+        );
         final inputMessages = _buildInputMessages(
           conversation: conversation,
           userText: userText,
@@ -3417,6 +3807,7 @@ class CloudLlmService {
         final requestBody = _buildOpenAiRequestBody(
           inputMessages: inputMessages,
           aiFeature: aiFeature,
+          clientContext: effectiveClientContext,
         );
         aiDebugLog(
           'direct-openai',
@@ -3424,8 +3815,10 @@ class CloudLlmService {
               'reasoning=${requestBody['reasoning']} '
               'tool_choice=${requestBody['tool_choice']} '
               'tool_count=${(requestBody['tools'] as List?)?.length ?? 0} '
+              'prompt_cache_key=${requestBody['prompt_cache_key']} '
               'prompt_cache_retention=${requestBody['prompt_cache_retention']}',
         );
+        _debugDumpJson('direct-openai', 'request body', requestBody);
 
         final hasLibrarySnapshot = librarySnapshot.trim().isNotEmpty;
         final hasRetryDroppableContext = pendingMix != null;
@@ -3480,6 +3873,12 @@ class CloudLlmService {
           final retryRequestBody = _buildOpenAiRequestBody(
             inputMessages: retryInputMessages,
             aiFeature: aiFeature,
+            clientContext: effectiveClientContext,
+          );
+          _debugDumpJson(
+            'direct-openai',
+            'retry request body',
+            retryRequestBody,
           );
           requestStopwatch
             ..reset()
@@ -3501,7 +3900,11 @@ class CloudLlmService {
           null,
         );
       }
-    } catch (_) {
+    } catch (error, stackTrace) {
+      aiDebugLog(
+        'llm-request',
+        'request failed before parse: $error\n$stackTrace',
+      );
       return _recoverableTextResult(
         _temporaryFailureMessage,
         softErrorCode: 'request_failed',
@@ -3541,6 +3944,14 @@ class CloudLlmService {
         'direct-openai',
         'error status=${response.statusCode} body=${payload ?? response.body}',
       );
+    }
+    if (!_isProxyEnabled && kAiDebugLogs) {
+      aiDebugLog(
+        'direct-openai',
+        'response status=${response.statusCode} '
+            'output_count=${(payload?['output'] as List?)?.length ?? 0}',
+      );
+      _debugDumpRawBody('direct-openai', 'response body', response.body);
     }
 
     if (response.statusCode != 200) {
@@ -3694,6 +4105,10 @@ class CloudLlmService {
           userText: userText,
         );
         if (args == null) {
+          aiDebugLog(
+            'llm-parse',
+            'invalid function_call name=$name raw_args=${o['arguments']}',
+          );
           final fallbackText = _invalidToolCallFallbackText(
             name,
             o['arguments'],
@@ -3705,6 +4120,11 @@ class CloudLlmService {
             meta: responseMeta,
           );
         }
+        aiDebugLog(
+          'llm-parse',
+          'function_call name=$name args=${aiDebugShortMap(args)}',
+        );
+        _debugDumpJson('llm-parse', 'normalized args for $name', args);
         toolResults.add(
           name == 'informational_response'
               ? LlmResult.text(

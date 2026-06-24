@@ -449,6 +449,18 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"rescanPlugins"]) {
         NSArray* plugins = [JuceBridge rescanPluginsObjC:args[@"searchPaths"]];
         result(plugins);
+    } else if ([call.method isEqualToString:@"getQuarantinedPlugins"]) {
+        result([JuceBridge getQuarantinedPluginsObjC]);
+    } else if ([call.method isEqualToString:@"isPluginQuarantined"]) {
+        NSString *pluginId = args[@"pluginId"] ?: args[@"id"] ?: @"";
+        result(@([JuceBridge isPluginQuarantinedObjC:pluginId]));
+    } else if ([call.method isEqualToString:@"clearPluginQuarantine"]) {
+        NSString *pluginId = args[@"pluginId"] ?: args[@"id"] ?: @"";
+        [JuceBridge clearPluginQuarantineObjC:pluginId];
+        result(nil);
+    } else if ([call.method isEqualToString:@"clearAllPluginQuarantines"]) {
+        [JuceBridge clearAllPluginQuarantinesObjC];
+        result(nil);
     } else if ([call.method isEqualToString:@"getEngineDiagnostics"]) {
         NSDictionary* diagnostics = [JuceBridge getEngineDiagnosticsObjC];
         result(diagnostics);
@@ -630,6 +642,10 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"setLiveMidiInputTargetClip"]) {
         NSInteger clip = [args[@"clip"] integerValue];
         result(@([JuceBridge setLiveMidiInputTargetClipObjC:clip]));
+    } else if ([call.method isEqualToString:@"setDesktopKeyboardMidiForwardingEnabled"]) {
+        BOOL enabled = [args[@"enabled"] boolValue];
+        [JuceBridge setDesktopKeyboardMidiForwardingEnabledObjC:enabled];
+        result(@(YES));
     } else if ([call.method isEqualToString:@"sendLiveMidiInputEvent"]) {
         BOOL noteOn = [args[@"noteOn"] boolValue];
         NSInteger channel = [args[@"channel"] integerValue];
@@ -656,9 +672,20 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         result([JuceBridge getMidiClipPluginStateObjC:clip]);
     } else if ([call.method isEqualToString:@"setMidiClipPluginState"]) {
         NSInteger clip = [args[@"clip"] integerValue];
-        NSString *stateBase64 = args[@"stateBase64"] ?: @"";
+        NSString *stateBase64 = [args[@"stateBase64"] ?: @"" copy];
+#if TARGET_OS_OSX
+        FlutterResult stateResult = [result copy];
+        dispatch_async(MixroomMidiClipLoadQueue(), ^{
+            BOOL applied = [JuceBridge setMidiClipPluginStateObjC:clip
+                                                      stateBase64:stateBase64];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                stateResult(@(applied));
+            });
+        });
+#else
         result(@([JuceBridge setMidiClipPluginStateObjC:clip
                                             stateBase64:stateBase64]));
+#endif
     } else if ([call.method isEqualToString:@"setHostedPluginWindowsDetached"]) {
         BOOL detached = [args[@"detached"] boolValue];
         [JuceBridge setHostedPluginWindowsDetachedObjC:detached];
@@ -668,11 +695,31 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"getConnectedMidiInputDevices"]) {
         result([JuceBridge getConnectedMidiInputDevicesObjC]);
     } else if ([call.method isEqualToString:@"beginProjectClipLoad"]) {
+#if TARGET_OS_OSX
+        FlutterResult beginResult = [result copy];
+        dispatch_async(MixroomMidiClipLoadQueue(), ^{
+            [JuceBridge beginProjectClipLoadObjC];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                beginResult(nil);
+            });
+        });
+#else
         [JuceBridge beginProjectClipLoadObjC];
         result(nil);
+#endif
     } else if ([call.method isEqualToString:@"endProjectClipLoad"]) {
+#if TARGET_OS_OSX
+        FlutterResult endResult = [result copy];
+        dispatch_async(MixroomMidiClipLoadQueue(), ^{
+            [JuceBridge endProjectClipLoadObjC];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                endResult(nil);
+            });
+        });
+#else
         [JuceBridge endProjectClipLoadObjC];
         result(nil);
+#endif
     } else if ([call.method isEqualToString:@"loadClip"]) {
         NSInteger clip = [args[@"clip"] integerValue];
         NSInteger rowId  = [args[@"rowId"] integerValue];
@@ -806,7 +853,22 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     // ----------------------------------------
     } else if ([call.method isEqualToString:@"insertTrackEffect"]) {
         NSInteger row = [args[@"row"] integerValue];
-        NSString *path = args[@"path"];
+        NSString *path = [args[@"path"] copy];
+#if TARGET_OS_OSX
+        FlutterResult insertResult = [result copy];
+        dispatch_async(MixroomMidiClipLoadQueue(), ^{
+            BOOL ok = [JuceBridge insertTrackEffectObjC:row path:path];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (ok) {
+                    insertResult(@(YES));
+                } else {
+                    insertResult([FlutterError errorWithCode:@"insert_track_effect_failed"
+                                                     message:@"Failed to insert row effect"
+                                                     details:@{@"row": @(row), @"path": path ?: @""}]);
+                }
+            });
+        });
+#else
         BOOL ok = [JuceBridge insertTrackEffectObjC:row path:path];
         if (ok) {
             result(@(YES));
@@ -815,6 +877,7 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
                                        message:@"Failed to insert row effect"
                                        details:@{@"row": @(row), @"path": path ?: @""}]);
         }
+#endif
     } else if ([call.method isEqualToString:@"removeTrackEffect"]) {
         NSInteger row = [args[@"row"] integerValue];
         NSInteger effect = [args[@"effect"] integerValue];
@@ -842,10 +905,22 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"setTrackEffectState"]) {
         NSInteger row = [args[@"row"] integerValue];
         NSInteger effect = [args[@"effect"] integerValue];
-        NSString *stateBase64 = args[@"stateBase64"] ?: @"";
+        NSString *stateBase64 = [args[@"stateBase64"] ?: @"" copy];
+#if TARGET_OS_OSX
+        FlutterResult stateResult = [result copy];
+        dispatch_async(MixroomMidiClipLoadQueue(), ^{
+            BOOL applied = [JuceBridge setTrackEffectStateObjC:row
+                                                   effectIndex:effect
+                                                   stateBase64:stateBase64];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                stateResult(@(applied));
+            });
+        });
+#else
         result(@([JuceBridge setTrackEffectStateObjC:row
                                          effectIndex:effect
                                          stateBase64:stateBase64]));
+#endif
     } else if ([call.method isEqualToString:@"openTrackPluginEditor"]) {
         NSInteger row = [args[@"row"] integerValue];
         NSInteger effect = [args[@"effect"] integerValue];
@@ -950,7 +1025,22 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     // NEW MASTER BUS API
     // ----------------------------------------
     } else if ([call.method isEqualToString:@"insertMasterEffect"]) {
-        NSString *path = args[@"path"];
+        NSString *path = [args[@"path"] copy];
+#if TARGET_OS_OSX
+        FlutterResult insertResult = [result copy];
+        dispatch_async(MixroomMidiClipLoadQueue(), ^{
+            BOOL ok = [JuceBridge insertMasterEffectObjC:path];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (ok) {
+                    insertResult(@(YES));
+                } else {
+                    insertResult([FlutterError errorWithCode:@"insert_master_effect_failed"
+                                                     message:@"Failed to insert master effect"
+                                                     details:@{@"path": path ?: @""}]);
+                }
+            });
+        });
+#else
         BOOL ok = [JuceBridge insertMasterEffectObjC:path];
         if (ok) {
             result(@(YES));
@@ -959,6 +1049,7 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
                                        message:@"Failed to insert master effect"
                                        details:@{@"path": path ?: @""}]);
         }
+#endif
     } else if ([call.method isEqualToString:@"removeMasterEffect"]) {
         NSInteger effect = [args[@"effect"] integerValue];
         [JuceBridge removeMasterEffectObjC:effect];
@@ -977,9 +1068,20 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         result([JuceBridge getMasterEffectStateObjC:effect]);
     } else if ([call.method isEqualToString:@"setMasterEffectState"]) {
         NSInteger effect = [args[@"effect"] integerValue];
-        NSString *stateBase64 = args[@"stateBase64"] ?: @"";
+        NSString *stateBase64 = [args[@"stateBase64"] ?: @"" copy];
+#if TARGET_OS_OSX
+        FlutterResult stateResult = [result copy];
+        dispatch_async(MixroomMidiClipLoadQueue(), ^{
+            BOOL applied = [JuceBridge setMasterEffectStateObjC:effect
+                                                    stateBase64:stateBase64];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                stateResult(@(applied));
+            });
+        });
+#else
         result(@([JuceBridge setMasterEffectStateObjC:effect
                                           stateBase64:stateBase64]));
+#endif
     } else if ([call.method isEqualToString:@"openMasterPluginEditor"]) {
         NSInteger effect = [args[@"effect"] integerValue];
         result(@([JuceBridge openMasterPluginEditorObjC:effect]));
@@ -1241,6 +1343,16 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSString *reason = args[@"reason"] ?: @"dart";
         result(@([JuceBridge prepareRecordingInputsObjC:desiredInputChannels reason:reason]));
     }
+    else if ([call.method isEqualToString:@"configureAudioDevice"]) {
+        double sampleRate = [args[@"sampleRate"] doubleValue];
+        NSInteger bufferSize = [args[@"bufferSize"] integerValue];
+        NSInteger desiredInputChannels = [args[@"desiredInputChannels"] integerValue];
+        NSString *reason = args[@"reason"] ?: @"dart";
+        result(@([JuceBridge configureAudioDeviceObjC:sampleRate
+                                           bufferSize:bufferSize
+                                  desiredInputChannels:desiredInputChannels
+                                                reason:reason]));
+    }
     else if ([call.method isEqualToString:@"preparePlaybackRoute"]) {
         NSString *reason = args[@"reason"] ?: @"dart";
         result(@([JuceBridge preparePlaybackRouteObjC:reason]));
@@ -1249,6 +1361,14 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSString *reason = args[@"reason"] ?: @"dart";
         [JuceBridge refreshAudioRouteObjC:reason];
         result(nil);
+    }
+    else if ([call.method isEqualToString:@"setMidiInputChannelFilter"]) {
+        NSInteger channel = [args[@"channel"] integerValue];
+        [JuceBridge setMidiInputChannelFilterObjC:channel];
+        result(nil);
+    }
+    else if ([call.method isEqualToString:@"getMidiInputChannelFilter"]) {
+        result([JuceBridge getMidiInputChannelFilterObjC]);
     }
     else if ([call.method isEqualToString:@"getRecordingPeak"]) {
         result([JuceBridge getRecordingPeakObjC]);

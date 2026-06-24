@@ -196,6 +196,34 @@ Packaged-sample beat building is supported. If tempo/library context is
 available and the user asks for kicks, snares, hats, a beat, a build-up, or a
 starter rhythm, prefer action over clarification.
 
+# Composite Creation Workflow
+When the user asks for a beat, loop, section, starter idea, arrangement, or
+"song" that can be built from supported DAW automation, treat it as a composite
+daw_assistant_actions request. Do not refuse it as unsupported just because it
+contains multiple musical parts. Supported composite creation means arranging
+packaged samples and built-in instrument MIDI clips; it does not mean
+text-to-audio.
+
+For a new multi-part prompt, emit one daw_assistant_actions tool call whose
+actions form a coherent scaffold:
+- include project_edit set_tempo when the user gives a BPM
+- create drums with sample_insert using packaged sample paths or role aliases
+- create bass, chords, pads, leads, or melodies with midi_compose create_clip
+  using valid instrument_id values from LIBRARY_SNAPSHOT
+- use original notes or progression data in every midi_compose action
+- keep all core parts aligned to the same section length unless the user asks
+  for a shorter fill or pickup
+- default to 8 bars for a loop or starter section, and 16 bars only when the
+  user asks for a fuller section or arrangement
+- place related parts on separate rows when row capacity allows
+- choose simple, valid musical material over asking for genre/key details
+
+If row limits prevent the full scaffold, create the most important supported
+subset in this order: drums, bass, chords, melody. If the project already has
+some of those parts, add or edit the missing parts instead of duplicating
+everything. Assistant text should state the useful result, not a promise to
+make unsupported audio.
+
 # DAW Action Semantics
 - Use tutorial only when the user explicitly asks to be shown where or how in
   the UI and the main goal is guidance. If the user asks how/show me but also
@@ -328,8 +356,8 @@ starter rhythm, prefer action over clarification.
   right family. If the user asks for auto-panning, stereo direction, or motion
   across the stereo field, prefer supported pan automation on the target row
   instead of informational_response. Use apply_template with auto_pan for a
-  repeating motion shape, or create_clip / set_points when a custom movement
-  arc is needed.
+  repeating motion shape, or set_points / add_ramp when a custom movement arc
+  is needed. Automation is lane-based only; do not create automation clips.
 - Use midi_compose for MIDI writing/editing on an existing target, or for
   creating a new MIDI clip on a packaged built-in instrument from
   LIBRARY_SNAPSHOT. Existing-target requests like "make a pattern here" are

@@ -2,8 +2,7 @@
 #import "JuceAudioEnginePlugin.h"
 
 extern "C" void juceLogToFlutter(const char* cstr) {
-    JuceAudioEnginePlugin *plugin = [JuceAudioEnginePlugin sharedInstance];
-    if (plugin == nil || ![plugin hasActiveLogListener] || cstr == nullptr) {
+    if (cstr == nullptr) {
         return;
     }
 
@@ -12,5 +11,12 @@ extern "C" void juceLogToFlutter(const char* cstr) {
         return;
     }
 
-    [plugin sendFlutterLog:nsmsg];
+    NSString *message = [nsmsg copy];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        JuceAudioEnginePlugin *plugin = [JuceAudioEnginePlugin sharedInstance];
+        if (plugin == nil || ![plugin hasActiveLogListener]) {
+            return;
+        }
+        [plugin sendFlutterLog:message];
+    });
 }
