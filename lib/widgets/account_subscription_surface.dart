@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:mixroom/helpers/entitlement_service.dart';
 import 'package:mixroom/helpers/iap_service.dart';
+import 'package:mixroom/helpers/subscription_limits.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/entitlement_models.dart';
 
@@ -798,8 +799,8 @@ class _PromptUsageCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final limits = entitlement.limits;
-    final daily = _limitReadout(limits['ai_prompts_daily']);
-    final weekly = _limitReadout(limits['ai_prompts_weekly']);
+    final planCode = entitlement.planCode.trim().toLowerCase();
+    final usage = _formatPlanAiUsageFeature(planCode, limits);
     final modelTier = _modelTierReadout(context, limits['ai_model_tier']);
     final advanced = _advancedPromptReadout(context, limits);
 
@@ -818,12 +819,9 @@ class _PromptUsageCard extends StatelessWidget {
         runSpacing: 8,
         children: [
           _PromptUsagePill(
-            label: _t(context, 'Daily'),
-            value: daily,
-          ),
-          _PromptUsagePill(
-            label: _t(context, 'Weekly'),
-            value: weekly,
+            label: _t(context, 'AI usage'),
+            value: usage ?? _t(context, 'Standard AI usage'),
+            wide: true,
           ),
           _PromptUsagePill(
             label: _t(context, 'Model access'),
@@ -832,7 +830,7 @@ class _PromptUsageCard extends StatelessWidget {
           ),
           if (advanced.isNotEmpty)
             _PromptUsagePill(
-              label: _t(context, 'Advanced pool'),
+              label: _t(context, 'Reasoning access'),
               value: advanced,
               wide: true,
             ),
@@ -1276,45 +1274,78 @@ class _PlansPanelState extends State<_PlansPanel> {
             onTap: _plansFocusNode.requestFocus,
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final cardWidth =
-                    (constraints.maxWidth * 0.34).clamp(228.0, 268.0);
-                return Scrollbar(
-                  controller: _plansScrollController,
-                  notificationPredicate: (notification) =>
-                      notification.metrics.axis == Axis.horizontal,
-                  child: SingleChildScrollView(
+                const railPadding = 10.0;
+                const cardGap = 10.0;
+                final contentWidth = (constraints.maxWidth - railPadding * 2)
+                    .clamp(0.0, double.infinity);
+                final visibleCardCount = contentWidth >= 740
+                    ? 3
+                    : contentWidth >= 500
+                        ? 2
+                        : 1;
+                final cardWidth = visibleCardCount == 1
+                    ? contentWidth
+                    : ((contentWidth - cardGap * (visibleCardCount - 1)) /
+                            visibleCardCount)
+                        .clamp(224.0, 264.0);
+
+                return Container(
+                  padding: const EdgeInsets.fromLTRB(
+                    railPadding,
+                    railPadding,
+                    railPadding,
+                    12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.08),
+                    ),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Scrollbar(
                     controller: _plansScrollController,
-                    scrollDirection: Axis.horizontal,
-                    physics: const BouncingScrollPhysics(),
-                    clipBehavior: Clip.none,
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        for (final entry in cards.asMap().entries) ...[
-                          SizedBox(
-                            width: cardWidth,
-                            height: 410,
-                            child: _PlanListRow(
-                              data: entry.value,
-                              planIsCurrent: _isCurrentPlanCard(entry.value),
-                              priceLabel:
-                                  _priceLabelForCard(context, entry.value),
-                              billingCaption:
-                                  _billingCaptionForCard(context, entry.value),
-                              isBusy: widget.isBusy,
-                              productActions:
-                                  _productActionsForCard(context, entry.value),
-                              fallbackAction: _fallbackActionForCard(
-                                context,
-                                entry.value,
-                                _isCurrentPlanCard(entry.value),
+                    notificationPredicate: (notification) =>
+                        notification.metrics.axis == Axis.horizontal,
+                    child: SingleChildScrollView(
+                      controller: _plansScrollController,
+                      scrollDirection: Axis.horizontal,
+                      physics: const BouncingScrollPhysics(),
+                      clipBehavior: Clip.hardEdge,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final entry in cards.asMap().entries) ...[
+                            SizedBox(
+                              width: cardWidth,
+                              height: 450,
+                              child: _PlanListRow(
+                                data: entry.value,
+                                planIsCurrent: _isCurrentPlanCard(entry.value),
+                                priceLabel:
+                                    _priceLabelForCard(context, entry.value),
+                                billingCaption: _billingCaptionForCard(
+                                  context,
+                                  entry.value,
+                                ),
+                                isBusy: widget.isBusy,
+                                productActions: _productActionsForCard(
+                                  context,
+                                  entry.value,
+                                ),
+                                fallbackAction: _fallbackActionForCard(
+                                  context,
+                                  entry.value,
+                                  _isCurrentPlanCard(entry.value),
+                                ),
                               ),
                             ),
-                          ),
-                          if (entry.key != cards.length - 1)
-                            const SizedBox(width: 10),
+                            if (entry.key != cards.length - 1)
+                              const SizedBox(width: cardGap),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
                   ),
                 );
@@ -1862,11 +1893,11 @@ BillingPlanDefinition _fallbackPlan(String planCode) {
 String _fallbackPlanDescription(String planCode) {
   switch (planCode.trim().toLowerCase()) {
     case 'free':
-      return 'Start building ideas with local projects, standard AI, and core sharing.';
+      return 'Start ideas anywhere with cross-platform project sync.';
     case 'starter':
-      return 'Expanded creation tools, higher-quality export, more storage, and WAV starter samples.';
+      return 'Expanded creation tools, higher-quality export, more storage, and full DAW access.';
     case 'producer':
-      return 'The full solo creator suite with advanced AI, premium libraries, and cloud file tools.';
+      return 'The full solo creator suite with advanced AI, high-quality export, and expanded storage.';
     case 'studio':
       return 'Shared project space, team seats, studio tools, and priority support for small teams.';
     case 'enterprise':
@@ -1955,27 +1986,28 @@ _PlanMarketingContent _planMarketingContent(String planCode) {
     case 'free':
       return const _PlanMarketingContent(
         subtitle: 'Casual enthusiasts',
-        tagline: 'Sample the basics with cloud sync.',
+        tagline: 'Start on mobile, tablet, or desktop.',
         sections: <_PlanMarketingSection>[
           _PlanMarketingSection(
             heading: 'DAW · Storage',
             items: <String>[
-              '250 MB cloud · 3 projects',
-              'No cap on clips or plugin rows',
+              '1 cloud project · sync across devices',
+              '10 local projects · 5 tracks',
+              'Core effects and instruments',
             ],
           ),
           _PlanMarketingSection(
             heading: 'Export',
             items: <String>[
               '16-bit / 44.1 kHz stereo',
-              'MP3 or FLAC (no WAV)',
+              'MP3 export',
             ],
           ),
           _PlanMarketingSection(
             heading: 'AI usage',
             items: <String>[
-              'Limited prompt usage allowance',
-              'Standard model',
+              'Light AI usage',
+              'Standard AI model',
             ],
           ),
         ],
@@ -1983,27 +2015,27 @@ _PlanMarketingContent _planMarketingContent(String planCode) {
     case 'starter':
       return const _PlanMarketingContent(
         subtitle: 'Aspiring producers',
-        tagline: 'For learners getting serious about the craft.',
+        tagline: 'More room to arrange, export, and finish tracks.',
         sections: <_PlanMarketingSection>[
           _PlanMarketingSection(
             heading: 'DAW · Storage',
             items: <String>[
               '5 GB cloud',
-              'No cap on number of projects',
+              'No free-tier track or project cap',
             ],
           ),
           _PlanMarketingSection(
             heading: 'Export',
             items: <String>[
-              'Up to 24-bit / 48 kHz',
-              'WAV supported',
+              'High-quality export',
+              'WAV, MP3, and FLAC formats',
             ],
           ),
           _PlanMarketingSection(
             heading: 'AI usage',
             items: <String>[
-              'More prompt allowance than Free',
-              'Standard model',
+              'Expanded AI usage',
+              'Standard AI model',
             ],
           ),
         ],
@@ -2011,26 +2043,26 @@ _PlanMarketingContent _planMarketingContent(String planCode) {
     case 'producer':
       return const _PlanMarketingContent(
         subtitle: 'Serious / Professional producers',
-        tagline: 'Full production stack with advanced AI.',
+        tagline: 'Full production stack with advanced AI and more storage.',
         sections: <_PlanMarketingSection>[
           _PlanMarketingSection(
             heading: 'DAW · Storage',
             items: <String>[
               '250 GB cloud',
-              'Upload your own sample packs · cloud browser',
+              'No free-tier track or project cap',
             ],
           ),
           _PlanMarketingSection(
             heading: 'AI usage',
             items: <String>[
-              'Highest prompt usage allowance',
-              'Option to choose higher and smarter reasoning AI',
+              'High-volume AI usage',
+              'Advanced reasoning AI options',
             ],
           ),
           _PlanMarketingSection(
             heading: 'Other',
             items: <String>[
-              'Premium sound libraries',
+              'High-quality export formats',
               'Priority support',
             ],
           ),
@@ -2058,7 +2090,7 @@ _PlanMarketingContent _planMarketingContent(String planCode) {
           _PlanMarketingSection(
             heading: 'AI & access',
             items: <String>[
-              'Each seat has individual Producer limits',
+              'High-volume AI for every seat',
               'Studio badge on profile',
             ],
           ),
@@ -2135,39 +2167,44 @@ List<String> _planFeatureItems(BillingPlanDefinition plan) {
   final capabilities = plan.capabilities;
   final storage = _formatStorageAmount(limits['storage_gb']);
   final sharedStorage = _formatStorageAmount(limits['shared_storage_gb']);
-  final dailyAi = _formatDailyAiFeature(limits);
-  final uploadHours = _formatUploadHours(limits['platform_upload_hours']);
+  final aiUsage = _formatPlanAiUsageFeature(code, limits);
   final members = _formatInteger(limits['members']);
 
   switch (code) {
     case 'free':
       return _compactFeatureItems([
-        _formatCloudProjects(limits['cloud_projects']),
-        storage == null ? null : '$storage cloud storage',
-        dailyAi,
+        '1 cloud project, sync across devices',
+        '10 local projects, 5 tracks each',
+        'Core effects and instruments',
+        'MP3 export',
+        'Light AI usage',
       ]);
     case 'starter':
       return _compactFeatureItems([
+        _formatDawCapacityFeature(code),
+        'All effects and instruments',
+        capabilities['high_quality_export'] == true
+            ? 'High-quality export in WAV, MP3, and FLAC'
+            : 'MP3 export',
         storage == null ? null : '$storage cloud storage',
-        uploadHours == null ? null : '$uploadHours upload hours',
-        capabilities['wav_starter_samples'] == true
-            ? 'WAV samples + high-quality export'
-            : dailyAi,
+        aiUsage,
       ]);
     case 'producer':
       return _compactFeatureItems([
+        _formatDawCapacityFeature(code),
         storage == null ? null : '$storage cloud storage',
-        dailyAi,
-        capabilities['premium_sound_libraries'] == true ||
-                capabilities['custom_sample_packs'] == true
-            ? 'Premium libraries + custom sample packs'
-            : 'Cloud file browser',
+        'All effects and instruments',
+        capabilities['high_quality_export'] == true
+            ? 'High-quality export in WAV, MP3, and FLAC'
+            : null,
+        aiUsage,
       ]);
     case 'studio':
       return _compactFeatureItems([
         members == null ? null : '$members seats included',
         sharedStorage == null ? null : '$sharedStorage shared storage',
-        'Producer-level AI and library access',
+        'Producer DAW access for each seat',
+        'Team workspace and priority support',
       ]);
     case 'enterprise':
       return _compactFeatureItems([
@@ -2175,6 +2212,7 @@ List<String> _planFeatureItems(BillingPlanDefinition plan) {
         capabilities['custom_ai_models'] == true
             ? 'Custom AI models'
             : 'Custom AI usage',
+        'Team workspace and admin controls',
         capabilities['compliance_controls'] == true
             ? 'Compliance controls + dedicated support'
             : 'Dedicated support',
@@ -2182,7 +2220,8 @@ List<String> _planFeatureItems(BillingPlanDefinition plan) {
     case 'education':
       return _compactFeatureItems([
         _formatSeatOptions(limits['seat_options']),
-        storage == null ? null : '$storage storage',
+        'Starter DAW access per seat',
+        storage == null ? null : '$storage storage per seat',
         capabilities['education_sandbox'] == true ||
                 capabilities['education_visibility_controls'] == true
             ? 'Education sandbox + visibility controls'
@@ -2190,9 +2229,9 @@ List<String> _planFeatureItems(BillingPlanDefinition plan) {
       ]);
     default:
       return _compactFeatureItems([
+        _formatDawCapacityFeature(code),
         storage == null ? null : '$storage storage',
-        dailyAi,
-        uploadHours == null ? null : '$uploadHours upload hours',
+        aiUsage,
       ]);
   }
 }
@@ -2201,14 +2240,16 @@ List<String> _compactFeatureItems(Iterable<String?> items) {
   return items
       .where((item) => item != null && item.trim().isNotEmpty)
       .map((item) => item!.trim())
-      .take(3)
       .toList(growable: false);
 }
 
-String? _formatCloudProjects(Object? raw) {
-  final value = _formatInteger(raw);
-  if (value == null) return null;
-  return value == '1' ? '1 cloud project' : '$value cloud projects';
+String _formatDawCapacityFeature(String planCode) {
+  final normalized = planCode.trim().toLowerCase();
+  if (normalized == 'free') {
+    return '${SubscriptionLimits.freeLocalProjects} local projects, '
+        '${SubscriptionLimits.freeRowsPerProject} tracks';
+  }
+  return 'No free-tier track or project cap';
 }
 
 String? _formatSeatOptions(Object? raw) {
@@ -2225,24 +2266,28 @@ String? _formatSeatOptions(Object? raw) {
   return null;
 }
 
-String? _formatDailyAiFeature(Map<String, dynamic> limits) {
-  final daily = _formatInteger(limits['ai_prompts_daily']);
+String? _formatPlanAiUsageFeature(
+    String planCode, Map<String, dynamic> limits) {
   final tier = (limits['ai_model_tier'] ?? '').toString().trim().toLowerCase();
-  if (daily == null) {
-    return tier == 'custom' ? 'Custom AI usage' : null;
+  switch (planCode.trim().toLowerCase()) {
+    case 'free':
+      return 'Light AI usage';
+    case 'starter':
+    case 'education':
+      return 'Expanded AI usage';
+    case 'producer':
+      return 'High-volume AI usage';
+    case 'studio':
+      return 'High-volume AI for every seat';
+    case 'enterprise':
+      return 'Custom AI usage';
   }
-  final tierLabel = switch (tier) {
-    'advanced' => 'advanced AI',
-    'custom' => 'custom AI',
-    _ => 'standard AI',
+  return switch (tier) {
+    'advanced' => 'High-volume advanced AI usage',
+    'custom' => 'Custom AI usage',
+    'standard' => 'Standard AI usage',
+    _ => null,
   };
-  return '$daily/day $tierLabel';
-}
-
-String? _formatUploadHours(Object? raw) {
-  final value = _formatInteger(raw);
-  if (value == null) return null;
-  return value == '1' ? '1 upload hour' : '$value upload hours';
 }
 
 String? _formatStorageAmount(Object? raw) {
@@ -2354,18 +2399,6 @@ String _subscriptionStatusLabel(
   }
 }
 
-String _limitReadout(dynamic value) {
-  if (value is num) {
-    final compact = NumberFormat.compact().format(value);
-    return compact.replaceAll('.0', '');
-  }
-  final text = '$value'.trim();
-  if (text.isEmpty || text == 'null') return '0';
-  if (text.toLowerCase() == 'custom') return 'Custom';
-  if (text.toLowerCase() == 'unlimited') return 'Unlimited';
-  return text;
-}
-
 String _modelTierReadout(BuildContext context, dynamic value) {
   switch ('$value'.trim().toLowerCase()) {
     case 'advanced':
@@ -2387,22 +2420,13 @@ String _advancedPromptReadout(
   final hasPremium = limits.containsKey('ai_premium_prompts_daily');
   if (!hasBetter && !hasPremium) return '';
 
-  final better = _limitReadout(limits['ai_better_prompts_daily']);
-  final premium = _limitReadout(limits['ai_premium_prompts_daily']);
   if (hasBetter && hasPremium) {
-    return _tr(
-      context,
-      'Better {better}/day · Premium {premium}/day',
-      {
-        'better': better,
-        'premium': premium,
-      },
-    );
+    return _t(context, 'Enhanced + premium AI');
   }
   if (hasBetter) {
-    return _tr(context, 'Better {count}/day', {'count': better});
+    return _t(context, 'Enhanced reasoning');
   }
-  return _tr(context, 'Premium {count}/day', {'count': premium});
+  return _t(context, 'Premium reasoning');
 }
 
 class _PlanListRow extends StatelessWidget {
@@ -2453,10 +2477,10 @@ class _PlanListRow extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.25),
-            blurRadius: 15,
-            spreadRadius: 4,
-            offset: const Offset(0, 8),
+            color: Colors.black.withValues(alpha: 0.18),
+            blurRadius: 10,
+            spreadRadius: 0,
+            offset: const Offset(0, 5),
           ),
         ],
       ),
@@ -2611,24 +2635,21 @@ class _PlanFeaturePreview extends StatelessWidget {
         return Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Container(
-                  width: 4,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.82),
-                    shape: BoxShape.circle,
-                  ),
+              Container(
+                width: 4,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.82),
+                  shape: BoxShape.circle,
                 ),
               ),
               const SizedBox(width: 7),
               Expanded(
                 child: Text(
                   item,
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.68),

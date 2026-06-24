@@ -2985,12 +2985,111 @@ class CloudLlmService {
     for (final action in normalized) {
       final type = action['type']?.toString().trim().toLowerCase() ?? '';
       if (type != 'sample_insert') continue;
+      _spreadDrumSampleInsertRows(action['data'] as Map<String, dynamic>);
       _repairBackbeatSampleInsert(
         action['data'] as Map<String, dynamic>,
         tempoBpm: tempoBpm,
       );
     }
     return normalized;
+  }
+
+  String? _drumSampleRowBucket(String? role) {
+    switch (role) {
+      case 'kick':
+        return 'kick';
+      case 'snare':
+      case 'clap':
+        return 'snare_clap';
+      case 'hat':
+        return 'hat';
+      case 'perc':
+        return 'perc';
+      case 'cymbal':
+        return 'cymbal';
+      case 'tom':
+        return 'tom';
+      default:
+        return null;
+    }
+  }
+
+  void _setSampleInsertItemRow(Map<String, dynamic> item, int rowIndex) {
+    final rawTarget = item['target'];
+    final target = rawTarget is Map<String, dynamic>
+        ? Map<String, dynamic>.from(rawTarget)
+        : (rawTarget is Map
+            ? Map<String, dynamic>.from(rawTarget)
+            : <String, dynamic>{});
+    item['row_index'] = rowIndex;
+    target['row_index'] = rowIndex;
+    item['target'] = target;
+  }
+
+  void _spreadDrumSampleInsertRows(Map<String, dynamic> data) {
+    final operation = data['operation']?.toString().trim().toLowerCase() ?? '';
+    if (operation != 'insert_audio_clips' && operation != 'insert_audio_clip') {
+      return;
+    }
+    final rawItems = data['items'];
+    if (rawItems is! List || rawItems.length < 2) return;
+
+    final bucketByItem = <Map<String, dynamic>, String>{};
+    final existingRows = <int>{};
+    final orderedBuckets = <String>[];
+    const bucketOrder = <String>[
+      'kick',
+      'snare_clap',
+      'hat',
+      'perc',
+      'cymbal',
+      'tom',
+    ];
+
+    for (var itemIndex = 0; itemIndex < rawItems.length; itemIndex += 1) {
+      final rawItem = rawItems[itemIndex];
+      if (rawItem is! Map) continue;
+      final item = rawItem is Map<String, dynamic>
+          ? rawItem
+          : Map<String, dynamic>.from(rawItem);
+      if (!identical(item, rawItem)) {
+        rawItems[itemIndex] = item;
+      }
+      final target = _actionTargetMap(item);
+      final libraryPath =
+          (item['library_path'] ?? target['library_path'])?.toString().trim() ??
+              '';
+      final bucket = _drumSampleRowBucket(
+        AssistantActionUtils.primarySampleRoleFromText(libraryPath),
+      );
+      if (bucket == null) continue;
+      bucketByItem[item] = bucket;
+      if (!orderedBuckets.contains(bucket)) orderedBuckets.add(bucket);
+      final rowIndex = _extractNormalizedRowIndex(item, target);
+      if (rowIndex != null) existingRows.add(rowIndex);
+    }
+
+    if (orderedBuckets.length < 2) return;
+    if (existingRows.length > 1) return;
+
+    orderedBuckets.sort((a, b) {
+      final ai = bucketOrder.indexOf(a);
+      final bi = bucketOrder.indexOf(b);
+      return ai.compareTo(bi);
+    });
+
+    final baseRow =
+        existingRows.isEmpty ? 0 : existingRows.reduce((a, b) => a < b ? a : b);
+    final rowByBucket = <String, int>{
+      for (int i = 0; i < orderedBuckets.length; i++)
+        orderedBuckets[i]: baseRow + i,
+    };
+
+    for (final entry in bucketByItem.entries) {
+      final row = rowByBucket[entry.value];
+      if (row == null) continue;
+      _setSampleInsertItemRow(entry.key, row);
+    }
   }
 
   double? _normalizedProjectTempoBpm(List<Map<String, dynamic>> actions) {

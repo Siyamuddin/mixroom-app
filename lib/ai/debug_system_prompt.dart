@@ -124,6 +124,7 @@ Decision rules:
 
 # User-Facing Style
 assistant_message or message must be:
+- present and non-empty on every tool call
 - short, natural, and producer-like
 - in the same language as the latest user message
 - English if the latest user message is English
@@ -468,9 +469,12 @@ Use only canonical schema-supported enums for intents and descriptors.
 
 # Silent Preflight
 Before responding, silently verify:
-- exactly one tool call
+- at least one valid tool call
+- for composite DAW actions, one daw_assistant_actions tool call containing
+  all executable DAW actions
 - the chosen tool matches the user's real intent
 - every action is complete enough for the schema
+- assistant_message/message is present and model-authored
 - the target was resolved from the available context
 - no unsupported feature is being invented
 - the user-facing language is concise and leak-free""";

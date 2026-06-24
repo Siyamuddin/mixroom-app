@@ -31,6 +31,8 @@ Future<AudioTrack> _buildMidiTrack(
 Widget _buildEditor({
   required AudioTrack clip,
   required MidiCommitCallback onCommit,
+  double projectPlayheadMs = 0,
+  bool isPlaying = false,
   bool isRecording = false,
   Future<void> Function(int pitch, double velocity)? onPreviewNote,
   PianoKeyDownCallback? onKeyboardNoteDown,
@@ -47,8 +49,8 @@ Widget _buildEditor({
             availableInstruments: const <Map<String, dynamic>>[],
             bpm: 120,
             beatsPerBar: 4,
-            projectPlayheadMs: 0,
-            isPlaying: false,
+            projectPlayheadMs: projectPlayheadMs,
+            isPlaying: isPlaying,
             isRecording: isRecording,
             magnetEnabled: true,
             quantizeDivisionsPerBar: 4,
@@ -261,11 +263,10 @@ void main() {
     expect(committedNotes, isNotNull);
     expect(_noteById(committedNotes!, 'a').lengthBeats, 3);
 
-    final gridTopLeft = tester.getTopLeft(
-      find.byKey(const ValueKey<String>('piano_roll_grid_canvas')),
-    );
-    await tester.tapAt(gridTopLeft + const Offset(420, 110));
-    await tester.pump(const Duration(milliseconds: 120));
+    final resizedRect =
+        tester.getRect(find.byKey(const ValueKey<String>('piano_note_a')));
+    await tester.tapAt(resizedRect.bottomRight + const Offset(80, 80));
+    await tester.pump(const Duration(milliseconds: 220));
 
     expect(committedNotes, isNotNull);
     expect(committedNotes, hasLength(2));
@@ -454,13 +455,16 @@ void main() {
       (tester) async {
     final clip = await _buildMidiTrack(<MidiNote>[]);
     final events = <String>[];
+    final startBeats = <double?>[];
 
     await tester.pumpWidget(
       _buildEditor(
         clip: clip,
         isRecording: true,
-        onKeyboardNoteDown: (requestedClip, pitch, velocity) async {
+        onKeyboardNoteDown: (requestedClip, pitch, velocity,
+            {double? startBeat}) async {
           events.add('down:$pitch');
+          startBeats.add(startBeat);
         },
         onKeyboardNoteUp: (requestedClip, pitch) async {
           events.add('up:$pitch');
@@ -494,6 +498,9 @@ void main() {
     await tester.pump(const Duration(milliseconds: 120));
 
     expect(events.take(3), <String>['down:84', 'up:84', 'down:84']);
+    expect(startBeats, isNotEmpty);
+    expect(startBeats.first, isNotNull);
+    expect(startBeats.first!.isFinite, isTrue);
   });
 
   testWidgets('desktop piano keys follow mouse drag across notes',
@@ -509,7 +516,8 @@ void main() {
         onPreviewNote: (pitch, velocity) async {
           shortPreviewCount++;
         },
-        onKeyboardNoteDown: (requestedClip, pitch, velocity) async {
+        onKeyboardNoteDown: (requestedClip, pitch, velocity,
+            {double? startBeat}) async {
           events.add('down:$pitch');
         },
         onKeyboardNoteUp: (requestedClip, pitch) async {
@@ -802,6 +810,209 @@ void main() {
 
     expect(
         find.byKey(const ValueKey<String>('piano_note_live')), findsOneWidget);
+  });
+
+  testWidgets('locked playback advances note positions from the visual clock',
+      (tester) async {
+    final clip = await _buildMidiTrack(<MidiNote>[
+      MidiNote(
+        id: 'a',
+        pitch: 84,
+        startBeat: 2,
+        lengthBeats: 1,
+        velocity: 0.7,
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        isPlaying: true,
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+
+    await tester.tap(find.byIcon(Icons.lock_open_rounded));
+    await tester.pump();
+
+    final noteFinder = find.byKey(const ValueKey<String>('piano_note_a'));
+    final beforeLeft = tester.getTopLeft(noteFinder).dx;
+    await tester.pump(const Duration(milliseconds: 250));
+    final midLeft = tester.getTopLeft(noteFinder).dx;
+    await tester.pump(const Duration(milliseconds: 250));
+    final afterLeft = tester.getTopLeft(noteFinder).dx;
+
+    expect(midLeft, lessThan(beforeLeft - 8.0));
+    expect(afterLeft, lessThan(beforeLeft - 12.0));
+    expect(afterLeft, lessThanOrEqualTo(midLeft + 2.0));
+  });
+
+  testWidgets('locked playback ignores small stale playhead rebases',
+      (tester) async {
+    final clip = await _buildMidiTrack(<MidiNote>[
+      MidiNote(
+        id: 'a',
+        pitch: 84,
+        startBeat: 2,
+        lengthBeats: 1,
+        velocity: 0.7,
+      ),
+    ]);
+
+    Widget editor({required double projectPlayheadMs}) {
+      return _buildEditor(
+        clip: clip,
+        projectPlayheadMs: projectPlayheadMs,
+        isPlaying: true,
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      );
+    }
+
+    await tester.pumpWidget(editor(projectPlayheadMs: 200));
+    await tester.pump(const Duration(milliseconds: 120));
+    await tester.tap(find.byIcon(Icons.lock_open_rounded));
+    await tester.pump();
+
+    final noteFinder = find.byKey(const ValueKey<String>('piano_note_a'));
+    await tester.pump(const Duration(milliseconds: 170));
+    final beforeRebaseLeft = tester.getTopLeft(noteFinder).dx;
+
+    await tester.pumpWidget(editor(projectPlayheadMs: 350));
+    await tester.pump(const Duration(milliseconds: 80));
+    final afterRebaseLeft = tester.getTopLeft(noteFinder).dx;
+
+    expect(afterRebaseLeft, lessThan(beforeRebaseLeft - 2.0));
+  });
+
+  testWidgets('playback highlights active pitches on the piano key rail',
+      (tester) async {
+    final clip = await _buildMidiTrack(<MidiNote>[
+      MidiNote(
+        id: 'b_note',
+        pitch: 83,
+        startBeat: 0,
+        lengthBeats: 1,
+        velocity: 0.7,
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        isPlaying: true,
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 80));
+
+    expect(
+      find.byKey(const ValueKey<String>('piano_key_active_overlay_83')),
+      findsOneWidget,
+    );
+    expect(find.text('B5'), findsOneWidget);
+  });
+
+  testWidgets('black key playback highlight matches the black key cutout',
+      (tester) async {
+    final clip = await _buildMidiTrack(<MidiNote>[
+      MidiNote(
+        id: 'black_note',
+        pitch: 82,
+        startBeat: 0,
+        lengthBeats: 1,
+        velocity: 0.7,
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        isPlaying: true,
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 80));
+
+    final keyRect =
+        tester.getRect(find.byKey(const ValueKey<String>('piano_key_82')));
+    final activeRect = tester.getRect(
+      find.byKey(const ValueKey<String>('piano_key_active_overlay_82')),
+    );
+
+    expect(activeRect.left, keyRect.left);
+    expect(activeRect.width, closeTo(46.0, 0.01));
+    expect(activeRect.width, lessThan(keyRect.width));
+  });
+
+  testWidgets('white key playback highlight clips adjacent black-row tail',
+      (tester) async {
+    final clip = await _buildMidiTrack(<MidiNote>[
+      MidiNote(
+        id: 'white_note',
+        pitch: 83,
+        startBeat: 0,
+        lengthBeats: 1,
+        velocity: 0.7,
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        isPlaying: true,
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 80));
+
+    final blackRowRect =
+        tester.getRect(find.byKey(const ValueKey<String>('piano_key_82')));
+    final tailRect = tester.getRect(
+      find.byKey(const ValueKey<String>('piano_key_tail_active_top_82')),
+    );
+
+    expect(
+      find.byKey(const ValueKey<String>('piano_key_active_overlay_83')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('piano_key_active_overlay_82')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('piano_key_tail_active_bottom_82')),
+      findsNothing,
+    );
+    expect(tailRect.left, closeTo(blackRowRect.left + 46.0, 0.01));
+    expect(tailRect.top, blackRowRect.top);
+    expect(tailRect.height, closeTo(blackRowRect.height / 2.0, 0.01));
+    expect(tailRect.width, lessThan(blackRowRect.width));
   });
 
   testWidgets('sequencer tab opens and commits step edits', (tester) async {

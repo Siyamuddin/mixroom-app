@@ -174,9 +174,6 @@ Map<String, bool> defaultCapabilitiesForPlanCode(String planCode) {
         SubscriptionCapability.selectableAiModels: true,
         SubscriptionCapability.advancedAiModels: true,
         SubscriptionCapability.producerProfilePresets: true,
-        SubscriptionCapability.premiumSoundLibraries: true,
-        SubscriptionCapability.cloudFileBrowser: true,
-        SubscriptionCapability.customSamplePacks: true,
         SubscriptionCapability.profilePlanBadge: true,
         SubscriptionCapability.cloudProjects: true,
       };
@@ -189,9 +186,6 @@ Map<String, bool> defaultCapabilitiesForPlanCode(String planCode) {
         SubscriptionCapability.selectableAiModels: true,
         SubscriptionCapability.advancedAiModels: true,
         SubscriptionCapability.producerProfilePresets: true,
-        SubscriptionCapability.premiumSoundLibraries: true,
-        SubscriptionCapability.cloudFileBrowser: true,
-        SubscriptionCapability.customSamplePacks: true,
         SubscriptionCapability.profilePlanBadge: true,
         SubscriptionCapability.studioFeatures: true,
         SubscriptionCapability.cloudProjects: true,
@@ -207,9 +201,6 @@ Map<String, bool> defaultCapabilitiesForPlanCode(String planCode) {
         SubscriptionCapability.selectableAiModels: true,
         SubscriptionCapability.advancedAiModels: true,
         SubscriptionCapability.producerProfilePresets: true,
-        SubscriptionCapability.premiumSoundLibraries: true,
-        SubscriptionCapability.cloudFileBrowser: true,
-        SubscriptionCapability.customSamplePacks: true,
         SubscriptionCapability.profilePlanBadge: true,
         SubscriptionCapability.studioFeatures: true,
         SubscriptionCapability.cloudProjects: true,
@@ -1416,7 +1407,7 @@ class BillingCatalogSnapshot {
           rank: 20,
           active: true,
           description:
-              'Full solo creator suite with advanced AI, premium libraries, and cloud file tools.',
+              'Full solo creator suite with advanced AI, high-quality export, and expanded storage.',
           capabilities: <String, bool>{
             SubscriptionCapability.allPlugins: true,
             SubscriptionCapability.highQualityExport: true,
@@ -1424,9 +1415,6 @@ class BillingCatalogSnapshot {
             SubscriptionCapability.selectableAiModels: true,
             SubscriptionCapability.advancedAiModels: true,
             SubscriptionCapability.producerProfilePresets: true,
-            SubscriptionCapability.premiumSoundLibraries: true,
-            SubscriptionCapability.cloudFileBrowser: true,
-            SubscriptionCapability.customSamplePacks: true,
             SubscriptionCapability.profilePlanBadge: true,
           },
           limits: <String, dynamic>{

@@ -52,6 +52,14 @@ const List<_BundledLicenseNotice> _bundledLicenseNotices =
     licenseAssetPath: 'assets/licenses/basic_pitch/LICENSE',
     noticeAssetPath: 'assets/licenses/basic_pitch/NOTICE',
   ),
+  _BundledLicenseNotice(
+    packages: <String>[
+      'VSCO 2 CE',
+      'VCSL Upright Piano, Knight',
+    ],
+    licenseAssetPath: 'assets/instruments/VSCO-2-CE-1.1.0/LICENSE',
+    noticeAssetPath: 'assets/instruments/VSCO-2-CE-1.1.0/NOTICE.md',
+  ),
 ];
 
 Future<void> _registerBundledThirdPartyLicenses() async {

@@ -2912,10 +2912,7 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
         jucePaths.addIfNotAlreadyThere(juceStringFromNSString(path));
     }
 
-    if (auto *mm = juce::MessageManager::getInstance())
-    {
-        mm->callSync([&]
-                     {
+    auto buildResult = [&]() {
             JuceEngine::get().setAdditionalPluginSearchPaths(jucePaths);
             NSMutableArray *arr = [NSMutableArray array];
             NSMutableSet<NSString *> *seenIds = [NSMutableSet set];
@@ -2959,8 +2956,17 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
                 entry[@"isInstrument"] = @(isInstrument);
                 [arr addObject:entry];
             }
-            resultArray = [arr copy]; });
+            resultArray = [arr copy];
+    };
+
+#if TARGET_OS_OSX
+    buildResult();
+#else
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        mm->callSync(buildResult);
     }
+#endif
 
     if (resultArray == nil)
         resultArray = [NSMutableArray array];
@@ -2977,10 +2983,7 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
         jucePaths.addIfNotAlreadyThere(juceStringFromNSString(path));
     }
 
-    if (auto *mm = juce::MessageManager::getInstance())
-    {
-        mm->callSync([&]
-                     {
+    auto buildResult = [&]() {
             NSMutableArray *arr = [NSMutableArray array];
             NSMutableSet<NSString *> *seenIds = [NSMutableSet set];
             auto types = JuceEngine::get().rescanPlugins(jucePaths);
@@ -3020,8 +3023,17 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
                 entry[@"isInstrument"] = @(isInstrument);
                 [arr addObject:entry];
             }
-            resultArray = [arr copy]; });
+            resultArray = [arr copy];
+    };
+
+#if TARGET_OS_OSX
+    buildResult();
+#else
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        mm->callSync(buildResult);
     }
+#endif
 
     if (resultArray == nil)
         resultArray = [NSMutableArray array];

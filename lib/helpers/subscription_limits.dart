@@ -4,9 +4,10 @@ class SubscriptionLimits {
   const SubscriptionLimits._();
 
   static const int freeLocalProjects = 10;
-  static const int paidLocalProjects = 10000;
+  // Paid plans should not enforce a product-level local project cap. This is a
+  // defensive guard for code paths that still require a finite integer.
+  static const int paidLocalProjects = 0x3fffffff;
   static const int freeRowsPerProject = 5;
-  static const int paidRowsPerProject = 100;
 
   static const Set<String> freeBuiltInEffects = <String>{
     'Gain',
@@ -55,7 +56,7 @@ class SubscriptionLimits {
   }
 
   static int rowLimitFor(EntitlementSnapshot? entitlement) {
-    return isFreePlan(entitlement) ? freeRowsPerProject : paidRowsPerProject;
+    return isFreePlan(entitlement) ? freeRowsPerProject : 0x3fffffff;
   }
 
   static bool canUseInstrument(

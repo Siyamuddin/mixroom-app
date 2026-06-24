@@ -85,6 +85,7 @@ class DesktopPluginPrefs {
     required this.favoritePluginIds,
     required this.hiddenPluginIds,
     required this.scanPaths,
+    this.cachedPlugins = const <Map<String, dynamic>>[],
     this.hostedWindowsDetached = false,
     this.lastRescanAtMs,
   });
@@ -92,6 +93,7 @@ class DesktopPluginPrefs {
   final Set<String> favoritePluginIds;
   final Set<String> hiddenPluginIds;
   final List<String> scanPaths;
+  final List<Map<String, dynamic>> cachedPlugins;
   final bool hostedWindowsDetached;
   final int? lastRescanAtMs;
 
@@ -99,6 +101,10 @@ class DesktopPluginPrefs {
         'favoritePluginIds': favoritePluginIds.toList()..sort(),
         'hiddenPluginIds': hiddenPluginIds.toList()..sort(),
         'scanPaths': scanPaths,
+        'cachedPlugins': cachedPlugins
+            .map(_sanitizePluginJson)
+            .where(_hasPluginIdentity)
+            .toList(),
         'hostedWindowsDetached': hostedWindowsDetached,
         if (lastRescanAtMs != null) 'lastRescanAtMs': lastRescanAtMs,
       };
@@ -114,6 +120,18 @@ class DesktopPluginPrefs {
           .toSet();
     }
 
+    List<Map<String, dynamic>> readPluginList(String key) {
+      final raw = json[key];
+      if (raw is! List) return const <Map<String, dynamic>>[];
+      return raw
+          .whereType<Map>()
+          .map((plugin) => _sanitizePluginJson(
+                Map<String, dynamic>.from(plugin),
+              ))
+          .where(_hasPluginIdentity)
+          .toList(growable: false);
+    }
+
     return DesktopPluginPrefs(
       favoritePluginIds: readStringSet('favoritePluginIds'),
       hiddenPluginIds: readStringSet('hiddenPluginIds'),
@@ -122,9 +140,38 @@ class DesktopPluginPrefs {
           .map((value) => value.trim())
           .where((value) => value.isNotEmpty)
           .toList(growable: false),
+      cachedPlugins: readPluginList('cachedPlugins'),
       hostedWindowsDetached: json['hostedWindowsDetached'] == true,
       lastRescanAtMs: (json['lastRescanAtMs'] as num?)?.toInt(),
     );
+  }
+
+  static Map<String, dynamic> _sanitizePluginJson(Map<String, dynamic> plugin) {
+    final out = <String, dynamic>{};
+    final id = plugin['id']?.toString().trim() ?? '';
+    final name = plugin['name']?.toString().trim() ?? '';
+    if (id.isNotEmpty) out['id'] = id;
+    if (name.isNotEmpty) out['name'] = name;
+
+    for (final key in <String>['format', 'manufacturer', 'category']) {
+      final value = plugin[key]?.toString().trim() ?? '';
+      if (value.isNotEmpty) out[key] = value;
+    }
+    for (final key in <String>[
+      'isInstrument',
+      'quarantined',
+      'favorite',
+      'hidden',
+    ]) {
+      if (plugin[key] is bool) out[key] = plugin[key] == true;
+    }
+    return out;
+  }
+
+  static bool _hasPluginIdentity(Map<String, dynamic> plugin) {
+    final id = (plugin['id'] as String?)?.trim() ?? '';
+    final name = (plugin['name'] as String?)?.trim() ?? '';
+    return id.isNotEmpty && name.isNotEmpty;
   }
 }
 

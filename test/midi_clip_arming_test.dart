@@ -91,4 +91,40 @@ void main() {
 
     expect(armed, isNull);
   });
+
+  test('resolves a selected instrument lane for midi recording', () {
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Audio', iconId: 0),
+      TimelineRow(
+        rowId: 2,
+        name: 'Keys',
+        iconId: 1,
+        kind: TimelineRowKind.instrument,
+        instrumentId: 'sfz.vsco.upright_piano',
+        instrumentName: 'Upright Piano',
+      ),
+    ];
+
+    expect(
+      resolveSelectedInstrumentLaneRecordingRow(
+        rows: rows,
+        selectedRow: 1,
+      ),
+      1,
+    );
+  });
+
+  test('does not resolve an audio row for midi recording', () {
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Audio', iconId: 0),
+    ];
+
+    expect(
+      resolveSelectedInstrumentLaneRecordingRow(
+        rows: rows,
+        selectedRow: 0,
+      ),
+      isNull,
+    );
+  });
 }

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:mixroom/helpers/desktop_editor_prefs.dart';
@@ -46,6 +48,12 @@ class DesktopPanelShell extends StatefulWidget {
     this.minWidth = 320,
     this.minHeight = 220,
     this.topContextMenuHeight = 14,
+    this.dragHandleHeight,
+    this.dragHandleLeftInset = 22,
+    this.dragHandleRightInset = 22,
+    this.outerShadows,
+    this.outerShadowBorderRadius = 18,
+    this.resizeCornerHandleSize = 32,
     this.onResetLayout,
   });
 
@@ -58,6 +66,12 @@ class DesktopPanelShell extends StatefulWidget {
   final double minWidth;
   final double minHeight;
   final double topContextMenuHeight;
+  final double? dragHandleHeight;
+  final double dragHandleLeftInset;
+  final double dragHandleRightInset;
+  final List<BoxShadow>? outerShadows;
+  final double outerShadowBorderRadius;
+  final double resizeCornerHandleSize;
   final VoidCallback? onResetLayout;
 
   @override
@@ -286,6 +300,7 @@ class _DesktopPanelShellState extends State<DesktopPanelShell> {
   Rect? _interactionStartRect;
   Offset? _interactionStartGlobal;
   _DesktopPanelEdge? _activeResizeEdge;
+  _DesktopPanelEdge? _hoverResizeEdge;
   bool _dragActive = false;
 
   bool get _isInteracting =>
@@ -518,6 +533,88 @@ class _DesktopPanelShellState extends State<DesktopPanelShell> {
     _commitLiveRect();
   }
 
+  MouseCursor _cursorForEdge(_DesktopPanelEdge? edge) {
+    switch (edge) {
+      case _DesktopPanelEdge.left:
+      case _DesktopPanelEdge.right:
+        return SystemMouseCursors.resizeLeftRight;
+      case _DesktopPanelEdge.top:
+      case _DesktopPanelEdge.bottom:
+        return SystemMouseCursors.resizeUpDown;
+      case _DesktopPanelEdge.topLeft:
+        return SystemMouseCursors.resizeUpLeft;
+      case _DesktopPanelEdge.topRight:
+        return SystemMouseCursors.resizeUpRight;
+      case _DesktopPanelEdge.bottomLeft:
+        return SystemMouseCursors.resizeDownLeft;
+      case _DesktopPanelEdge.bottomRight:
+        return SystemMouseCursors.resizeDownRight;
+      case null:
+        return MouseCursor.defer;
+    }
+  }
+
+  _DesktopPanelEdge? _resizeEdgeForLocalPosition({
+    required Offset position,
+    required Size size,
+    required double sideHandleSize,
+    required double cornerHandleSize,
+  }) {
+    if (widget.fullscreen ||
+        position.dx < 0 ||
+        position.dy < 0 ||
+        position.dx > size.width ||
+        position.dy > size.height) {
+      return null;
+    }
+
+    final nearLeft = position.dx <= sideHandleSize;
+    final nearRight = position.dx >= size.width - sideHandleSize;
+    final nearTop = position.dy <= sideHandleSize;
+    final nearBottom = position.dy >= size.height - sideHandleSize;
+    final inLeftCorner = position.dx <= cornerHandleSize;
+    final inRightCorner = position.dx >= size.width - cornerHandleSize;
+    final inTopCorner = position.dy <= cornerHandleSize;
+    final inBottomCorner = position.dy >= size.height - cornerHandleSize;
+
+    if (inLeftCorner && inTopCorner) return _DesktopPanelEdge.topLeft;
+    if (inRightCorner && inTopCorner) return _DesktopPanelEdge.topRight;
+    if (inLeftCorner && inBottomCorner) return _DesktopPanelEdge.bottomLeft;
+    if (inRightCorner && inBottomCorner) {
+      return _DesktopPanelEdge.bottomRight;
+    }
+    if (nearLeft) return _DesktopPanelEdge.left;
+    if (nearRight) return _DesktopPanelEdge.right;
+    if (nearTop) return _DesktopPanelEdge.top;
+    if (nearBottom) return _DesktopPanelEdge.bottom;
+    return null;
+  }
+
+  void _updateHoverResizeEdge({
+    required Offset position,
+    required Size size,
+    required double sideHandleSize,
+    required double cornerHandleSize,
+  }) {
+    final next = _resizeEdgeForLocalPosition(
+      position: position,
+      size: size,
+      sideHandleSize: sideHandleSize,
+      cornerHandleSize: cornerHandleSize,
+    );
+    if (next == _hoverResizeEdge) return;
+    setState(() {
+      _hoverResizeEdge = next;
+    });
+  }
+
+  void _clearHoverResizeEdge() {
+    if (_hoverResizeEdge == null) return;
+    setState(() {
+      _hoverResizeEdge = null;
+    });
+  }
+
   void _commitLiveRect() {
     final liveRect = _liveRect;
     _interactionStartRect = null;
@@ -677,8 +774,9 @@ class _DesktopPanelShellState extends State<DesktopPanelShell> {
       alignment: alignment,
       child: MouseRegion(
         cursor: cursor,
+        opaque: true,
         child: GestureDetector(
-          behavior: HitTestBehavior.translucent,
+          behavior: HitTestBehavior.opaque,
           onPanStart: (details) => _beginResize(edge, details),
           onPanUpdate: _updateResize,
           onPanEnd: _endResize,
@@ -691,6 +789,44 @@ class _DesktopPanelShellState extends State<DesktopPanelShell> {
     );
   }
 
+  Widget _buildCornerResizeHandle({
+    required _DesktopPanelEdge edge,
+    required MouseCursor cursor,
+    required double size,
+  }) {
+    return Positioned(
+      left: edge == _DesktopPanelEdge.topLeft ||
+              edge == _DesktopPanelEdge.bottomLeft
+          ? 0
+          : null,
+      right: edge == _DesktopPanelEdge.topRight ||
+              edge == _DesktopPanelEdge.bottomRight
+          ? 0
+          : null,
+      top: edge == _DesktopPanelEdge.topLeft ||
+              edge == _DesktopPanelEdge.topRight
+          ? 0
+          : null,
+      bottom: edge == _DesktopPanelEdge.bottomLeft ||
+              edge == _DesktopPanelEdge.bottomRight
+          ? 0
+          : null,
+      width: size,
+      height: size,
+      child: MouseRegion(
+        cursor: cursor,
+        opaque: true,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onPanStart: (details) => _beginResize(edge, details),
+          onPanUpdate: _updateResize,
+          onPanEnd: _endResize,
+          child: const SizedBox.expand(),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final rect = widget.fullscreen
@@ -698,95 +834,127 @@ class _DesktopPanelShellState extends State<DesktopPanelShell> {
         : (_liveRect ?? _rectFromLayout(widget.layout));
     final shellPadding =
         widget.fullscreen ? EdgeInsets.zero : const EdgeInsets.all(8);
-    final dragStripHeight = widget.fullscreen ? 0.0 : 10.0;
-    final topMenuHeight = widget.fullscreen
+    final dragStripHeight = widget.fullscreen
         ? 0.0
-        : widget.topContextMenuHeight.clamp(0.0, rect.height);
+        : (widget.dragHandleHeight ?? 10.0).clamp(0.0, rect.height).toDouble();
+    final topMenuHeight =
+        widget.topContextMenuHeight.clamp(0.0, rect.height).toDouble();
+    const sideHandleSize = 14.0;
+    final cornerHandleSize = widget.resizeCornerHandleSize
+        .clamp(16.0, math.min(rect.width, rect.height))
+        .toDouble();
 
     return Positioned.fromRect(
       rect: rect,
-      child: Listener(
-        behavior: HitTestBehavior.translucent,
-        onPointerDown: (event) {
-          if (!widget.fullscreen &&
-              event.localPosition.dy <= topMenuHeight &&
-              event.kind == PointerDeviceKind.mouse &&
-              event.buttons == kSecondaryMouseButton) {
-            _showPanelMenu(event.position);
-          }
-        },
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: <Widget>[
-            Padding(
-              padding: shellPadding,
-              child: widget.child,
-            ),
-            if (!widget.fullscreen)
-              Positioned(
-                left: 22,
-                right: 22,
-                top: 0,
-                height: dragStripHeight,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  onPanStart: _beginDrag,
-                  onPanUpdate: _updateDrag,
-                  onPanEnd: _endDrag,
-                  child: const SizedBox.expand(),
+      child: MouseRegion(
+        cursor: _cursorForEdge(_hoverResizeEdge),
+        onExit: (_) => _clearHoverResizeEdge(),
+        child: Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerHover: (event) {
+            _updateHoverResizeEdge(
+              position: event.localPosition,
+              size: rect.size,
+              sideHandleSize: sideHandleSize,
+              cornerHandleSize: cornerHandleSize,
+            );
+          },
+          onPointerMove: (event) {
+            _updateHoverResizeEdge(
+              position: event.localPosition,
+              size: rect.size,
+              sideHandleSize: sideHandleSize,
+              cornerHandleSize: cornerHandleSize,
+            );
+          },
+          onPointerDown: (event) {
+            if (event.localPosition.dy <= topMenuHeight &&
+                event.kind == PointerDeviceKind.mouse &&
+                event.buttons == kSecondaryMouseButton) {
+              _showPanelMenu(event.position);
+            }
+          },
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: <Widget>[
+              Padding(
+                padding: shellPadding,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(
+                      widget.outerShadowBorderRadius,
+                    ),
+                    boxShadow: widget.outerShadows,
+                  ),
+                  child: widget.child,
                 ),
               ),
-            if (!widget.fullscreen) ...<Widget>[
-              _buildResizeHandle(
-                alignment: Alignment.centerLeft,
-                cursor: SystemMouseCursors.resizeLeftRight,
-                edge: _DesktopPanelEdge.left,
-                width: 14,
-                height: double.infinity,
-              ),
-              _buildResizeHandle(
-                alignment: Alignment.centerRight,
-                cursor: SystemMouseCursors.resizeLeftRight,
-                edge: _DesktopPanelEdge.right,
-                width: 14,
-                height: double.infinity,
-              ),
-              _buildResizeHandle(
-                alignment: Alignment.topCenter,
-                cursor: SystemMouseCursors.resizeUpDown,
-                edge: _DesktopPanelEdge.top,
-                width: double.infinity,
-                height: 14,
-              ),
-              _buildResizeHandle(
-                alignment: Alignment.bottomCenter,
-                cursor: SystemMouseCursors.resizeUpDown,
-                edge: _DesktopPanelEdge.bottom,
-                width: double.infinity,
-                height: 14,
-              ),
-              _buildResizeHandle(
-                alignment: Alignment.topLeft,
-                cursor: SystemMouseCursors.resizeUpLeftDownRight,
-                edge: _DesktopPanelEdge.topLeft,
-              ),
-              _buildResizeHandle(
-                alignment: Alignment.topRight,
-                cursor: SystemMouseCursors.resizeUpRightDownLeft,
-                edge: _DesktopPanelEdge.topRight,
-              ),
-              _buildResizeHandle(
-                alignment: Alignment.bottomLeft,
-                cursor: SystemMouseCursors.resizeUpRightDownLeft,
-                edge: _DesktopPanelEdge.bottomLeft,
-              ),
-              _buildResizeHandle(
-                alignment: Alignment.bottomRight,
-                cursor: SystemMouseCursors.resizeUpLeftDownRight,
-                edge: _DesktopPanelEdge.bottomRight,
-              ),
+              if (!widget.fullscreen)
+                Positioned(
+                  left: widget.dragHandleLeftInset,
+                  right: widget.dragHandleRightInset,
+                  top: 0,
+                  height: dragStripHeight,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onPanStart: _beginDrag,
+                    onPanUpdate: _updateDrag,
+                    onPanEnd: _endDrag,
+                    child: const SizedBox.expand(),
+                  ),
+                ),
+              if (!widget.fullscreen) ...<Widget>[
+                _buildResizeHandle(
+                  alignment: Alignment.centerLeft,
+                  cursor: SystemMouseCursors.resizeLeftRight,
+                  edge: _DesktopPanelEdge.left,
+                  width: sideHandleSize,
+                  height: double.infinity,
+                ),
+                _buildResizeHandle(
+                  alignment: Alignment.centerRight,
+                  cursor: SystemMouseCursors.resizeLeftRight,
+                  edge: _DesktopPanelEdge.right,
+                  width: sideHandleSize,
+                  height: double.infinity,
+                ),
+                _buildResizeHandle(
+                  alignment: Alignment.topCenter,
+                  cursor: SystemMouseCursors.resizeUpDown,
+                  edge: _DesktopPanelEdge.top,
+                  width: double.infinity,
+                  height: sideHandleSize,
+                ),
+                _buildResizeHandle(
+                  alignment: Alignment.bottomCenter,
+                  cursor: SystemMouseCursors.resizeUpDown,
+                  edge: _DesktopPanelEdge.bottom,
+                  width: double.infinity,
+                  height: sideHandleSize,
+                ),
+                _buildCornerResizeHandle(
+                  cursor: SystemMouseCursors.resizeUpLeft,
+                  edge: _DesktopPanelEdge.topLeft,
+                  size: cornerHandleSize,
+                ),
+                _buildCornerResizeHandle(
+                  cursor: SystemMouseCursors.resizeUpRight,
+                  edge: _DesktopPanelEdge.topRight,
+                  size: cornerHandleSize,
+                ),
+                _buildCornerResizeHandle(
+                  cursor: SystemMouseCursors.resizeDownLeft,
+                  edge: _DesktopPanelEdge.bottomLeft,
+                  size: cornerHandleSize,
+                ),
+                _buildCornerResizeHandle(
+                  cursor: SystemMouseCursors.resizeDownRight,
+                  edge: _DesktopPanelEdge.bottomRight,
+                  size: cornerHandleSize,
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

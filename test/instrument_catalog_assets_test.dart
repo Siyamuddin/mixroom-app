@@ -83,6 +83,69 @@ Set<String> _extractStaticSfzPaths(String source) {
   return out;
 }
 
+Future<List<Map<String, String>>> _parseSfzRegions(File sfzFile) async {
+  final control = <String, String>{};
+  final global = <String, String>{};
+  final master = <String, String>{};
+  final group = <String, String>{};
+  Map<String, String>? region;
+  var currentBlock = '';
+  final regions = <Map<String, String>>[];
+
+  for (final rawLine
+      in const LineSplitter().convert(await sfzFile.readAsString())) {
+    final parsed = _parseSfzLine(rawLine);
+    final tag = parsed.blockTag;
+    if (tag != null && tag.isNotEmpty) {
+      currentBlock = tag;
+      if (tag == 'group') {
+        group.clear();
+      } else if (tag == 'master') {
+        master.clear();
+      } else if (tag == 'region') {
+        region = <String, String>{}
+          ..addAll(control)
+          ..addAll(global)
+          ..addAll(master)
+          ..addAll(group);
+        regions.add(region);
+      }
+    }
+
+    final opcodes = parsed.opcodes;
+    if (opcodes.isEmpty) continue;
+
+    switch (currentBlock) {
+      case 'control':
+        control.addAll(opcodes);
+        break;
+      case 'global':
+        global.addAll(opcodes);
+        break;
+      case 'master':
+        master.addAll(opcodes);
+        break;
+      case 'group':
+        group.addAll(opcodes);
+        break;
+      case 'region':
+        region ??= <String, String>{}
+          ..addAll(control)
+          ..addAll(global)
+          ..addAll(master)
+          ..addAll(group);
+        region.addAll(opcodes);
+        break;
+    }
+  }
+
+  return regions;
+}
+
+int _sfzInt(Map<String, String> region, String key, int fallback) {
+  return int.tryParse((region[key] ?? '').trim()) ?? fallback;
+}
+
 void main() {
   test('bundled instrument catalog resolves every indexed SFZ preset',
       () async {
@@ -202,8 +265,8 @@ void main() {
           'cpp', 'JuceEngine.h'),
       p.join(repoRoot.path, 'juce_audio_engine', 'android', 'src', 'main',
           'cpp', 'TimelineMidiClipProcessor.h'),
-      p.join(repoRoot.path, 'juce_audio_engine', 'ios', 'Classes',
-          'JuceEngine.h'),
+      p.join(
+          repoRoot.path, 'juce_audio_engine', 'ios', 'Classes', 'JuceEngine.h'),
     ];
 
     final referenced = <String>{};
@@ -227,6 +290,63 @@ void main() {
     }
   });
 
+  test('upright piano covers the chromatic 88-key piano range', () async {
+    final repoRoot = Directory.current;
+    final sfzFile = File(p.join(repoRoot.path, 'assets', 'instruments',
+        'VSCO-2-CE-1.1.0', 'UprightPiano.sfz'));
+    expect(sfzFile.existsSync(), isTrue,
+        reason: 'Missing upright piano SFZ preset.');
+
+    final regions = (await _parseSfzRegions(sfzFile))
+        .where((region) => (region['sample'] ?? '').trim().isNotEmpty)
+        .toList(growable: false);
+    expect(regions, isNotEmpty,
+        reason: 'Upright piano parsed with zero sample regions.');
+
+    for (final region in regions) {
+      final loKey = _sfzInt(region, 'lokey', 0);
+      final hiKey = _sfzInt(region, 'hikey', 127);
+      final keyCenter = _sfzInt(region, 'pitch_keycenter', -1);
+      expect(loKey, greaterThanOrEqualTo(21),
+          reason: 'Upright piano must not map below A0.');
+      expect(hiKey, lessThanOrEqualTo(108),
+          reason: 'Upright piano must not map above C8.');
+      expect(keyCenter, inInclusiveRange(21, 108),
+          reason: 'Upright piano sample key center must stay in piano range.');
+      expect(loKey, lessThanOrEqualTo(hiKey),
+          reason: 'Upright piano region has an inverted key range.');
+    }
+
+    const velocities = <int>[1, 64, 110];
+    for (var pitch = 21; pitch <= 108; pitch++) {
+      final exactPitchRegions = regions.where((region) {
+        final loKey = _sfzInt(region, 'lokey', 0);
+        final hiKey = _sfzInt(region, 'hikey', 127);
+        final keyCenter = _sfzInt(region, 'pitch_keycenter', -1);
+        return loKey == pitch && hiKey == pitch && keyCenter == pitch;
+      }).toList(growable: false);
+      expect(exactPitchRegions.length, 2,
+          reason:
+              'Upright piano must have two explicit sample regions for pitch $pitch.');
+
+      for (final velocity in velocities) {
+        final matches = regions.where((region) {
+          final loKey = _sfzInt(region, 'lokey', 0);
+          final hiKey = _sfzInt(region, 'hikey', 127);
+          final loVel = _sfzInt(region, 'lovel', 0);
+          final hiVel = _sfzInt(region, 'hivel', 127);
+          return pitch >= loKey &&
+              pitch <= hiKey &&
+              velocity >= loVel &&
+              velocity <= hiVel;
+        });
+        expect(matches, isNotEmpty,
+            reason:
+                'Upright piano missing pitch $pitch at velocity $velocity.');
+      }
+    }
+  });
+
   test('native sampled resolver does not hardcode bundled SFZ asset paths',
       () async {
     final repoRoot = Directory.current;
@@ -235,8 +355,8 @@ void main() {
           'cpp', 'JuceEngine.h'),
       p.join(repoRoot.path, 'juce_audio_engine', 'android', 'src', 'main',
           'cpp', 'TimelineMidiClipProcessor.h'),
-      p.join(repoRoot.path, 'juce_audio_engine', 'ios', 'Classes',
-          'JuceEngine.h'),
+      p.join(
+          repoRoot.path, 'juce_audio_engine', 'ios', 'Classes', 'JuceEngine.h'),
     ];
 
     for (final path in nativeFiles) {

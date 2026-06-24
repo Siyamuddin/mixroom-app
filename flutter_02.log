@@ -1,0 +1,93 @@
+Flutter crash report.
+Please report a bug at https://github.com/flutter/flutter/issues.
+
+## command
+
+flutter test test/audio_timeline_interactions_test.dart --plain-name tool selector menu is wide enough for single-line labels
+
+## exception
+
+PathNotFoundException: PathNotFoundException: Cannot copy file to '/Users/andrewhyungulee/Mixroom/mixroom-app/build/unit_test_assets/NativeAssetsManifest.json', path = '/Users/andrewhyungulee/Mixroom/mixroom-app/build/native_assets/macos/native_assets.json' (OS Error: No such file or directory, errno = 2)
+
+```
+#0      _checkForErrorResponse (dart:io/common.dart:58:9)
+#1      _File.copy.<anonymous closure> (dart:io/file_impl.dart:406:7)
+#2      _rootRunUnary (dart:async/zone_root.dart:48:47)
+#3      _CustomZone.runUnary (dart:async/zone.dart:733:19)
+<asynchronous suspension>
+#4      ForwardingFile.copy (package:file/src/forwarding/forwarding_file.dart:29:51)
+<asynchronous suspension>
+#5      ForwardingFile.copy (package:file/src/forwarding/forwarding_file.dart:29:51)
+<asynchronous suspension>
+#6      TestCommand.runCommand (package:flutter_tools/src/commands/test.dart:517:7)
+<asynchronous suspension>
+#7      FlutterCommand.run.<anonymous closure> (package:flutter_tools/src/runner/flutter_command.dart:1630:27)
+<asynchronous suspension>
+#8      AppContext.run.<anonymous closure> (package:flutter_tools/src/base/context.dart:154:19)
+<asynchronous suspension>
+#9      CommandRunner.runCommand (package:args/command_runner.dart:212:13)
+<asynchronous suspension>
+#10     FlutterCommandRunner.runCommand.<anonymous closure> (package:flutter_tools/src/runner/flutter_command_runner.dart:496:9)
+<asynchronous suspension>
+#11     AppContext.run.<anonymous closure> (package:flutter_tools/src/base/context.dart:154:19)
+<asynchronous suspension>
+#12     FlutterCommandRunner.runCommand (package:flutter_tools/src/runner/flutter_command_runner.dart:431:5)
+<asynchronous suspension>
+#13     FlutterCommandRunner.run.<anonymous closure> (package:flutter_tools/src/runner/flutter_command_runner.dart:307:33)
+<asynchronous suspension>
+#14     run.<anonymous closure>.<anonymous closure> (package:flutter_tools/runner.dart:104:11)
+<asynchronous suspension>
+#15     AppContext.run.<anonymous closure> (package:flutter_tools/src/base/context.dart:154:19)
+<asynchronous suspension>
+#16     main (package:flutter_tools/executable.dart:103:3)
+<asynchronous suspension>
+```
+
+## flutter doctor
+
+```
+[✓] Flutter (Channel stable, 3.44.2, on macOS 26.4 25E246 darwin-arm64, locale en-KR) [331ms]
+    • Flutter version 3.44.2 on channel stable at /Users/andrewhyungulee/MOSS/flutter
+    • Upstream repository https://github.com/flutter/flutter.git
+    • Framework revision c9a6c48423 (13 days ago), 2026-06-10 15:52:41 -0700
+    • Engine revision 77e2e94772
+    • Dart version 3.12.2
+    • DevTools version 2.57.0
+    • Feature flags: enable-web, enable-linux-desktop, enable-macos-desktop, enable-windows-desktop, enable-android, enable-ios, cli-animations, enable-native-assets, enable-swift-package-manager, omit-legacy-version-file, enable-lldb-debugging, enable-uiscene-migration
+
+[✓] Android toolchain - develop for Android devices (Android SDK version 35.0.1) [2.3s]
+    • Android SDK at /Users/andrewhyungulee/Library/Android/sdk
+    • Emulator version 35.4.9.0 (build_id 13025442) (CL:N/A)
+    • Platform android-36, build-tools 35.0.1
+    • ANDROID_SDK_ROOT = /Users/andrewhyungulee/Library/Android/sdk
+    • Java binary at: /Applications/Android Studio.app/Contents/jbr/Contents/Home/bin/java
+      This is the JDK bundled with the latest Android Studio installation on this machine.
+      To manually set the JDK path, use: `flutter config --jdk-dir="path/to/jdk"`.
+    • Java version OpenJDK Runtime Environment (build 21.0.5+-12932927-b750.29)
+    • All Android licenses accepted.
+
+[✓] Xcode - develop for iOS and macOS (Xcode 26.5) [1,299ms]
+    • Xcode at /Applications/Xcode.app/Contents/Developer
+    • Build 17F42
+    • CocoaPods version 1.16.2
+
+[✓] Chrome - develop for the web [11ms]
+    • Chrome at /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+
+[✓] Connected device (4 available) [7.4s]
+    • SM F711N (mobile)                   • R3CRA02JAMD               • android-arm64  • Android 15 (API 35)
+    • Andrew’s iPhone (wireless) (mobile) • 00008120-00041C522280201E • ios            • iOS 18.7.2 22H124
+    • macOS (desktop)                     • macos                     • darwin-arm64   • macOS 26.4 25E246 darwin-arm64
+    • Chrome (web)                        • chrome                    • web-javascript • Google Chrome 149.0.7827.156
+    ! Error: Browsing on the local area network for Hansol의 iPhone. Ensure the device is unlocked and attached with a cable or associated with the same local area network as this Mac.
+      The device must be opted into Developer Mode to connect wirelessly. (code -27)
+    ! Error: Browsing on the local area network for Chaeyeon의 iPad (2). Ensure the device is unlocked and attached with a cable or associated with the same local area network as this Mac.
+      The device must be opted into Developer Mode to connect wirelessly. (code -27)
+    ! Error: Browsing on the local area network for Chaeyeon의 iPad. Ensure the device is unlocked and attached with a cable or associated with the same local area network as this Mac.
+      The device must be opted into Developer Mode to connect wirelessly. (code -27)
+
+[✓] Network resources [485ms]
+    • All expected network resources are available.
+
+• No issues found!
+```

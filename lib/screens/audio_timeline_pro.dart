@@ -60,6 +60,16 @@ class _PendingPaintPaste {
   });
 }
 
+class _TimelinePasteTarget {
+  final int row;
+  final double startMs;
+
+  const _TimelinePasteTarget({
+    required this.row,
+    required this.startMs,
+  });
+}
+
 class _AddRowBubbleTailPainter extends CustomPainter {
   _AddRowBubbleTailPainter({
     required this.centerX,
@@ -198,6 +208,9 @@ const Color _kTimelineHeaderIdle = Color(0xFF464A4F);
 const Color _kTimelineHeaderIdleDark = Color(0xFF32363B);
 const Color _kTimelineHeaderSelected = Color(0xFF9A6A36);
 const Color _kTimelineHeaderSelectedDark = Color(0xFF744B24);
+const Color _kMasterAutomationLaneFill = Color(0xFF1D2733);
+const Color _kMasterAutomationLaneHeader = Color(0xFF3F4751);
+const Color _kMasterAutomationLaneBorder = Color.fromRGBO(255, 255, 255, 0.16);
 const Color _kTimelineUtilityBlue = Color(0xFF2B88DE);
 const Color _kTimelineUtilityBlueDark = Color(0xFF1F69BA);
 const Color _kTimelineClipAudio = Color(0xFF6A7A89);
@@ -482,6 +495,7 @@ class AudioCanvasTimeline extends StatefulWidget {
       setRowEffectParam;
   final Future<List<Map<String, dynamic>>> Function() scanPlugins;
   final Future<void> Function(String pluginId)? onTogglePluginFavorite;
+  final Future<void> Function()? onManagePlugins;
   final Future<bool> Function(int row, int effectIndex)? openTrackPluginEditor;
   final Future<void> Function(int row, List<Map<String, dynamic>> points)
       setTrackAutomationPoints;
@@ -529,6 +543,8 @@ class AudioCanvasTimeline extends StatefulWidget {
   final Future<bool> Function(int row, double timeMs) onPasteClipAt;
   final VoidCallback? onClearCopiedClip;
   final void Function(List<int> clipIndices)? onCopyClips;
+  final Future<bool> Function(List<int> clipIndices, double pasteStartMs)?
+      onStepDuplicateClips;
   final Future<void> Function(List<int> clipIndices)? onDeleteClips;
   final Future<void> Function(int clipIndex, double cutTimeMs)? onCutClipAt;
   final Future<void> Function(List<int> clipIndices)? onGlueClips;
@@ -590,6 +606,8 @@ class AudioCanvasTimeline extends StatefulWidget {
   final VoidCallback? onUpgradeRequested;
   final bool useTabletDawLayout;
   final double? tabletSidePanelWidth;
+  final bool allowMultipleExpandedRows;
+  final bool expandRowsOnTrackSelect;
 
   final String mode; // "Basic" or "Pro"
 
@@ -677,6 +695,7 @@ class AudioCanvasTimeline extends StatefulWidget {
     required this.setRowEffectParam,
     required this.scanPlugins,
     this.onTogglePluginFavorite,
+    this.onManagePlugins,
     this.openTrackPluginEditor,
     required this.setTrackAutomationPoints,
     required this.onAutomationCommit,
@@ -715,6 +734,7 @@ class AudioCanvasTimeline extends StatefulWidget {
     required this.onPasteClipAt,
     this.onClearCopiedClip,
     this.onCopyClips,
+    this.onStepDuplicateClips,
     this.onDeleteClips,
     this.onCutClipAt,
     this.onGlueClips,
@@ -763,6 +783,8 @@ class AudioCanvasTimeline extends StatefulWidget {
     this.onUpgradeRequested,
     this.useTabletDawLayout = false,
     this.tabletSidePanelWidth,
+    this.allowMultipleExpandedRows = true,
+    this.expandRowsOnTrackSelect = true,
   }) : super(key: key);
   @override
   State<AudioCanvasTimeline> createState() => _AudioCanvasTimelineState();
@@ -1102,6 +1124,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   static const double _kTabletRowHeightMax = 84.0;
   static const double _kTabletRowHeightMinScale = 0.62;
   static const double _kTabletRowHeightMaxScale = 1.0;
+  static const double _kTabletRailWheelResizeSensitivity = 0.0015;
   static const double _kTabletHeaderLedgeX = 27.0;
   static const double _kTabletRailCenterX = _kTabletHeaderLedgeX / 2.0;
   static const Color _kTabletRailLaneColor = Color.fromRGBO(17, 64, 103, 0.84);
@@ -1131,14 +1154,16 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   static const double _kTimelineAutomationLaneExpandedHeight =
       kRowHeight - (_kTimelineAutomationLaneInset * 2.0);
   static const double _kTimelineAutomationLaneCollapsedHeight = 20.0;
-  static const double _kMasterAutomationLaneHeight = 188.0;
+  static const double _kMasterAutomationLaneMinHeight = 312.0;
   static const double _kMacWheelZoomSensitivity = 0.0025;
   static const double _kMinTimelinePixelsPerMs = 0.001;
   static const double _kMaxTimelinePixelsPerMs = 1.0;
+  late final FocusNode _timelineFocusNode;
   bool get _usesTabletDawLayout => widget.useTabletDawLayout;
   bool get _usesDesktopOrTabletDawLayout =>
       _usesTabletDawLayout || PlatformCapabilities.current.isDesktop;
-  bool get _allowsMultipleExpandedRows => _usesDesktopOrTabletDawLayout;
+  bool get _allowsMultipleExpandedRows =>
+      _usesDesktopOrTabletDawLayout && widget.allowMultipleExpandedRows;
   double get _rowHeight => _usesTabletDawLayout
       ? _kTabletRowHeightMax * _tabletRowHeightScale
       : kRowHeight;
@@ -1157,6 +1182,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   double _scrollOffsetMs = 0.0;
   int _selectedClipIndex = -1;
   final Set<int> _selectedClipIndices = <int>{};
+  int _clipVisualStackCounter = 0;
+  final Map<String, int> _clipVisualStackOrder = <String, int>{};
   int _selectedRowIndex = 0;
   // final List<bool> _rowMuted = List.filled(kNumRows, false);
   final List<bool> _rowExpanded = <bool>[];
@@ -1179,6 +1206,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   int? _dragStartRow;
   double _dragDeltaMs = 0.0;
   int _dragDeltaRows = 0;
+  bool _dragXAxisLocked = false;
   final Map<int, double> _dragGroupStartMs = <int, double>{};
   final Map<int, int> _dragGroupStartRows = <int, int>{};
   Offset? _dragStartLocalOffset; // Local position where drag started
@@ -1253,12 +1281,19 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   bool _suppressNextTimelineTapAfterInstrumentLaneCreate = false;
   int? _pendingTapSelectionClipIndex;
   double? _pendingTapSelectionPopupMs;
+  bool _desktopPrimaryPointerDownActive = false;
+  String? _stepDuplicateShortcutSelectionKey;
+  double? _stepDuplicateShortcutNextPasteMs;
   final Set<int> _activeTimelinePointers = <int>{};
 
   // Paste popup state
   bool _showPastePopup = false;
   int? _pasteRow;
   double? _pasteMs;
+  bool _showInstrumentLaneRegionPopup = false;
+  int? _instrumentLaneRegionRow;
+  double? _instrumentLaneRegionMs;
+  Offset? _instrumentLaneRegionAnchorLocal;
   _TimelineGestureSelectionSnapshot? _singleTouchSelectionSnapshot;
   double? _clipPopupMs;
   int? _inlineClipControlIndex;
@@ -1436,6 +1471,18 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _magnetEnabled &&
       !(_timelineKeyboardModifierPointer != null &&
           HardwareKeyboard.instance.isAltPressed);
+
+  bool get _timelineClipDragXAxisLockPressed {
+    final keyboard = HardwareKeyboard.instance;
+    final pressed = keyboard.logicalKeysPressed;
+    final metaPressed = keyboard.isMetaPressed ||
+        pressed.contains(LogicalKeyboardKey.metaLeft) ||
+        pressed.contains(LogicalKeyboardKey.metaRight);
+    final controlPressed = keyboard.isControlPressed ||
+        pressed.contains(LogicalKeyboardKey.controlLeft) ||
+        pressed.contains(LogicalKeyboardKey.controlRight);
+    return metaPressed || (!Platform.isMacOS && controlPressed);
+  }
 
   double _quantizeMsForTimelineClipDrag(double rawMs) {
     return _timelineClipDragSnapEnabled ? _quantizeMs(rawMs) : rawMs;
@@ -1680,6 +1727,13 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
   }
 
+  void _clearInstrumentLaneRegionPopupState() {
+    _showInstrumentLaneRegionPopup = false;
+    _instrumentLaneRegionRow = null;
+    _instrumentLaneRegionMs = null;
+    _instrumentLaneRegionAnchorLocal = null;
+  }
+
   void _clearCutPreview() {
     if (_cutPreviewClipIndex == null &&
         _cutPreviewRawMs == null &&
@@ -1908,6 +1962,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         _automationClipMenuClipId != null ||
         _clipPopupMs != null ||
         _showPastePopup ||
+        _showInstrumentLaneRegionPopup ||
         _trimClipIndex != null ||
         _stretchClipIndex != null ||
         _activeTrimHandleX != null;
@@ -1922,6 +1977,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _showPastePopup = false;
     _pasteRow = null;
     _pasteMs = null;
+    _clearInstrumentLaneRegionPopupState();
     _highlightedSegmentRow = null;
     _highlightedSegmentStartMs = null;
     _highlightedSegmentEndMs = null;
@@ -1940,6 +1996,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _showPastePopup = false;
     _pasteRow = null;
     _pasteMs = null;
+    _clearInstrumentLaneRegionPopupState();
     _highlightedSegmentRow = null;
     _highlightedSegmentStartMs = null;
     _highlightedSegmentEndMs = null;
@@ -1960,17 +2017,65 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     });
   }
 
+  void _requestTimelineFocus() {
+    if (!_timelineFocusNode.canRequestFocus) return;
+    _timelineFocusNode.requestFocus();
+  }
+
+  bool _showPastePopupForEmptyTimelinePointerDown(Offset localPos) {
+    if (!_hasPasteClipboard ||
+        _interactionMode == 'automation' ||
+        _hasActiveAutomationClipDrag ||
+        _selectionBoxActive ||
+        _activeTool == _TimelineTool.cut ||
+        _activeTool == _TimelineTool.delete ||
+        _activeTool == _TimelineTool.paint) {
+      return false;
+    }
+    if (_timelineAutomationClipAt(localPos) != null ||
+        _getGestureClipIndexAt(localPos) != null) {
+      return false;
+    }
+
+    final tapRow = _rowForLocalY(localPos.dy);
+    if (tapRow == null ||
+        (!_canPasteCopiedClipAtRow(tapRow) &&
+            !_canPasteAutomationClipAt(tapRow))) {
+      return false;
+    }
+
+    final rawTapMs = _scrollOffsetMs + localPos.dx / _pixelsPerMs;
+    final needsVisualReset = _selectedClipIndex >= 0 ||
+        _selectedClipIndices.isNotEmpty ||
+        _selectedAutomationClipByLane.isNotEmpty ||
+        _automationClipMenuClipId != null ||
+        _trimClipIndex != null ||
+        _stretchClipIndex != null ||
+        _activeTrimHandleX != null;
+    setState(() {
+      if (needsVisualReset) {
+        _resetTrimInteractionState();
+        _clearClipSelection();
+      }
+      _setPastePopupTarget(tapRow, rawTapMs);
+    });
+    return true;
+  }
+
   void _onTimelinePointerDown(PointerDownEvent event) {
+    _requestTimelineFocus();
     _suppressNextTimelineTapAfterDeadZoneHold = false;
     _activeTimelinePointers.add(event.pointer);
     final keyboard = HardwareKeyboard.instance;
     final desktopSelectionModifierPressed =
         Platform.isMacOS ? keyboard.isMetaPressed : keyboard.isControlPressed;
     final desktopPrimaryPointer = _isDesktopPrimaryTimelinePointer(event);
-    final keyboardModifierDragPointer =
+    final primaryMouseOrTrackpadPointer =
         (event.kind == PointerDeviceKind.mouse ||
                 event.kind == PointerDeviceKind.trackpad) &&
             event.buttons == kPrimaryMouseButton;
+    _desktopPrimaryPointerDownActive = primaryMouseOrTrackpadPointer;
+    final keyboardModifierDragPointer = primaryMouseOrTrackpadPointer;
     if (keyboardModifierDragPointer) {
       _timelineKeyboardModifierPointer = event.pointer;
     }
@@ -1982,7 +2087,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         return;
       }
       if (_canShowInstrumentLaneRegionMenuAt(event.localPosition)) {
-        unawaited(_showInstrumentLaneRegionMenuAt(event.localPosition));
+        _showInstrumentLaneRegionMenuAt(event.localPosition);
         return;
       }
       _deleteStrokeActive = true;
@@ -1993,6 +2098,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
     final desktopBoxSelectionShortcut = desktopPrimaryPointer &&
         desktopSelectionModifierPressed &&
+        _getGestureClipIndexAt(event.localPosition) == null &&
         _canStartSelectionBoxAt(
           event.localPosition,
           allowStartingOverClip: true,
@@ -2002,6 +2108,13 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         _clearPendingSelectionBox();
         _beginSelectionBoxAt(event.localPosition);
       });
+      return;
+    }
+    if (primaryMouseOrTrackpadPointer &&
+        !desktopSelectionModifierPressed &&
+        !keyboard.isAltPressed &&
+        !keyboard.isShiftPressed &&
+        _showPastePopupForEmptyTimelinePointerDown(event.localPosition)) {
       return;
     }
     if (desktopPrimaryPointer &&
@@ -2158,20 +2271,37 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _onTimelinePointerSignal(PointerSignalEvent event) {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.macOS) return;
-    if (event is! PointerScrollEvent) return;
+    _handleTimelineNavigationPointerSignal(event);
+  }
+
+  void _onTimelineLeftChromePointerSignal(PointerSignalEvent event) {
+    if (_handleTimelineNavigationPointerSignal(
+      event,
+      focalPointPx: 0.0,
+    )) {
+      return;
+    }
+    _handleVerticalTimelinePointerSignal(event);
+  }
+
+  bool _handleTimelineNavigationPointerSignal(
+    PointerSignalEvent event, {
+    double? focalPointPx,
+  }) {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.macOS) return false;
+    if (event is! PointerScrollEvent) return false;
 
     final keyboard = HardwareKeyboard.instance;
     final cmdPressed = keyboard.isMetaPressed;
     final shiftPressed = keyboard.isShiftPressed;
-    if (!cmdPressed && !shiftPressed) return;
+    if (!cmdPressed && !shiftPressed) return false;
 
     GestureBinding.instance.pointerSignalResolver.register(
       event,
       (PointerSignalEvent resolved) {
         if (resolved is! PointerScrollEvent) return;
         if (cmdPressed) {
-          _handleMacTimelineZoom(resolved);
+          _handleMacTimelineZoom(resolved, focalPointPx: focalPointPx);
           return;
         }
         if (shiftPressed) {
@@ -2179,9 +2309,49 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         }
       },
     );
+    return true;
   }
 
-  void _handleMacTimelineZoom(PointerScrollEvent event) {
+  bool _handleVerticalTimelinePointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) return false;
+    if (!PlatformCapabilities.current.isDesktop) return false;
+
+    final keyboard = HardwareKeyboard.instance;
+    if ((defaultTargetPlatform == TargetPlatform.macOS &&
+            (keyboard.isMetaPressed || keyboard.isShiftPressed)) ||
+        keyboard.isControlPressed) {
+      return false;
+    }
+
+    final delta = event.scrollDelta.dy;
+    if (delta.abs() < 0.5 || delta.abs() < event.scrollDelta.dx.abs()) {
+      return false;
+    }
+    if (!_verticalScrollController.hasClients) return false;
+
+    GestureBinding.instance.pointerSignalResolver.register(
+      event,
+      (PointerSignalEvent resolved) {
+        if (resolved is! PointerScrollEvent) return;
+        if (!_verticalScrollController.hasClients) return;
+        final position = _verticalScrollController.position;
+        final nextOffset =
+            (_verticalScrollController.offset + resolved.scrollDelta.dy)
+                .clamp(position.minScrollExtent, position.maxScrollExtent)
+                .toDouble();
+        if ((nextOffset - _verticalScrollController.offset).abs() <= 0.01) {
+          return;
+        }
+        _verticalScrollController.jumpTo(nextOffset);
+      },
+    );
+    return true;
+  }
+
+  void _handleMacTimelineZoom(
+    PointerScrollEvent event, {
+    double? focalPointPx,
+  }) {
     final rawDelta = event.scrollDelta.dy.abs() >= event.scrollDelta.dx.abs()
         ? event.scrollDelta.dy
         : event.scrollDelta.dx;
@@ -2194,9 +2364,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           .clamp(_kMinTimelinePixelsPerMs, _kMaxTimelinePixelsPerMs);
       if ((newPixelsPerMs - _pixelsPerMs).abs() < 0.0001) return;
 
-      final focalPointPx = event.localPosition.dx;
-      final focalPointMs = _scrollOffsetMs + focalPointPx / _pixelsPerMs;
-      _scrollOffsetMs = focalPointMs - (focalPointPx / newPixelsPerMs);
+      final focalPx = (focalPointPx ?? event.localPosition.dx)
+          .clamp(0.0, _getViewportWidth(context))
+          .toDouble();
+      final focalPointMs = _scrollOffsetMs + focalPx / _pixelsPerMs;
+      _scrollOffsetMs = focalPointMs - (focalPx / newPixelsPerMs);
       _pixelsPerMs = newPixelsPerMs;
       _clampScroll();
       didZoom = true;
@@ -2233,6 +2405,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   void _onTimelinePointerUp(PointerUpEvent event) {
     _onDeadZonePointerUp(event);
     _activeTimelinePointers.remove(event.pointer);
+    _desktopPrimaryPointerDownActive = false;
     if (_clipLoopPreviewPointer == event.pointer) {
       _stopClipLoopPreview();
       return;
@@ -2317,6 +2490,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   void _onTimelinePointerCancel(PointerCancelEvent event) {
     _onDeadZonePointerCancel(event);
     _activeTimelinePointers.remove(event.pointer);
+    _desktopPrimaryPointerDownActive = false;
     if (_timelineKeyboardModifierPointer == event.pointer) {
       _timelineKeyboardModifierPointer = null;
     }
@@ -2591,8 +2765,13 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     );
 
     if (selected == null || !mounted || selected == _activeTool) return;
+    _selectTimelineTool(selected);
+  }
+
+  void _selectTimelineTool(_TimelineTool tool) {
+    if (tool == _activeTool) return;
     setState(() {
-      _activeTool = selected;
+      _activeTool = tool;
       _clearPendingSelectionBox();
       _selectionBoxActive = false;
       _selectionBoxStart = null;
@@ -2612,6 +2791,19 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _publishTopControlsState();
   }
 
+  _TimelineTool? _timelineToolForShortcutKey(LogicalKeyboardKey key) {
+    final index = switch (key) {
+      LogicalKeyboardKey.digit1 || LogicalKeyboardKey.numpad1 => 0,
+      LogicalKeyboardKey.digit2 || LogicalKeyboardKey.numpad2 => 1,
+      LogicalKeyboardKey.digit3 || LogicalKeyboardKey.numpad3 => 2,
+      LogicalKeyboardKey.digit4 || LogicalKeyboardKey.numpad4 => 3,
+      LogicalKeyboardKey.digit5 || LogicalKeyboardKey.numpad5 => 4,
+      _ => -1,
+    };
+    if (index < 0 || index >= _TimelineTool.values.length) return null;
+    return _TimelineTool.values[index];
+  }
+
   List<int> _activeSelectedClipIndices() {
     if (_selectedClipIndices.isNotEmpty) {
       final list = _selectedClipIndices
@@ -2626,10 +2818,63 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     return const <int>[];
   }
 
+  bool _isClipIndexSelected(int index) {
+    return index == _selectedClipIndex || _selectedClipIndices.contains(index);
+  }
+
+  String _clipVisualStackKey(AudioTrack clip, int fallbackIndex) {
+    final clipId = clip.clipId.trim();
+    if (clipId.isNotEmpty) return 'clip:$clipId';
+    if (clip.engineClipId >= 0) return 'engine:${clip.engineClipId}';
+    return 'index:$fallbackIndex';
+  }
+
+  int _clipVisualStackOrderForIndex(int index) {
+    if (index < 0 || index >= widget.clips.length) return 0;
+    return _clipVisualStackOrder[
+            _clipVisualStackKey(widget.clips[index], index)] ??
+        0;
+  }
+
+  void _clearClipVisualStackOrder() {
+    _clipVisualStackOrder.clear();
+    _clipVisualStackCounter = 0;
+  }
+
+  void _setClipVisualStackSelection(
+    Iterable<int> clipIndices, {
+    int? primaryClipIndex,
+  }) {
+    _clearClipVisualStackOrder();
+    final ordered = clipIndices
+        .where((i) => i >= 0 && i < widget.clips.length)
+        .toSet()
+        .toList()
+      ..sort();
+    if (primaryClipIndex != null && ordered.remove(primaryClipIndex)) {
+      ordered.add(primaryClipIndex);
+    }
+    for (final index in ordered) {
+      _clipVisualStackOrder[_clipVisualStackKey(widget.clips[index], index)] =
+          ++_clipVisualStackCounter;
+    }
+  }
+
+  List<int> _clipHitTestOrder() {
+    return List<int>.generate(widget.clips.length, (i) => i)
+      ..sort((a, b) {
+        final stackCompare = _clipVisualStackOrderForIndex(b)
+            .compareTo(_clipVisualStackOrderForIndex(a));
+        if (stackCompare != 0) return stackCompare;
+        return b.compareTo(a);
+      });
+  }
+
   void _clearClipSelection() {
     _commitInlineClipControlIfNeeded();
     _clearInlineClipControlState();
     _clearAutomationClipSelection();
+    _clearClipVisualStackOrder();
     _selectedClipIndex = -1;
     _selectedClipIndices.clear();
     _clipPopupMs = null;
@@ -2650,6 +2895,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _selectedClipIndices
       ..clear()
       ..add(clipIndex);
+    _setClipVisualStackSelection(
+      <int>[clipIndex],
+      primaryClipIndex: clipIndex,
+    );
     _clipPopupMs = popupMs;
     if (emitSelectionChanged) {
       _emitSelectionChanged();
@@ -2677,6 +2926,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
     _selectedClipIndex = clipIndex;
     _selectedClipIndices.add(clipIndex);
+    _setClipVisualStackSelection(
+      _selectedClipIndices,
+      primaryClipIndex: clipIndex,
+    );
     _clipPopupMs = null;
     if (emitSelectionChanged) {
       _emitSelectionChanged();
@@ -2697,6 +2950,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _draggedClipIndex = null;
     _dragStartGlobalOffset = null;
     _dragStartLocalOffset = null;
+    _dragXAxisLocked = false;
   }
 
   void _restoreTentativeClipSelectionIfNeeded() {
@@ -2725,6 +2979,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _showPastePopup = false;
     _pasteRow = null;
     _pasteMs = null;
+    _clearInstrumentLaneRegionPopupState();
     _highlightedSegmentRow = null;
     _highlightedSegmentStartMs = null;
     _highlightedSegmentEndMs = null;
@@ -2898,6 +3153,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (_selectedClipIndices.isEmpty) {
       _selectedClipIndex = -1;
       _clipPopupMs = null;
+      _clearClipVisualStackOrder();
+    } else {
+      _setClipVisualStackSelection(
+        _selectedClipIndices,
+        primaryClipIndex: _selectedClipIndex >= 0 ? _selectedClipIndex : null,
+      );
     }
     _emitSelectionChanged();
   }
@@ -2935,6 +3196,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (_selectedClipIndices.isEmpty) {
       _selectedClipIndex = -1;
       _clipPopupMs = null;
+      _clearClipVisualStackOrder();
+    } else {
+      _setClipVisualStackSelection(
+        _selectedClipIndices,
+        primaryClipIndex: _selectedClipIndex >= 0 ? _selectedClipIndex : null,
+      );
     }
   }
 
@@ -3115,9 +3382,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _masterAutomationEditorTargetId!.trim().isNotEmpty &&
       _rowCount > 0;
 
+  double get _masterAutomationLaneHeight =>
+      math.max(_kMasterAutomationLaneMinHeight, _expandedRowHeight + 8.0);
+
   double get _masterAutomationLanePaintHeight => _isMasterAutomationLaneOpen &&
           _automationTargetsForMasterLane().isNotEmpty
-      ? _kMasterAutomationLaneHeight
+      ? _masterAutomationLaneHeight
       : 0.0;
 
   List<Map<String, dynamic>> _automationTargetsForMasterLane() {
@@ -3224,6 +3494,27 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
     for (int i = 0; i < _rowExpanded.length; i++) {
       _rowExpanded[i] = i == row;
+    }
+  }
+
+  void _enforceSingleExpandedRowIfNeeded({bool notify = false}) {
+    if (_allowsMultipleExpandedRows) return;
+    var retainedExpandedRow = -1;
+    if (_selectedRowIndex >= 0 &&
+        _selectedRowIndex < _rowExpanded.length &&
+        _rowExpanded[_selectedRowIndex]) {
+      retainedExpandedRow = _selectedRowIndex;
+    } else {
+      retainedExpandedRow = _rowExpanded.indexWhere((expanded) => expanded);
+    }
+    if (retainedExpandedRow < 0) return;
+
+    final oldExpanded = List<bool>.from(_rowExpanded);
+    for (int i = 0; i < _rowExpanded.length; i++) {
+      _rowExpanded[i] = i == retainedExpandedRow;
+    }
+    if (notify) {
+      _notifyRowExpansionChanges(oldExpanded);
     }
   }
 
@@ -3929,6 +4220,137 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     return widget.canPasteClipAtRow?.call(row) ?? true;
   }
 
+  double _timelinePasteStartMs(double rawMs) {
+    return _magnetEnabled ? _segmentStartMsForTap(rawMs) : rawMs;
+  }
+
+  int? _rowForPlayheadPaste() {
+    if (_rowCount <= 0) return null;
+    final selected = _activeSelectedClipIndices();
+    if (selected.isNotEmpty) {
+      final anchorIndex = _selectionAnchorClipIndex(selected);
+      if (anchorIndex != null && anchorIndex < widget.clips.length) {
+        final row = widget.clips[anchorIndex].rowIndex;
+        if (row >= 0 && row < _rowCount) return row;
+      }
+    }
+    if (_selectedRowIndex >= 0 && _selectedRowIndex < _rowCount) {
+      return _selectedRowIndex;
+    }
+    return 0;
+  }
+
+  _TimelinePasteTarget? _timelineShortcutPasteTarget() {
+    if (!_hasPasteClipboard) return null;
+    if (_pasteRow != null &&
+        _pasteMs != null &&
+        _pasteRow! >= 0 &&
+        _pasteRow! < _rowCount &&
+        (_canPasteCopiedClipAtRow(_pasteRow!) ||
+            _canPasteAutomationClipAt(_pasteRow!))) {
+      return _TimelinePasteTarget(row: _pasteRow!, startMs: _pasteMs!);
+    }
+
+    final row = _rowForPlayheadPaste();
+    if (row == null ||
+        (!_canPasteCopiedClipAtRow(row) && !_canPasteAutomationClipAt(row))) {
+      return null;
+    }
+    return _TimelinePasteTarget(
+      row: row,
+      startMs: _timelinePasteStartMs(_currentPlayheadMs),
+    );
+  }
+
+  bool _pasteClipboardAt(int row, double startMs) {
+    if (_automationClipClipboard != null && _canPasteAutomationClipAt(row)) {
+      _pasteAutomationClipAt(row, startMs);
+      return true;
+    }
+    if (!_canPasteCopiedClipAtRow(row)) return false;
+    unawaited(widget.onPasteClipAt(row, startMs));
+    return true;
+  }
+
+  bool _pasteClipboardFromTimelineShortcut() {
+    final target = _timelineShortcutPasteTarget();
+    if (target == null) return false;
+    final pasted = _pasteClipboardAt(target.row, target.startMs);
+    if (pasted) {
+      _clearPastePopup();
+    }
+    return pasted;
+  }
+
+  String _stepDuplicateSelectionKey(List<int> selected) {
+    return selected.join(',');
+  }
+
+  double? _selectionPasteStepMs(List<int> selected) {
+    double? minStartMs;
+    double? maxEndMs;
+    for (final index in selected) {
+      if (index < 0 || index >= widget.clips.length) continue;
+      final clip = widget.clips[index];
+      final startMs = widget.getStartMs(clip);
+      final endMs = startMs + widget.getTimelineDurationMs(clip);
+      minStartMs = minStartMs == null ? startMs : math.min(minStartMs, startMs);
+      maxEndMs = maxEndMs == null ? endMs : math.max(maxEndMs, endMs);
+    }
+    if (minStartMs == null || maxEndMs == null) return null;
+    final span = maxEndMs - minStartMs;
+    if (!span.isFinite || span <= 0.1) return null;
+    return span;
+  }
+
+  void _resetStepDuplicateShortcutRepeat() {
+    _stepDuplicateShortcutSelectionKey = null;
+    _stepDuplicateShortcutNextPasteMs = null;
+  }
+
+  bool _stepDuplicateSelectedClipsFromShortcut({required bool isRepeat}) {
+    final duplicate = widget.onStepDuplicateClips;
+    if (duplicate == null) return false;
+    final selected = _activeSelectedClipIndices();
+    if (selected.isEmpty) return false;
+    final selectionKey = _stepDuplicateSelectionKey(selected);
+    final repeatPasteStartMs =
+        isRepeat && _stepDuplicateShortcutSelectionKey == selectionKey
+            ? _stepDuplicateShortcutNextPasteMs
+            : null;
+    final pasteStartMs = repeatPasteStartMs ?? _selectionPasteStartMs(selected);
+    if (pasteStartMs == null) return false;
+    final stepMs = _selectionPasteStepMs(selected);
+    if (stepMs != null) {
+      final nextPasteStartMs = pasteStartMs + stepMs;
+      _stepDuplicateShortcutSelectionKey = selectionKey;
+      _stepDuplicateShortcutNextPasteMs =
+          _magnetEnabled ? _quantizeMsCeil(nextPasteStartMs) : nextPasteStartMs;
+    } else {
+      _resetStepDuplicateShortcutRepeat();
+    }
+    unawaited(duplicate(selected, pasteStartMs));
+    return true;
+  }
+
+  void _setPastePopupTarget(int row, double rawMs) {
+    final quantizedStartMs = _segmentStartMsForTap(rawMs);
+    final quantizedEndMs = quantizedStartMs + _quantizeIntervalMs();
+    _clearInstrumentLaneRegionPopupState();
+    _pasteRow = row;
+    _pasteMs = _magnetEnabled ? quantizedStartMs : rawMs;
+    _showPastePopup = true;
+    if (_magnetEnabled) {
+      _highlightedSegmentRow = row;
+      _highlightedSegmentStartMs = quantizedStartMs;
+      _highlightedSegmentEndMs = quantizedEndMs;
+    } else {
+      _highlightedSegmentRow = null;
+      _highlightedSegmentStartMs = null;
+      _highlightedSegmentEndMs = null;
+    }
+  }
+
   void _resetPaintStrokeState() {
     _paintStrokeActive = false;
     _paintStrokeRow = null;
@@ -4180,6 +4602,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   @override
   void initState() {
     super.initState();
+    _timelineFocusNode = FocusNode(debugLabel: 'Audio timeline');
     _syncLoopStateFromWidget();
     widget.controller?._bind(
       ensureRowExpanded: ensureRowExpanded,
@@ -4294,6 +4717,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     } else if (oldWidget.rows.length != widget.rows.length) {
       _syncRowUiState();
     }
+    if (oldWidget.allowMultipleExpandedRows !=
+        widget.allowMultipleExpandedRows) {
+      _enforceSingleExpandedRowIfNeeded(notify: true);
+    } else {
+      _enforceSingleExpandedRowIfNeeded();
+    }
     if (_automationEditorRow != null &&
         (_automationEditorRow! < 0 || _automationEditorRow! >= _rowCount)) {
       _automationEditorRow = null;
@@ -4351,6 +4780,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       publishTopControlsState: _publishTopControlsState,
     );
     _verticalScrollController.dispose();
+    _timelineFocusNode.dispose();
     super.dispose();
   }
 
@@ -4469,6 +4899,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _handleHeaderPointerDown(int row, PointerDownEvent event) {
+    _requestTimelineFocus();
     if (_groupFoldHeaderPointerRows.containsKey(event.pointer) ||
         _isGroupFoldHeaderHit(row, event.localPosition)) {
       _groupFoldHeaderPointerRows[event.pointer] = row;
@@ -4642,11 +5073,13 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         }
         _selectedRowIndex = tappedRow;
         widget.onSelectRow(tappedRow);
-        if (_allowsMultipleExpandedRows) {
-          _rowExpanded[tappedRow] = true;
-        } else {
-          for (int i = 0; i < _rowExpanded.length; i++) {
-            _rowExpanded[i] = false;
+        if (widget.expandRowsOnTrackSelect) {
+          if (_allowsMultipleExpandedRows) {
+            _rowExpanded[tappedRow] = true;
+          } else {
+            for (int i = 0; i < _rowExpanded.length; i++) {
+              _rowExpanded[i] = i == tappedRow;
+            }
           }
         }
         return;
@@ -4734,6 +5167,118 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       }
     }
     _syncVerticalScrollOffsetAfterGeometryChange();
+  }
+
+  bool _hasTimelineEscapeDismissibleOverlay() {
+    return _automationTargetPickerRow != null ||
+        _automationClipMenuClipId != null ||
+        _clipPopupMs != null ||
+        _showPastePopup ||
+        _pasteRow != null;
+  }
+
+  bool _dismissTimelineEscapeOverlay() {
+    if (!_hasTimelineEscapeDismissibleOverlay()) return false;
+    setState(() {
+      _automationTargetPickerRow = null;
+      _clearAutomationClipMenu();
+      _clipPopupMs = null;
+      _showPastePopup = false;
+      _pasteRow = null;
+      _pasteMs = null;
+      _highlightedSegmentRow = null;
+      _highlightedSegmentStartMs = null;
+      _highlightedSegmentEndMs = null;
+    });
+    return true;
+  }
+
+  bool _collapseExpandedTimelineState() {
+    final hasExpandedRows = _rowExpanded.any((expanded) => expanded);
+    final hasMasterAutomationLane = _masterAutomationEditorTargetId != null;
+    if (!hasExpandedRows && !hasMasterAutomationLane) return false;
+
+    final oldExpanded = List<bool>.from(_rowExpanded);
+    setState(() {
+      for (int i = 0; i < _rowExpanded.length; i++) {
+        _rowExpanded[i] = false;
+      }
+      _masterAutomationEditorTargetId = null;
+      if (_automationRangeSelectionTargetId != null &&
+          _isMasterAutomationTargetId(_automationRangeSelectionTargetId!)) {
+        _clearAutomationRangeSelectionMode();
+      }
+      _automationEditorRow = null;
+      _automationEditorTargetId = null;
+      _automationTargetPickerRow = null;
+      _clearTimelineSelectionFeedback();
+    });
+    for (int i = 0; i < oldExpanded.length && i < _rowExpanded.length; i++) {
+      if (oldExpanded[i] != _rowExpanded[i]) {
+        widget.onRowExpansionChanged?.call(i, _rowExpanded[i]);
+        widget.onTutorialRowExpansionChanged?.call(i, _rowExpanded[i]);
+      }
+    }
+    _syncVerticalScrollOffsetAfterGeometryChange();
+    return true;
+  }
+
+  KeyEventResult _handleTimelineKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is KeyUpEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.keyB ||
+          event.logicalKey == LogicalKeyboardKey.metaLeft ||
+          event.logicalKey == LogicalKeyboardKey.metaRight ||
+          event.logicalKey == LogicalKeyboardKey.controlLeft ||
+          event.logicalKey == LogicalKeyboardKey.controlRight) {
+        _resetStepDuplicateShortcutRepeat();
+      }
+      return KeyEventResult.ignored;
+    }
+    final isRepeat = event is KeyRepeatEvent;
+    if (event is! KeyDownEvent && !isRepeat) {
+      return KeyEventResult.ignored;
+    }
+    if (ModalRoute.of(context)?.isCurrent != true) {
+      return KeyEventResult.ignored;
+    }
+    final keyboard = HardwareKeyboard.instance;
+    final primaryShortcutPressed =
+        keyboard.isMetaPressed || keyboard.isControlPressed;
+    if (!isRepeat &&
+        !primaryShortcutPressed &&
+        !keyboard.isAltPressed &&
+        !keyboard.isShiftPressed) {
+      final tool = _timelineToolForShortcutKey(event.logicalKey);
+      if (tool != null) {
+        _selectTimelineTool(tool);
+        return KeyEventResult.handled;
+      }
+    }
+    if (!isRepeat &&
+        primaryShortcutPressed &&
+        event.logicalKey == LogicalKeyboardKey.keyC) {
+      if (_activeSelectedClipIndices().isEmpty) return KeyEventResult.ignored;
+      _copySelectedClips();
+      return KeyEventResult.handled;
+    }
+    if (!isRepeat &&
+        primaryShortcutPressed &&
+        event.logicalKey == LogicalKeyboardKey.keyV) {
+      return _pasteClipboardFromTimelineShortcut()
+          ? KeyEventResult.handled
+          : KeyEventResult.ignored;
+    }
+    if (primaryShortcutPressed && event.logicalKey == LogicalKeyboardKey.keyB) {
+      return _stepDuplicateSelectedClipsFromShortcut(isRepeat: isRepeat)
+          ? KeyEventResult.handled
+          : KeyEventResult.ignored;
+    }
+    if (isRepeat || event.logicalKey != LogicalKeyboardKey.escape) {
+      return KeyEventResult.ignored;
+    }
+    if (_dismissTimelineEscapeOverlay()) return KeyEventResult.handled;
+    if (_collapseExpandedTimelineState()) return KeyEventResult.handled;
+    return KeyEventResult.ignored;
   }
 
   void _syncRowUiState() {
@@ -4987,9 +5532,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final targetLabel = (targetMeta?['label'] ?? targetId).toString().trim();
     final targetParamId =
         (targetMeta?['paramId'] ?? targetId).toString().trim();
+    final targetUnit = (targetMeta?['unit'] ?? '').toString().trim();
     return _AutomationValueFormatter(
       targetLabel: targetLabel.isEmpty ? targetId : targetLabel,
       targetParamId: targetParamId.isEmpty ? targetId : targetParamId,
+      targetUnit: targetUnit,
       targetMin: (targetMeta?['min'] as num?)?.toDouble() ?? 0.0,
       targetMax: (targetMeta?['max'] as num?)?.toDouble() ?? 1.0,
       isVolumeLane: targetMeta?['isVolume'] == true || targetId == 'volume',
@@ -5979,6 +6526,131 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         return;
       }
     }
+  }
+
+  void _masterAutomationPanStart(
+    String targetId,
+    Offset pos,
+    double laneHeight,
+  ) {
+    if (!_isMasterAutomationLaneOpen || _rowCount <= 0) return;
+    final normalizedTargetId = _resolveAutomationTargetIdFromTargets(
+      _automationTargetsForMasterLane(),
+      targetId,
+    );
+    if (normalizedTargetId.trim().isEmpty) return;
+    const row = 0;
+    final lane = widget.getAutomationPointsForTarget(row, normalizedTargetId);
+    _automationBefore = lane.map((p) => p.copy()).toList();
+
+    setState(() {
+      _interactionMode = 'automation';
+      _isUserInteracting = true;
+      _automationActiveLaneHeight = laneHeight;
+      _automationDragRow = row;
+    });
+
+    final formatter = _automationValueFormatterForTarget(
+      row,
+      normalizedTargetId,
+    );
+    for (int i = 0; i < lane.length; i++) {
+      final p = lane[i];
+      final px = (p.x - _scrollOffsetMs) * _pixelsPerMs;
+      final py = _automationLaneLocalY(
+        p.volume,
+        laneHeight,
+        formatter: formatter,
+      );
+      if ((pos - Offset(px, py)).distance < 20) {
+        setState(() {
+          _automationDragIndex = i;
+          _automationDragStart = pos;
+          _automationFingerOffsetY = pos.dy - py;
+        });
+        return;
+      }
+    }
+  }
+
+  void _masterAutomationPanUpdate(String targetId, Offset pos) {
+    if (_interactionMode != 'automation') return;
+    if (_automationDragIndex == null || _rowCount <= 0) return;
+    final normalizedTargetId = _resolveAutomationTargetIdFromTargets(
+      _automationTargetsForMasterLane(),
+      targetId,
+    );
+    if (normalizedTargetId.trim().isEmpty) return;
+    const row = 0;
+    final formatter = _automationValueFormatterForTarget(
+      row,
+      normalizedTargetId,
+    );
+    final points = List<AutomationPoint>.from(
+      widget.getAutomationPointsForTarget(row, normalizedTargetId),
+    );
+    final index = _automationDragIndex!;
+    if (index < 0 || index >= points.length) return;
+    final p = points[index];
+
+    double newTimeMs = (pos.dx / _pixelsPerMs) + _scrollOffsetMs;
+    if (_magnetEnabled) {
+      newTimeMs = _quantizeMs(newTimeMs);
+    }
+
+    if (index != 0) {
+      final minX = points[index - 1].x + 1;
+      if (index < points.length - 1) {
+        final maxX = points[index + 1].x - 1;
+        p.x = newTimeMs.clamp(minX, maxX).toDouble();
+      } else {
+        p.x = newTimeMs < minX ? minX : newTimeMs;
+      }
+    }
+
+    const verticalPadding = 12.0;
+    final laneHeight =
+        _automationActiveLaneHeight ?? _masterAutomationLaneHeight;
+    final usableHeight = laneHeight - verticalPadding * 2;
+    final effectiveFingerY = pos.dy - (_automationFingerOffsetY ?? 0.0);
+    final displayNormalized =
+        1 - ((effectiveFingerY - verticalPadding) / usableHeight);
+    p.volume = formatter.storedNormalizedForDisplayNormalized(
+      displayNormalized.clamp(0.0, 1.0).toDouble(),
+    );
+
+    widget.setAutomationPointsForTarget(row, normalizedTargetId, points);
+    setState(() {});
+  }
+
+  void _masterAutomationPanEnd(String targetId) {
+    if (_interactionMode != 'automation' || _rowCount <= 0) return;
+    final normalizedTargetId = _resolveAutomationTargetIdFromTargets(
+      _automationTargetsForMasterLane(),
+      targetId,
+    );
+    const row = 0;
+    final before = _automationBefore;
+    final after = widget.getAutomationPointsForTarget(row, normalizedTargetId);
+    if (before != null && normalizedTargetId.trim().isNotEmpty) {
+      final copiedAfter = after.map((p) => p.copy()).toList(growable: false);
+      widget.onAutomationTargetCommit?.call(
+        row,
+        normalizedTargetId,
+        before,
+        copiedAfter,
+      );
+    }
+
+    _automationBefore = null;
+    setState(() {
+      _automationDragRow = null;
+      _automationDragIndex = null;
+      _interactionMode = '';
+      _isUserInteracting = false;
+      _automationFingerOffsetY = null;
+      _automationActiveLaneHeight = null;
+    });
   }
 
   void _automationPanUpdate(int row, Offset pos) {
@@ -7396,6 +8068,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         singleSelectionIndex >= 0 &&
         singleSelectionIndex < widget.clips.length &&
         !widget.clips[singleSelectionIndex].isMidi;
+    final canOpenMidiPianoRoll = hasSingleSelection &&
+        widget.onOpenMidiClip != null &&
+        singleSelectionIndex >= 0 &&
+        singleSelectionIndex < widget.clips.length &&
+        widget.clips[singleSelectionIndex].isMidi;
     final canReplaceSamplerSource = hasSingleSelection &&
         widget.onReplaceSamplerSource != null &&
         singleSelectionIndex >= 0 &&
@@ -7424,6 +8101,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
             (canGlueSelection ? 1 : 0) +
             (canOpenPitchLab ? 1 : 0) +
             (canCreateSampler ? 1 : 0) +
+            (canOpenMidiPianoRoll ? 1 : 0) +
             (canReplaceSamplerSource ? 1 : 0) +
             (canOpenMidiInstrumentUi ? 1 : 0);
     final double popupWidth = math.min(
@@ -7496,7 +8174,27 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       }
     }
 
-    final popupChildren = <Widget>[
+    final popupChildren = <Widget>[];
+    if (canOpenMidiPianoRoll) {
+      popupChildren.addAll(<Widget>[
+        Expanded(
+          child: _buildClipPopupAction(
+            key: const ValueKey('selected_clip_popup_open_piano_roll'),
+            icon: Icons.piano_outlined,
+            color: const Color(0xFF8BE7C8),
+            onTap: () {
+              final openMidiClip = widget.onOpenMidiClip;
+              if (openMidiClip == null) return;
+              setState(_clearClipSelection);
+              openMidiClip(singleSelectionIndex);
+            },
+            tooltip: L10n.translate(context, 'Open piano roll'),
+          ),
+        ),
+        Container(width: 1, height: 16, color: Colors.white24),
+      ]);
+    }
+    popupChildren.addAll(<Widget>[
       Expanded(
         child: _buildClipPopupAction(
           icon: Icons.copy,
@@ -7518,7 +8216,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           tooltip: L10n.translate(context, 'Place clone'),
         ),
       ),
-    ];
+    ]);
     if (hasSingleSelection) {
       popupChildren.addAll(<Widget>[
         Container(width: 1, height: 16, color: Colors.white24),
@@ -7708,8 +8406,15 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final bool showClearButton =
         widget.onClearCopiedClip != null || _automationClipClipboard != null;
 
-    const double popupHeight = 32;
-    final double popupWidth = showClearButton ? 116 : 70;
+    const double popupHeight = 36;
+    const double actionSize = 34;
+    const double separatorWidth = 1;
+    const double horizontalPadding = 4;
+    const double borderWidthAllowance = 2;
+    final double popupWidth = borderWidthAllowance +
+        horizontalPadding * 2 +
+        actionSize * (showClearButton ? 2 : 1) +
+        (showClearButton ? separatorWidth : 0);
 
     double left = _headerWidth;
     double top = -100; // offscreen when hidden
@@ -7757,62 +8462,171 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         ignoring: !visible, // disable interactions when hidden
         child: AnimatedOpacity(
           opacity: visible ? 1.0 : 0.0,
-          duration: const Duration(milliseconds: 180),
+          duration: const Duration(milliseconds: 70),
           curve: Curves.easeOut,
-          child: Container(
-            width: popupWidth,
-            height: popupHeight,
-            decoration: BoxDecoration(
-              color: const Color(0xFF000000).withOpacity(0.65),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white24, width: 1),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  tooltip: L10n.translate(context, 'Place clone'),
-                  icon: const Icon(Icons.content_paste,
-                      size: 18, color: Colors.white),
-                  onPressed: () {
-                    if (_pasteRow != null && _pasteMs != null) {
-                      if (_automationClipClipboard != null &&
-                          _canPasteAutomationClipAt(_pasteRow!)) {
-                        _pasteAutomationClipAt(_pasteRow!, _pasteMs!);
-                      } else if (_canPasteCopiedClipAtRow(_pasteRow!)) {
-                        unawaited(widget.onPasteClipAt(_pasteRow!, _pasteMs!));
-                      }
-                    }
-                    _clearPastePopup();
-                  },
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+              child: Container(
+                key: const ValueKey('timeline_paste_popup'),
+                width: popupWidth,
+                height: popupHeight,
+                decoration: _timelineGlassPopupDecoration(radius: 18),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: horizontalPadding,
                 ),
-                if (showClearButton) ...[
-                  Container(width: 1, height: 18, color: Colors.white24),
-                  IconButton(
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    tooltip: L10n.translate(context, 'Clear clipboard'),
-                    icon: const Icon(Icons.delete_outline,
-                        size: 18, color: Color(0xFFFFA4A4)),
-                    onPressed: () {
-                      _clearClipboard();
-                      ScaffoldMessenger.of(context)
-                        ..hideCurrentSnackBar()
-                        ..showSnackBar(
-                          SnackBar(
-                            content: Text(
-                                L10n.translate(context, 'Clipboard cleared')),
-                            duration: Duration(milliseconds: 1200),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox.square(
+                      dimension: actionSize,
+                      child: _buildClipPopupAction(
+                        tooltip: L10n.translate(context, 'Place clone'),
+                        icon: Icons.content_paste,
+                        color: Colors.white,
+                        onTap: () {
+                          if (_pasteRow != null && _pasteMs != null) {
+                            _pasteClipboardAt(_pasteRow!, _pasteMs!);
+                          }
+                          _clearPastePopup();
+                        },
+                      ),
+                    ),
+                    if (showClearButton) ...[
+                      Container(
+                        width: separatorWidth,
+                        height: 18,
+                        color: Colors.white24,
+                      ),
+                      SizedBox.square(
+                        dimension: actionSize,
+                        child: _buildClipPopupAction(
+                          tooltip: L10n.translate(context, 'Clear clipboard'),
+                          icon: Icons.delete_outline,
+                          color: const Color(0xFFFFA4A4),
+                          onTap: () {
+                            _clearClipboard();
+                            ScaffoldMessenger.of(context)
+                              ..hideCurrentSnackBar()
+                              ..showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    L10n.translate(
+                                      context,
+                                      'Clipboard cleared',
+                                    ),
+                                  ),
+                                  duration: Duration(milliseconds: 1200),
+                                ),
+                              );
+                            _clearPastePopup();
+                          },
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInstrumentLaneRegionPopup(
+    double viewportWidth,
+    double viewportHeight,
+  ) {
+    final visible = _showInstrumentLaneRegionPopup &&
+        _instrumentLaneRegionRow != null &&
+        _instrumentLaneRegionMs != null &&
+        _instrumentLaneRegionAnchorLocal != null;
+    const double popupHeight = 36;
+    const double popupWidth = 156;
+
+    double left = _headerWidth;
+    double top = -100;
+
+    if (visible) {
+      final row = _instrumentLaneRegionRow!;
+      if (!_isSourceRowVisible(row)) {
+        return const SizedBox.shrink();
+      }
+      final anchor = _instrumentLaneRegionAnchorLocal!;
+      if (anchor.dx >= 0 && anchor.dx <= viewportWidth) {
+        left = (_headerWidth + anchor.dx - popupWidth / 2)
+            .clamp(
+              _headerWidth,
+              _headerWidth + viewportWidth - popupWidth,
+            )
+            .toDouble();
+        final anchorViewportY = anchor.dy;
+        top = anchorViewportY - popupHeight - 8;
+        if (top < 0) {
+          top = anchorViewportY + 8;
+        }
+        top = top
+            .clamp(0.0, math.max(0.0, viewportHeight - popupHeight))
+            .toDouble();
+      }
+    }
+
+    return Positioned(
+      left: left,
+      top: top,
+      child: IgnorePointer(
+        ignoring: !visible,
+        child: AnimatedOpacity(
+          key: const ValueKey('instrument_lane_region_popup'),
+          opacity: visible ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 90),
+          curve: Curves.easeOut,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  key: const ValueKey('instrument_lane_region_popup_add'),
+                  borderRadius: BorderRadius.circular(18),
+                  onTap: () {
+                    unawaited(_createMidiRegionFromInstrumentLanePopup());
+                  },
+                  child: Container(
+                    width: popupWidth,
+                    height: popupHeight,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: _timelineGlassPopupDecoration(radius: 18),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.add_rounded,
+                          size: 18,
+                          color: _kTimelineShellText,
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            L10n.translate(context, 'Add MIDI Region'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: _kTimelineShellText,
+                              fontFamily: 'Pretendard',
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
-                        );
-                      _clearPastePopup();
-                    },
+                        ),
+                      ],
+                    ),
                   ),
-                ],
-              ],
+                ),
+              ),
             ),
           ),
         ),
@@ -7859,16 +8673,20 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           bottom: 0,
           child: SizedBox(
             width: headerWidth,
-            child: RepaintBoundary(
-              child: ClipRect(
-                child: OverflowBox(
-                  alignment: Alignment.topLeft,
-                  minHeight: 0,
-                  maxHeight: _scrollContentHeight,
-                  child: SizedBox(
-                    height: _scrollContentHeight,
-                    child: _buildTrackHeadersContent(
-                      headerWidth,
+            child: Listener(
+              behavior: HitTestBehavior.opaque,
+              onPointerSignal: _onTimelineLeftChromePointerSignal,
+              child: RepaintBoundary(
+                child: ClipRect(
+                  child: OverflowBox(
+                    alignment: Alignment.topLeft,
+                    minHeight: 0,
+                    maxHeight: _scrollContentHeight,
+                    child: SizedBox(
+                      height: _scrollContentHeight,
+                      child: _buildTrackHeadersContent(
+                        headerWidth,
+                      ),
                     ),
                   ),
                 ),
@@ -7877,131 +8695,142 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           ),
         );
 
-        return Container(
-          constraints: const BoxConstraints(),
-          color: Colors.transparent,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ValueListenableBuilder<Duration>(
-                valueListenable: widget.transportClockListenable,
-                builder: (context, _, __) {
-                  final playheadPx = PlatformCapabilities.current.isDesktop
-                      ? _getPlayheadPx(context)
-                      : mobilePlayheadPx;
-                  _syncPlaybackViewport(playheadPx);
-                  return _buildTimeRuler(viewportWidth);
-                },
-              ),
-              Expanded(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final visibleTimelineHeight = constraints.maxHeight;
-                    return Stack(
-                      children: [
-                        if (_usesTabletDawLayout)
-                          Positioned(
-                            left: 0,
-                            top: 0,
-                            bottom: 0,
-                            width: headerWidth,
-                            child: RepaintBoundary(
-                              child: _buildTabletLeftSectionShell(),
-                            ),
-                          ),
-                        ScrollConfiguration(
-                          behavior: ScrollConfiguration.of(context).copyWith(
-                            scrollbars: false,
-                          ),
-                          child: SingleChildScrollView(
-                            controller: _verticalScrollController,
-                            physics: ((_pendingDrag ||
-                                            _pendingAutomationClipVisual !=
-                                                null) &&
-                                        _activeTool != _TimelineTool.delete) ||
-                                    _isUserInteracting &&
-                                        (_interactionMode == 'drag' ||
-                                            _interactionMode == 'automation' ||
-                                            _hasActiveAutomationClipDrag) ||
-                                    _activeTool == _TimelineTool.delete
-                                ? const NeverScrollableScrollPhysics()
-                                : const ClampingScrollPhysics(),
-                            child: SizedBox(
-                              height: _scrollContentHeight,
-                              child: Stack(
-                                fit: StackFit.expand,
-                                children: [
-                                  ValueListenableBuilder<Duration>(
-                                    valueListenable:
-                                        widget.transportClockListenable,
-                                    builder: (context, clock, __) {
-                                      final playheadPx =
-                                          PlatformCapabilities.current.isDesktop
-                                              ? _getPlayheadPx(context)
-                                              : mobilePlayheadPx;
-                                      _syncPlaybackViewport(playheadPx);
-                                      return _buildPlaybackDrivenTimelineLayers(
-                                        viewportWidth: viewportWidth,
-                                        visibleTimelineHeight:
-                                            visibleTimelineHeight,
-                                        playheadPx: playheadPx,
-                                        transportMs:
-                                            clock.inMicroseconds.toDouble() /
-                                                1000.0,
-                                        timelineUnderlayWidth:
-                                            timelineUnderlayWidth,
-                                        expandedHeights: expandedHeights,
-                                        automationLaneHeights:
-                                            automationLaneHeights,
-                                        timelineAutomationClipVisuals:
-                                            timelineAutomationClipVisuals,
-                                        rowsHiddenByCollapsedGroups:
-                                            rowsHiddenByCollapsedGroups,
-                                      );
-                                    },
-                                  ),
-                                  staticTrackHeaders,
-                                  _buildMasterAutomationLane(viewportWidth),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                        if (_usesTabletDawLayout)
-                          Positioned(
-                            left: 0,
-                            bottom: 0,
-                            width: headerWidth,
-                            child: RepaintBoundary(
-                              child: _buildTabletHeaderFooter(headerWidth),
-                            ),
-                          ),
-                        if (_usesTabletDawLayout)
-                          Positioned(
-                            left: 0,
-                            top: _kTabletRailTopInset,
-                            bottom: _kTabletFooterControlsBottomPadding,
-                            child: RepaintBoundary(
-                              child: _buildTabletVerticalCompressionRail(
-                                visibleTimelineHeight,
-                              ),
-                            ),
-                          ),
-                        _buildSelectedClipPopup(
-                          viewportWidth,
-                          visibleTimelineHeight,
-                        ),
-                        _buildAutomationClipMenuOverlay(
-                          viewportWidth,
-                          visibleTimelineHeight,
-                          timelineAutomationClipVisuals,
-                        ),
-                      ],
-                    );
+        return Focus(
+          focusNode: _timelineFocusNode,
+          autofocus: true,
+          onKeyEvent: _handleTimelineKeyEvent,
+          child: Container(
+            constraints: const BoxConstraints(),
+            color: Colors.transparent,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ValueListenableBuilder<Duration>(
+                  valueListenable: widget.transportClockListenable,
+                  builder: (context, _, __) {
+                    final playheadPx = PlatformCapabilities.current.isDesktop
+                        ? _getPlayheadPx(context)
+                        : mobilePlayheadPx;
+                    _syncPlaybackViewport(playheadPx);
+                    return _buildTimeRuler(viewportWidth);
                   },
                 ),
-              ),
-            ],
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final visibleTimelineHeight = constraints.maxHeight;
+                      return Stack(
+                        children: [
+                          if (_usesTabletDawLayout)
+                            Positioned(
+                              left: 0,
+                              top: 0,
+                              bottom: 0,
+                              width: headerWidth,
+                              child: RepaintBoundary(
+                                child: _buildTabletLeftSectionShell(),
+                              ),
+                            ),
+                          ScrollConfiguration(
+                            behavior: ScrollConfiguration.of(context).copyWith(
+                              scrollbars: false,
+                            ),
+                            child: SingleChildScrollView(
+                              controller: _verticalScrollController,
+                              physics: ((_pendingDrag ||
+                                              _pendingAutomationClipVisual !=
+                                                  null) &&
+                                          _activeTool !=
+                                              _TimelineTool.delete) ||
+                                      _isUserInteracting &&
+                                          (_interactionMode == 'drag' ||
+                                              _interactionMode ==
+                                                  'automation' ||
+                                              _hasActiveAutomationClipDrag) ||
+                                      _activeTool == _TimelineTool.delete
+                                  ? const NeverScrollableScrollPhysics()
+                                  : const ClampingScrollPhysics(),
+                              child: SizedBox(
+                                height: _scrollContentHeight,
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    ValueListenableBuilder<Duration>(
+                                      valueListenable:
+                                          widget.transportClockListenable,
+                                      builder: (context, clock, __) {
+                                        final playheadPx = PlatformCapabilities
+                                                .current.isDesktop
+                                            ? _getPlayheadPx(context)
+                                            : mobilePlayheadPx;
+                                        _syncPlaybackViewport(playheadPx);
+                                        return _buildPlaybackDrivenTimelineLayers(
+                                          viewportWidth: viewportWidth,
+                                          visibleTimelineHeight:
+                                              visibleTimelineHeight,
+                                          playheadPx: playheadPx,
+                                          transportMs:
+                                              clock.inMicroseconds.toDouble() /
+                                                  1000.0,
+                                          timelineUnderlayWidth:
+                                              timelineUnderlayWidth,
+                                          expandedHeights: expandedHeights,
+                                          automationLaneHeights:
+                                              automationLaneHeights,
+                                          timelineAutomationClipVisuals:
+                                              timelineAutomationClipVisuals,
+                                          rowsHiddenByCollapsedGroups:
+                                              rowsHiddenByCollapsedGroups,
+                                        );
+                                      },
+                                    ),
+                                    _buildMasterAutomationLane(viewportWidth),
+                                    staticTrackHeaders,
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (_usesTabletDawLayout)
+                            Positioned(
+                              left: 0,
+                              bottom: 0,
+                              width: headerWidth,
+                              child: RepaintBoundary(
+                                child: _buildTabletHeaderFooter(headerWidth),
+                              ),
+                            ),
+                          if (_usesTabletDawLayout)
+                            Positioned(
+                              left: 0,
+                              top: _kTabletRailTopInset,
+                              bottom: _kTabletFooterControlsBottomPadding,
+                              child: RepaintBoundary(
+                                child: _buildTabletVerticalCompressionRail(
+                                  visibleTimelineHeight,
+                                ),
+                              ),
+                            ),
+                          _buildSelectedClipPopup(
+                            viewportWidth,
+                            visibleTimelineHeight,
+                          ),
+                          _buildInstrumentLaneRegionPopup(
+                            viewportWidth,
+                            visibleTimelineHeight,
+                          ),
+                          _buildAutomationClipMenuOverlay(
+                            viewportWidth,
+                            visibleTimelineHeight,
+                            timelineAutomationClipVisuals,
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -8097,6 +8926,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                           selectedClipIndex: _selectedClipIndex,
                           selectedClipIndices:
                               _selectedClipIndices.toList(growable: false),
+                          clipVisualStackOrder:
+                              Map<String, int>.from(_clipVisualStackOrder),
                           stretchToolActive:
                               _activeTool == _TimelineTool.stretch,
                           trimClipIndex: _trimClipIndex,
@@ -8179,6 +9010,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                       ? null
                       : _onTimelineLongPressEnd,
                   onDoubleTapDown: _onTimelineDoubleTapDown,
+                  onTapDown: _handleTapDown,
                   onTapUp: _onTimelineTap,
                   child: Align(
                     alignment: Alignment.topLeft,
@@ -8207,6 +9039,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                             selectedClipIndex: _selectedClipIndex,
                             selectedClipIndices:
                                 _selectedClipIndices.toList(growable: false),
+                            clipVisualStackOrder:
+                                Map<String, int>.from(_clipVisualStackOrder),
                             stretchToolActive:
                                 _activeTool == _TimelineTool.stretch,
                             trimClipIndex: _trimClipIndex,
@@ -8367,23 +9201,27 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           top: topY,
           width: viewportWidth,
           height: expandedHeight,
-          child: ClipRect(
-            // prevents overflow painting
-            child: Container(
-              decoration: BoxDecoration(
-                color: normalizedExpandedTab == 1
-                    ? _kTimelineExpandedPanelSurfaceFx
-                    : _kTimelineExpandedPanelSurface,
-                border: Border(
-                  top: BorderSide(color: _kTimelineExpandedPanelBorder),
-                  bottom: BorderSide(color: _kTimelineExpandedPanelBorder),
+          child: Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerSignal: _onTimelinePointerSignal,
+            child: ClipRect(
+              // prevents overflow painting
+              child: Container(
+                decoration: BoxDecoration(
+                  color: normalizedExpandedTab == 1
+                      ? _kTimelineExpandedPanelSurfaceFx
+                      : _kTimelineExpandedPanelSurface,
+                  border: Border(
+                    top: BorderSide(color: _kTimelineExpandedPanelBorder),
+                    bottom: BorderSide(color: _kTimelineExpandedPanelBorder),
+                  ),
                 ),
-              ),
-              child: _buildExpandedRowPanelContent(
-                row,
-                viewportWidth,
-                normalizedExpandedTab,
-                automationTargetId,
+                child: _buildExpandedRowPanelContent(
+                  row,
+                  viewportWidth,
+                  normalizedExpandedTab,
+                  automationTargetId,
+                ),
               ),
             ),
           ),
@@ -8405,66 +9243,31 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _masterAutomationEditorTargetId ?? '',
     );
     return Positioned(
-      left: 0,
+      left: _headerWidth,
       top: 0,
-      right: 0,
+      width: viewportWidth,
       height: _masterAutomationLanePaintHeight,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            width: _headerWidth,
-            padding: const EdgeInsets.fromLTRB(9, 10, 8, 10),
-            decoration: BoxDecoration(
-              color: _kTimelineHeaderIdle.withValues(alpha: 0.70),
-              border: Border(
-                right: BorderSide(
-                  color: Colors.white.withValues(alpha: 0.08),
-                ),
-                bottom: BorderSide(
-                  color: Colors.white.withValues(alpha: 0.10),
-                ),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.tune_rounded,
-                  size: 17,
-                  color: _kTimelineShellText.withValues(alpha: 0.88),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  L10n.translate(context, 'Master'),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: _kTimelineShellText,
-                    fontFamily: 'Pretendard',
-                    fontSize: 11.4,
-                    fontWeight: FontWeight.w800,
-                    height: 1.0,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  L10n.translate(context, 'Automation'),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: _kTimelineShellMutedText,
-                    fontFamily: 'Pretendard',
-                    fontSize: 9.2,
-                    fontWeight: FontWeight.w600,
-                    height: 1.0,
-                  ),
-                ),
-              ],
+      child: Listener(
+        behavior: HitTestBehavior.opaque,
+        onPointerSignal: _onTimelinePointerSignal,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: _kMasterAutomationLaneFill,
+            border: Border(
+              bottom: BorderSide(color: _kMasterAutomationLaneBorder),
             ),
           ),
-          SizedBox(
-            width: viewportWidth,
+          child: ValueListenableBuilder<Duration>(
+            valueListenable: widget.transportClockListenable,
+            builder: (context, _, child) {
+              final playheadPx = _getPlayheadPx(context);
+              return Stack(
+                children: [
+                  Positioned.fill(child: child!),
+                  _buildMasterAutomationPlayhead(playheadPx),
+                ],
+              );
+            },
             child: _buildAutomationPanel(
               0,
               targetId: targetId,
@@ -8473,7 +9276,115 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
               onClose: closeMasterAutomationLane,
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMasterAutomationLaneHeader(double width) {
+    const iconStripWidth = 44.0;
+    return Container(
+      width: width,
+      height: _masterAutomationLanePaintHeight,
+      decoration: BoxDecoration(
+        color: _kMasterAutomationLaneHeader,
+        border: Border(
+          right: BorderSide(color: _kMasterAutomationLaneBorder),
+          bottom: BorderSide(color: _kMasterAutomationLaneBorder),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            width: iconStripWidth,
+            child: ColoredBox(
+              color: const Color.fromRGBO(42, 73, 103, 0.90),
+              child: Center(
+                child: Icon(
+                  Icons.tune_rounded,
+                  size: 20,
+                  color: _kTimelineShellText.withValues(alpha: 0.92),
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(10, 12, 8, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    L10n.translate(context, 'Master'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _kTimelineShellText,
+                      fontFamily: 'Pretendard',
+                      fontSize: 12.2,
+                      fontWeight: FontWeight.w800,
+                      height: 1.0,
+                      letterSpacing: 0,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    L10n.translate(context, 'Automation'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: _kTimelineShellMutedText,
+                      fontFamily: 'Pretendard',
+                      fontSize: 9.8,
+                      fontWeight: FontWeight.w600,
+                      height: 1.0,
+                      letterSpacing: 0,
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    L10n.translate(context, 'Master chain'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.46),
+                      fontFamily: 'Pretendard',
+                      fontSize: 9.4,
+                      fontWeight: FontWeight.w600,
+                      height: 1.0,
+                      letterSpacing: 0,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildMasterAutomationPlayhead(double playheadPx) {
+    return Positioned(
+      left: playheadPx - 2.0,
+      top: 0,
+      bottom: 0,
+      child: IgnorePointer(
+        child: SizedBox(
+          width: 4,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: const Color.fromRGBO(240, 169, 87, 0.22),
+              border: Border(
+                left: BorderSide(
+                  color: const Color(0xFFF0A957),
+                  width: 1.5,
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -8760,6 +9671,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                     timelineDurationMs: _maxDurationMs,
                     targetLabel: 'Volume',
                     targetParamId: 'volume',
+                    targetUnit: 'dB',
                     targetMin: 0.0,
                     targetMax: 1.0,
                     targetDefaultNormalized: null,
@@ -8994,6 +9906,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         (activeTarget['fullLabel'] ?? targetLabel).toString().trim();
     final targetParamId =
         (activeTarget['paramId'] ?? activeTargetId).toString().trim();
+    final targetUnit = (activeTarget['unit'] ?? '').toString().trim();
     final targetMin = (activeTarget['min'] as num?)?.toDouble() ?? 0.0;
     final targetMax = (activeTarget['max'] as num?)?.toDouble() ?? 1.0;
     final targetDefaultNormalized =
@@ -9014,6 +9927,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final formatter = _AutomationValueFormatter(
       targetLabel: targetLabel.isEmpty ? activeTargetId : targetLabel,
       targetParamId: targetParamId.isEmpty ? activeTargetId : targetParamId,
+      targetUnit: targetUnit,
       targetMin: targetMin,
       targetMax: targetMax,
       pluginDisplayLabels: targetDisplayLabels,
@@ -9091,6 +10005,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         _automationTargetPickerRow = null;
       });
     }
+
+    final footerPadding = masterLane
+        ? const EdgeInsets.fromLTRB(10, 4, 10, 6)
+        : const EdgeInsets.fromLTRB(10, 4, 10, 8);
+    final pickerHeight = masterLane ? 34.0 : 38.0;
+    final pickerMenuHeight = masterLane ? 196.0 : 224.0;
+    final footerGap = masterLane ? 5.0 : 7.0;
+    final toolbarHeight = masterLane ? 22.0 : 24.0;
 
     double? laneHighlightStartMs;
     double? laneHighlightEndMs;
@@ -9496,6 +10418,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                         targetParamId: targetParamId.isEmpty
                             ? activeTargetId
                             : targetParamId,
+                        targetUnit: targetUnit,
                         targetMin: targetMin,
                         targetMax: targetMax,
                         targetDefaultNormalized: targetDefaultNormalized,
@@ -9518,11 +10441,19 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                           );
                           setState(() {});
                         },
-                        onPanStartExternal: (pos) =>
-                            _automationPanStart(row, pos, laneHeight),
-                        onPanUpdateExternal: (pos) =>
-                            _automationPanUpdate(row, pos),
-                        onPanEndExternal: () => _automationPanEnd(row),
+                        onPanStartExternal: (pos) => masterLane
+                            ? _masterAutomationPanStart(
+                                activeTargetId,
+                                pos,
+                                laneHeight,
+                              )
+                            : _automationPanStart(row, pos, laneHeight),
+                        onPanUpdateExternal: (pos) => masterLane
+                            ? _masterAutomationPanUpdate(activeTargetId, pos)
+                            : _automationPanUpdate(row, pos),
+                        onPanEndExternal: () => masterLane
+                            ? _masterAutomationPanEnd(activeTargetId)
+                            : _automationPanEnd(row),
                         onPanCancelExternal: _cancelAutomationPointInteraction,
                         onBackgroundPanStartExternal:
                             _automationLaneBackgroundPanStart,
@@ -9545,7 +10476,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
+              padding: footerPadding,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -9675,7 +10606,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                         menuChildren: [
                           SizedBox(
                             width: pickerConstraints.maxWidth,
-                            height: 224,
+                            height: pickerMenuHeight,
                             child: Scrollbar(
                               child: ListView.separated(
                                 padding: const EdgeInsets.all(7),
@@ -9812,7 +10743,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                         ],
                         builder: (context, controller, child) {
                           return Container(
-                            height: 38,
+                            height: pickerHeight,
                             decoration: BoxDecoration(
                               color: Colors.white.withValues(alpha: 0.055),
                               borderRadius: BorderRadius.circular(8),
@@ -9895,7 +10826,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                       ),
                                       const SizedBox(width: 8),
                                       AnimatedRotation(
-                                        turns: _automationTargetPickerRow == row
+                                        turns: _automationTargetPickerRow ==
+                                                pickerRowKey
                                             ? 0.5
                                             : 0.0,
                                         duration:
@@ -9919,9 +10851,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                       );
                     },
                   ),
-                  const SizedBox(height: 7),
+                  SizedBox(height: footerGap),
                   SizedBox(
-                    height: 24,
+                    height: toolbarHeight,
                     child: ListView(
                       scrollDirection: Axis.horizontal,
                       children: [
@@ -10016,6 +10948,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         getTrackPluginParameters: widget.getRowPluginParameters,
         scanPlugins: widget.scanPlugins,
         onTogglePluginFavorite: widget.onTogglePluginFavorite,
+        onManagePlugins: widget.onManagePlugins,
         openTrackPluginEditor: widget.openTrackPluginEditor,
         setTrackEffectParam: widget.setRowEffectParam,
         onRequestAutomateParameter: _handleRowEffectAutomationRequest,
@@ -10353,6 +11286,13 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _beginLoopInteractionAtRulerX(event.localPosition.dx);
   }
 
+  void _onRulerPointerDown(PointerDownEvent event) {
+    _requestTimelineFocus();
+    if (PlatformCapabilities.current.isDesktop) {
+      _onDesktopRulerSecondaryPointerDown(event);
+    }
+  }
+
   void _onDesktopRulerSecondaryPointerMove(PointerMoveEvent event) {
     if (!_desktopSecondaryLoopDragActive) return;
     if ((event.buttons & kSecondaryMouseButton) == 0) {
@@ -10441,10 +11381,13 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           ),
         ),
         alignment: Alignment.center,
-        child: _buildToolIcon(
-          _activeTool,
-          size: 16,
-          color: const Color.fromARGB(220, 255, 255, 255),
+        child: KeyedSubtree(
+          key: ValueKey('timeline_active_tool_${_activeTool.name}'),
+          child: _buildToolIcon(
+            _activeTool,
+            size: 16,
+            color: const Color.fromARGB(220, 255, 255, 255),
+          ),
         ),
       ),
     );
@@ -10555,8 +11498,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
               // Ruler content
               Expanded(
                 child: Listener(
-                  onPointerDown:
-                      isDesktop ? _onDesktopRulerSecondaryPointerDown : null,
+                  behavior: HitTestBehavior.translucent,
+                  onPointerSignal: _onTimelinePointerSignal,
+                  onPointerDown: _onRulerPointerDown,
                   onPointerMove:
                       isDesktop ? _onDesktopRulerSecondaryPointerMove : null,
                   onPointerUp:
@@ -11177,6 +12121,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
     return Column(
       children: [
+        if (_masterAutomationLanePaintHeight > 0.0)
+          _buildMasterAutomationLaneHeader(dynamicWidth),
         ...List.generate(_rowCount, (row) {
           if (!_isSourceRowVisible(row)) return const SizedBox.shrink();
           final isSelected = row == _selectedRowIndex;
@@ -11540,6 +12486,36 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     });
   }
 
+  void _onTabletRailPointerSignal(PointerSignalEvent event) {
+    if (_handleTabletRailRowHeightPointerSignal(event)) return;
+    _onTimelineLeftChromePointerSignal(event);
+  }
+
+  bool _handleTabletRailRowHeightPointerSignal(PointerSignalEvent event) {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.macOS) return false;
+    if (event is! PointerScrollEvent) return false;
+    if (!PlatformCapabilities.current.isDesktop) return false;
+    if (!HardwareKeyboard.instance.isMetaPressed) return false;
+
+    final rawDelta = event.scrollDelta.dy;
+    if (rawDelta.abs() < 0.5 || rawDelta.abs() < event.scrollDelta.dx.abs()) {
+      return false;
+    }
+
+    GestureBinding.instance.pointerSignalResolver.register(
+      event,
+      (PointerSignalEvent resolved) {
+        if (resolved is! PointerScrollEvent) return;
+        final delta = resolved.scrollDelta.dy;
+        if (delta.abs() < 0.5) return;
+        _setTabletRowHeightScale(
+          _tabletRowHeightScale - delta * _kTabletRailWheelResizeSensitivity,
+        );
+      },
+    );
+    return true;
+  }
+
   Widget _buildTabletVerticalCompressionRail(double visibleTimelineHeight) {
     final railHeight = _tabletRailViewportHeight(visibleTimelineHeight);
     final maxScroll = _tabletRailMaxScroll(visibleTimelineHeight);
@@ -11574,104 +12550,109 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       decreasedValue: '${(rowHeightPercent - 8).clamp(62, 100)}%',
       onIncrease: () => _setTabletRowHeightScale(_tabletRowHeightScale + 0.08),
       onDecrease: () => _setTabletRowHeightScale(_tabletRowHeightScale - 0.08),
-      child: GestureDetector(
+      child: Listener(
         behavior: HitTestBehavior.opaque,
-        dragStartBehavior: DragStartBehavior.down,
-        onVerticalDragStart: (details) =>
-            _handleTabletRailDragStart(details, visibleTimelineHeight),
-        onVerticalDragUpdate: (details) =>
-            _handleTabletRailDragUpdate(details, visibleTimelineHeight),
-        onVerticalDragEnd: (_) => _handleTabletRailDragEnd(),
-        onVerticalDragCancel: _handleTabletRailDragEnd,
-        child: ExcludeSemantics(
-          child: SizedBox(
-            width: _kTabletHeaderLedgeX + 4,
-            height: railHeight,
-            child: Stack(
-              alignment: Alignment.topLeft,
-              children: [
-                Positioned.fill(
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Padding(
-                      padding: EdgeInsets.only(left: railTrackLeft),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 110),
-                        width: railTrackWidth,
-                        decoration: BoxDecoration(
-                          color: anyActive
-                              ? stateColor.withValues(alpha: 0.12)
-                              : const Color(0xFF0A1521).withValues(alpha: 0.17),
-                          borderRadius: BorderRadius.circular(99),
-                          border: Border.all(
+        onPointerSignal: _onTabletRailPointerSignal,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          dragStartBehavior: DragStartBehavior.down,
+          onVerticalDragStart: (details) =>
+              _handleTabletRailDragStart(details, visibleTimelineHeight),
+          onVerticalDragUpdate: (details) =>
+              _handleTabletRailDragUpdate(details, visibleTimelineHeight),
+          onVerticalDragEnd: (_) => _handleTabletRailDragEnd(),
+          onVerticalDragCancel: _handleTabletRailDragEnd,
+          child: ExcludeSemantics(
+            child: SizedBox(
+              width: _kTabletHeaderLedgeX + 4,
+              height: railHeight,
+              child: Stack(
+                alignment: Alignment.topLeft,
+                children: [
+                  Positioned.fill(
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Padding(
+                        padding: EdgeInsets.only(left: railTrackLeft),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 110),
+                          width: railTrackWidth,
+                          decoration: BoxDecoration(
                             color: anyActive
-                                ? stateColor.withValues(alpha: 0.20)
-                                : Colors.white.withValues(alpha: 0.06),
-                            width: 0.8,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  top: thumbTop,
-                  left: thumbLeft,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 110),
-                    width: thumbWidth,
-                    height: thumbHeight,
-                    decoration: BoxDecoration(
-                      color: anyActive
-                          ? const Color(0xFFF4F4F4).withValues(alpha: 0.72)
-                          : const Color(0xFFF4F4F4).withValues(alpha: 0.44),
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(
-                        color: anyActive
-                            ? stateColor.withValues(
-                                alpha: resizing ? 0.66 : 0.52)
-                            : Colors.white.withValues(alpha: 0.09),
-                        width: anyActive ? 1.0 : 0.6,
-                      ),
-                      boxShadow: <BoxShadow>[
-                        BoxShadow(
-                          color: anyActive
-                              ? stateColor.withValues(
-                                  alpha: resizing ? 0.24 : 0.16)
-                              : Colors.black.withValues(alpha: 0.13),
-                          blurRadius: resizing ? 15 : (anyActive ? 11 : 4),
-                          offset: const Offset(0, 1),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      children: [
-                        _TabletRailEndCap(
-                          active: resizingTop,
-                          resizing: resizing,
-                        ),
-                        Expanded(
-                          child: Center(
-                            child: Container(
-                              width: 2,
-                              height: math.max(12.0, thumbHeight * 0.34),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF15436C)
-                                    .withValues(alpha: anyActive ? 0.34 : 0.20),
-                                borderRadius: BorderRadius.circular(99),
-                              ),
+                                ? stateColor.withValues(alpha: 0.12)
+                                : const Color(0xFF0A1521)
+                                    .withValues(alpha: 0.17),
+                            borderRadius: BorderRadius.circular(99),
+                            border: Border.all(
+                              color: anyActive
+                                  ? stateColor.withValues(alpha: 0.20)
+                                  : Colors.white.withValues(alpha: 0.06),
+                              width: 0.8,
                             ),
                           ),
                         ),
-                        _TabletRailEndCap(
-                          active: resizingBottom,
-                          resizing: resizing,
-                        ),
-                      ],
+                      ),
                     ),
                   ),
-                ),
-              ],
+                  Positioned(
+                    top: thumbTop,
+                    left: thumbLeft,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 110),
+                      width: thumbWidth,
+                      height: thumbHeight,
+                      decoration: BoxDecoration(
+                        color: anyActive
+                            ? const Color(0xFFF4F4F4).withValues(alpha: 0.72)
+                            : const Color(0xFFF4F4F4).withValues(alpha: 0.44),
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(
+                          color: anyActive
+                              ? stateColor.withValues(
+                                  alpha: resizing ? 0.66 : 0.52)
+                              : Colors.white.withValues(alpha: 0.09),
+                          width: anyActive ? 1.0 : 0.6,
+                        ),
+                        boxShadow: <BoxShadow>[
+                          BoxShadow(
+                            color: anyActive
+                                ? stateColor.withValues(
+                                    alpha: resizing ? 0.24 : 0.16)
+                                : Colors.black.withValues(alpha: 0.13),
+                            blurRadius: resizing ? 15 : (anyActive ? 11 : 4),
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        children: [
+                          _TabletRailEndCap(
+                            active: resizingTop,
+                            resizing: resizing,
+                          ),
+                          Expanded(
+                            child: Center(
+                              child: Container(
+                                width: 2,
+                                height: math.max(12.0, thumbHeight * 0.34),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF15436C).withValues(
+                                      alpha: anyActive ? 0.34 : 0.20),
+                                  borderRadius: BorderRadius.circular(99),
+                                ),
+                              ),
+                            ),
+                          ),
+                          _TabletRailEndCap(
+                            active: resizingBottom,
+                            resizing: resizing,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -12083,7 +13064,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                     ? const Color(0xFF15436C)
                     : Colors.white.withValues(alpha: 0.90),
                 fontSize: fontSize,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w600,
                 height: 1.0,
               ),
             ),
@@ -12875,7 +13856,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                   ? Colors.white
                   : Colors.white.withValues(alpha: 0.72),
               fontSize: 13,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ),
@@ -12933,7 +13914,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                   ? Colors.white
                   : Colors.white.withValues(alpha: 0.72),
               fontSize: 12.5,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ),
@@ -13779,6 +14760,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         _clipPopupMs = null;
         _dragDeltaMs = 0.0;
         _dragDeltaRows = 0;
+        _dragXAxisLocked = false;
         _dragGroupStartMs.clear();
         _dragGroupStartRows.clear();
         final draggedIndex = _draggedClipIndex;
@@ -13869,9 +14851,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           final baseMs = _dragGroupStartMs[index];
           final baseRow = _dragGroupStartRows[index];
           if (baseMs == null || baseRow == null) continue;
-          final nextStartMs =
-              _quantizeMsForTimelineClipDrag(baseMs + _dragDeltaMs)
-                  .clamp(0.0, double.infinity);
+          final nextStartMs = (_dragXAxisLocked
+                  ? baseMs
+                  : _quantizeMsForTimelineClipDrag(baseMs + _dragDeltaMs))
+              .clamp(0.0, double.infinity);
           final nextRow = (baseRow + _dragDeltaRows)
               .clamp(0, math.max(0, _rowCount - 1))
               .toInt();
@@ -13970,6 +14953,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _dragGroupStartMs.clear();
       _dragGroupStartRows.clear();
       _timelineKeyboardModifierPointer = null;
+      _dragXAxisLocked = false;
       // _dragStartClipMs and _dragStartRow are kept for the painter until commit
       // _activeTrimHandleX = null;
       _trimClipIndex = null;
@@ -13990,6 +14974,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _initialScrollMs = null;
       _dragDeltaMs = 0.0;
       _dragDeltaRows = 0;
+      _dragXAxisLocked = false;
     });
   }
 
@@ -13997,7 +14982,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _clearPendingAutomationClipSelection();
     if (_activeTool == _TimelineTool.pencil &&
         _canShowInstrumentLaneRegionMenuAt(details.localPosition)) {
-      unawaited(_showInstrumentLaneRegionMenuAt(details.localPosition));
+      _showInstrumentLaneRegionMenuAt(details.localPosition);
       return;
     }
     if (_activeTool != _TimelineTool.pencil &&
@@ -14084,9 +15069,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
       // Calculate TOTAL delta from drag start (for row)
       final totalDx = details.focalPoint.dx - _dragStartGlobalOffset!.dx;
+      final xLocked = _timelineClipDragXAxisLockPressed;
+      _dragXAxisLocked = xLocked;
 
       // Convert to delta in Ms
-      final deltaMs = totalDx / _pixelsPerMs;
+      final deltaMs = xLocked ? 0.0 : totalDx / _pixelsPerMs;
       _dragDeltaMs = deltaMs;
 
       // Convert total vertical displacement to row index
@@ -14108,9 +15095,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
       // Update the *temporary* drag state
       // The painter will use these values to draw the ghost clip
-      _dragStartClipMs = _quantizeMsForTimelineClipDrag(
-        originalStartMs + deltaMs,
-      ); // === FIX ===: Start from original clip position + delta
+      _dragStartClipMs = xLocked
+          ? originalStartMs
+          : _quantizeMsForTimelineClipDrag(
+              originalStartMs + deltaMs,
+            ); // === FIX ===: Start from original clip position + delta
       _dragStartRow = newRow; // === FIX ===: Use the calculated new row
 
       // Clamp row
@@ -14469,8 +15458,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       return null;
     }
 
-    // Iterate backwards to prioritize clips drawn later (higher index clips are usually drawn on top)
-    for (int i = widget.clips.length - 1; i >= 0; i--) {
+    for (final i in _clipHitTestOrder()) {
       final clip = widget.clips[i];
       final startMs = widget.getStartMs(clip);
       final durationMs = widget.getTimelineDurationMs(clip);
@@ -14579,7 +15567,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         }
       }
     }
-    for (int i = widget.clips.length - 1; i >= 0; i--) {
+    for (final i in _clipHitTestOrder()) {
       final clip = widget.clips[i];
       if (clip.rowIndex != tapRow) continue;
 
@@ -14588,7 +15576,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       if (tapMs >= startMs && tapMs <= endMs) {
         return i;
       }
-      if (!includeTrimHandleHitbox || !_selectedClipIndices.contains(i)) {
+      if (!includeTrimHandleHitbox || !_isClipIndexSelected(i)) {
         continue;
       }
       final clipRect = _getClipRect(i);
@@ -14669,9 +15657,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (tappedClipIndex == null) {
       final tapRow = _rowForLocalY(localPos.dy);
       final rawTapMs = _scrollOffsetMs + localPos.dx / _pixelsPerMs;
-      final quantizedStartMs = _segmentStartMsForTap(rawTapMs);
-      final quantizedEndMs = quantizedStartMs + _quantizeIntervalMs();
-      final tapMsForPaste = _magnetEnabled ? quantizedStartMs : rawTapMs;
       final canPasteHere = tapRow != null &&
           (_canPasteCopiedClipAtRow(tapRow) ||
               _canPasteAutomationClipAt(tapRow));
@@ -14687,34 +15672,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           _resetTrimInteractionState();
           _clearClipSelection();
           if (canPasteHere) {
-            _pasteRow = tapRow;
-            _pasteMs = tapMsForPaste;
-            _showPastePopup = true;
-            if (_magnetEnabled) {
-              _highlightedSegmentRow = tapRow;
-              _highlightedSegmentStartMs = quantizedStartMs;
-              _highlightedSegmentEndMs = quantizedEndMs;
-            } else {
-              _highlightedSegmentRow = null;
-              _highlightedSegmentStartMs = null;
-              _highlightedSegmentEndMs = null;
-            }
+            _setPastePopupTarget(tapRow, rawTapMs);
           }
         });
       } else if (canPasteHere) {
         setState(() {
-          _pasteRow = tapRow;
-          _pasteMs = tapMsForPaste;
-          _showPastePopup = true;
-          if (_magnetEnabled) {
-            _highlightedSegmentRow = tapRow;
-            _highlightedSegmentStartMs = quantizedStartMs;
-            _highlightedSegmentEndMs = quantizedEndMs;
-          } else {
-            _highlightedSegmentRow = null;
-            _highlightedSegmentStartMs = null;
-            _highlightedSegmentEndMs = null;
-          }
+          _setPastePopupTarget(tapRow, rawTapMs);
         });
       }
       return;
@@ -14766,9 +15729,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     // === 4. PRIORITY 2: TAP ON CLIP BODY → SELECT FIRST, DRAG ON FOLLOW-UP ===
     if (clipRect.contains(localPos)) {
       final clip = widget.clips[tappedClipIndex];
+      final desktopDirectDrag =
+          _desktopPrimaryPointerDownActive && !wasAlreadySelected;
       final canBeginDrag = _activeTool == _TimelineTool.paint ||
           wasAlreadySelected ||
-          draggingGroup;
+          draggingGroup ||
+          desktopDirectDrag;
       final tentativeSelection =
           !canBeginDrag && !wasAlreadySelected && !draggingGroup;
       setState(() {
@@ -14788,7 +15754,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         }
         if (canBeginDrag) {
           _pendingDrag = true;
-          _pendingDragStartedFromSelection = wasAlreadySelected;
+          _pendingDragStartedFromSelection =
+              wasAlreadySelected || desktopDirectDrag;
           _draggedClipIndex = tappedClipIndex;
           _dragStartGlobalOffset = details.globalPosition;
           _dragStartLocalOffset = localPos;
@@ -14796,6 +15763,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           _dragStartRow = clip.rowIndex;
           _dragDeltaMs = 0.0;
           _dragDeltaRows = 0;
+          _dragXAxisLocked = false;
           _dragGroupStartMs.clear();
           _dragGroupStartRows.clear();
         }
@@ -14838,7 +15806,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     return true;
   }
 
-  Future<void> _showInstrumentLaneRegionMenuAt(Offset localPosition) async {
+  void _showInstrumentLaneRegionMenuAt(Offset localPosition) {
     if (!_canShowInstrumentLaneRegionMenuAt(localPosition)) {
       return;
     }
@@ -14856,6 +15824,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _showPastePopup = false;
       _pasteRow = null;
       _pasteMs = null;
+      _showInstrumentLaneRegionPopup = true;
+      _instrumentLaneRegionRow = tapRow;
+      _instrumentLaneRegionMs = tapMsForPaste;
+      _instrumentLaneRegionAnchorLocal = localPosition;
       _highlightedSegmentRow = _magnetEnabled ? tapRow : null;
       _highlightedSegmentStartMs = _magnetEnabled ? quantizedStartMs : null;
       _highlightedSegmentEndMs = _magnetEnabled ? quantizedEndMs : null;
@@ -14864,51 +15836,15 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _selectionBoxCurrent = null;
       _suppressNextTimelineTapAfterInstrumentLaneCreate = true;
     });
+  }
 
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: const Color(0xFF5F666D),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(
-                Icons.add_rounded,
-                color: _kTimelineShellText,
-              ),
-              title: Text(
-                L10n.translate(ctx, 'Add MIDI Region'),
-                style: const TextStyle(
-                  fontFamily: 'Pretendard',
-                  color: _kTimelineShellText,
-                ),
-              ),
-              onTap: () => Navigator.pop(ctx, 'add_midi_region'),
-            ),
-            ListTile(
-              leading: const Icon(
-                Icons.close_rounded,
-                color: _kTimelineShellText,
-              ),
-              title: Text(
-                L10n.translate(ctx, 'Cancel'),
-                style: const TextStyle(
-                  fontFamily: 'Pretendard',
-                  color: _kTimelineShellText,
-                ),
-              ),
-              onTap: () => Navigator.pop(ctx),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (!mounted) return;
+  Future<void> _createMidiRegionFromInstrumentLanePopup() async {
+    final create = widget.onCreateMidiClipInInstrumentLane;
+    final row = _instrumentLaneRegionRow;
+    final ms = _instrumentLaneRegionMs;
+    if (create == null || row == null || ms == null) return;
     setState(() {
+      _clearInstrumentLaneRegionPopupState();
       _highlightedSegmentRow = null;
       _highlightedSegmentStartMs = null;
       _highlightedSegmentEndMs = null;
@@ -14916,10 +15852,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _pasteRow = null;
       _pasteMs = null;
     });
-    if (action != 'add_midi_region') return;
-    final create = widget.onCreateMidiClipInInstrumentLane;
-    if (create == null) return;
-    await create(tapRow, tapMsForPaste);
+    await create(row, ms);
   }
 
   void _onTimelineTap(TapUpDetails details) {
@@ -14982,6 +15915,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           _showPastePopup = false;
           _pasteRow = null;
           _pasteMs = null;
+          _clearInstrumentLaneRegionPopupState();
           _highlightedSegmentRow = null;
           _highlightedSegmentStartMs = null;
           _highlightedSegmentEndMs = null;
@@ -14997,6 +15931,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           _showPastePopup = false;
           _pasteRow = null;
           _pasteMs = null;
+          _clearInstrumentLaneRegionPopupState();
           _highlightedSegmentRow = null;
           _highlightedSegmentStartMs = null;
           _highlightedSegmentEndMs = null;
@@ -15009,6 +15944,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           _showPastePopup = false;
           _pasteRow = null;
           _pasteMs = null;
+          _clearInstrumentLaneRegionPopupState();
           _highlightedSegmentRow = null;
           _highlightedSegmentStartMs = null;
           _highlightedSegmentEndMs = null;
@@ -15081,9 +16017,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final localX = details.localPosition.dx;
     final localY = details.localPosition.dy;
     final rawTapMs = _scrollOffsetMs + localX / _pixelsPerMs;
-    final quantizedStartMs = _segmentStartMsForTap(rawTapMs);
-    final quantizedEndMs = quantizedStartMs + _quantizeIntervalMs();
-    final tapMsForPaste = _magnetEnabled ? quantizedStartMs : rawTapMs;
 
     final tapRow = _rowForLocalY(localY);
     if (tapRow == null) return;
@@ -15128,6 +16061,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         _showPastePopup = false;
         _pasteRow = null;
         _pasteMs = null;
+        _clearInstrumentLaneRegionPopupState();
         _highlightedSegmentRow = null;
         _highlightedSegmentStartMs = null;
         _highlightedSegmentEndMs = null;
@@ -15141,22 +16075,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
         // If we have something copied, show paste popup here
         if (canPasteHere) {
-          _pasteRow = tapRow;
-          _pasteMs = tapMsForPaste;
-          _showPastePopup = true;
-          if (_magnetEnabled) {
-            _highlightedSegmentRow = tapRow;
-            _highlightedSegmentStartMs = quantizedStartMs;
-            _highlightedSegmentEndMs = quantizedEndMs;
-          } else {
-            _highlightedSegmentRow = null;
-            _highlightedSegmentStartMs = null;
-            _highlightedSegmentEndMs = null;
-          }
+          _setPastePopupTarget(tapRow, rawTapMs);
         } else {
           _showPastePopup = false;
           _pasteRow = null;
           _pasteMs = null;
+          _clearInstrumentLaneRegionPopupState();
           _highlightedSegmentRow = null;
           _highlightedSegmentStartMs = null;
           _highlightedSegmentEndMs = null;
@@ -15312,6 +16236,7 @@ class _TimelinePainter extends CustomPainter {
   final double? clipLoopPreviewFallbackMs;
   final int selectedClipIndex;
   final List<int> selectedClipIndices;
+  final Map<String, int> clipVisualStackOrder;
   final bool stretchToolActive;
   final int? trimClipIndex; // === FIX ===: Added for trim halo/indicator
   // === FIX ===: Updated drag properties
@@ -15351,6 +16276,7 @@ class _TimelinePainter extends CustomPainter {
   final int _automationClipHash;
   final int _rowsHiddenByCollapsedGroupsHash;
   final int _selectedClipIndicesHash;
+  final int _clipVisualStackOrderHash;
   final int _rowExpandedHash;
   final int _expandedTabHash;
   final int _effectsPanelHeightsHash;
@@ -15381,6 +16307,7 @@ class _TimelinePainter extends CustomPainter {
     required this.clipLoopPreviewFallbackMs,
     required this.selectedClipIndex,
     required this.selectedClipIndices,
+    required this.clipVisualStackOrder,
     required this.stretchToolActive,
     this.trimClipIndex, // === FIX ===: Add to constructor
     this.draggedClipIndex,
@@ -15429,6 +16356,8 @@ class _TimelinePainter extends CustomPainter {
           (rowsHiddenByCollapsedGroups.toList()..sort()),
         ),
         _selectedClipIndicesHash = _hashList(selectedClipIndices),
+        _clipVisualStackOrderHash =
+            _computeClipVisualStackOrderHash(clipVisualStackOrder),
         _rowExpandedHash = _hashList(rowExpanded),
         _expandedTabHash = _hashList(expandedTab),
         _effectsPanelHeightsHash = _hashDoubleList(effectsPanelHeights),
@@ -15471,6 +16400,16 @@ class _TimelinePainter extends CustomPainter {
       hash = _hashCombine(hash, _quantizeDouble(getFullDurationMs(clip)));
       hash = _hashCombine(hash, peaks.length);
       hash = _hashCombine(hash, identityHashCode(peaks));
+    }
+    return _hashFinish(hash);
+  }
+
+  static int _computeClipVisualStackOrderHash(Map<String, int> stackOrder) {
+    var hash = 0;
+    final keys = stackOrder.keys.toList(growable: false)..sort();
+    for (final key in keys) {
+      hash = _hashCombine(hash, key);
+      hash = _hashCombine(hash, stackOrder[key] ?? 0);
     }
     return _hashFinish(hash);
   }
@@ -15699,13 +16638,13 @@ class _TimelinePainter extends CustomPainter {
       );
       canvas.drawRect(
         masterRect,
-        Paint()..color = _timelineAutomationLaneFillColor(true),
+        Paint()..color = _kMasterAutomationLaneFill,
       );
       canvas.drawLine(
         Offset(0, masterAutomationLaneHeight),
         Offset(viewportWidth, masterAutomationLaneHeight),
         Paint()
-          ..color = _kTimelineRowDivider
+          ..color = _kMasterAutomationLaneBorder
           ..strokeWidth = 1,
       );
     }
@@ -15910,9 +16849,7 @@ class _TimelinePainter extends CustomPainter {
     final collapsedGroupSummaries = _collapsedGroupSummaries();
     _drawCollapsedGroupSummaries(canvas, collapsedGroupSummaries);
 
-    // Draw clips
-    // ... (Clip drawing logic remains the same, but _drawClip needs modification) ...
-    for (int i = 0; i < clips.length; i++) {
+    for (final i in _clipPaintOrder()) {
       if (draggingGroup && selectedClipIndices.contains(i)) continue;
       if (!draggingGroup && i == draggedClipIndex) continue;
       if (_isClipRepresentedByCollapsedGroup(
@@ -15940,8 +16877,8 @@ class _TimelinePainter extends CustomPainter {
         _drawClip(canvas, draggedClipIndex!, true, overlapByClip);
       }
     }
-    _drawSelectedClipHandlesOverlay(canvas);
     _drawCrossfadeVisuals(canvas, crossfadeVisuals);
+    _drawSelectedClipHandlesOverlay(canvas);
     _drawTimelineAutomationClips(canvas, size);
     _drawCutPreviewLine(canvas);
 
@@ -15983,6 +16920,32 @@ class _TimelinePainter extends CustomPainter {
 
   bool _crossfadeModeActive(String mode) =>
       mode == 'linear' || mode == 'equal_power' || mode == 's_curve';
+
+  bool _isClipSelected(int index) {
+    return index == selectedClipIndex || selectedClipIndices.contains(index);
+  }
+
+  String _clipVisualStackKey(AudioTrack clip, int fallbackIndex) {
+    final clipId = clip.clipId.trim();
+    if (clipId.isNotEmpty) return 'clip:$clipId';
+    if (clip.engineClipId >= 0) return 'engine:${clip.engineClipId}';
+    return 'index:$fallbackIndex';
+  }
+
+  int _clipVisualStackOrderForIndex(int index) {
+    if (index < 0 || index >= clips.length) return 0;
+    return clipVisualStackOrder[_clipVisualStackKey(clips[index], index)] ?? 0;
+  }
+
+  List<int> _clipPaintOrder() {
+    return List<int>.generate(clips.length, (i) => i)
+      ..sort((a, b) {
+        final stackCompare = _clipVisualStackOrderForIndex(a)
+            .compareTo(_clipVisualStackOrderForIndex(b));
+        if (stackCompare != 0) return stackCompare;
+        return a.compareTo(b);
+      });
+  }
 
   bool _rowAllowsClip(int row, AudioTrack clip) {
     if (row < 0 || row >= rows.length) return false;
@@ -16564,7 +17527,7 @@ class _TimelinePainter extends CustomPainter {
     final hasOverlap =
         index >= 0 && index < overlapByClip.length && overlapByClip[index];
     final isMidi = clip.clipKind == ClipKind.midi;
-    final isSelected = selectedClipIndices.contains(index);
+    final isSelected = _isClipSelected(index);
     final isLoopPreview = clipLoopPreviewClipIndex == index;
     final showEdgeHandles =
         selectedClipIndices.length <= 1 && index == selectedClipIndex;
@@ -17438,6 +18401,7 @@ class _TimelinePainter extends CustomPainter {
             old._rowsHiddenByCollapsedGroupsHash ||
         selectedClipIndex != old.selectedClipIndex ||
         _selectedClipIndicesHash != old._selectedClipIndicesHash ||
+        _clipVisualStackOrderHash != old._clipVisualStackOrderHash ||
         draggedClipIndex != old.draggedClipIndex ||
         draggedClipStartMs != old.draggedClipStartMs ||
         draggedClipRowIndex != old.draggedClipRowIndex ||
@@ -17752,6 +18716,7 @@ class _AutomationLane extends StatefulWidget {
   final double timelineDurationMs; // kept for future use, but not needed for x
   final String targetLabel;
   final String targetParamId;
+  final String targetUnit;
   final double targetMin;
   final double targetMax;
   final double? targetDefaultNormalized;
@@ -17778,6 +18743,7 @@ class _AutomationLane extends StatefulWidget {
     required this.timelineDurationMs,
     required this.targetLabel,
     required this.targetParamId,
+    required this.targetUnit,
     required this.targetMin,
     required this.targetMax,
     required this.targetDefaultNormalized,
@@ -17843,6 +18809,7 @@ class _AutomationLaneState extends State<_AutomationLane> {
   _AutomationValueFormatter get _valueFormatter => _AutomationValueFormatter(
         targetLabel: widget.targetLabel,
         targetParamId: widget.targetParamId,
+        targetUnit: widget.targetUnit,
         targetMin: widget.targetMin,
         targetMax: widget.targetMax,
         pluginDisplayLabels: widget.targetDisplayLabels,
@@ -18189,6 +19156,7 @@ class _AutomationLaneState extends State<_AutomationLane> {
             verticalPadding: verticalPadding,
             targetLabel: widget.targetLabel,
             targetParamId: widget.targetParamId,
+            targetUnit: widget.targetUnit,
             targetMin: widget.targetMin,
             targetMax: widget.targetMax,
             targetDefaultNormalized: widget.targetDefaultNormalized,
@@ -18216,6 +19184,7 @@ class _AutomationPainter extends CustomPainter {
   final double verticalPadding;
   final String targetLabel;
   final String targetParamId;
+  final String targetUnit;
   final double targetMin;
   final double targetMax;
   final double? targetDefaultNormalized;
@@ -18232,6 +19201,7 @@ class _AutomationPainter extends CustomPainter {
     required this.verticalPadding,
     required this.targetLabel,
     required this.targetParamId,
+    required this.targetUnit,
     required this.targetMin,
     required this.targetMax,
     required this.targetDefaultNormalized,
@@ -18250,6 +19220,7 @@ class _AutomationPainter extends CustomPainter {
   _AutomationValueFormatter get _valueFormatter => _AutomationValueFormatter(
         targetLabel: targetLabel,
         targetParamId: targetParamId,
+        targetUnit: targetUnit,
         targetMin: targetMin,
         targetMax: targetMax,
         pluginDisplayLabels: targetDisplayLabels,
@@ -18517,6 +19488,7 @@ class _AutomationPainter extends CustomPainter {
         old.verticalPadding != verticalPadding ||
         old.targetLabel != targetLabel ||
         old.targetParamId != targetParamId ||
+        old.targetUnit != targetUnit ||
         old.targetMin != targetMin ||
         old.targetMax != targetMax ||
         old.targetDefaultNormalized != targetDefaultNormalized ||
@@ -18582,6 +19554,7 @@ const double _kGainAutomationDbMax = 6.0;
 class _AutomationValueFormatter {
   final String targetLabel;
   final String targetParamId;
+  final String targetUnit;
   final double targetMin;
   final double targetMax;
   final Map<double, String> pluginDisplayLabels;
@@ -18591,6 +19564,7 @@ class _AutomationValueFormatter {
   const _AutomationValueFormatter({
     required this.targetLabel,
     required this.targetParamId,
+    this.targetUnit = '',
     required this.targetMin,
     required this.targetMax,
     this.pluginDisplayLabels = const <double, String>{},
@@ -18599,7 +19573,7 @@ class _AutomationValueFormatter {
   });
 
   String get signature =>
-      '${targetLabel.trim().toLowerCase()}|${targetParamId.trim().toLowerCase()}|$targetMin|$targetMax|$isVolumeLane|${pluginDisplayLabels.entries.map((e) => '${e.key}:${e.value}').join('|')}';
+      '${targetLabel.trim().toLowerCase()}|${targetParamId.trim().toLowerCase()}|${targetUnit.trim().toLowerCase()}|$targetMin|$targetMax|$isVolumeLane|${pluginDisplayLabels.entries.map((e) => '${e.key}:${e.value}').join('|')}';
 
   double _normalizedToTargetValue(double normalized) {
     final span = targetMax - targetMin;
@@ -18758,66 +19732,57 @@ class _AutomationValueFormatter {
     return false;
   }
 
-  String get _targetContext {
-    return '${targetLabel.trim().toLowerCase()} ${targetParamId.trim().toLowerCase()}';
+  String get _targetParamContext {
+    final lowerLabel = targetLabel.trim().toLowerCase();
+    final paramLabel = lowerLabel.contains('•')
+        ? lowerLabel.split('•').last.trim()
+        : lowerLabel;
+    return '$paramLabel ${targetParamId.trim().toLowerCase()}';
+  }
+
+  bool _containsTimeUnitToken(String haystack) {
+    return RegExp(
+      r'(^|[^a-z0-9])(ms|msec|millisecond|milliseconds|s|sec|secs|second|seconds)($|[^a-z0-9])',
+    ).hasMatch(haystack);
+  }
+
+  String get _normalizedUnit {
+    final raw = targetUnit.trim().toLowerCase();
+    if (raw.isEmpty) return '';
+    if (raw == 'hz' || raw == 'khz') return raw;
+    if (raw == 'db' || raw == 'dB'.toLowerCase()) return 'db';
+    if (raw == '%' || raw == 'percent' || raw == 'percentage') return '%';
+    if (raw == 'ms' || raw == 'millisecond' || raw == 'milliseconds') {
+      return 'ms';
+    }
+    if (raw == 's' || raw == 'sec' || raw == 'second' || raw == 'seconds') {
+      return 's';
+    }
+    if (raw == 'deg' || raw == 'degree' || raw == 'degrees' || raw == '°') {
+      return 'deg';
+    }
+    if (raw == 'st' || raw == 'semitone' || raw == 'semitones') return 'st';
+    if (raw == 'ct' || raw == 'cent' || raw == 'cents') return 'ct';
+    if (raw == 'q') return 'q';
+    return raw;
   }
 
   _AutomationValueKind get valueKind {
     if (isVolumeLane) return _AutomationValueKind.volumeDb;
 
-    final context = _targetContext;
+    final context = _targetParamContext;
+    final unit = _normalizedUnit;
     final min = targetMin;
     final max = targetMax;
     final span = max - min;
     final hasValidRange = span.isFinite && span.abs() >= 1e-9;
     final looksNormalizedRange = min >= -0.001 && max <= 1.001;
-    final looksPercentRange = min >= -0.1 && max <= 100.1;
+    final looksUnipolarPercentRange = min >= -0.1 && max <= 100.1;
+    final looksBipolarPercentRange = min >= -100.1 && max <= 100.1;
+    final looksPercentRange = hasValidRange &&
+        (looksUnipolarPercentRange || looksBipolarPercentRange);
 
-    if (_containsAny(context, const [
-          'freq',
-          'frequency',
-          'cutoff',
-          'hz',
-          'highpass',
-          'lowpass',
-          'band'
-        ]) ||
-        (hasValidRange && min >= 0.0 && max >= 1500.0 && max <= 50000.0)) {
-      return _AutomationValueKind.hz;
-    }
-
-    if (_containsAny(context, const [
-      'attack',
-      'release',
-      'decay',
-      'delay',
-      'predelay',
-      'pre-delay',
-      'pre delay',
-      'hold',
-      'time',
-      'ms',
-      'sec',
-      'second'
-    ])) {
-      if (_containsAny(context, const ['ms', 'millisecond']) ||
-          (hasValidRange && max > 20.0)) {
-        return _AutomationValueKind.milliseconds;
-      }
-      return _AutomationValueKind.seconds;
-    }
-
-    if (_containsAny(context, const ['semitone', 'semi-tone'])) {
-      return _AutomationValueKind.semitone;
-    }
-    if (_containsAny(context, const ['cents'])) {
-      return _AutomationValueKind.cents;
-    }
-    if (_containsAny(context, const ['ratio'])) {
-      return _AutomationValueKind.ratio;
-    }
-
-    final hasDbHint =
+    final hasDbHint = unit == 'db' ||
         _containsAny(context, const ['db', 'threshold', 'ceiling']);
     final hasGainHint = _containsAny(
       context,
@@ -18826,8 +19791,22 @@ class _AutomationValueFormatter {
     if (hasGainHint && min >= -0.001 && max > 1.001 && max <= 3.001) {
       return _AutomationValueKind.gainUiDb;
     }
-    if (hasDbHint || (hasGainHint && (min < 0.0 || max > 2.5))) {
+    if (hasDbHint) {
       return _AutomationValueKind.db;
+    }
+
+    if (unit == 'hz' ||
+        unit == 'khz' ||
+        _containsAny(context, const [
+          'freq',
+          'frequency',
+          'cutoff',
+          'hz',
+          'highpass',
+          'lowpass'
+        ]) ||
+        (hasValidRange && min >= 0.0 && max >= 1500.0 && max <= 50000.0)) {
+      return _AutomationValueKind.hz;
     }
 
     final hasPercentHint = _containsAny(
@@ -18839,13 +19818,69 @@ class _AutomationValueFormatter {
         'amount',
         'depth',
         'feedback',
+        'size',
+        'room',
+        'damp',
+        'damping',
+        'diffusion',
+        'density',
+        'drive',
+        'spread',
         'width',
         'pan',
+        'pump',
+        'sustain',
+        'speed',
+        'smooth',
+        'swing',
+        'correction',
         '%'
       ],
     );
-    if (looksPercentRange && (hasPercentHint || looksNormalizedRange)) {
+    final looksCanonicalPercentRange =
+        hasValidRange && min >= -0.001 && max >= 99.9 && max <= 100.1;
+    if (unit == '%' ||
+        (looksPercentRange &&
+            (hasPercentHint ||
+                looksNormalizedRange ||
+                looksCanonicalPercentRange))) {
       return _AutomationValueKind.percent;
+    }
+
+    final hasTimeHint = _containsAny(context, const [
+          'attack',
+          'release',
+          'decay',
+          'delay',
+          'predelay',
+          'pre-delay',
+          'pre delay',
+          'hold',
+          'time',
+        ]) ||
+        _containsTimeUnitToken(context);
+    if (unit == 'ms' || unit == 's' || hasTimeHint) {
+      if (unit == 'ms' ||
+          _containsTimeUnitToken(context) ||
+          (hasValidRange && max > 20.0)) {
+        return _AutomationValueKind.milliseconds;
+      }
+      return _AutomationValueKind.seconds;
+    }
+
+    if (unit == 'st' ||
+        _containsAny(context, const ['semitone', 'semi-tone'])) {
+      return _AutomationValueKind.semitone;
+    }
+    if (unit == 'ct' || _containsAny(context, const ['cents'])) {
+      return _AutomationValueKind.cents;
+    }
+    if (_containsAny(context, const ['ratio'])) {
+      return _AutomationValueKind.ratio;
+    }
+
+    if (hasGainHint && (min < 0.0 || max > 2.5)) {
+      return _AutomationValueKind.db;
     }
 
     return _AutomationValueKind.generic;
@@ -18899,6 +19934,32 @@ class _AutomationValueFormatter {
     return (unity + ((max - unity) * t)).clamp(min, max).toDouble();
   }
 
+  double _gainDbToDisplayNormalized(double db) {
+    if (!db.isFinite && db.isNegative) return 0.0;
+    final clampedDb =
+        db.clamp(_kGainAutomationDbMin, _kGainAutomationDbMax).toDouble();
+    if (clampedDb <= 0.0) {
+      final t =
+          ((clampedDb - _kGainAutomationDbMin) / (0.0 - _kGainAutomationDbMin))
+              .clamp(0.0, 1.0)
+              .toDouble();
+      return (t * 0.75).clamp(0.0, 0.75).toDouble();
+    }
+    final t = (clampedDb / _kGainAutomationDbMax).clamp(0.0, 1.0).toDouble();
+    return (0.75 + (t * 0.25)).clamp(0.75, 1.0).toDouble();
+  }
+
+  double _displayNormalizedToGainDb(double displayNormalized) {
+    final clamped = displayNormalized.clamp(0.0, 1.0).toDouble();
+    if (clamped <= 0.0) return double.negativeInfinity;
+    if (clamped <= 0.75) {
+      final t = (clamped / 0.75).clamp(0.0, 1.0).toDouble();
+      return _kGainAutomationDbMin + ((0.0 - _kGainAutomationDbMin) * t);
+    }
+    final t = ((clamped - 0.75) / 0.25).clamp(0.0, 1.0).toDouble();
+    return _kGainAutomationDbMax * t;
+  }
+
   double displayNormalizedForStoredNormalized(double normalized) {
     final clamped = normalized.clamp(0.0, 1.0).toDouble();
     if (valueKind != _AutomationValueKind.gainUiDb) {
@@ -18906,7 +19967,7 @@ class _AutomationValueFormatter {
     }
     final raw = _normalizedToTargetValue(clamped);
     if (raw <= targetMin + 0.000001) return 0.0;
-    return _dbToVol(_gainUiToDb(raw));
+    return _gainDbToDisplayNormalized(_gainUiToDb(raw));
   }
 
   double storedNormalizedForDisplayNormalized(double displayNormalized) {
@@ -18917,7 +19978,9 @@ class _AutomationValueFormatter {
     if (clamped <= 0.000001) {
       return _targetValueToNormalized(targetMin);
     }
-    return _targetValueToNormalized(_dbToGainUi(_volToDb(clamped)));
+    return _targetValueToNormalized(
+      _dbToGainUi(_displayNormalizedToGainDb(clamped)),
+    );
   }
 
   double rawValueForNormalized(double normalized) {
@@ -19019,6 +20082,12 @@ class _AutomationValueFormatter {
         final sign = raw > 0 ? '+' : '';
         return '$sign${_formatNumber(raw, maxDecimals: 0)} ct';
       case _AutomationValueKind.generic:
+        final unit = _normalizedUnit;
+        if (unit == 'deg') return '${_formatNumber(raw, maxDecimals: 0)}°';
+        if (unit == 'q') return '${_formatNumber(raw, maxDecimals: 2)} Q';
+        if (unit.isNotEmpty) {
+          return '${_formatNumber(raw, maxDecimals: 2)} $targetUnit';
+        }
         return _formatNumber(raw, maxDecimals: 2);
     }
   }

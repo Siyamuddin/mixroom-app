@@ -65,6 +65,24 @@ static dispatch_queue_t MixroomMidiClipLoadQueue(void) {
     return queue;
 }
 
+static dispatch_queue_t MixroomPluginScanQueue(void) {
+    static dispatch_queue_t queue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        dispatch_queue_attr_t attr =
+            dispatch_queue_attr_make_with_qos_class(
+                DISPATCH_QUEUE_SERIAL,
+                QOS_CLASS_USER_INITIATED,
+                0
+            );
+        queue = dispatch_queue_create(
+            "com.mixroom.juce_audio_engine.plugin_scan",
+            attr
+        );
+    });
+    return queue;
+}
+
 static NSString *MixroomRouteKindForPortType(NSString *portType) {
 #if TARGET_OS_OSX
     #pragma unused(portType)
@@ -444,11 +462,31 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSArray* arr = [JuceBridge getMasterPluginParametersObjC:effect];
         result(arr);
     } else if ([call.method isEqualToString:@"scanPlugins"]) {
-        NSArray* plugins = [JuceBridge scanPluginsObjC:args[@"searchPaths"]];
+        NSArray *searchPaths = args[@"searchPaths"];
+#if TARGET_OS_OSX
+        dispatch_async(MixroomPluginScanQueue(), ^{
+            NSArray *plugins = [JuceBridge scanPluginsObjC:searchPaths];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                result(plugins);
+            });
+        });
+#else
+        NSArray* plugins = [JuceBridge scanPluginsObjC:searchPaths];
         result(plugins);
+#endif
     } else if ([call.method isEqualToString:@"rescanPlugins"]) {
-        NSArray* plugins = [JuceBridge rescanPluginsObjC:args[@"searchPaths"]];
+        NSArray *searchPaths = args[@"searchPaths"];
+#if TARGET_OS_OSX
+        dispatch_async(MixroomPluginScanQueue(), ^{
+            NSArray *plugins = [JuceBridge rescanPluginsObjC:searchPaths];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                result(plugins);
+            });
+        });
+#else
+        NSArray* plugins = [JuceBridge rescanPluginsObjC:searchPaths];
         result(plugins);
+#endif
     } else if ([call.method isEqualToString:@"getQuarantinedPlugins"]) {
         result([JuceBridge getQuarantinedPluginsObjC]);
     } else if ([call.method isEqualToString:@"isPluginQuarantined"]) {

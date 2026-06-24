@@ -23,3 +23,11 @@ AudioTrack? resolveArmedMidiClip({
 
   return null;
 }
+
+int? resolveSelectedInstrumentLaneRecordingRow({
+  required List<TimelineRow> rows,
+  required int selectedRow,
+}) {
+  if (selectedRow < 0 || selectedRow >= rows.length) return null;
+  return rows[selectedRow].isInstrumentLane ? selectedRow : null;
+}

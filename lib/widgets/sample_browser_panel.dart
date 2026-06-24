@@ -22,6 +22,24 @@ class SampleDragData {
   });
 }
 
+class SampleBrowserPanelViewState {
+  final String? selectedRoot;
+  final String? selectedTreePath;
+  final String? previewFocusPath;
+  final String sampleFilter;
+  final Set<String> expandedDirs;
+  final double treeScrollOffset;
+
+  const SampleBrowserPanelViewState({
+    this.selectedRoot,
+    this.selectedTreePath,
+    this.previewFocusPath,
+    this.sampleFilter = 'all',
+    this.expandedDirs = const <String>{},
+    this.treeScrollOffset = 0.0,
+  });
+}
+
 class SampleBrowserPanel extends StatefulWidget {
   final List<String> rootFolders;
   final Set<String> fixedRootFolders;
@@ -41,6 +59,8 @@ class SampleBrowserPanel extends StatefulWidget {
   final Future<void> Function(Duration position) onPreviewSeek;
   final Future<void> Function()? onOpenSystemSettings;
   final VoidCallback? onDragOutsidePanel;
+  final SampleBrowserPanelViewState? initialViewState;
+  final ValueChanged<SampleBrowserPanelViewState>? onViewStateChanged;
 
   const SampleBrowserPanel({
     super.key,
@@ -62,6 +82,8 @@ class SampleBrowserPanel extends StatefulWidget {
     this.onOpenSystemSettings,
     this.onDragActivityChanged,
     this.onDragOutsidePanel,
+    this.initialViewState,
+    this.onViewStateChanged,
   });
 
   @override
@@ -75,6 +97,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   static const Color _kPanelFill = Color.fromRGBO(244, 244, 244, 0.08);
   static const Color _kPanelFillStrong = Color.fromRGBO(244, 244, 244, 0.14);
   static const Color _kPanelAccent = Color(0xFF78D9FF);
+  static const Color _kHelpWarmBorder = Color(0xFFE0B27F);
   static const Duration _kFolderHoldDelay = Duration(milliseconds: 180);
   static const double _kFolderHoldMoveTolerance = 14.0;
   static const int _kPreviewWaveformMobileBars = 128;
@@ -104,7 +127,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   final Map<String, List<double>> _waveformByFile = <String, List<double>>{};
   final Set<String> _waveformLoading = <String>{};
   final FocusNode _treeFocusNode = FocusNode(debugLabel: 'sample_browser_tree');
-  final ScrollController _treeScrollController = ScrollController();
+  late final ScrollController _treeScrollController;
   final Map<String, GlobalKey> _treeRowKeys = <String, GlobalKey>{};
 
   String? _selectedRoot;
@@ -112,6 +135,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   String? _previewFocusPath;
   String _sampleFilter = 'all';
   List<String> _rootFoldersSnapshot = const <String>[];
+  double? _pendingTreeScrollOffset;
   bool _dragOutsideNotified = false;
   Timer? _folderHoldTimer;
   Offset? _folderHoldDownPos;
@@ -120,8 +144,32 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   @override
   void initState() {
     super.initState();
+    final initialViewState = widget.initialViewState;
+    if (initialViewState != null) {
+      _selectedRoot = initialViewState.selectedRoot;
+      _selectedTreePath = initialViewState.selectedTreePath;
+      _previewFocusPath = initialViewState.previewFocusPath;
+      _sampleFilter = initialViewState.sampleFilter;
+      _expandedDirs.addAll(initialViewState.expandedDirs);
+    }
+    final initialTreeScrollOffset = math.max(
+      0.0,
+      initialViewState?.treeScrollOffset ?? 0.0,
+    );
+    _pendingTreeScrollOffset =
+        initialTreeScrollOffset > 0.0 ? initialTreeScrollOffset : null;
+    _treeScrollController = ScrollController(
+      initialScrollOffset: initialTreeScrollOffset,
+    );
+    _treeScrollController.addListener(_notifyViewState);
     _rootFoldersSnapshot = List<String>.from(widget.rootFolders);
     _syncSelectedRoot();
+    _restoreExpandedDirectories();
+    final previewPath = _previewFocusPath ?? widget.auditioningPath;
+    if (previewPath != null) {
+      _ensureWaveformForFile(previewPath);
+    }
+    _restorePendingTreeScrollOffset();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_treeFocusNode.canRequestFocus) return;
       _treeFocusNode.requestFocus();
@@ -156,9 +204,50 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   @override
   void dispose() {
     _folderHoldTimer?.cancel();
+    _notifyViewState();
+    _treeScrollController.removeListener(_notifyViewState);
     _treeFocusNode.dispose();
     _treeScrollController.dispose();
     super.dispose();
+  }
+
+  void _notifyViewState() {
+    final onViewStateChanged = widget.onViewStateChanged;
+    if (onViewStateChanged == null) return;
+    onViewStateChanged(
+      SampleBrowserPanelViewState(
+        selectedRoot: _selectedRoot,
+        selectedTreePath: _selectedTreePath,
+        previewFocusPath: _previewFocusPath,
+        sampleFilter: _sampleFilter,
+        expandedDirs: Set<String>.from(_expandedDirs),
+        treeScrollOffset: _treeScrollController.hasClients
+            ? _treeScrollController.offset
+            : math.max(0.0, widget.initialViewState?.treeScrollOffset ?? 0.0),
+      ),
+    );
+  }
+
+  void _restoreExpandedDirectories() {
+    for (final dirPath in _expandedDirs.toList(growable: false)) {
+      unawaited(_ensureDirectoryLoaded(dirPath));
+    }
+  }
+
+  void _restorePendingTreeScrollOffset() {
+    final targetOffset = _pendingTreeScrollOffset;
+    if (targetOffset == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_treeScrollController.hasClients) return;
+      final position = _treeScrollController.position;
+      if (position.maxScrollExtent <= 0.0 && targetOffset > 0.0) return;
+      final restoredOffset = targetOffset
+          .clamp(position.minScrollExtent, position.maxScrollExtent)
+          .toDouble();
+      _pendingTreeScrollOffset = null;
+      _treeScrollController.jumpTo(restoredOffset);
+      _notifyViewState();
+    });
   }
 
   void _startFolderHold(String rootPath, String label, Offset globalPos) {
@@ -196,6 +285,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
         _selectedRoot = null;
         _selectedTreePath = null;
       });
+      _notifyViewState();
       return;
     }
     if (_selectedRoot != null && widget.rootFolders.contains(_selectedRoot)) {
@@ -207,6 +297,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
       _selectedTreePath = null;
       _expandedDirs.add(nextRoot);
     });
+    _notifyViewState();
     _ensureDirectoryLoaded(nextRoot);
   }
 
@@ -343,6 +434,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
         _childrenByDir[dirPath] = visible;
         _dirErrors.remove(dirPath);
       });
+      _restorePendingTreeScrollOffset();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -367,6 +459,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
         _expandedDirs.remove(dirPath);
       }
     });
+    _notifyViewState();
     if (shouldExpand) {
       _ensureDirectoryLoaded(dirPath);
     }
@@ -378,6 +471,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
       _selectedTreePath = null;
       _expandedDirs.add(rootPath);
     });
+    _notifyViewState();
     _requestTreeFocus();
     _ensureDirectoryLoaded(rootPath);
   }
@@ -387,6 +481,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
     setState(() {
       _previewFocusPath = filePath;
     });
+    _notifyViewState();
     _ensureWaveformForFile(filePath);
   }
 
@@ -428,6 +523,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
       setState(() {
         _selectedTreePath = line.path;
       });
+      _notifyViewState();
     }
     if (ensureVisible) {
       _ensureSelectedRowVisible(line.path);
@@ -468,6 +564,15 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
       if (line.path == path) return line;
     }
     return null;
+  }
+
+  void _restartPreviewForFile(String filePath) {
+    _setPreviewFocusPath(filePath);
+    if (widget.auditioningPath == filePath && widget.previewPlaying) {
+      unawaited(widget.onPreviewSeek(Duration.zero));
+      return;
+    }
+    unawaited(widget.onAuditionTap(filePath));
   }
 
   KeyEventResult _handleTreeKeyEvent(FocusNode node, KeyEvent event) {
@@ -521,7 +626,11 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
         setState(() {
           _expandedDirs.add(selectedLine.path);
         });
+        _notifyViewState();
         unawaited(_ensureDirectoryLoaded(selectedLine.path));
+      } else if (!selectedLine.isDirectory) {
+        _selectTreeLine(selectedLine);
+        _restartPreviewForFile(selectedLine.path);
       }
       return KeyEventResult.handled;
     }
@@ -546,6 +655,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
         _selectedTreePath = parentPath;
       }
     });
+    _notifyViewState();
     if (parentPath != null) {
       _ensureSelectedRowVisible(parentPath);
     }
@@ -850,57 +960,170 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
     if (!mounted) return;
     await showDialog<void>(
       context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF7B7772),
-          title: Text(L10n.translate(ctx, 'File Browser Help'),
-              style: const TextStyle(color: Colors.white)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _HelpRow(
-                icon: Icons.create_new_folder_outlined,
-                text: L10n.translate(ctx, 'Load a folder into the browser.'),
+      barrierColor: Colors.black.withValues(alpha: 0.62),
+      builder: (ctx) => Material(
+        type: MaterialType.transparency,
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: Container(
+                constraints: const BoxConstraints(maxWidth: 420),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(24),
+                  gradient: const LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: <Color>[
+                      Color.fromRGBO(87, 96, 106, 0.96),
+                      Color.fromRGBO(49, 58, 68, 0.96),
+                    ],
+                  ),
+                  border: Border.all(color: _kPanelBorder),
+                  boxShadow: const <BoxShadow>[
+                    BoxShadow(
+                      color: Color.fromRGBO(0, 0, 0, 0.30),
+                      blurRadius: 20,
+                      offset: Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              color: _kHelpWarmBorder.withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(11),
+                              border: Border.all(
+                                color: _kHelpWarmBorder.withValues(alpha: 0.28),
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.help_outline_rounded,
+                              color: _kHelpWarmBorder,
+                              size: 18,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              L10n.translate(ctx, 'File Browser Help'),
+                              style: const TextStyle(
+                                color: _kPanelText,
+                                fontFamily: 'Pretendard',
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.2,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        L10n.translate(
+                          ctx,
+                          'A few gestures that make browsing samples faster.',
+                        ),
+                        style: const TextStyle(
+                          color: _kPanelMutedText,
+                          fontFamily: 'Pretendard',
+                          fontSize: 12.2,
+                          fontWeight: FontWeight.w500,
+                          height: 1.32,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Divider(
+                        height: 1,
+                        thickness: 1,
+                        color: Colors.white.withValues(alpha: 0.10),
+                      ),
+                      _HelpRow(
+                        icon: Icons.create_new_folder_outlined,
+                        accent: const Color(0xFF7DB4FF),
+                        title: L10n.translate(ctx, 'Add folders'),
+                        body: L10n.translate(
+                            ctx, 'Load a folder into the browser.'),
+                      ),
+                      _HelpRow(
+                        icon: Icons.folder_open_outlined,
+                        accent: const Color(0xFF83D4B9),
+                        title: L10n.translate(ctx, 'Switch folder roots'),
+                        body: L10n.translate(ctx,
+                            'Tap a folder button to switch the current folder.'),
+                      ),
+                      _HelpRow(
+                        icon: Icons.play_circle_outline,
+                        accent: const Color(0xFFF7C56D),
+                        title: L10n.translate(ctx, 'Preview samples'),
+                        body: L10n.translate(ctx, 'Preview an audio file.'),
+                      ),
+                      _HelpRow(
+                        icon: Icons.pan_tool_alt_outlined,
+                        accent: const Color(0xFFE78CF3),
+                        title: L10n.translate(ctx, 'Drag into timeline'),
+                        body: L10n.translate(
+                            ctx, 'Hold and drag a file into the timeline.'),
+                      ),
+                      _HelpRow(
+                        icon: Icons.delete_outline,
+                        accent: const Color(0xFFFF9A7D),
+                        title: L10n.translate(ctx, 'Remove folder roots'),
+                        body: L10n.translate(
+                            ctx, 'Hold a folder button to remove it.'),
+                      ),
+                      _HelpRow(
+                        icon: Icons.multitrack_audio_outlined,
+                        accent: const Color(0xFF78D9FF),
+                        title: L10n.translate(ctx, 'Scrub preview'),
+                        body: L10n.translate(ctx,
+                            'Use the bottom waveform to seek preview playback.'),
+                        showDivider: false,
+                      ),
+                      const SizedBox(height: 12),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          style: TextButton.styleFrom(
+                            minimumSize: const Size(0, 38),
+                            padding: const EdgeInsets.symmetric(horizontal: 14),
+                            foregroundColor: _kPanelText,
+                            backgroundColor: _kPanelFillStrong,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(999),
+                              side: BorderSide(
+                                color: Colors.white.withValues(alpha: 0.14),
+                              ),
+                            ),
+                          ),
+                          child: Text(
+                            L10n.translate(ctx, 'Got it'),
+                            style: const TextStyle(
+                              fontFamily: 'Pretendard',
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              const SizedBox(height: 8),
-              _HelpRow(
-                icon: Icons.folder_open_outlined,
-                text: L10n.translate(
-                    ctx, 'Tap a folder button to switch the current folder.'),
-              ),
-              const SizedBox(height: 8),
-              _HelpRow(
-                icon: Icons.play_circle_outline,
-                text: L10n.translate(ctx, 'Preview an audio file.'),
-              ),
-              const SizedBox(height: 8),
-              _HelpRow(
-                icon: Icons.pan_tool_alt_outlined,
-                text: L10n.translate(
-                    ctx, 'Hold and drag a file into the timeline.'),
-              ),
-              const SizedBox(height: 8),
-              _HelpRow(
-                icon: Icons.delete_outline,
-                text: L10n.translate(ctx, 'Hold a folder button to remove it.'),
-              ),
-              const SizedBox(height: 8),
-              _HelpRow(
-                icon: Icons.multitrack_audio_outlined,
-                text: L10n.translate(
-                    ctx, 'Use the bottom waveform to seek preview playback.'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text(L10n.translate(ctx, 'OK')),
             ),
-          ],
-        );
-      },
+          ),
+        ),
+      ),
     );
   }
 
@@ -1235,6 +1458,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
               setState(() {
                 _sampleFilter = entry.key;
               });
+              _notifyViewState();
             },
           );
         },
@@ -1333,6 +1557,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
     }
 
     _pruneTreeRowKeys(lines);
+    _restorePendingTreeScrollOffset();
     return ListView.builder(
       controller: _treeScrollController,
       padding: const EdgeInsets.fromLTRB(0, 2, 0, 4),
@@ -1712,27 +1937,82 @@ class _WaveformPreviewPainter extends CustomPainter {
 
 class _HelpRow extends StatelessWidget {
   final IconData icon;
-  final String text;
+  final Color accent;
+  final String title;
+  final String body;
+  final bool showDivider;
 
   const _HelpRow({
     required this.icon,
-    required this.text,
+    required this.accent,
+    required this.title,
+    required this.body,
+    this.showDivider = true,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 18, color: const Color(0xFFA9C3FF)),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            text,
-            style: const TextStyle(color: Colors.white70, height: 1.3),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: accent.withValues(alpha: 0.22),
+                    ),
+                  ),
+                  child: Icon(icon, color: accent, size: 17),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          color: _SampleBrowserPanelState._kPanelText,
+                          fontFamily: 'Pretendard',
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.1,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        body,
+                        style: const TextStyle(
+                          color: _SampleBrowserPanelState._kPanelMutedText,
+                          fontFamily: 'Pretendard',
+                          fontSize: 12.2,
+                          fontWeight: FontWeight.w500,
+                          height: 1.34,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+          if (showDivider)
+            Divider(
+              height: 1,
+              thickness: 1,
+              color: Colors.white.withValues(alpha: 0.08),
+            ),
+        ],
+      ),
     );
   }
 }

@@ -299,6 +299,94 @@ void main() {
       expect(data['color_name'], 'orange');
     });
 
+    test('tempo edit preserves LLM-authored assistant text', () async {
+      final result = await _runPrompt(
+        prompt: 'set bpm to 128',
+        output: [
+          {
+            'type': 'function_call',
+            'name': 'daw_assistant_actions',
+            'arguments': {
+              'assistant_message': 'Set the project tempo to 128 BPM.',
+              'actions': [
+                {
+                  'type': 'project_edit',
+                  'data': {
+                    'operation': 'set_bpm',
+                    'bpm': 128,
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      );
+
+      expect(result.hasAssistantActions, isTrue);
+      expect(result.message, 'Set the project tempo to 128 BPM.');
+      final action = result.assistantActions.single;
+      expect(action.type, 'project_edit');
+      expect(action.data['operation'], 'set_tempo');
+      expect(action.data['tempo_bpm'], 128);
+    });
+
+    test('colliding drum sample roles spread onto separate rows', () async {
+      final result = await _runPrompt(
+        prompt: 'add edm drums',
+        output: [
+          {
+            'type': 'function_call',
+            'name': 'daw_assistant_actions',
+            'arguments': {
+              'assistant_message': 'Built an EDM drum groove.',
+              'actions': [
+                {
+                  'type': 'sample_insert',
+                  'data': {
+                    'operation': 'insert_audio_clips',
+                    'items': [
+                      {
+                        'library_path':
+                            'Starter Kit v1/Processed Drums/Kick-01.mp3',
+                        'row_index': 0,
+                        'repeat_count': 4,
+                      },
+                      {
+                        'library_path':
+                            'Starter Kit v1/Processed Drums/Snare-01.mp3',
+                        'row_index': 0,
+                        'repeat_count': 4,
+                      },
+                      {
+                        'library_path':
+                            'Starter Kit v1/Processed Drums/Hat-01.mp3',
+                        'row_index': 0,
+                        'repeat_count': 8,
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      );
+
+      expect(result.hasAssistantActions, isTrue);
+      expect(result.message, 'Built an EDM drum groove.');
+      final action = result.assistantActions.single;
+      expect(action.type, 'sample_insert');
+      final items = (action.data['items'] as List).cast<Map>();
+      expect(
+        items.map((item) => item['row_index']).toList(growable: false),
+        <int>[0, 1, 2],
+      );
+      for (final item in items) {
+        final target = Map<String, dynamic>.from(item['target'] as Map);
+        expect(target['row_index'], item['row_index']);
+      }
+    });
+
     test('multi-call DAW tool output keeps all actions instead of falling back',
         () async {
       final result = await _runPrompt(

@@ -486,6 +486,7 @@ class AutomationLaneSnapshot {
   final int effectIndex;
   final String paramId;
   final String type;
+  final String unit;
   final double min;
   final double max;
   final List<AutomationPoint> points;
@@ -496,6 +497,7 @@ class AutomationLaneSnapshot {
     required this.effectIndex,
     required this.paramId,
     required this.type,
+    this.unit = '',
     required this.min,
     required this.max,
     required this.points,
@@ -508,6 +510,7 @@ class AutomationLaneSnapshot {
       "effectIndex": effectIndex,
       "paramId": paramId,
       "type": type,
+      if (unit.trim().isNotEmpty) "unit": unit.trim(),
       "min": min,
       "max": max,
       "points": points.map((p) => p.toJson()).toList(),
@@ -520,6 +523,7 @@ class AutomationLaneSnapshot {
     final effectIndex = (json["effectIndex"] as num?)?.toInt() ?? -1;
     final paramId = (json["paramId"] ?? '').toString();
     final type = (json["type"] ?? 'float').toString();
+    final unit = (json["unit"] ?? '').toString();
     final min = (json["min"] as num?)?.toDouble() ?? 0.0;
     final max = (json["max"] as num?)?.toDouble() ?? 1.0;
     final points = ((json["points"] as List?) ?? const [])
@@ -533,6 +537,7 @@ class AutomationLaneSnapshot {
       effectIndex: effectIndex,
       paramId: paramId,
       type: type,
+      unit: unit,
       min: min,
       max: max,
       points: points,

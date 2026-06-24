@@ -569,6 +569,7 @@ class _OnDeviceEffectPicker extends StatefulWidget {
     required this.onUpgradeRequested,
     required this.onFavoriteToggle,
     required this.autoFocusSearch,
+    required this.onManagePlugins,
   });
 
   final List<Map<String, dynamic>> effects;
@@ -576,6 +577,7 @@ class _OnDeviceEffectPicker extends StatefulWidget {
   final VoidCallback? onUpgradeRequested;
   final Future<void> Function(String pluginId)? onFavoriteToggle;
   final bool autoFocusSearch;
+  final Future<void> Function()? onManagePlugins;
 
   @override
   State<_OnDeviceEffectPicker> createState() => _OnDeviceEffectPickerState();
@@ -697,6 +699,9 @@ class _OnDeviceEffectPickerState extends State<_OnDeviceEffectPicker> {
     final emptyLabel = widget.effects.isEmpty
         ? L10n.translate(context, 'No external plugins found')
         : 'No plugins match your search';
+    final showDiscoverShortcut = widget.effects.isEmpty &&
+        PlatformCapabilities.current.isDesktop &&
+        widget.onManagePlugins != null;
 
     return Column(
       children: [
@@ -718,18 +723,38 @@ class _OnDeviceEffectPickerState extends State<_OnDeviceEffectPicker> {
               if (filteredEffects.isEmpty) {
                 return Material(
                   type: MaterialType.transparency,
-                  child: ListTile(
-                    dense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 10),
-                    title: Text(
-                      emptyLabel,
-                      maxLines: 1,
-                      softWrap: false,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.72),
-                        fontSize: 13.0,
-                      ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 10,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          emptyLabel,
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.72),
+                            fontSize: 13.0,
+                          ),
+                        ),
+                        if (showDiscoverShortcut) ...[
+                          const SizedBox(height: 10),
+                          TextButton.icon(
+                            onPressed: () async {
+                              Navigator.of(context).maybePop();
+                              await Future<void>.delayed(Duration.zero);
+                              await widget.onManagePlugins?.call();
+                            },
+                            icon: const Icon(Icons.travel_explore_rounded),
+                            label: const Text('Discover Plug-ins'),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 );
@@ -2793,6 +2818,7 @@ class RowEffectsPanel extends StatefulWidget {
       getTrackPluginParameters;
   final Future<List<Map<String, dynamic>>> Function() scanPlugins;
   final Future<void> Function(String pluginId)? onTogglePluginFavorite;
+  final Future<void> Function()? onManagePlugins;
   final Future<bool> Function(int row, int effectIndex)? openTrackPluginEditor;
   final Future<void> Function(
           int row, int effectIndex, String paramId, dynamic value)
@@ -2857,6 +2883,7 @@ class RowEffectsPanel extends StatefulWidget {
     required this.getTrackPluginParameters,
     required this.scanPlugins,
     this.onTogglePluginFavorite,
+    this.onManagePlugins,
     this.openTrackPluginEditor,
     required this.setTrackEffectParam,
     this.onRequestAutomateParameter,
@@ -5951,6 +5978,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                               onUpgradeRequested: widget.onUpgradeRequested,
                               onFavoriteToggle: widget.onTogglePluginFavorite,
                               autoFocusSearch: autoFocusSearch,
+                              onManagePlugins: widget.onManagePlugins,
                               onInsert: (path) async {
                                 await widget.insertEffectOnRow(
                                   widget.rowIndex,
@@ -7248,6 +7276,7 @@ class MasterEffectsPanel extends StatefulWidget {
   )? onRequestAutomateParameter;
   final Future<List<Map<String, dynamic>>> Function() scanPlugins;
   final Future<void> Function(String pluginId)? onTogglePluginFavorite;
+  final Future<void> Function()? onManagePlugins;
   final Future<bool> Function(int effectIndex)? openMasterPluginEditor;
   final void Function(
           int effectIndex, String paramId, dynamic oldValue, dynamic newValue)?
@@ -7293,6 +7322,7 @@ class MasterEffectsPanel extends StatefulWidget {
     this.onRequestAutomateParameter,
     required this.scanPlugins,
     this.onTogglePluginFavorite,
+    this.onManagePlugins,
     this.openMasterPluginEditor,
     this.onHeightChanged,
     this.onMasterPluginParamCommit,
@@ -9405,6 +9435,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
                               onUpgradeRequested: widget.onUpgradeRequested,
                               onFavoriteToggle: widget.onTogglePluginFavorite,
                               autoFocusSearch: autoFocusSearch,
+                              onManagePlugins: widget.onManagePlugins,
                               onInsert: (path) async {
                                 await widget.insertMasterEffect(path);
                                 await _loadEffects();
