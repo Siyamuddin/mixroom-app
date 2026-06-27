@@ -3043,9 +3043,14 @@ class _PitchEstimate {
 
 enum AudioEditorInitialAction { exportWav, exportMp3 }
 
-const double _kMacDawBackPillWidth = 56.0;
+const double _kMacDawBackPillWidth = 69.0;
 const double _kMacDawBackPillHeight = 26.0;
+const double _kMacDawBackPillHorizontalNudge = 3.0;
 const double _kMacDawBackPillDownNudgeFraction = 0.22;
+const double _kDesktopTopBarExtraTopPadding = 2.0;
+const double _kDesktopTimelineScrollbarReservedGap = 6.0;
+const double _kDesktopTimelineRulerHeight =
+    TabletDawPanelLayout.tabletRulerHeight + 6.0;
 
 class _EditorLayoutSpec {
   final EdgeInsets topBarPadding;
@@ -4540,7 +4545,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   double get _tabletDesktopTopBarTopInset {
-    return TabletDawPanelLayout.topBarTabletTopInset;
+    return TabletDawPanelLayout.topBarTabletTopInset +
+        (PlatformCapabilities.current.isDesktop
+            ? _kDesktopTopBarExtraTopPadding
+            : 0.0);
+  }
+
+  double get _tabletDesktopTopBarContentHeight {
+    return PlatformCapabilities.current.isDesktop ? 58.0 : 48.0;
+  }
+
+  double get _tabletTimelineRulerHeight {
+    return PlatformCapabilities.current.isDesktop
+        ? _kDesktopTimelineRulerHeight
+        : TabletDawPanelLayout.tabletRulerHeight;
   }
 
   void _syncTabletRowFxSelectionAfterRemove(int row, int removedEffectIndex) {
@@ -5318,6 +5336,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   _TopPopupType _activeTopPopup = _TopPopupType.none;
   final AudioCanvasTimelineController _timelineController =
       AudioCanvasTimelineController();
+  bool _timelineHorizontalScrollbarPointerCaptured = false;
   final GlobalKey _tabletTopToolButtonKey =
       GlobalKey(debugLabel: 'tablet_top_tool_button');
   final GlobalKey _tabletTopQuantizeButtonKey =
@@ -34091,7 +34110,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               alignment: Alignment.center,
               child: macDesktop
                   ? Transform.translate(
-                      offset: Offset(0, macBackPillDownNudge),
+                      offset: Offset(
+                        _kMacDawBackPillHorizontalNudge,
+                        macBackPillDownNudge,
+                      ),
                       child: _buildMacDawBackPill(
                         width: _kMacDawBackPillWidth,
                         height: _kMacDawBackPillHeight,
@@ -34598,10 +34620,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }) {
     final pillWidth = math.max(0.0, panelWidth).toDouble();
     if (pillWidth <= 0.0) return const SizedBox.shrink();
-    const pillHeight = TabletDawPanelLayout.tabletRulerHeight;
+    final pillHeight = _tabletTimelineRulerHeight;
     const pillLeft = 0.0;
-    final pillTop = topBarReservedHeight +
-        ((TabletDawPanelLayout.tabletRulerHeight - pillHeight) / 2.0);
+    final pillTop = topBarReservedHeight;
     return Positioned(
       left: pillLeft,
       top: pillTop,
@@ -34958,14 +34979,216 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   double _topBarReservedHeight(_EditorLayoutSpec layoutSpec) {
     if (_usesTabletDesktopDawShell(context)) {
-      const projectHeaderTopRowHeight = 48.0;
       return _tabletDesktopTopBarTopInset +
-          projectHeaderTopRowHeight +
-          TabletDawPanelLayout.topBarTabletBottomInset;
+          _tabletDesktopTopBarContentHeight +
+          TabletDawPanelLayout.topBarTabletBottomInset +
+          (PlatformCapabilities.current.isDesktop
+              ? _kDesktopTimelineScrollbarReservedGap
+              : 0.0);
     }
     return layoutSpec.topBarPadding.vertical +
         math.max(layoutSpec.topBarActionButtonSize, 48) +
         layoutSpec.topBarBottomGap;
+  }
+
+  Widget _buildTimelineHorizontalScrollbarOverlay({
+    required double topBarReservedHeight,
+    required double rightInset,
+  }) {
+    if (!PlatformCapabilities.current.isDesktop) {
+      return const SizedBox.shrink();
+    }
+
+    return ValueListenableBuilder<TimelineHorizontalScrollbarState>(
+      valueListenable: _timelineController.horizontalScrollbarListenable,
+      builder: (context, state, _) {
+        if (!state.visible ||
+            state.viewportWidth <= 0.0 ||
+            state.thumbWidth <= 0.0) {
+          return const SizedBox.shrink();
+        }
+
+        final thumbTop = (state.hitHeight - state.thumbHeight) / 2.0;
+        final trackTop = (state.hitHeight - state.trackHeight) / 2.0;
+        final active = state.dragging;
+        final resizing = state.resizeStartActive || state.resizeEndActive;
+        final thumbColor = const Color(0xFFE4E7EA).withValues(
+          alpha: active ? 0.72 : 0.40,
+        );
+        final activeColor = const Color(0xFF7FC9E5);
+        final resizeColor = const Color(0xFFFFC66D);
+        final stateColor = resizing ? resizeColor : activeColor;
+        final borderColor = active
+            ? stateColor.withValues(alpha: resizing ? 0.66 : 0.52)
+            : Colors.white.withValues(alpha: 0.08);
+        final semanticStep = math.max(48.0, state.viewportWidth * 0.12);
+        bool thumbContains(double localX) {
+          return localX >= state.thumbLeft &&
+              localX <= state.thumbLeft + state.thumbWidth;
+        }
+
+        return Positioned(
+          left: state.headerWidth,
+          right: rightInset,
+          top: topBarReservedHeight - (state.hitHeight / 2.0),
+          height: state.hitHeight,
+          child: Semantics(
+            slider: true,
+            label: L10n.translate(context, 'Timeline scrollbar'),
+            increasedValue: L10n.translate(context, 'Scroll timeline right'),
+            decreasedValue: L10n.translate(context, 'Scroll timeline left'),
+            onIncrease: () {
+              _timelineController.dragHorizontalScrollbarBy(semanticStep);
+            },
+            onDecrease: () {
+              _timelineController.dragHorizontalScrollbarBy(-semanticStep);
+            },
+            child: Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerDown: (event) {
+                final localX = event.localPosition.dx;
+                _timelineHorizontalScrollbarPointerCaptured = true;
+                if (!thumbContains(localX)) {
+                  _timelineController.jumpHorizontalScrollbarTo(localX);
+                }
+                _timelineController.beginHorizontalScrollbarDrag(localX);
+              },
+              onPointerUp: (_) {
+                _timelineController.endHorizontalScrollbarDrag();
+              },
+              onPointerCancel: (_) {
+                _timelineHorizontalScrollbarPointerCaptured = false;
+                _timelineController.endHorizontalScrollbarDrag();
+              },
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                dragStartBehavior: DragStartBehavior.down,
+                onTapUp: (details) {
+                  if (_timelineHorizontalScrollbarPointerCaptured ||
+                      thumbContains(details.localPosition.dx)) {
+                    _timelineHorizontalScrollbarPointerCaptured = false;
+                    return;
+                  }
+                  _timelineController.jumpHorizontalScrollbarTo(
+                    details.localPosition.dx,
+                  );
+                  _timelineHorizontalScrollbarPointerCaptured = false;
+                },
+                onTapCancel: () {
+                  _timelineHorizontalScrollbarPointerCaptured = false;
+                },
+                onHorizontalDragStart: (details) {
+                  if (!_timelineHorizontalScrollbarPointerCaptured &&
+                      !thumbContains(details.localPosition.dx)) {
+                    return;
+                  }
+                  _timelineHorizontalScrollbarPointerCaptured = true;
+                  _timelineController.beginHorizontalScrollbarDrag(
+                    details.localPosition.dx,
+                  );
+                },
+                onHorizontalDragUpdate: (details) {
+                  if (!_timelineHorizontalScrollbarPointerCaptured) {
+                    return;
+                  }
+                  _timelineController.dragHorizontalScrollbarBy(
+                    details.delta.dx,
+                  );
+                },
+                onHorizontalDragEnd: (_) {
+                  _timelineHorizontalScrollbarPointerCaptured = false;
+                  _timelineController.endHorizontalScrollbarDrag();
+                },
+                onHorizontalDragCancel: () {
+                  _timelineHorizontalScrollbarPointerCaptured = false;
+                  _timelineController.endHorizontalScrollbarDrag();
+                },
+                child: Stack(
+                  alignment: Alignment.centerLeft,
+                  children: [
+                    Positioned(
+                      left: state.endInset,
+                      right: state.endInset,
+                      top: trackTop,
+                      height: state.trackHeight,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: active
+                              ? stateColor.withValues(alpha: 0.12)
+                              : const Color(0xFF0A1521).withValues(alpha: 0.17),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: active
+                                ? stateColor.withValues(alpha: 0.20)
+                                : Colors.white.withValues(alpha: 0.06),
+                            width: 0.8,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: state.thumbLeft,
+                      top: thumbTop,
+                      width: state.thumbWidth,
+                      height: state.thumbHeight,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 110),
+                        decoration: BoxDecoration(
+                          color: thumbColor,
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(
+                            color: borderColor,
+                            width: active ? 1.0 : 0.6,
+                          ),
+                          boxShadow: <BoxShadow>[
+                            BoxShadow(
+                              color: active
+                                  ? stateColor.withValues(
+                                      alpha: resizing ? 0.24 : 0.16,
+                                    )
+                                  : Colors.black.withValues(alpha: 0.14),
+                              blurRadius: resizing ? 15 : (active ? 11 : 4),
+                              offset: const Offset(0, 1),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            _TimelineHorizontalScrollbarEndCap(
+                              active: state.resizeStartActive,
+                              resizing: resizing,
+                            ),
+                            Expanded(
+                              child: Center(
+                                child: Container(
+                                  width:
+                                      math.max(12.0, state.thumbWidth * 0.34),
+                                  height: 2,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF15436C).withValues(
+                                      alpha: active ? 0.34 : 0.20,
+                                    ),
+                                    borderRadius: BorderRadius.circular(99),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            _TimelineHorizontalScrollbarEndCap(
+                              active: state.resizeEndActive,
+                              resizing: resizing,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Widget _buildMobileOverlayWindow({
@@ -65128,6 +65351,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   ),
                                 ),
                               ),
+                              _buildTimelineHorizontalScrollbarOverlay(
+                                topBarReservedHeight: topBarReservedHeight,
+                                rightInset: tabletRightPanelReservedWidth,
+                              ),
                               _buildProjectSettingsPopup(),
                               _buildExpandedChatHistoryOverlay(),
                             ],
@@ -65725,6 +65952,58 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _TimelineHorizontalScrollbarEndCap extends StatelessWidget {
+  const _TimelineHorizontalScrollbarEndCap({
+    required this.active,
+    required this.resizing,
+  });
+
+  final bool active;
+  final bool resizing;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = resizing ? const Color(0xFFFFC66D) : const Color(0xFF7FC9E5);
+    final colorAlpha = active
+        ? 0.76
+        : resizing
+            ? 0.46
+            : 0.28;
+    final glowAlpha = active
+        ? 0.46
+        : resizing
+            ? 0.24
+            : 0.0;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 110),
+      width: active ? 8 : (resizing ? 6 : 5),
+      height: active ? 14 : (resizing ? 12 : 9),
+      margin: const EdgeInsets.symmetric(horizontal: 3),
+      decoration: BoxDecoration(
+        color: resizing
+            ? accent.withValues(alpha: colorAlpha)
+            : const Color(0xFF15436C).withValues(alpha: colorAlpha),
+        borderRadius: BorderRadius.circular(99),
+        border: active || resizing
+            ? Border.all(
+                color: Colors.white.withValues(alpha: active ? 0.56 : 0.34),
+                width: 0.6,
+              )
+            : null,
+        boxShadow: active || resizing
+            ? <BoxShadow>[
+                BoxShadow(
+                  color: accent.withValues(alpha: glowAlpha),
+                  blurRadius: active ? 10 : 7,
+                  spreadRadius: active ? 1.4 : 0.8,
+                ),
+              ]
+            : const <BoxShadow>[],
       ),
     );
   }

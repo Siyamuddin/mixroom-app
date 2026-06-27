@@ -189,6 +189,11 @@ enum _TimelineTool {
   delete,
 }
 
+enum _TimelineTrackpadPanAxis {
+  horizontal,
+  vertical,
+}
+
 enum _InlineClipControlKind {
   settings,
 }
@@ -377,6 +382,87 @@ class TimelineTopControlsState {
     toolIcon: Icons.near_me_outlined,
     toolIconFlipHorizontally: true,
   );
+}
+
+@immutable
+class TimelineHorizontalScrollbarState {
+  final bool visible;
+  final double headerWidth;
+  final double viewportWidth;
+  final double thumbLeft;
+  final double thumbWidth;
+  final double thumbHeight;
+  final double hitHeight;
+  final double trackHeight;
+  final double endInset;
+  final bool dragging;
+  final bool resizeStartActive;
+  final bool resizeEndActive;
+
+  const TimelineHorizontalScrollbarState({
+    required this.visible,
+    required this.headerWidth,
+    required this.viewportWidth,
+    required this.thumbLeft,
+    required this.thumbWidth,
+    required this.thumbHeight,
+    required this.hitHeight,
+    required this.trackHeight,
+    required this.endInset,
+    required this.dragging,
+    required this.resizeStartActive,
+    required this.resizeEndActive,
+  });
+
+  static const TimelineHorizontalScrollbarState hidden =
+      TimelineHorizontalScrollbarState(
+    visible: false,
+    headerWidth: 0.0,
+    viewportWidth: 0.0,
+    thumbLeft: 0.0,
+    thumbWidth: 0.0,
+    thumbHeight: 12.0,
+    hitHeight: 22.0,
+    trackHeight: 4.0,
+    endInset: 0.0,
+    dragging: false,
+    resizeStartActive: false,
+    resizeEndActive: false,
+  );
+
+  @override
+  bool operator ==(Object other) {
+    return identical(this, other) ||
+        other is TimelineHorizontalScrollbarState &&
+            other.visible == visible &&
+            other.headerWidth == headerWidth &&
+            other.viewportWidth == viewportWidth &&
+            other.thumbLeft == thumbLeft &&
+            other.thumbWidth == thumbWidth &&
+            other.thumbHeight == thumbHeight &&
+            other.hitHeight == hitHeight &&
+            other.trackHeight == trackHeight &&
+            other.endInset == endInset &&
+            other.dragging == dragging &&
+            other.resizeStartActive == resizeStartActive &&
+            other.resizeEndActive == resizeEndActive;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+        visible,
+        headerWidth,
+        viewportWidth,
+        thumbLeft,
+        thumbWidth,
+        thumbHeight,
+        hitHeight,
+        trackHeight,
+        endInset,
+        dragging,
+        resizeStartActive,
+        resizeEndActive,
+      );
 }
 
 class AudioCanvasTimeline extends StatefulWidget {
@@ -810,15 +896,29 @@ class AudioCanvasTimelineController {
   Future<void> Function({Rect? anchorRect})? _showToolMenu;
   Future<void> Function({Rect? anchorRect})? _showQuantizeMenu;
   VoidCallback? _publishTopControlsState;
+  void Function(double localX)? _beginHorizontalScrollbarDrag;
+  void Function(double deltaX)? _dragHorizontalScrollbarBy;
+  VoidCallback? _endHorizontalScrollbarDrag;
+  void Function(double localX)? _jumpHorizontalScrollbarTo;
   final ValueNotifier<TimelineTopControlsState> _topControls =
       ValueNotifier<TimelineTopControlsState>(
     TimelineTopControlsState.initial,
+  );
+  final ValueNotifier<TimelineHorizontalScrollbarState> _horizontalScrollbar =
+      ValueNotifier<TimelineHorizontalScrollbarState>(
+    TimelineHorizontalScrollbarState.hidden,
   );
 
   ValueListenable<TimelineTopControlsState> get topControlsListenable =>
       _topControls;
 
   TimelineTopControlsState get topControlsState => _topControls.value;
+
+  ValueListenable<TimelineHorizontalScrollbarState>
+      get horizontalScrollbarListenable => _horizontalScrollbar;
+
+  TimelineHorizontalScrollbarState get horizontalScrollbarState =>
+      _horizontalScrollbar.value;
 
   void _bind({
     required void Function(int row, {int tab}) ensureRowExpanded,
@@ -831,6 +931,10 @@ class AudioCanvasTimelineController {
     required Future<void> Function({Rect? anchorRect}) showToolMenu,
     required Future<void> Function({Rect? anchorRect}) showQuantizeMenu,
     required VoidCallback publishTopControlsState,
+    required void Function(double localX) beginHorizontalScrollbarDrag,
+    required void Function(double deltaX) dragHorizontalScrollbarBy,
+    required VoidCallback endHorizontalScrollbarDrag,
+    required void Function(double localX) jumpHorizontalScrollbarTo,
   }) {
     _ensureRowExpanded = ensureRowExpanded;
     _showMasterAutomationLane = showMasterAutomationLane;
@@ -842,6 +946,10 @@ class AudioCanvasTimelineController {
     _showToolMenu = showToolMenu;
     _showQuantizeMenu = showQuantizeMenu;
     _publishTopControlsState = publishTopControlsState;
+    _beginHorizontalScrollbarDrag = beginHorizontalScrollbarDrag;
+    _dragHorizontalScrollbarBy = dragHorizontalScrollbarBy;
+    _endHorizontalScrollbarDrag = endHorizontalScrollbarDrag;
+    _jumpHorizontalScrollbarTo = jumpHorizontalScrollbarTo;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _publishTopControlsState?.call();
     });
@@ -858,6 +966,10 @@ class AudioCanvasTimelineController {
     required Future<void> Function({Rect? anchorRect}) showToolMenu,
     required Future<void> Function({Rect? anchorRect}) showQuantizeMenu,
     required VoidCallback publishTopControlsState,
+    required void Function(double localX) beginHorizontalScrollbarDrag,
+    required void Function(double deltaX) dragHorizontalScrollbarBy,
+    required VoidCallback endHorizontalScrollbarDrag,
+    required void Function(double localX) jumpHorizontalScrollbarTo,
   }) {
     if (identical(_ensureRowExpanded, ensureRowExpanded)) {
       _ensureRowExpanded = null;
@@ -891,6 +1003,21 @@ class AudioCanvasTimelineController {
     }
     if (identical(_publishTopControlsState, publishTopControlsState)) {
       _publishTopControlsState = null;
+    }
+    if (identical(
+      _beginHorizontalScrollbarDrag,
+      beginHorizontalScrollbarDrag,
+    )) {
+      _beginHorizontalScrollbarDrag = null;
+    }
+    if (identical(_dragHorizontalScrollbarBy, dragHorizontalScrollbarBy)) {
+      _dragHorizontalScrollbarBy = null;
+    }
+    if (identical(_endHorizontalScrollbarDrag, endHorizontalScrollbarDrag)) {
+      _endHorizontalScrollbarDrag = null;
+    }
+    if (identical(_jumpHorizontalScrollbarTo, jumpHorizontalScrollbarTo)) {
+      _jumpHorizontalScrollbarTo = null;
     }
   }
 
@@ -934,8 +1061,30 @@ class AudioCanvasTimelineController {
     _topControls.value = state;
   }
 
+  void beginHorizontalScrollbarDrag(double localX) {
+    _beginHorizontalScrollbarDrag?.call(localX);
+  }
+
+  void dragHorizontalScrollbarBy(double deltaX) {
+    _dragHorizontalScrollbarBy?.call(deltaX);
+  }
+
+  void endHorizontalScrollbarDrag() {
+    _endHorizontalScrollbarDrag?.call();
+  }
+
+  void jumpHorizontalScrollbarTo(double localX) {
+    _jumpHorizontalScrollbarTo?.call(localX);
+  }
+
+  void _setHorizontalScrollbarState(TimelineHorizontalScrollbarState state) {
+    if (_horizontalScrollbar.value == state) return;
+    _horizontalScrollbar.value = state;
+  }
+
   void dispose() {
     _topControls.dispose();
+    _horizontalScrollbar.dispose();
   }
 }
 
@@ -1153,6 +1302,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   static const double kHeaderWidth = 80.0;
   static const double kTimelineUnderlayLeft = 44.0;
   static const double kRulerHeight = 40.0;
+  static const double _kDesktopRulerExtraHeight = 6.0;
+  static const double _kDesktopRulerContentYOffset = 5.0;
   static const double kTrimHandleWidth = 14.0;
   static const double kTrimHandleGap = 8.0;
   static const double kTrimHandleVerticalInset = 5.0;
@@ -1167,6 +1318,20 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   static const double _kMacWheelZoomSensitivity = 0.0025;
   static const double _kMinTimelinePixelsPerMs = 0.001;
   static const double _kMaxTimelinePixelsPerMs = 1.0;
+  static const double _kHorizontalScrollbarHeight = 12.0;
+  static const double _kHorizontalScrollbarActiveHeight = 15.0;
+  static const double _kHorizontalScrollbarHitHeight = 22.0;
+  static const double _kHorizontalScrollbarTrackHeight = 4.0;
+  static const double _kHorizontalScrollbarActiveTrackHeight = 6.0;
+  static const double _kHorizontalScrollbarEndInset = 10.0;
+  static const double _kHorizontalScrollbarEdgeHitZone = 14.0;
+  static const double _kHorizontalScrollbarResizeSensitivity = 0.006;
+  static const double _kHorizontalScrollbarComfortMinThumbWidth = 72.0;
+  static const double _kHorizontalScrollbarZoomedMinThumbWidth = 36.0;
+  static const double _kHorizontalScrollbarMinShrinkStartPixelsPerMs = 0.12;
+  static const double _kHorizontalScrollbarMinShrinkEndPixelsPerMs = 0.45;
+  static const double _kTrackpadHorizontalInertiaMinTravelPx = 44.0;
+  static const double _kTrackpadHorizontalInertiaMinVelocityPxPerSecond = 260.0;
   late final FocusNode _timelineFocusNode;
   bool get _usesTabletDawLayout => widget.useTabletDawLayout;
   bool get _usesDesktopOrTabletDawLayout =>
@@ -1177,6 +1342,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       ? _kTabletRowHeightMax * _tabletRowHeightScale
       : kRowHeight;
   double get _expandedRowHeight => (_rowHeight * 3.0) + 40.0;
+  double get _timeRulerHeight => PlatformCapabilities.current.isDesktop
+      ? kRulerHeight + _kDesktopRulerExtraHeight
+      : kRulerHeight;
+  double get _timeRulerContentYOffset => PlatformCapabilities.current.isDesktop
+      ? _kDesktopRulerContentYOffset
+      : 0.0;
   double get _effectsPanelMinHeight => _usesTabletDawLayout
       ? _kTabletEffectsPanelMinHeight
       : math.max(_kHeaderTabsMinHeight, _expandedRowHeight);
@@ -1248,6 +1419,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   double _tabletRailDragStartScale = _kTabletRowHeightMaxScale;
   double _tabletRailDragStartScrollOffset = 0.0;
   double _tabletRailDragStartGlobalY = 0.0;
+  bool _horizontalScrollbarDragging = false;
+  String? _horizontalScrollbarDragMode;
+  double _horizontalScrollbarDragAccumX = 0.0;
+  double _horizontalScrollbarDragStartPixelsPerMs = 0.1;
+  double _horizontalScrollbarDragAnchorLocalX = 0.0;
+  double _horizontalScrollbarDragAnchorMs = 0.0;
 
   List<AutomationPoint>? _automationBefore;
   int? _automationDragRow;
@@ -1294,6 +1471,15 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   String? _stepDuplicateShortcutSelectionKey;
   double? _stepDuplicateShortcutNextPasteMs;
   final Set<int> _activeTimelinePointers = <int>{};
+  bool _timelineModifierTrackpadNavigationActive = false;
+  double? _timelineModifierTrackpadNavigationVerticalOffset;
+  _TimelineTrackpadPanAxis? _timelineTrackpadPanAxis;
+  PointerPanZoomUpdateEvent? _lastTimelinePointerPanZoomUpdateEvent;
+  Timer? _timelineTrackpadHorizontalInertiaTimer;
+  Duration? _timelineTrackpadLastHorizontalPanTime;
+  double _timelineTrackpadHorizontalVelocityPxPerSecond = 0.0;
+  bool _timelineTrackpadHorizontalInertiaEligible = false;
+  double _timelineTrackpadHorizontalTravelPx = 0.0;
 
   // Paste popup state
   bool _showPastePopup = false;
@@ -2283,6 +2469,39 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _handleTimelineNavigationPointerSignal(event);
   }
 
+  void _onTimelinePointerPanZoomStart(PointerPanZoomStartEvent event) {
+    _stopTimelineTrackpadHorizontalInertia();
+    _timelineTrackpadPanAxis = null;
+    _lastTimelinePointerPanZoomUpdateEvent = null;
+    _timelineTrackpadLastHorizontalPanTime = event.timeStamp;
+    _timelineTrackpadHorizontalVelocityPxPerSecond = 0.0;
+    _timelineTrackpadHorizontalInertiaEligible = false;
+    _timelineTrackpadHorizontalTravelPx = 0.0;
+    _beginTimelineModifierTrackpadNavigationLock();
+  }
+
+  void _onTimelinePointerPanZoomUpdate(PointerPanZoomUpdateEvent event) {
+    if (_handleTimelineNavigationPointerPanZoomUpdate(event)) {
+      _restoreTimelineModifierTrackpadNavigationVerticalOffset();
+    }
+  }
+
+  void _onTimelinePointerPanZoomEnd(PointerPanZoomEndEvent event) {
+    final shouldStartHorizontalInertia =
+        _timelineTrackpadHorizontalInertiaEligible &&
+            _timelineTrackpadHorizontalTravelPx >=
+                _kTrackpadHorizontalInertiaMinTravelPx;
+    _timelineTrackpadPanAxis = null;
+    _lastTimelinePointerPanZoomUpdateEvent = null;
+    _timelineTrackpadLastHorizontalPanTime = null;
+    _timelineTrackpadHorizontalInertiaEligible = false;
+    _timelineTrackpadHorizontalTravelPx = 0.0;
+    _endTimelineModifierTrackpadNavigationLock();
+    if (shouldStartHorizontalInertia) {
+      _startTimelineTrackpadHorizontalInertia();
+    }
+  }
+
   void _onTimelineLeftChromePointerSignal(PointerSignalEvent event) {
     if (_handleTimelineNavigationPointerSignal(
       event,
@@ -2291,6 +2510,17 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       return;
     }
     _handleVerticalTimelinePointerSignal(event);
+  }
+
+  void _onTimelineLeftChromePointerPanZoomUpdate(
+    PointerPanZoomUpdateEvent event,
+  ) {
+    if (_handleTimelineNavigationPointerPanZoomUpdate(
+      event,
+      focalPointPx: 0.0,
+    )) {
+      _restoreTimelineModifierTrackpadNavigationVerticalOffset();
+    }
   }
 
   bool _handleTimelineNavigationPointerSignal(
@@ -2304,6 +2534,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final cmdPressed = keyboard.isMetaPressed;
     final shiftPressed = keyboard.isShiftPressed;
     if (!cmdPressed && !shiftPressed) return false;
+    _stopTimelineTrackpadHorizontalInertia();
 
     GestureBinding.instance.pointerSignalResolver.register(
       event,
@@ -2319,6 +2550,98 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       },
     );
     return true;
+  }
+
+  bool _handleTimelineNavigationPointerPanZoomUpdate(
+    PointerPanZoomUpdateEvent event, {
+    double? focalPointPx,
+  }) {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.macOS) return false;
+    if (identical(_lastTimelinePointerPanZoomUpdateEvent, event)) return true;
+    _lastTimelinePointerPanZoomUpdateEvent = event;
+
+    final keyboard = HardwareKeyboard.instance;
+    final cmdPressed = keyboard.isMetaPressed;
+    final shiftPressed = keyboard.isShiftPressed;
+
+    if (cmdPressed) {
+      _beginTimelineModifierTrackpadNavigationLock();
+      _handleMacTimelineZoomDelta(
+        event.localPanDelta,
+        focalPointPx: focalPointPx ?? event.localPosition.dx,
+      );
+      return true;
+    }
+    if (shiftPressed) {
+      _beginTimelineModifierTrackpadNavigationLock();
+      _recordTimelineTrackpadHorizontalVelocity(
+        event,
+        scrollDeltaPx: event.localPanDelta.dy,
+      );
+      _handleMacTimelineHorizontalScrollDelta(event.localPanDelta);
+      return true;
+    }
+    return _handleMacTimelineTrackpadHorizontalScroll(event);
+  }
+
+  bool _macTimelineNavigationModifierPressed() {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.macOS) return false;
+    final keyboard = HardwareKeyboard.instance;
+    return keyboard.isMetaPressed || keyboard.isShiftPressed;
+  }
+
+  void _beginTimelineModifierTrackpadNavigationLock() {
+    if (!_macTimelineNavigationModifierPressed()) return;
+    _beginTimelineTrackpadNavigationLock();
+  }
+
+  void _beginTimelineTrackpadNavigationLock() {
+    _timelineModifierTrackpadNavigationVerticalOffset ??=
+        _verticalScrollController.hasClients
+            ? _verticalScrollController.offset
+            : null;
+    if (_timelineModifierTrackpadNavigationActive) return;
+    setState(() {
+      _timelineModifierTrackpadNavigationActive = true;
+    });
+  }
+
+  void _restoreTimelineModifierTrackpadNavigationVerticalOffset() {
+    final lockedOffset = _timelineModifierTrackpadNavigationVerticalOffset;
+    if (lockedOffset == null || !_verticalScrollController.hasClients) return;
+    final position = _verticalScrollController.position;
+    final target = lockedOffset
+        .clamp(position.minScrollExtent, position.maxScrollExtent)
+        .toDouble();
+    if ((_verticalScrollController.offset - target).abs() > 0.01) {
+      _verticalScrollController.jumpTo(target);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          !_timelineModifierTrackpadNavigationActive ||
+          !_verticalScrollController.hasClients) {
+        return;
+      }
+      final position = _verticalScrollController.position;
+      final target = lockedOffset
+          .clamp(position.minScrollExtent, position.maxScrollExtent)
+          .toDouble();
+      if ((_verticalScrollController.offset - target).abs() > 0.01) {
+        _verticalScrollController.jumpTo(target);
+      }
+    });
+  }
+
+  void _endTimelineModifierTrackpadNavigationLock() {
+    if (!_timelineModifierTrackpadNavigationActive &&
+        _timelineModifierTrackpadNavigationVerticalOffset == null) {
+      return;
+    }
+    _restoreTimelineModifierTrackpadNavigationVerticalOffset();
+    setState(() {
+      _timelineModifierTrackpadNavigationActive = false;
+      _timelineModifierTrackpadNavigationVerticalOffset = null;
+    });
   }
 
   bool _handleVerticalTimelinePointerSignal(PointerSignalEvent event) {
@@ -2361,9 +2684,17 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     PointerScrollEvent event, {
     double? focalPointPx,
   }) {
-    final rawDelta = event.scrollDelta.dy.abs() >= event.scrollDelta.dx.abs()
-        ? event.scrollDelta.dy
-        : event.scrollDelta.dx;
+    _handleMacTimelineZoomDelta(
+      event.scrollDelta,
+      focalPointPx: focalPointPx ?? event.localPosition.dx,
+    );
+  }
+
+  void _handleMacTimelineZoomDelta(
+    Offset delta, {
+    required double focalPointPx,
+  }) {
+    final rawDelta = delta.dy;
     if (rawDelta == 0) return;
 
     bool didZoom = false;
@@ -2373,9 +2704,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           .clamp(_kMinTimelinePixelsPerMs, _kMaxTimelinePixelsPerMs);
       if ((newPixelsPerMs - _pixelsPerMs).abs() < 0.0001) return;
 
-      final focalPx = (focalPointPx ?? event.localPosition.dx)
-          .clamp(0.0, _getViewportWidth(context))
-          .toDouble();
+      final focalPx =
+          focalPointPx.clamp(0.0, _getViewportWidth(context)).toDouble();
       final focalPointMs = _scrollOffsetMs + focalPx / _pixelsPerMs;
       _scrollOffsetMs = focalPointMs - (focalPx / newPixelsPerMs);
       _pixelsPerMs = newPixelsPerMs;
@@ -2394,9 +2724,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _handleMacTimelineHorizontalScroll(PointerScrollEvent event) {
-    final rawDelta = event.scrollDelta.dx.abs() >= event.scrollDelta.dy.abs()
-        ? event.scrollDelta.dx
-        : event.scrollDelta.dy;
+    _handleMacTimelineHorizontalScrollDelta(event.scrollDelta);
+  }
+
+  void _handleMacTimelineHorizontalScrollDelta(Offset delta) {
+    final rawDelta = delta.dy;
     if (rawDelta == 0) return;
 
     setState(() {
@@ -2409,6 +2741,108 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     });
 
     widget.onTutorialTimelineScrolled?.call();
+  }
+
+  void _recordTimelineTrackpadHorizontalVelocity(
+    PointerPanZoomUpdateEvent event, {
+    required double scrollDeltaPx,
+  }) {
+    final previousTime = _timelineTrackpadLastHorizontalPanTime;
+    _timelineTrackpadLastHorizontalPanTime = event.timeStamp;
+    if (scrollDeltaPx.abs() < 0.5) return;
+
+    _timelineTrackpadHorizontalTravelPx += scrollDeltaPx.abs();
+    final elapsedSeconds = previousTime == null
+        ? 1 / 60
+        : (event.timeStamp - previousTime).inMicroseconds / 1000000.0;
+    final safeElapsedSeconds = elapsedSeconds > 0 ? elapsedSeconds : 1 / 60;
+    _timelineTrackpadHorizontalVelocityPxPerSecond =
+        (scrollDeltaPx / safeElapsedSeconds).clamp(-4200.0, 4200.0);
+    _timelineTrackpadHorizontalInertiaEligible =
+        _timelineTrackpadHorizontalVelocityPxPerSecond.abs() >=
+            _kTrackpadHorizontalInertiaMinVelocityPxPerSecond;
+  }
+
+  void _startTimelineTrackpadHorizontalInertia() {
+    if (_timelineTrackpadHorizontalInertiaTimer != null) return;
+    final velocity = _timelineTrackpadHorizontalVelocityPxPerSecond;
+    _timelineTrackpadHorizontalVelocityPxPerSecond = 0.0;
+    if (velocity.abs() < _kTrackpadHorizontalInertiaMinVelocityPxPerSecond ||
+        _pixelsPerMs <= 0) {
+      return;
+    }
+
+    final simulation = ClampingScrollSimulation(
+      position: _scrollOffsetMs * _pixelsPerMs,
+      velocity: velocity,
+    );
+    final stopwatch = Stopwatch()..start();
+    const frame = Duration(milliseconds: 16);
+    _timelineTrackpadHorizontalInertiaTimer = Timer.periodic(frame, (timer) {
+      if (!mounted || _pixelsPerMs <= 0) {
+        _stopTimelineTrackpadHorizontalInertia();
+        return;
+      }
+
+      final elapsedSeconds = stopwatch.elapsedMicroseconds / 1000000.0;
+      final nextScrollPx = simulation.x(elapsedSeconds);
+      final before = _scrollOffsetMs;
+      setState(() {
+        _scrollOffsetMs = nextScrollPx / _pixelsPerMs;
+        _clampScroll();
+      });
+      if (simulation.isDone(elapsedSeconds) ||
+          (_scrollOffsetMs - before).abs() < 0.01) {
+        _stopTimelineTrackpadHorizontalInertia();
+      }
+    });
+  }
+
+  void _stopTimelineTrackpadHorizontalInertia() {
+    _timelineTrackpadHorizontalInertiaTimer?.cancel();
+    _timelineTrackpadHorizontalInertiaTimer = null;
+    _timelineTrackpadHorizontalVelocityPxPerSecond = 0.0;
+    _timelineTrackpadHorizontalInertiaEligible = false;
+    _timelineTrackpadHorizontalTravelPx = 0.0;
+  }
+
+  bool _handleMacTimelineTrackpadHorizontalScroll(
+    PointerPanZoomUpdateEvent event,
+  ) {
+    final delta = event.localPanDelta;
+    final horizontalDelta = delta.dx.abs();
+    final verticalDelta = delta.dy.abs();
+    if (_timelineTrackpadPanAxis == null) {
+      if (horizontalDelta < 0.5 && verticalDelta < 0.5) return false;
+      if (horizontalDelta <= verticalDelta) {
+        _timelineTrackpadPanAxis = _TimelineTrackpadPanAxis.vertical;
+        return false;
+      }
+      _timelineTrackpadPanAxis = _TimelineTrackpadPanAxis.horizontal;
+    }
+    if (_timelineTrackpadPanAxis != _TimelineTrackpadPanAxis.horizontal) {
+      return false;
+    }
+
+    _beginTimelineTrackpadNavigationLock();
+    final rawDelta = delta.dx;
+    if (rawDelta.abs() < 0.5) return true;
+    _recordTimelineTrackpadHorizontalVelocity(
+      event,
+      scrollDeltaPx: -event.localPanDelta.dx,
+    );
+
+    setState(() {
+      _scrollOffsetMs -= rawDelta / _pixelsPerMs;
+      _clampScroll();
+      if (!PlatformCapabilities.current.isDesktop) {
+        final playheadPx = _getPlayheadPx(context);
+        widget.onScrubRequested(_scrollOffsetMs + playheadPx / _pixelsPerMs);
+      }
+    });
+
+    widget.onTutorialTimelineScrolled?.call();
+    return true;
   }
 
   void _onTimelinePointerUp(PointerUpEvent event) {
@@ -4716,6 +5150,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       showToolMenu: _showToolMenu,
       showQuantizeMenu: _showQuantizeMenu,
       publishTopControlsState: _publishTopControlsState,
+      beginHorizontalScrollbarDrag: _beginHorizontalScrollbarDrag,
+      dragHorizontalScrollbarBy: _dragHorizontalScrollbarByDelta,
+      endHorizontalScrollbarDrag: _endHorizontalScrollbarDrag,
+      jumpHorizontalScrollbarTo: _jumpHorizontalScrollbarToLocalX,
     );
     _syncRowUiState();
     _verticalScrollController.addListener(() {
@@ -4757,6 +5195,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         showToolMenu: _showToolMenu,
         showQuantizeMenu: _showQuantizeMenu,
         publishTopControlsState: _publishTopControlsState,
+        beginHorizontalScrollbarDrag: _beginHorizontalScrollbarDrag,
+        dragHorizontalScrollbarBy: _dragHorizontalScrollbarByDelta,
+        endHorizontalScrollbarDrag: _endHorizontalScrollbarDrag,
+        jumpHorizontalScrollbarTo: _jumpHorizontalScrollbarToLocalX,
       );
       widget.controller?._bind(
         ensureRowExpanded: ensureRowExpanded,
@@ -4769,6 +5211,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         showToolMenu: _showToolMenu,
         showQuantizeMenu: _showQuantizeMenu,
         publishTopControlsState: _publishTopControlsState,
+        beginHorizontalScrollbarDrag: _beginHorizontalScrollbarDrag,
+        dragHorizontalScrollbarBy: _dragHorizontalScrollbarByDelta,
+        endHorizontalScrollbarDrag: _endHorizontalScrollbarDrag,
+        jumpHorizontalScrollbarTo: _jumpHorizontalScrollbarToLocalX,
       );
     }
     if (oldWidget.clips.length != widget.clips.length) {
@@ -4868,6 +5314,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _cancelHeaderHoldTimer();
     _cancelDeadZoneHoldTimer();
     _cancelMagnetHoldTimer();
+    _stopTimelineTrackpadHorizontalInertia();
     widget.controller?._unbind(
       ensureRowExpanded: ensureRowExpanded,
       showMasterAutomationLane: showMasterAutomationLane,
@@ -4879,6 +5326,13 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       showToolMenu: _showToolMenu,
       showQuantizeMenu: _showQuantizeMenu,
       publishTopControlsState: _publishTopControlsState,
+      beginHorizontalScrollbarDrag: _beginHorizontalScrollbarDrag,
+      dragHorizontalScrollbarBy: _dragHorizontalScrollbarByDelta,
+      endHorizontalScrollbarDrag: _endHorizontalScrollbarDrag,
+      jumpHorizontalScrollbarTo: _jumpHorizontalScrollbarToLocalX,
+    );
+    widget.controller?._setHorizontalScrollbarState(
+      TimelineHorizontalScrollbarState.hidden,
     );
     _verticalScrollController.dispose();
     _timelineFocusNode.dispose();
@@ -5565,6 +6019,254 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final deadZonePx =
         _getMobilePlayheadPxForTimelineWidth(_timelineWidgetWidth(context));
     return math.max(0.0, deadZonePx) / _pixelsPerMs;
+  }
+
+  double _horizontalScrollbarContentEndMs() {
+    return math.max(_maxDurationMs, msFor128Bars(widget.bpm));
+  }
+
+  double _horizontalScrollbarMinScrollMs(BuildContext context) {
+    return PlatformCapabilities.current.isDesktop
+        ? -_desktopLeftDeadZoneMs(context)
+        : -_getPlayheadPx(context) / _pixelsPerMs;
+  }
+
+  double _horizontalScrollbarMaxScrollMs({
+    required BuildContext context,
+    required double viewportWidth,
+  }) {
+    final viewportMs = viewportWidth / _pixelsPerMs;
+    return _horizontalScrollbarContentEndMs() - viewportMs;
+  }
+
+  void _setScrollOffsetFromHorizontalScrollbar({
+    required double viewportWidth,
+    required double targetScrollMs,
+  }) {
+    setState(() {
+      _scrollOffsetMs = targetScrollMs;
+      _clampScroll();
+    });
+    _publishHorizontalScrollbarState(viewportWidth: viewportWidth);
+    widget.onTutorialTimelineScrolled?.call();
+  }
+
+  void _beginHorizontalScrollbarDrag(double localX) {
+    if (_horizontalScrollbarDragging) return;
+    final viewportWidth = _getViewportWidth(context);
+    final metrics = _horizontalScrollbarMetrics(viewportWidth);
+    var dragMode = 'scroll';
+    var anchorLocalX = localX.clamp(0.0, viewportWidth).toDouble();
+    var anchorMs = _scrollOffsetMs + anchorLocalX / _pixelsPerMs;
+    if (metrics != null) {
+      final thumbLeft = metrics.thumbLeft;
+      final thumbRight = metrics.thumbLeft + metrics.thumbWidth;
+      final clampedLocalX = localX.clamp(thumbLeft, thumbRight).toDouble();
+      if (localX >= thumbLeft && localX <= thumbRight) {
+        final edgeHitZone = math.min(
+            _kHorizontalScrollbarEdgeHitZone, metrics.thumbWidth / 2.0);
+        if (clampedLocalX - thumbLeft <= edgeHitZone) {
+          dragMode = 'resize_start';
+          anchorLocalX = thumbRight;
+        } else if (thumbRight - clampedLocalX <= edgeHitZone) {
+          dragMode = 'resize_end';
+          anchorLocalX = thumbLeft;
+        }
+      }
+      anchorMs = _scrollOffsetMs + anchorLocalX / _pixelsPerMs;
+    }
+    setState(() {
+      _horizontalScrollbarDragging = true;
+      _horizontalScrollbarDragMode = dragMode;
+      _horizontalScrollbarDragAccumX = 0.0;
+      _horizontalScrollbarDragStartPixelsPerMs = _pixelsPerMs;
+      _horizontalScrollbarDragAnchorLocalX = anchorLocalX;
+      _horizontalScrollbarDragAnchorMs = anchorMs;
+    });
+    _publishHorizontalScrollbarState();
+  }
+
+  void _endHorizontalScrollbarDrag() {
+    if (!_horizontalScrollbarDragging) return;
+    setState(() {
+      _horizontalScrollbarDragging = false;
+      _horizontalScrollbarDragMode = null;
+      _horizontalScrollbarDragAccumX = 0.0;
+    });
+    _publishHorizontalScrollbarState();
+  }
+
+  void _jumpHorizontalScrollbarToLocalX(double localX) {
+    _jumpHorizontalScrollbarTo(
+      viewportWidth: _getViewportWidth(context),
+      localX: localX,
+    );
+  }
+
+  void _dragHorizontalScrollbarByDelta(double deltaX) {
+    if (_horizontalScrollbarDragMode == 'resize_start' ||
+        _horizontalScrollbarDragMode == 'resize_end') {
+      _resizeHorizontalScrollbarByDelta(deltaX);
+      return;
+    }
+    _dragHorizontalScrollbarBy(
+      viewportWidth: _getViewportWidth(context),
+      deltaX: deltaX,
+    );
+  }
+
+  void _resizeHorizontalScrollbarByDelta(double deltaX) {
+    _horizontalScrollbarDragAccumX += deltaX;
+    final resizeStart = _horizontalScrollbarDragMode == 'resize_start';
+    final zoomDeltaPx = resizeStart
+        ? _horizontalScrollbarDragAccumX
+        : -_horizontalScrollbarDragAccumX;
+    final nextPixelsPerMs = (_horizontalScrollbarDragStartPixelsPerMs *
+            math.exp(zoomDeltaPx * _kHorizontalScrollbarResizeSensitivity))
+        .clamp(_kMinTimelinePixelsPerMs, _kMaxTimelinePixelsPerMs)
+        .toDouble();
+    if ((nextPixelsPerMs - _pixelsPerMs).abs() < 0.000001) return;
+    setState(() {
+      _pixelsPerMs = nextPixelsPerMs;
+      _scrollOffsetMs = _horizontalScrollbarDragAnchorMs -
+          (_horizontalScrollbarDragAnchorLocalX / _pixelsPerMs);
+      _clampScroll();
+    });
+    _publishHorizontalScrollbarState();
+    widget.onTutorialTimelineZoomed?.call();
+  }
+
+  void _jumpHorizontalScrollbarTo({
+    required double viewportWidth,
+    required double localX,
+  }) {
+    final metrics = _horizontalScrollbarMetrics(viewportWidth);
+    if (metrics == null || metrics.trackTravel <= 0.0) return;
+    final targetThumbLeft =
+        (localX - metrics.trackInset - (metrics.thumbWidth / 2.0))
+            .clamp(0.0, metrics.trackTravel);
+    final targetRatio = targetThumbLeft / metrics.trackTravel;
+    _setScrollOffsetFromHorizontalScrollbar(
+      viewportWidth: viewportWidth,
+      targetScrollMs:
+          metrics.minScrollMs + (targetRatio * metrics.scrollableMs),
+    );
+  }
+
+  void _dragHorizontalScrollbarBy({
+    required double viewportWidth,
+    required double deltaX,
+  }) {
+    final metrics = _horizontalScrollbarMetrics(viewportWidth);
+    if (metrics == null || metrics.trackTravel <= 0.0) return;
+    final scrollDeltaMs = (deltaX / metrics.trackTravel) * metrics.scrollableMs;
+    _setScrollOffsetFromHorizontalScrollbar(
+      viewportWidth: viewportWidth,
+      targetScrollMs: _scrollOffsetMs + scrollDeltaMs,
+    );
+  }
+
+  double _horizontalScrollbarMinThumbWidthForZoom() {
+    const shrinkSpan = _kHorizontalScrollbarMinShrinkEndPixelsPerMs -
+        _kHorizontalScrollbarMinShrinkStartPixelsPerMs;
+    final progress = shrinkSpan <= 0.0
+        ? 1.0
+        : ((_pixelsPerMs - _kHorizontalScrollbarMinShrinkStartPixelsPerMs) /
+                shrinkSpan)
+            .clamp(0.0, 1.0)
+            .toDouble();
+    return _kHorizontalScrollbarComfortMinThumbWidth -
+        ((_kHorizontalScrollbarComfortMinThumbWidth -
+                _kHorizontalScrollbarZoomedMinThumbWidth) *
+            progress);
+  }
+
+  _HorizontalScrollbarMetrics? _horizontalScrollbarMetrics(
+      double viewportWidth) {
+    if (!viewportWidth.isFinite || viewportWidth <= 0.0 || _pixelsPerMs <= 0) {
+      return null;
+    }
+
+    final minScrollMs = _horizontalScrollbarMinScrollMs(context);
+    final maxScrollMs = math.max(
+      minScrollMs,
+      _horizontalScrollbarMaxScrollMs(
+        context: context,
+        viewportWidth: viewportWidth,
+      ),
+    );
+    final scrollableMs = math.max(0.0, maxScrollMs - minScrollMs);
+
+    final viewportMs = viewportWidth / _pixelsPerMs;
+    final contentSpanMs = viewportMs + scrollableMs;
+    if (!contentSpanMs.isFinite || contentSpanMs <= 0.0) return null;
+
+    const trackInset = _kHorizontalScrollbarEndInset;
+    final trackWidth = math.max(0.0, viewportWidth - (trackInset * 2.0));
+    if (trackWidth <= 0.0) return null;
+
+    final minThumbWidth =
+        math.min(_horizontalScrollbarMinThumbWidthForZoom(), trackWidth);
+    final thumbWidth = (trackWidth * (viewportMs / contentSpanMs))
+        .clamp(minThumbWidth, trackWidth)
+        .toDouble();
+    final trackTravel = math.max(0.0, trackWidth - thumbWidth);
+    final thumbLeft = trackTravel <= 0.0
+        ? trackInset
+        : trackInset +
+            (((_scrollOffsetMs - minScrollMs) / scrollableMs) * trackTravel)
+                .clamp(0.0, trackTravel)
+                .toDouble();
+
+    return _HorizontalScrollbarMetrics(
+      minScrollMs: minScrollMs,
+      scrollableMs: scrollableMs,
+      trackInset: trackInset,
+      thumbLeft: thumbLeft,
+      thumbWidth: thumbWidth,
+      trackTravel: trackTravel,
+    );
+  }
+
+  void _publishHorizontalScrollbarState({double? viewportWidth}) {
+    final controller = widget.controller;
+    if (controller == null) return;
+    if (!PlatformCapabilities.current.isDesktop) {
+      controller._setHorizontalScrollbarState(
+        TimelineHorizontalScrollbarState.hidden,
+      );
+      return;
+    }
+
+    final effectiveViewportWidth = viewportWidth ?? _getViewportWidth(context);
+    final metrics = _horizontalScrollbarMetrics(effectiveViewportWidth);
+    if (metrics == null) {
+      controller._setHorizontalScrollbarState(
+        TimelineHorizontalScrollbarState.hidden,
+      );
+      return;
+    }
+
+    controller._setHorizontalScrollbarState(
+      TimelineHorizontalScrollbarState(
+        visible: true,
+        headerWidth: _headerWidth,
+        viewportWidth: effectiveViewportWidth,
+        thumbLeft: metrics.thumbLeft,
+        thumbWidth: metrics.thumbWidth,
+        thumbHeight: _horizontalScrollbarDragging
+            ? _kHorizontalScrollbarActiveHeight
+            : _kHorizontalScrollbarHeight,
+        hitHeight: _kHorizontalScrollbarHitHeight,
+        trackHeight: _horizontalScrollbarDragging
+            ? _kHorizontalScrollbarActiveTrackHeight
+            : _kHorizontalScrollbarTrackHeight,
+        endInset: metrics.trackInset,
+        dragging: _horizontalScrollbarDragging,
+        resizeStartActive: _horizontalScrollbarDragMode == 'resize_start',
+        resizeEndActive: _horizontalScrollbarDragMode == 'resize_end',
+      ),
+    );
   }
 
   double _timelineWidgetWidth(BuildContext context) {
@@ -8787,6 +9489,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
             child: Listener(
               behavior: HitTestBehavior.opaque,
               onPointerSignal: _onTimelineLeftChromePointerSignal,
+              onPointerPanZoomStart: _onTimelinePointerPanZoomStart,
+              onPointerPanZoomUpdate: _onTimelineLeftChromePointerPanZoomUpdate,
+              onPointerPanZoomEnd: _onTimelinePointerPanZoomEnd,
               child: RepaintBoundary(
                 child: ClipRect(
                   child: OverflowBox(
@@ -8858,6 +9563,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                               _interactionMode ==
                                                   'automation' ||
                                               _hasActiveAutomationClipDrag) ||
+                                      _timelineModifierTrackpadNavigationActive ||
                                       _activeTool == _TimelineTool.delete
                                   ? const NeverScrollableScrollPhysics()
                                   : const ClampingScrollPhysics(),
@@ -9029,6 +9735,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                           scrollOffsetMs: _scrollOffsetMs -
                               (timelineUnderlayWidth / _pixelsPerMs),
                           viewportWidth: timelineUnderlayWidth,
+                          rulerHeight: _timeRulerHeight,
                           playheadPx: playheadPx,
                           transportMs: loopPreviewTransportMs,
                           clipLoopPreviewClipIndex: loopPreviewClipIndex,
@@ -9104,6 +9811,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                 onPointerMove: _onTimelinePointerMove,
                 onPointerHover: _onTimelinePointerHover,
                 onPointerSignal: _onTimelinePointerSignal,
+                onPointerPanZoomStart: _onTimelinePointerPanZoomStart,
+                onPointerPanZoomUpdate: _onTimelinePointerPanZoomUpdate,
+                onPointerPanZoomEnd: _onTimelinePointerPanZoomEnd,
                 onPointerUp: _onTimelinePointerUp,
                 onPointerCancel: _onTimelinePointerCancel,
                 child: GestureDetector(
@@ -9142,6 +9852,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                             pixelsPerMs: _pixelsPerMs,
                             scrollOffsetMs: _scrollOffsetMs,
                             viewportWidth: viewportWidth,
+                            rulerHeight: _timeRulerHeight,
                             playheadPx: playheadPx,
                             transportMs: loopPreviewTransportMs,
                             clipLoopPreviewClipIndex: loopPreviewClipIndex,
@@ -9315,6 +10026,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           child: Listener(
             behavior: HitTestBehavior.opaque,
             onPointerSignal: _onTimelinePointerSignal,
+            onPointerPanZoomStart: _onTimelinePointerPanZoomStart,
+            onPointerPanZoomUpdate: _onTimelinePointerPanZoomUpdate,
+            onPointerPanZoomEnd: _onTimelinePointerPanZoomEnd,
             child: ClipRect(
               // prevents overflow painting
               child: Container(
@@ -9361,6 +10075,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       child: Listener(
         behavior: HitTestBehavior.opaque,
         onPointerSignal: _onTimelinePointerSignal,
+        onPointerPanZoomStart: _onTimelinePointerPanZoomStart,
+        onPointerPanZoomUpdate: _onTimelinePointerPanZoomUpdate,
+        onPointerPanZoomEnd: _onTimelinePointerPanZoomEnd,
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: _kMasterAutomationLaneFill,
@@ -11545,11 +12262,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     });
   }
 
-  Widget _buildTabletRulerHeader() {
+  Widget _buildTabletRulerHeader({double? height}) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(0, 0, 0, 0),
       child: Container(
-        height: TabletDawPanelLayout.tabletRulerHeight,
+        height: height ?? TabletDawPanelLayout.tabletRulerHeight,
         decoration: BoxDecoration(
           color: const Color(0xFF485660).withValues(alpha: 0.80),
           border: Border(
@@ -11563,128 +12280,169 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   Widget _buildTimeRuler(double viewportWidth) {
     final isDesktop = PlatformCapabilities.current.isDesktop;
-    return Container(
-      height: kRulerHeight,
-      color: isDesktop
-          ? const Color.fromRGBO(18, 28, 40, 0.68)
-          : _timelineCanvasColor(),
+    final rulerHeight = _timeRulerHeight;
+    final rulerContentYOffset = _timeRulerContentYOffset;
+    const scrollbarOverlap = 0.0;
+    if (isDesktop) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _publishHorizontalScrollbarState(viewportWidth: viewportWidth);
+      });
+    }
+    return SizedBox(
+      height: rulerHeight,
       child: Stack(
+        clipBehavior: Clip.none,
         children: [
-          Row(
-            children: [
-              // Empty space for headers
-              SizedBox(
-                width: _headerWidth,
-                child: _usesTabletDawLayout
-                    ? _buildTabletRulerHeader()
-                    : Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 6),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            // _buildToggleButton(
-                            //   size: 30, // smaller
-                            //   iconSize: 16, // smaller icon
-                            //   iconOn: Symbols.magnification_small,
-                            //   iconOff: Icons.push_pin_outlined,
-                            //   active: _magnetEnabled,
-                            //   onTap: () => setState(() => _magnetEnabled = !_magnetEnabled),
-                            // ),
-                            _buildToggleButtonSvg(
-                              key: _magnetButtonKey,
-                              active: _magnetEnabled,
-                              onTap: _toggleMagnetFromRuler,
-                              onTapDown: _onMagnetTapDown,
-                              onTapUp: _onMagnetTapUp,
-                              onTapCancel: _onMagnetTapCancel,
-                              svgPath: 'assets/magnet-solid-full.svg',
+          Positioned(
+            left: 0,
+            right: 0,
+            top: scrollbarOverlap,
+            height: rulerHeight - scrollbarOverlap,
+            child: Container(
+              color: isDesktop
+                  ? const Color.fromRGBO(18, 28, 40, 0.68)
+                  : _timelineCanvasColor(),
+              child: Stack(
+                children: [
+                  Row(
+                    children: [
+                      // Empty space for headers
+                      SizedBox(
+                        width: _headerWidth,
+                        child: _usesTabletDawLayout
+                            ? _buildTabletRulerHeader(height: rulerHeight)
+                            : SizedBox(
+                                height: rulerHeight,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 6),
+                                  child: Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      // _buildToggleButton(
+                                      //   size: 30, // smaller
+                                      //   iconSize: 16, // smaller icon
+                                      //   iconOn: Symbols.magnification_small,
+                                      //   iconOff: Icons.push_pin_outlined,
+                                      //   active: _magnetEnabled,
+                                      //   onTap: () => setState(() => _magnetEnabled = !_magnetEnabled),
+                                      // ),
+                                      _buildToggleButtonSvg(
+                                        key: _magnetButtonKey,
+                                        active: _magnetEnabled,
+                                        onTap: _toggleMagnetFromRuler,
+                                        onTapDown: _onMagnetTapDown,
+                                        onTapUp: _onMagnetTapUp,
+                                        onTapCancel: _onMagnetTapCancel,
+                                        svgPath: 'assets/magnet-solid-full.svg',
+                                      ),
+                                      _buildToolMenuButton(),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                      ),
+
+                      // Ruler content
+                      Expanded(
+                        child: Listener(
+                          behavior: HitTestBehavior.translucent,
+                          onPointerSignal: _onTimelinePointerSignal,
+                          onPointerPanZoomStart: _onTimelinePointerPanZoomStart,
+                          onPointerPanZoomUpdate:
+                              _onTimelinePointerPanZoomUpdate,
+                          onPointerPanZoomEnd: _onTimelinePointerPanZoomEnd,
+                          onPointerDown: _onRulerPointerDown,
+                          onPointerMove: isDesktop
+                              ? _onDesktopRulerSecondaryPointerMove
+                              : null,
+                          onPointerUp: isDesktop
+                              ? _onDesktopRulerSecondaryPointerUp
+                              : null,
+                          onPointerCancel: isDesktop
+                              ? _onDesktopRulerSecondaryPointerUp
+                              : null,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onTapDown: _onRulerTapDown,
+                            onTapUp: _onRulerTapUp,
+                            onSecondaryTapDown:
+                                isDesktop ? _onDesktopRulerSecondaryTap : null,
+                            onPanStart: _onRulerPanStart,
+                            onPanUpdate: _onRulerPanUpdate,
+                            onPanEnd: _onRulerPanEnd,
+                            child: CustomPaint(
+                              painter: _RulerPainter(
+                                pixelsPerMs: _pixelsPerMs,
+                                scrollOffsetMs: _scrollOffsetMs,
+                                viewportWidth: viewportWidth,
+                                bpm: widget.bpm,
+                                beatsPerBar: widget.beatsPerBar,
+                                beatUnit: widget.beatUnit,
+                                quantizeDivisions: _quantizeDivisionsPerBar,
+                                contentYOffset: rulerContentYOffset,
+                              ),
+                              size: Size(viewportWidth, rulerHeight),
                             ),
-                            _buildToolMenuButton(),
-                          ],
+                          ),
                         ),
                       ),
-              ),
-
-              // Ruler content
-              Expanded(
-                child: Listener(
-                  behavior: HitTestBehavior.translucent,
-                  onPointerSignal: _onTimelinePointerSignal,
-                  onPointerDown: _onRulerPointerDown,
-                  onPointerMove:
-                      isDesktop ? _onDesktopRulerSecondaryPointerMove : null,
-                  onPointerUp:
-                      isDesktop ? _onDesktopRulerSecondaryPointerUp : null,
-                  onPointerCancel:
-                      isDesktop ? _onDesktopRulerSecondaryPointerUp : null,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.translucent,
-                    onTapDown: _onRulerTapDown,
-                    onTapUp: _onRulerTapUp,
-                    onSecondaryTapDown:
-                        isDesktop ? _onDesktopRulerSecondaryTap : null,
-                    onPanStart: _onRulerPanStart,
-                    onPanUpdate: _onRulerPanUpdate,
-                    onPanEnd: _onRulerPanEnd,
-                    child: CustomPaint(
-                      painter: _RulerPainter(
-                        pixelsPerMs: _pixelsPerMs,
-                        scrollOffsetMs: _scrollOffsetMs,
-                        viewportWidth: viewportWidth,
-                        bpm: widget.bpm,
-                        beatsPerBar: widget.beatsPerBar,
-                        beatUnit: widget.beatUnit,
-                        quantizeDivisions: _quantizeDivisionsPerBar,
-                      ),
-                      size: Size(viewportWidth, kRulerHeight),
-                    ),
+                    ],
                   ),
-                ),
-              ),
-            ],
-          ),
-          if (isDesktop)
-            ValueListenableBuilder<Duration>(
-              valueListenable: widget.transportClockListenable,
-              builder: (context, _, __) {
-                final playheadPx = _getPlayheadPx(context);
-                return Positioned(
-                  left: _headerWidth + playheadPx - 10,
-                  top: 16,
-                  child: IgnorePointer(
-                    child: SizedBox(
-                      width: 20,
-                      height: kRulerHeight,
-                      child: Column(
-                        children: [
-                          Icon(
-                            Icons.arrow_drop_down_rounded,
-                            size: 14,
-                            color: const Color(0xFFF0A957),
-                          ),
-                          Container(
-                            width: 2,
-                            height: 6,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF0A957),
-                              borderRadius: BorderRadius.circular(999),
+                  if (isDesktop)
+                    ValueListenableBuilder<Duration>(
+                      valueListenable: widget.transportClockListenable,
+                      builder: (context, _, __) {
+                        final playheadPx = _getPlayheadPx(context);
+                        return Positioned(
+                          left: _headerWidth + playheadPx - 10,
+                          top: 16 + rulerContentYOffset,
+                          child: IgnorePointer(
+                            child: SizedBox(
+                              width: 20,
+                              height: rulerHeight,
+                              child: Column(
+                                children: [
+                                  Icon(
+                                    Icons.arrow_drop_down_rounded,
+                                    size: 14,
+                                    color: const Color(0xFFF0A957),
+                                  ),
+                                  Container(
+                                    width: 2,
+                                    height: 6,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF0A957),
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                        ],
-                      ),
+                        );
+                      },
                     ),
-                  ),
-                );
-              },
+                  if (_loopEnabled)
+                    _buildLoopRegion(
+                      viewportWidth,
+                      height: rulerHeight,
+                    ),
+                ],
+              ),
             ),
-          if (_loopEnabled) _buildLoopRegion(viewportWidth),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildLoopRegion(double viewportWidth) {
+  Widget _buildLoopRegion(
+    double viewportWidth, {
+    double? height,
+  }) {
     if (_loopStartMs == null || _loopEndMs == null) {
       return const SizedBox.shrink();
     }
@@ -11708,7 +12466,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       left: left,
       top: 0,
       width: width,
-      height: kRulerHeight,
+      height: height ?? kRulerHeight,
       child: IgnorePointer(
         child: Container(
           decoration: BoxDecoration(
@@ -15442,8 +16200,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   void _handlePanZoomUpdate(ScaleUpdateDetails details) {
     bool didZoom = false;
     bool didScroll = false;
-    final allowDesktopPointerPan =
-        !PlatformCapabilities.current.isDesktop || _timelineHasMultiTouch;
+    final trackpadNavigationGestureActive =
+        _timelineModifierTrackpadNavigationActive ||
+            _timelineTrackpadPanAxis != null;
+    final allowDesktopPointerPan = !trackpadNavigationGestureActive &&
+        (!PlatformCapabilities.current.isDesktop || _timelineHasMultiTouch);
     setState(() {
       // --- Handle Zoom ---
       if (details.scale != 1.0 && _initialPixelsPerMs != null) {
@@ -16201,6 +16962,24 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 }
 
+class _HorizontalScrollbarMetrics {
+  final double minScrollMs;
+  final double scrollableMs;
+  final double trackInset;
+  final double thumbLeft;
+  final double thumbWidth;
+  final double trackTravel;
+
+  const _HorizontalScrollbarMetrics({
+    required this.minScrollMs,
+    required this.scrollableMs,
+    required this.trackInset,
+    required this.thumbLeft,
+    required this.thumbWidth,
+    required this.trackTravel,
+  });
+}
+
 class _ClipOverlapSpan {
   final int index;
   final int row;
@@ -16340,6 +17119,7 @@ class _TimelinePainter extends CustomPainter {
   final double pixelsPerMs;
   final double scrollOffsetMs;
   final double viewportWidth;
+  final double rulerHeight;
   final double playheadPx; // === FIX ===: Use playheadPx
   final double transportMs;
   final int? clipLoopPreviewClipIndex;
@@ -16411,6 +17191,7 @@ class _TimelinePainter extends CustomPainter {
     required this.pixelsPerMs,
     required this.scrollOffsetMs,
     required this.viewportWidth,
+    required this.rulerHeight,
     required this.playheadPx, // === FIX ===
     required this.transportMs,
     required this.clipLoopPreviewClipIndex,
@@ -18345,7 +19126,6 @@ class _TimelinePainter extends CustomPainter {
   void _drawPlayhead(Canvas canvas, Size size) {
     // === FIX ===: Use playheadPx
     final x = playheadPx;
-    const double rulerHeight = _AudioCanvasTimelineState.kRulerHeight;
     final glowPaint = Paint()
       ..color = const Color.fromRGBO(240, 169, 87, 0.22)
       ..strokeWidth = 4;
@@ -18504,6 +19284,7 @@ class _TimelinePainter extends CustomPainter {
         scrollOffsetMs != old.scrollOffsetMs ||
         pixelsPerMs != old.pixelsPerMs ||
         viewportWidth != old.viewportWidth ||
+        rulerHeight != old.rulerHeight ||
         masterAutomationLaneHeight != old.masterAutomationLaneHeight ||
         clipOverlapMode != old.clipOverlapMode ||
         (leftVisibleExtensionPx ?? 0.0) !=
@@ -18553,6 +19334,7 @@ class _RulerPainter extends CustomPainter {
   final int beatsPerBar;
   final int beatUnit;
   final int quantizeDivisions;
+  final double contentYOffset;
   _RulerPainter({
     required this.pixelsPerMs,
     required this.scrollOffsetMs,
@@ -18561,6 +19343,7 @@ class _RulerPainter extends CustomPainter {
     required this.beatsPerBar,
     required this.beatUnit,
     required this.quantizeDivisions,
+    required this.contentYOffset,
   });
   @override
   void paint(Canvas canvas, Size size) {
@@ -18617,7 +19400,10 @@ class _RulerPainter extends CustomPainter {
                 fontWeight: FontWeight.w500),
           );
           textPainter.layout();
-          textPainter.paint(canvas, Offset(x - textPainter.width / 2, 5));
+          textPainter.paint(
+            canvas,
+            Offset(x - textPainter.width / 2, 5 + contentYOffset),
+          );
         }
       }
       // Draw quantize subdivisions within the bar.
@@ -18653,7 +19439,8 @@ class _RulerPainter extends CustomPainter {
         bpm != oldDelegate.bpm ||
         beatsPerBar != oldDelegate.beatsPerBar ||
         beatUnit != oldDelegate.beatUnit ||
-        quantizeDivisions != oldDelegate.quantizeDivisions;
+        quantizeDivisions != oldDelegate.quantizeDivisions ||
+        contentYOffset != oldDelegate.contentYOffset;
   }
 }
 
