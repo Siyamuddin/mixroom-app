@@ -1,9 +1,11 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/screens/audio_timeline_pro.dart';
 import 'package:mixroom/widgets/effects_panel.dart';
@@ -17,6 +19,11 @@ const double _kClipDurationMs = 2000.0;
 const int _kClipDurationMsInt = 2000;
 const double _kTrimHandleWidthPx = 14.0;
 const double _kTrimHandleGapPx = 8.0;
+
+void _setTestTargetPlatform(TargetPlatform? platform) {
+  debugDefaultTargetPlatformOverride = platform;
+  PlatformCapabilities.debugResetForCurrentPlatform();
+}
 
 Future<AudioTrack> _buildClip({
   int durationMs = _kClipDurationMsInt,
@@ -146,6 +153,24 @@ Offset _magnetButtonCenter(WidgetTester tester) {
   return topLeft + const Offset(21.0, 20.0);
 }
 
+Future<void> _sendTrackpadPanZoomUpdate(
+  WidgetTester tester, {
+  required Offset position,
+  required Offset panDelta,
+  int pointer = 99,
+}) async {
+  final gesture = await tester.createGesture(
+    pointer: pointer,
+    kind: PointerDeviceKind.trackpad,
+  );
+  await gesture.panZoomStart(position);
+  await tester.pump();
+  await gesture.panZoomUpdate(position, pan: panDelta);
+  await tester.pump();
+  await gesture.panZoomEnd();
+  await tester.pump();
+}
+
 Future<void> _openRowHeaderMenu(WidgetTester tester, int row) async {
   final headerRect = tester.getRect(
     find.byKey(ValueKey('timeline_row_header_$row')),
@@ -260,6 +285,8 @@ Widget _buildHarness({
   bool loopEnabled = false,
   int loopStartMs = 0,
   int loopEndMs = 0,
+  VoidCallback? onTutorialTimelineScrolled,
+  VoidCallback? onTutorialTimelineZoomed,
 }) {
   final rows = rowsOverride ??
       <TimelineRow>[
@@ -444,6 +471,8 @@ Widget _buildHarness({
           registerRowFxRefresher: null,
           registerRowFxPlaybackRefresher: null,
           onSnapSettingsChanged: onSnapSettingsChanged,
+          onTutorialTimelineScrolled: onTutorialTimelineScrolled,
+          onTutorialTimelineZoomed: onTutorialTimelineZoomed,
           meters: MeterBus(numRows: rows.length),
           getRowCompressorMeter: (_, __) async => const <double>[0.0, 0.0],
           getRowEqWaveform: (_, __, ___) async => const <double>[0.0, 0.0],
@@ -695,6 +724,512 @@ void main() {
     expect(moveCommits, hasLength(1));
     expect(moveCommits.single.startMs, closeTo(0.0, 0.01));
     expect(moveCommits.single.row, 1);
+  });
+
+  testWidgets('desktop cmd trackpad scroll zooms without vertical movement',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final rows = List<TimelineRow>.generate(
+        12,
+        (index) => TimelineRow(
+          rowId: index + 1,
+          name: 'Track ${index + 1}',
+          iconId: 0,
+        ),
+      );
+      final clips = <AudioTrack>[await _buildClip()];
+      var zoomEvents = 0;
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          rowsOverride: rows,
+          onMoveClipCommit: (_, __, ___) async {},
+          onTutorialTimelineZoomed: () => zoomEvents++,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final clipCenter = _clipCenter(tester);
+      final rowHeaderTopBefore = tester
+          .getTopLeft(find.byKey(const ValueKey('timeline_row_header_1')))
+          .dy;
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await _sendTrackpadPanZoomUpdate(
+        tester,
+        position: clipCenter,
+        panDelta: const Offset(120.0, 0.0),
+      );
+      await tester.pumpAndSettle();
+
+      expect(zoomEvents, 0);
+      expect(
+        tester
+            .getTopLeft(find.byKey(const ValueKey('timeline_row_header_1')))
+            .dy,
+        closeTo(rowHeaderTopBefore, 0.01),
+      );
+
+      await _sendTrackpadPanZoomUpdate(
+        tester,
+        position: clipCenter,
+        panDelta: const Offset(0.0, 120.0),
+      );
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+
+      expect(zoomEvents, 1);
+      expect(
+        tester
+            .getTopLeft(find.byKey(const ValueKey('timeline_row_header_1')))
+            .dy,
+        closeTo(rowHeaderTopBefore, 0.01),
+      );
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('desktop shift trackpad scroll pans without vertical movement',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final rows = List<TimelineRow>.generate(
+        12,
+        (index) => TimelineRow(
+          rowId: index + 1,
+          name: 'Track ${index + 1}',
+          iconId: 0,
+        ),
+      );
+      final clips = <AudioTrack>[await _buildClip()];
+      var scrollEvents = 0;
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          rowsOverride: rows,
+          onMoveClipCommit: (_, __, ___) async {},
+          onTutorialTimelineScrolled: () => scrollEvents++,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final clipCenter = _clipCenter(tester);
+      final rowHeaderTopBefore = tester
+          .getTopLeft(find.byKey(const ValueKey('timeline_row_header_1')))
+          .dy;
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await _sendTrackpadPanZoomUpdate(
+        tester,
+        position: clipCenter,
+        panDelta: const Offset(120.0, 0.0),
+      );
+      await tester.pumpAndSettle();
+
+      expect(scrollEvents, 0);
+      expect(
+        tester
+            .getTopLeft(find.byKey(const ValueKey('timeline_row_header_1')))
+            .dy,
+        closeTo(rowHeaderTopBefore, 0.01),
+      );
+
+      await _sendTrackpadPanZoomUpdate(
+        tester,
+        position: clipCenter,
+        panDelta: const Offset(0.0, 120.0),
+      );
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pumpAndSettle();
+
+      expect(scrollEvents, 1);
+      expect(
+        tester
+            .getTopLeft(find.byKey(const ValueKey('timeline_row_header_1')))
+            .dy,
+        closeTo(rowHeaderTopBefore, 0.01),
+      );
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('desktop horizontal trackpad scroll pans timeline',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final rows = List<TimelineRow>.generate(
+        12,
+        (index) => TimelineRow(
+          rowId: index + 1,
+          name: 'Track ${index + 1}',
+          iconId: 0,
+        ),
+      );
+      final clips = <AudioTrack>[await _buildClip()];
+      var scrollEvents = 0;
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          rowsOverride: rows,
+          onMoveClipCommit: (_, __, ___) async {},
+          loopEnabled: true,
+          loopStartMs: 1000,
+          loopEndMs: 3000,
+          onTutorialTimelineScrolled: () => scrollEvents++,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final clipCenter = _clipCenter(tester);
+      final loopRightBefore = tester
+          .getRect(find.byKey(const ValueKey('timeline_loop_region')))
+          .right;
+      final rowHeaderTopBefore = tester
+          .getTopLeft(find.byKey(const ValueKey('timeline_row_header_1')))
+          .dy;
+
+      await _sendTrackpadPanZoomUpdate(
+        tester,
+        position: clipCenter,
+        panDelta: const Offset(-160.0, 80.0),
+      );
+      await tester.pump();
+
+      expect(scrollEvents, 1);
+      expect(
+        tester
+            .getRect(find.byKey(const ValueKey('timeline_loop_region')))
+            .right,
+        lessThan(loopRightBefore),
+      );
+      expect(
+        tester
+            .getTopLeft(find.byKey(const ValueKey('timeline_row_header_1')))
+            .dy,
+        closeTo(rowHeaderTopBefore, 0.01),
+      );
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('desktop horizontal trackpad scroll eases after release',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final rows = List<TimelineRow>.generate(
+        12,
+        (index) => TimelineRow(
+          rowId: index + 1,
+          name: 'Track ${index + 1}',
+          iconId: 0,
+        ),
+      );
+      final clips = <AudioTrack>[await _buildClip()];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          rowsOverride: rows,
+          onMoveClipCommit: (_, __, ___) async {},
+          loopEnabled: true,
+          loopStartMs: 1000,
+          loopEndMs: 3000,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final clipCenter = _clipCenter(tester);
+      final loopRightBefore = tester
+          .getRect(find.byKey(const ValueKey('timeline_loop_region')))
+          .right;
+      final gesture = await tester.createGesture(
+        pointer: 101,
+        kind: PointerDeviceKind.trackpad,
+      );
+      await gesture.panZoomStart(clipCenter);
+      await tester.pump();
+      await gesture.panZoomUpdate(
+        clipCenter,
+        pan: const Offset(-180.0, 20.0),
+      );
+      await tester.pump();
+
+      final loopRightDuringGesture = tester
+          .getRect(find.byKey(const ValueKey('timeline_loop_region')))
+          .right;
+      await gesture.panZoomEnd();
+      await tester.pump(const Duration(milliseconds: 32));
+
+      final loopRightAfterEase = tester
+          .getRect(find.byKey(const ValueKey('timeline_loop_region')))
+          .right;
+      expect(loopRightDuringGesture, lessThan(loopRightBefore));
+      expect(loopRightAfterEase, lessThan(loopRightDuringGesture));
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('desktop shift trackpad scroll eases after release',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final rows = List<TimelineRow>.generate(
+        12,
+        (index) => TimelineRow(
+          rowId: index + 1,
+          name: 'Track ${index + 1}',
+          iconId: 0,
+        ),
+      );
+      final clips = <AudioTrack>[await _buildClip()];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          rowsOverride: rows,
+          onMoveClipCommit: (_, __, ___) async {},
+          loopEnabled: true,
+          loopStartMs: 1000,
+          loopEndMs: 3000,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final clipCenter = _clipCenter(tester);
+      final loopRightBefore = tester
+          .getRect(find.byKey(const ValueKey('timeline_loop_region')))
+          .right;
+      final gesture = await tester.createGesture(
+        pointer: 102,
+        kind: PointerDeviceKind.trackpad,
+      );
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await gesture.panZoomStart(clipCenter);
+      await tester.pump();
+      await gesture.panZoomUpdate(
+        clipCenter,
+        pan: const Offset(0.0, 180.0),
+      );
+      await tester.pump();
+
+      final loopRightDuringGesture = tester
+          .getRect(find.byKey(const ValueKey('timeline_loop_region')))
+          .right;
+      await gesture.panZoomEnd();
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pump(const Duration(milliseconds: 32));
+
+      final loopRightAfterEase = tester
+          .getRect(find.byKey(const ValueKey('timeline_loop_region')))
+          .right;
+      expect(loopRightDuringGesture, lessThan(loopRightBefore));
+      expect(loopRightAfterEase, lessThan(loopRightDuringGesture));
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('desktop vertical trackpad scroll does not pan timeline',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final rows = List<TimelineRow>.generate(
+        12,
+        (index) => TimelineRow(
+          rowId: index + 1,
+          name: 'Track ${index + 1}',
+          iconId: 0,
+        ),
+      );
+      final clips = <AudioTrack>[await _buildClip()];
+      var scrollEvents = 0;
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          rowsOverride: rows,
+          onMoveClipCommit: (_, __, ___) async {},
+          loopEnabled: true,
+          loopStartMs: 1000,
+          loopEndMs: 3000,
+          onTutorialTimelineScrolled: () => scrollEvents++,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final clipCenter = _clipCenter(tester);
+      final loopRightBefore = tester
+          .getRect(find.byKey(const ValueKey('timeline_loop_region')))
+          .right;
+
+      await _sendTrackpadPanZoomUpdate(
+        tester,
+        position: clipCenter,
+        panDelta: const Offset(-80.0, 160.0),
+      );
+      await tester.pumpAndSettle();
+
+      expect(scrollEvents, 0);
+      expect(
+        tester
+            .getRect(find.byKey(const ValueKey('timeline_loop_region')))
+            .right,
+        closeTo(loopRightBefore, 0.01),
+      );
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('desktop tiny horizontal trackpad release does not ease',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final rows = List<TimelineRow>.generate(
+        12,
+        (index) => TimelineRow(
+          rowId: index + 1,
+          name: 'Track ${index + 1}',
+          iconId: 0,
+        ),
+      );
+      final clips = <AudioTrack>[await _buildClip()];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          rowsOverride: rows,
+          onMoveClipCommit: (_, __, ___) async {},
+          loopEnabled: true,
+          loopStartMs: 1000,
+          loopEndMs: 3000,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final clipCenter = _clipCenter(tester);
+      final gesture = await tester.createGesture(
+        pointer: 103,
+        kind: PointerDeviceKind.trackpad,
+      );
+      await gesture.panZoomStart(clipCenter);
+      await tester.pump();
+      await gesture.panZoomUpdate(
+        clipCenter,
+        pan: const Offset(-18.0, 4.0),
+      );
+      await tester.pump();
+
+      final loopRightDuringGesture = tester
+          .getRect(find.byKey(const ValueKey('timeline_loop_region')))
+          .right;
+      await gesture.panZoomEnd();
+      await tester.pump(const Duration(milliseconds: 48));
+
+      final loopRightAfterRelease = tester
+          .getRect(find.byKey(const ValueKey('timeline_loop_region')))
+          .right;
+      expect(loopRightAfterRelease, closeTo(loopRightDuringGesture, 0.01));
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('desktop scrollbar starts comfortable and shrinks when zoomed',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final controller = AudioCanvasTimelineController();
+      final clips = <AudioTrack>[await _buildClip()];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          controller: controller,
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.pump();
+
+      var state = controller.horizontalScrollbarState;
+      expect(state.visible, isTrue);
+      expect(state.thumbWidth, greaterThanOrEqualTo(72.0));
+
+      controller.beginHorizontalScrollbarDrag(
+        state.thumbLeft + state.thumbWidth - 2.0,
+      );
+      controller.dragHorizontalScrollbarBy(-320.0);
+      controller.endHorizontalScrollbarDrag();
+      await tester.pumpAndSettle();
+
+      state = controller.horizontalScrollbarState;
+      expect(state.thumbWidth, lessThan(72.0));
+      expect(state.thumbWidth, greaterThanOrEqualTo(36.0));
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('desktop scrollbar track press jumps then captures drag',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final controller = AudioCanvasTimelineController();
+      final clips = <AudioTrack>[await _buildClip()];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          controller: controller,
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.pump();
+
+      var state = controller.horizontalScrollbarState;
+      controller.beginHorizontalScrollbarDrag(
+        state.thumbLeft + state.thumbWidth - 2.0,
+      );
+      controller.dragHorizontalScrollbarBy(-320.0);
+      controller.endHorizontalScrollbarDrag();
+      await tester.pumpAndSettle();
+
+      state = controller.horizontalScrollbarState;
+      final trackWidth = state.viewportWidth - (state.endInset * 2.0);
+      final trackTravel = trackWidth - state.thumbWidth;
+      expect(trackTravel, greaterThan(80.0));
+
+      final trackPressX =
+          state.endInset + (trackTravel * 0.5) + (state.thumbWidth / 2.0);
+      controller.jumpHorizontalScrollbarTo(trackPressX);
+      controller.beginHorizontalScrollbarDrag(trackPressX);
+      await tester.pump();
+
+      final afterPress = controller.horizontalScrollbarState;
+      expect(afterPress.dragging, isTrue);
+      expect(afterPress.thumbLeft, greaterThan(state.thumbLeft));
+
+      controller.dragHorizontalScrollbarBy(48.0);
+      controller.endHorizontalScrollbarDrag();
+      await tester.pump();
+
+      final afterDrag = controller.horizontalScrollbarState;
+      expect(afterDrag.dragging, isFalse);
+      expect(afterDrag.thumbLeft, greaterThan(afterPress.thumbLeft));
+    } finally {
+      _setTestTargetPlatform(null);
+    }
   });
 
   testWidgets('external loop state renders the timeline loop region',
