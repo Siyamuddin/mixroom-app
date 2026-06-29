@@ -163,6 +163,32 @@ class AudioRouteInfo {
   );
 }
 
+class AudioInputDeviceInfo {
+  const AudioInputDeviceInfo({
+    required this.name,
+    required this.isBluetoothInput,
+    required this.isBuiltIn,
+    required this.isDefault,
+    required this.transport,
+  });
+
+  final String name;
+  final bool isBluetoothInput;
+  final bool isBuiltIn;
+  final bool isDefault;
+  final String transport;
+
+  factory AudioInputDeviceInfo.fromMap(Map<String, dynamic> map) {
+    return AudioInputDeviceInfo(
+      name: map['name']?.toString() ?? '',
+      isBluetoothInput: map['isBluetoothInput'] == true,
+      isBuiltIn: map['isBuiltIn'] == true,
+      isDefault: map['isDefault'] == true,
+      transport: map['transport']?.toString() ?? 'unknown',
+    );
+  }
+}
+
 class JuceAudioEngine {
   static const _ch = MethodChannel('juce_audio_engine');
   static const _eventCh = EventChannel('juce_audio_engine/events');
@@ -2284,6 +2310,34 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<List<String>> getOutputDevices() async {
+    try {
+      final res = await _ch.invokeMethod<List>('getOutputDevices');
+      return (res ?? []).cast<String>();
+    } on PlatformException catch (e) {
+      _logError('getOutputDevices', e);
+      return [];
+    }
+  }
+
+  static Future<List<AudioInputDeviceInfo>> getInputDeviceInfos() async {
+    try {
+      final res = await _ch.invokeMethod<List>('getInputDeviceInfos');
+      return (res ?? const [])
+          .whereType<Map>()
+          .map((map) => AudioInputDeviceInfo.fromMap(
+                Map<String, dynamic>.from(map),
+              ))
+          .where((info) => info.name.trim().isNotEmpty)
+          .toList(growable: false);
+    } on MissingPluginException {
+      return const [];
+    } on PlatformException catch (e) {
+      _logError('getInputDeviceInfos', e);
+      return const [];
+    }
+  }
+
   static Future<bool> selectInputDevice(String name) async {
     try {
       final res = await _ch.invokeMethod<bool>('selectInputDevice', {
@@ -2292,6 +2346,18 @@ class JuceAudioEngine {
       return res ?? false;
     } on PlatformException catch (e) {
       _logError('selectInputDevice', e);
+      return false;
+    }
+  }
+
+  static Future<bool> selectOutputDevice(String name) async {
+    try {
+      final res = await _ch.invokeMethod<bool>('selectOutputDevice', {
+        'name': name,
+      });
+      return res ?? false;
+    } on PlatformException catch (e) {
+      _logError('selectOutputDevice', e);
       return false;
     }
   }

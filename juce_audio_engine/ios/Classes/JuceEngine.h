@@ -5710,7 +5710,10 @@ public:
 
     // Device info
     juce::StringArray getAvailableInputDevices();
+    juce::StringArray getAvailableOutputDevices();
     bool selectInputDevice(const juce::String &name);
+    bool selectOutputDevice(const juce::String &name);
+    bool isBluetoothInputDeviceName(const juce::String &name) const;
     juce::String getCurrentInputDeviceName() const;
     juce::String getCurrentOutputDeviceName() const;
     int getNumInputChannels() const;

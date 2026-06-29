@@ -40,6 +40,27 @@ void main() {
           ];
         case 'getTransportSeconds':
           return 12.5;
+        case 'getOutputDevices':
+          return <String>['MacBook Pro Speakers', 'WH-1000XM4'];
+        case 'selectOutputDevice':
+          return true;
+        case 'getInputDeviceInfos':
+          return <Map<String, dynamic>>[
+            <String, dynamic>{
+              'name': 'MacBook Pro Microphone',
+              'isBluetoothInput': false,
+              'isBuiltIn': true,
+              'isDefault': true,
+              'transport': 'builtIn',
+            },
+            <String, dynamic>{
+              'name': 'AirPods Pro',
+              'isBluetoothInput': true,
+              'isBuiltIn': false,
+              'isDefault': false,
+              'transport': 'bluetooth',
+            },
+          ];
         case 'addRow':
           return 42;
         case 'supportsLiveMidiClipPlayback':
@@ -129,6 +150,46 @@ void main() {
     expect(calls, hasLength(1));
     expect(calls.single.method, 'preparePlaybackRoute');
     expect(calls.single.arguments, <String, dynamic>{'reason': 'projectLoad'});
+  });
+
+  test('getInputDeviceInfos parses macOS input metadata', () async {
+    final infos = await JuceAudioEngine.getInputDeviceInfos();
+
+    expect(infos, hasLength(2));
+    expect(infos.first.name, 'MacBook Pro Microphone');
+    expect(infos.first.isBluetoothInput, isFalse);
+    expect(infos.first.isBuiltIn, isTrue);
+    expect(infos.first.isDefault, isTrue);
+    expect(infos.first.transport, 'builtIn');
+    expect(infos.last.name, 'AirPods Pro');
+    expect(infos.last.isBluetoothInput, isTrue);
+    expect(infos.last.transport, 'bluetooth');
+    expect(calls.single.method, 'getInputDeviceInfos');
+  });
+
+  test('getInputDeviceInfos returns empty list when plugin is unavailable',
+      () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null);
+
+    final infos = await JuceAudioEngine.getInputDeviceInfos();
+
+    expect(infos, isEmpty);
+  });
+
+  test('getOutputDevices returns native output names', () async {
+    final outputs = await JuceAudioEngine.getOutputDevices();
+
+    expect(outputs, <String>['MacBook Pro Speakers', 'WH-1000XM4']);
+    expect(calls.single.method, 'getOutputDevices');
+  });
+
+  test('selectOutputDevice sends selected output name', () async {
+    final selected = await JuceAudioEngine.selectOutputDevice('WH-1000XM4');
+
+    expect(selected, isTrue);
+    expect(calls.single.method, 'selectOutputDevice');
+    expect(calls.single.arguments, <String, dynamic>{'name': 'WH-1000XM4'});
   });
 
   test('capabilities + plugin scan normalization', () async {

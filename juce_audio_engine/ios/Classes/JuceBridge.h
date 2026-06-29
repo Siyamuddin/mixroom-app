@@ -265,7 +265,9 @@
                                                   trimEndMs:(double)trimEndMs;
 
 + (NSArray<NSString *> *)getInputDevicesObjC;
++ (NSArray<NSString *> *)getOutputDevicesObjC;
 + (BOOL)selectInputDeviceObjC:(NSString *)name;
++ (BOOL)selectOutputDeviceObjC:(NSString *)name;
 
 + (NSNumber *)getNumInputChannelsObjC;
 + (NSString *)getCurrentDeviceNameObjC;

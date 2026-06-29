@@ -73,6 +73,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:mixroom/helpers/app_popup.dart';
 import 'package:mixroom/helpers/audio_export_plan.dart';
+import 'package:mixroom/helpers/audio_input_device_policy.dart';
 import 'package:mixroom/helpers/export_save_dialog.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/providers/locale_provider.dart';
@@ -5385,11 +5386,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   MediaDeviceInfo? _selectedOutput;
   final List<TrackGroup> _trackGroups = <TrackGroup>[];
   String? _androidOutputRouteName;
+  List<String> _macOutputDevices = const <String>[];
   String? _macOutputDeviceName;
   AudioRouteInfo _audioRouteInfo = AudioRouteInfo.unknown;
 
   List<String> _inputDevices = [];
+  List<AudioInputDeviceInfo> _inputDeviceInfos = const <AudioInputDeviceInfo>[];
   String? _selectedDevice;
+  int _inputDeviceSelectorRevision = 0;
 
   int _numInputChannels = 0;
   int _selectedChannelStart = 0;
@@ -5407,7 +5411,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _recordTransitionInFlight = false;
   bool _recordStartVisualPending = false;
   bool _recordStartCancelRequested = false;
-  Future<void>? _pendingIosRecordingRouteRestore;
   Duration _lastInputDevicesLoadedElapsed = Duration.zero;
   Duration _lastAudioRouteInfoRefreshElapsed = Duration.zero;
 
@@ -5417,13 +5420,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _dawEntryMicPromptHandled = false;
   bool _advancedBluetoothMonitorOverride = false;
   final Set<String> _allowedBluetoothMicKeys = <String>{};
+  static const AudioInputDevicePolicy _audioInputDevicePolicy =
+      AudioInputDevicePolicy();
   Timer? _recordingRoutePolicyTimer;
   bool? _liveInputMonitoringEffective;
   static const String _kBluetoothMonitorOverridePref =
       'audio_editor.bluetooth_monitor_override';
   static const String _kAllowedBluetoothMicKeysPref =
       'audio_editor.allowed_bluetooth_mic_keys';
-
   bool _metronomeEnabled = false;
   double _metronomeVolume = 0.5; // 0–1
 
@@ -8525,7 +8529,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // _startMeterPolling();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await JuceAudioEngine.initialise(); // heavy blocking native call
+      await JuceAudioEngine.initialise();
       JuceAudioEngine.initialiseEventListeners();
       _juceEngineEventSubscription ??=
           JuceAudioEngine.eventsStream.listen(_handleJuceEngineEvent);
@@ -11656,7 +11660,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<bool> _ensurePlaybackRouteReady({required String reason}) async {
-    final ok = await JuceAudioEngine.preparePlaybackRoute(reason: reason);
+    var ok = false;
+    try {
+      ok = await JuceAudioEngine.preparePlaybackRoute(
+        reason: reason,
+      ).timeout(const Duration(seconds: 4));
+    } on TimeoutException {
+      debugPrint('preparePlaybackRoute timed out: $reason');
+      return false;
+    } catch (e) {
+      debugPrint('preparePlaybackRoute failed [$reason]: $e');
+      return false;
+    }
     if (!ok && mounted) {
       debugPrint('preparePlaybackRoute failed: $reason');
     }
@@ -12586,7 +12601,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await JuceAudioEngine.setTransportSeconds(0.0);
       await JuceAudioEngine.setMetronomeTransportMs(0.0);
       if (Platform.isIOS || PlatformCapabilities.current.isDesktop) {
-        await JuceAudioEngine.preparePlaybackRoute(reason: 'projectLoad');
+        await _ensurePlaybackRouteReady(reason: 'projectLoad');
       }
       await _syncNativeAutomationForAllRows();
       await _stabilizeAutomationTargetsAfterProjectLoad();
@@ -18832,7 +18847,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (!routeKnown) {
         await _refreshAudioRouteInfo();
       } else if (!_audioRouteInfoCacheIsFresh()) {
-        unawaited(_refreshAudioRouteInfo());
+        if (Platform.isIOS) {
+          await _refreshAudioRouteInfo();
+        } else {
+          unawaited(_refreshAudioRouteInfo());
+        }
       }
 
       if (!await _confirmBluetoothMicMode(_audioRouteInfo)) {
@@ -18841,6 +18860,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (Platform.isMacOS) {
+      if (!await _ensureMacNonBluetoothRecordingInput(
+        reason: 'recordStart',
+        notify: true,
+      )) {
+        return false;
+      }
+
       final selectedDeviceName = (_selectedDevice ?? '').trim();
       if (selectedDeviceName.isNotEmpty) {
         final currentInputName =
@@ -18916,14 +18942,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       await _letRecordingVisualStatePaint();
       if (!mounted || _recordStartCancelRequested) return;
-
-      if (Platform.isIOS) {
-        final pendingRestore = _pendingIosRecordingRouteRestore;
-        if (pendingRestore != null) {
-          await pendingRestore;
-        }
-      }
-      if (_recordStartCancelRequested) return;
 
       if (_loopEnabled) {
         await _restartAudio(_safeAudioEditorStateSetter);
@@ -19120,9 +19138,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _midiHeldNoteRefreshTimer = null;
       final resumePlaybackAfterStop = keepPlaying && _isPlaying;
       final hadBluetoothInputRoute = _audioRouteInfo.inputIsBluetoothHeadset;
-      final needsBluetoothStopRecovery = Platform.isAndroid
-          ? hadBluetoothInputRoute
-          : (_audioRouteInfo.isBluetoothOutput || hadBluetoothInputRoute);
+      final needsBluetoothStopRecovery =
+          Platform.isAndroid && hadBluetoothInputRoute;
       Future<void>? deferredBluetoothRestore;
 
       _recordingPeakTimer?.cancel();
@@ -19162,31 +19179,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _lastPreparedRecordingDevice = null;
       _lastPreparedRecordingInputOpenChannels = null;
       if (needsBluetoothStopRecovery) {
-        if (Platform.isIOS) {
-          deferredBluetoothRestore =
-              JuceAudioEngine.restoreBluetoothPlaybackAfterRecordingStop()
-                  .then((_) {
-            return _refreshAudioRouteInfo(refreshNativeRoute: false);
-          });
-          _pendingIosRecordingRouteRestore = deferredBluetoothRestore;
-          deferredBluetoothRestore.whenComplete(() {
-            if (identical(
-                _pendingIosRecordingRouteRestore, deferredBluetoothRestore)) {
-              _pendingIosRecordingRouteRestore = null;
-            }
-          });
-          unawaited(deferredBluetoothRestore);
-        } else {
-          deferredBluetoothRestore = (() async {
-            await Future<void>.delayed(const Duration(milliseconds: 250));
-            await JuceAudioEngine.restoreBluetoothPlaybackAfterRecordingStop();
-            await Future<void>.delayed(const Duration(milliseconds: 100));
-            if (mounted) {
-              await _refreshAudioRouteInfo(refreshNativeRoute: false);
-            }
-          })();
-          unawaited(deferredBluetoothRestore);
-        }
+        deferredBluetoothRestore = (() async {
+          await Future<void>.delayed(const Duration(milliseconds: 250));
+          await JuceAudioEngine.restoreBluetoothPlaybackAfterRecordingStop();
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          if (mounted) {
+            await _refreshAudioRouteInfo(refreshNativeRoute: false);
+          }
+        })();
+        unawaited(deferredBluetoothRestore);
       } else if (Platform.isAndroid) {
         // The native stop-record path already restores playback routing. Forcing
         // another immediate native refresh here can reopen Android's Bluetooth
@@ -19241,6 +19242,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               row,
               timeMs,
               transcodeTo48k: false,
+              showLoadingOverlay: false,
               recordingLatencyMs: recordingLatencyMs,
               alignmentOffsetMs: appliedAlignmentOffsetMs,
             ),
@@ -37649,6 +37651,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  Future<void> _selectMacOutputDevice(String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+
+    final ok = await JuceAudioEngine.selectOutputDevice(trimmed);
+    if (!mounted) return;
+    if (!ok) {
+      _showSmallNotice(
+        L10n.translate(context, 'Selected output device is not available.'),
+      );
+      await _loadInputDevicesFromJuce();
+      return;
+    }
+
+    _setStateAndRefreshProjectSettings(() {
+      _macOutputDeviceName = trimmed;
+    });
+    await _refreshAudioRouteInfo();
+    await _ensurePlaybackRouteReady(reason: 'selectMacOutputDevice');
+  }
+
   List<_InputChannelRouteOption> _buildInputChannelRouteOptions(
       int numInputChannels) {
     if (numInputChannels <= 0) return const <_InputChannelRouteOption>[];
@@ -37739,7 +37762,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _isRecording || _recordStartVisualPending;
 
   bool _supportsNativeBluetoothMonitorPolicy() {
-    return Platform.isAndroid || Platform.isIOS;
+    return Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
   }
 
   bool _sameAudioRouteInfo(AudioRouteInfo a, AudioRouteInfo b) {
@@ -37792,6 +37815,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   bool _looksLikeBluetoothDeviceName(String name) {
+    final info = _audioInputDevicePolicy.findByName(_inputDeviceInfos, name);
+    if (info != null) return info.isBluetoothInput;
     final normalized = _normalizeBluetoothRouteKeyToken(name);
     if (normalized.isEmpty) return false;
     return normalized.contains('airpods') ||
@@ -37835,12 +37860,105 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   String? _recommendedNonBluetoothInputDevice() {
+    if (Platform.isMacOS && _inputDeviceInfos.isNotEmpty) {
+      return _audioInputDevicePolicy.safeFallbackName(
+        devices: _inputDeviceInfos,
+        selectedName: _selectedDevice,
+        currentName: _audioRouteInfo.inputDeviceName,
+      );
+    }
     for (final device in _inputDevices) {
       if (!_looksLikeBluetoothDeviceName(device)) {
         return device;
       }
     }
     return null;
+  }
+
+  void _showBluetoothInputBlockedNotice() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          L10n.translate(
+            context,
+            'Bluetooth microphones are disabled in this version. Mixroom is using the built-in/default mic instead.',
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<bool> _ensureMacNonBluetoothRecordingInput({
+    required String reason,
+    bool notify = false,
+  }) async {
+    if (!Platform.isMacOS) return true;
+
+    final currentInputName =
+        (await JuceAudioEngine.getCurrentDeviceName()).trim();
+    final selectedName = (_selectedDevice ?? '').trim();
+    final fallback = _inputDeviceInfos.isNotEmpty
+        ? _audioInputDevicePolicy.safeFallbackName(
+            devices: _inputDeviceInfos,
+            selectedName: selectedName,
+            currentName: currentInputName,
+          )
+        : _recommendedNonBluetoothInputDevice();
+
+    final selectedIsBluetooth =
+        selectedName.isNotEmpty && _looksLikeBluetoothDeviceName(selectedName);
+    final currentIsBluetooth = currentInputName.isNotEmpty &&
+        _looksLikeBluetoothDeviceName(currentInputName);
+    final routeIsBluetooth = _audioRouteInfo.inputIsBluetoothHeadset;
+    final needsFallback = fallback != null &&
+        (selectedIsBluetooth ||
+            currentIsBluetooth ||
+            routeIsBluetooth ||
+            selectedName.isEmpty);
+
+    if (fallback == null) {
+      _lastPreparedRecordingDevice = null;
+      _lastPreparedRecordingInputOpenChannels = null;
+      if (notify) {
+        _showBluetoothInputBlockedNotice();
+      }
+      debugPrint('No non-Bluetooth native input device available: $reason');
+      return false;
+    }
+
+    if (!needsFallback) return true;
+
+    final ok = await JuceAudioEngine.selectInputDevice(fallback);
+    if (!ok) {
+      if (notify) {
+        _showBluetoothInputBlockedNotice();
+      }
+      debugPrint('Failed to select non-Bluetooth native input: $fallback');
+      return false;
+    }
+
+    final channels = await JuceAudioEngine.getNumInputChannels();
+    if (!mounted) return false;
+    _setStateAndRefreshProjectSettings(() {
+      _selectedDevice = fallback;
+      _numInputChannels = channels;
+      _normalizeInputChannelSelection();
+      if (_isValidRowIndex(_selectedRow)) {
+        _rows[_selectedRow] = _rows[_selectedRow].copyWith(
+          inputDeviceName: fallback,
+          inputChannelStart: _selectedChannelStart,
+          inputChannelCount: _selectedChannelCount,
+        );
+      }
+    });
+    _lastPreparedRecordingDevice = null;
+    _lastPreparedRecordingInputOpenChannels = null;
+    await _refreshAudioRouteInfo();
+    if (notify) {
+      _showBluetoothInputBlockedNotice();
+    }
+    return true;
   }
 
   bool _shouldEnableLiveInputMonitoring(AudioRouteInfo info) {
@@ -38218,6 +38336,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final desiredInputChannels = _desiredRecordingInputOpenChannels();
     final selectedDevice = (_selectedDevice ?? '').trim();
 
+    if (Platform.isMacOS) {
+      if (_inputDeviceInfos.isNotEmpty &&
+          (selectedDevice.isEmpty ||
+              _looksLikeBluetoothDeviceName(selectedDevice))) {
+        _lastPreparedRecordingDevice = null;
+        _lastPreparedRecordingInputOpenChannels = null;
+        unawaited(_ensureMacNonBluetoothRecordingInput(reason: reason));
+        return;
+      }
+      final fallback = _audioInputDevicePolicy.safeFallbackName(
+        devices: _inputDeviceInfos,
+        selectedName: selectedDevice,
+        currentName: _audioRouteInfo.inputDeviceName,
+      );
+      if (_inputDeviceInfos.isNotEmpty && fallback == null) {
+        _lastPreparedRecordingDevice = null;
+        _lastPreparedRecordingInputOpenChannels = null;
+        return;
+      }
+    }
+
     if (Platform.isAndroid) {
       _lastPreparedRecordingDevice = null;
       _lastPreparedRecordingInputOpenChannels = null;
@@ -38267,22 +38406,72 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final micBlocked = !(micStatus.isGranted || micStatus.isLimited);
 
       final devices = await JuceAudioEngine.getInputDevices();
+      final deviceInfos = Platform.isMacOS
+          ? await JuceAudioEngine.getInputDeviceInfos()
+          : const <AudioInputDeviceInfo>[];
+      final outputDevices = Platform.isMacOS
+          ? await JuceAudioEngine.getOutputDevices()
+          : const <String>[];
       final current = await JuceAudioEngine.getCurrentDeviceName();
       final currentOutput = await JuceAudioEngine.getCurrentOutputDeviceName();
-      final channels = await JuceAudioEngine.getNumInputChannels();
+      var channels = await JuceAudioEngine.getNumInputChannels();
+      final resolvedDevices = devices.isNotEmpty
+          ? devices
+          : (Platform.isMacOS
+              ? deviceInfos.map((info) => info.name).toList(growable: false)
+              : const <String>[]);
+      var selectedDeviceName = resolvedDevices.contains(current)
+          ? current
+          : (resolvedDevices.isNotEmpty ? resolvedDevices.first : null);
+      var noSafeNativeInput = false;
+
+      if (Platform.isMacOS && deviceInfos.isNotEmpty) {
+        final fallback = _audioInputDevicePolicy.safeFallbackName(
+          devices: deviceInfos,
+          selectedName: selectedDeviceName,
+          currentName: current,
+        );
+        final selectedIsBluetooth = selectedDeviceName != null &&
+            _audioInputDevicePolicy
+                    .findByName(deviceInfos, selectedDeviceName)
+                    ?.isBluetoothInput ==
+                true;
+        final currentIsBluetooth = _audioInputDevicePolicy
+                .findByName(deviceInfos, current)
+                ?.isBluetoothInput ==
+            true;
+        if (fallback != null &&
+            (selectedDeviceName == null ||
+                selectedIsBluetooth ||
+                currentIsBluetooth)) {
+          final selected = await JuceAudioEngine.selectInputDevice(fallback);
+          if (selected) {
+            selectedDeviceName = fallback;
+            channels = await JuceAudioEngine.getNumInputChannels();
+          }
+        } else if (fallback == null) {
+          noSafeNativeInput = true;
+          selectedDeviceName =
+              resolvedDevices.isNotEmpty ? resolvedDevices.first : null;
+          channels = 0;
+        }
+      }
       _lastInputDevicesLoadedElapsed = _transportUiStopwatch.elapsed;
       _setStateAndRefreshProjectSettings(() {
         final resolvedChannels = channels > 0
             ? channels
-            : (devices.isNotEmpty ? _numInputChannels : 0);
-        final currentDeviceName = current.trim();
-        final currentOutputDeviceName = currentOutput.trim();
+            : (noSafeNativeInput
+                ? 0
+                : (resolvedDevices.isNotEmpty ? _numInputChannels : 0));
+        final currentOutputDeviceName = currentOutput.trim().isNotEmpty
+            ? currentOutput.trim()
+            : (outputDevices.isNotEmpty ? outputDevices.first : '');
         _microphonePermissionStatus = micStatus;
         _microphoneAccessBlocked = micBlocked;
-        _inputDevices = devices;
-        _selectedDevice = devices.contains(current)
-            ? current
-            : (devices.isNotEmpty ? devices.first : null);
+        _inputDeviceInfos = deviceInfos;
+        _inputDevices = resolvedDevices;
+        _selectedDevice = selectedDeviceName;
+        _macOutputDevices = outputDevices;
         _macOutputDeviceName =
             currentOutputDeviceName.isEmpty ? null : currentOutputDeviceName;
         _numInputChannels = resolvedChannels;
@@ -38300,6 +38489,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _microphoneAccessBlocked =
             !(micStatus.isGranted || micStatus.isLimited);
         _inputDevices = const <String>[];
+        _inputDeviceInfos = const <AudioInputDeviceInfo>[];
+        _macOutputDevices = const <String>[];
         _selectedDevice = null;
         _numInputChannels = 0;
         _normalizeInputChannelSelection();
@@ -38457,6 +38648,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       identifier: 'daw.input_device',
       label: L10n.translate(context, 'Input Device'),
       child: DropdownButtonFormField<String>(
+        key: ValueKey<String>(
+          'input-device-${_selectedDevice ?? ''}-$_inputDeviceSelectorRevision',
+        ),
         initialValue: _selectedDevice,
         isExpanded: true,
         dropdownColor: kMixroomGlassDropdownMenuColor,
@@ -38500,6 +38694,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             .toList(),
         onChanged: (name) async {
           if (name == null) return;
+
+          if (Platform.isMacOS && _looksLikeBluetoothDeviceName(name)) {
+            _showBluetoothInputBlockedNotice();
+            await _ensureMacNonBluetoothRecordingInput(
+              reason: 'blockedBluetoothInputSelection',
+              notify: false,
+            );
+            if (!mounted) return;
+            _setStateAndRefreshProjectSettings(() {
+              _inputDeviceSelectorRevision++;
+            });
+            return;
+          }
 
           final ok = await JuceAudioEngine.selectInputDevice(name);
           if (!ok) return;
@@ -38824,13 +39031,44 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (Platform.isMacOS) {
       final routeLabel = _macOutputDeviceName?.trim();
-      final effectiveLabel = (routeLabel == null || routeLabel.isEmpty)
-          ? L10n.translate(
-              context,
-              'System default (managed by macOS audio settings)',
-            )
-          : routeLabel;
-      return InputDecorator(
+      final outputValue = routeLabel != null &&
+              routeLabel.isNotEmpty &&
+              _macOutputDevices.contains(routeLabel)
+          ? routeLabel
+          : null;
+      if (_macOutputDevices.isEmpty) {
+        final effectiveLabel = (routeLabel == null || routeLabel.isEmpty)
+            ? L10n.translate(
+                context,
+                'System default (managed by macOS audio settings)',
+              )
+            : routeLabel;
+        return InputDecorator(
+          decoration: _projectSettingsFieldDecoration(
+            labelText: L10n.translate(context, 'Output Device'),
+            suffixIcon: IconButton(
+              tooltip: L10n.translate(context, 'Refresh output device'),
+              icon: const Icon(Icons.refresh, color: Colors.white70),
+              onPressed: () {
+                unawaited(() async {
+                  await _loadInputDevicesFromJuce();
+                  await _ensurePlaybackRouteReady(reason: 'macOutputRefresh');
+                }());
+              },
+            ),
+          ),
+          child: Text(
+            effectiveLabel,
+            style: const TextStyle(color: Colors.white),
+          ),
+        );
+      }
+
+      return DropdownButtonFormField<String>(
+        initialValue: outputValue,
+        isExpanded: true,
+        dropdownColor: kMixroomGlassDropdownMenuColor,
+        style: const TextStyle(color: Colors.white),
         decoration: _projectSettingsFieldDecoration(
           labelText: L10n.translate(context, 'Output Device'),
           suffixIcon: IconButton(
@@ -38844,10 +39082,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             },
           ),
         ),
-        child: Text(
-          effectiveLabel,
-          style: const TextStyle(color: Colors.white),
+        hint: Text(
+          routeLabel == null || routeLabel.isEmpty
+              ? L10n.translate(
+                  context,
+                  'System default (managed by macOS audio settings)',
+                )
+              : routeLabel,
+          style: const TextStyle(color: Colors.white70),
         ),
+        items: _macOutputDevices.map((name) {
+          return DropdownMenuItem<String>(
+            value: name,
+            child: Text(
+              name,
+              style: const TextStyle(color: Colors.white),
+              overflow: TextOverflow.ellipsis,
+            ),
+          );
+        }).toList(growable: false),
+        onChanged: (name) {
+          if (name == null) return;
+          unawaited(_selectMacOutputDevice(name));
+        },
       );
     }
 
@@ -39278,7 +39535,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Widget _buildBluetoothRecordingPolicyCard() {
     final showBluetoothOutput = _audioRouteInfo.isBluetoothOutput;
     final showBluetoothMic = _audioRouteInfo.inputIsBluetoothHeadset;
-    final hasOptIns = _allowedBluetoothMicKeys.isNotEmpty;
+    final hardBlocksBluetoothMic = Platform.isMacOS;
+    final hasOptIns =
+        !hardBlocksBluetoothMic && _allowedBluetoothMicKeys.isNotEmpty;
 
     if (!showBluetoothOutput && !showBluetoothMic && !hasOptIns) {
       return const SizedBox.shrink();
@@ -39333,15 +39592,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           if (showBluetoothMic) ...[
             const SizedBox(height: 8),
             Text(
-              _isBluetoothMicOptedIn()
+              hardBlocksBluetoothMic
                   ? L10n.translate(
                       context,
-                      'Bluetooth headset mic can reduce audio quality and increase latency. This device is currently allowed for recording.',
+                      'Bluetooth microphones are disabled in this version. Mixroom is using the built-in/default mic instead.',
                     )
-                  : L10n.translate(
-                      context,
-                      'Bluetooth headset mic can reduce audio quality and increase latency. You will be asked to confirm before recording.',
-                    ),
+                  : _isBluetoothMicOptedIn()
+                      ? L10n.translate(
+                          context,
+                          'Bluetooth headset mic can reduce audio quality and increase latency. This device is currently allowed for recording.',
+                        )
+                      : L10n.translate(
+                          context,
+                          'Bluetooth headset mic can reduce audio quality and increase latency. You will be asked to confirm before recording.',
+                        ),
               style: const TextStyle(color: Colors.white70, height: 1.35),
             ),
           ],

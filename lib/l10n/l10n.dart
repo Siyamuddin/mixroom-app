@@ -1113,6 +1113,10 @@ class L10n {
               'Bluetooth headset mic can reduce audio quality and increase latency. Continue with this mic?',
           'Bluetooth headset mic can reduce audio quality and increase latency. Use your built-in/default mic instead, or continue with this mic?':
               'Bluetooth headset mic can reduce audio quality and increase latency. Use your built-in/default mic instead, or continue with this mic?',
+          'Bluetooth microphones are disabled in this version. Mixroom is using the built-in/default mic instead.':
+              'Bluetooth microphones are disabled in this version. Mixroom is using the built-in/default mic instead.',
+          'Selected output device is not available.':
+              'Selected output device is not available.',
           'Use default mic': 'Use default mic',
           'Input Channel': 'Input Channel',
           'System default (speaker / Bluetooth / audio interface)':
@@ -3004,6 +3008,10 @@ class L10n {
               '블루투스 헤드셋 마이크는 음질 저하와 지연 증가를 유발할 수 있습니다. 이 마이크로 계속할까요?',
           'Bluetooth headset mic can reduce audio quality and increase latency. Use your built-in/default mic instead, or continue with this mic?':
               '블루투스 헤드셋 마이크는 음질 저하와 지연 증가를 유발할 수 있습니다. 내장/기본 마이크를 사용할지, 이 마이크로 계속할지 선택하세요.',
+          'Bluetooth microphones are disabled in this version. Mixroom is using the built-in/default mic instead.':
+              '이 버전에서는 블루투스 마이크를 사용할 수 없습니다. Mixroom이 내장/기본 마이크를 대신 사용합니다.',
+          'Selected output device is not available.':
+              '선택한 출력 장치를 사용할 수 없습니다.',
           'Use default mic': '기본 마이크 사용',
           'Input Channel': '입력 채널',
           'System default (speaker / Bluetooth / audio interface)':
@@ -4258,6 +4266,9 @@ class L10n {
               '蓝牙耳机麦克风可能降低音质并增加延迟。继续使用此麦克风吗？',
           'Bluetooth headset mic can reduce audio quality and increase latency. Use your built-in/default mic instead, or continue with this mic?':
               '蓝牙耳机麦克风可能降低音质并增加延迟。改用内置/默认麦克风，还是继续使用此麦克风？',
+          'Bluetooth microphones are disabled in this version. Mixroom is using the built-in/default mic instead.':
+              '此版本已禁用蓝牙麦克风。Mixroom 正在改用内置/默认麦克风。',
+          'Selected output device is not available.': '所选输出设备不可用。',
           'Use default mic': '使用默认麦克风',
           'Input Device': '输入设备',
           'Refresh audio devices': '刷新音频设备',
@@ -5605,6 +5616,10 @@ class L10n {
               'Bluetoothヘッドセットマイクは音質低下や遅延増加の可能性があります。このマイクで続行しますか？',
           'Bluetooth headset mic can reduce audio quality and increase latency. Use your built-in/default mic instead, or continue with this mic?':
               'Bluetoothヘッドセットマイクは音質低下や遅延増加の可能性があります。内蔵/デフォルトマイクを使うか、このマイクで続行するか選択してください。',
+          'Bluetooth microphones are disabled in this version. Mixroom is using the built-in/default mic instead.':
+              'このバージョンではBluetoothマイクは無効です。Mixroomは内蔵/デフォルトマイクを使用します。',
+          'Selected output device is not available.':
+              '選択した出力デバイスは使用できません。',
           'Use default mic': 'デフォルトマイクを使う',
           'Input Device': '入力デバイス',
           'Refresh audio devices': 'オーディオデバイスを更新',
