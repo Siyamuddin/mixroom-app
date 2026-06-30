@@ -12,7 +12,7 @@ from .ai_runtime_defaults import (
 )
 from .llm_settings import DEFAULT_MODEL
 DEFAULT_TEMPERATURE = CHAT_DEFAULT_TEMPERATURE
-PROMPT_CACHE_VERSION = "mixroom-daw-v20260422a"
+PROMPT_CACHE_VERSION = "mixroom-daw-v20260701a"
 DEFAULT_PROMPT_CACHE_RETENTION = "in_memory"
 NormalizedLlmRequest = Dict[str, Any]
 
@@ -23,6 +23,7 @@ _KNOWN_CLIENT_CAPABILITIES = frozenset(
         "daw.midi_compose.instrument_insert",
         "daw.midi_compose.transpose_notes",
         "daw.midi_compose.audio_to_midi",
+        "daw.clip_edit.pitch_shift",
     }
 )
 
@@ -200,6 +201,14 @@ def _build_system_prompt(
     else:
         lines.append(
             "- This client does not support audio-to-MIDI transcription; do not emit midi_compose convert_audio_to_midi."
+        )
+    if "daw.clip_edit.pitch_shift" in client_capabilities:
+        lines.append(
+            '- This client supports direct audio clip/stem pitch and key changes. For audio clip or stem pitch/key changes, use daw_assistant_actions clip_edit operation pitch_shift with semitones/delta_semitones. Do not add a Pitch Shift effect or automation unless the user explicitly asks for an effect or automation curve. Treat "one key" as one semitone.'
+        )
+    else:
+        lines.append(
+            "- This client does not support direct audio clip/stem pitch and key changes; do not emit clip_edit pitch_shift. Do not add a Pitch Shift effect or automation unless the user explicitly asks for an effect or automation curve."
         )
     return "\n".join(lines).strip()
 
@@ -804,7 +813,7 @@ Action data rules:
     3) target effect (or add effect)
     4) target parameter control
 - clarify: {"question": "...", "options": ["...","..."]}
-- clip_edit: {"operation":"trim|auto_trim|cut|stretch|glue|move|tempo_follow|auto_bpm_align|align_first_sound|tempo_detect_set_project|duplicate|delete|dialog_cleanup|dialog_remove_range|dialog_tighten_pauses|dialog_lift_quiet","target": {...}, ...}
+- clip_edit: {"operation":"trim|auto_trim|cut|stretch|glue|move|tempo_follow|auto_bpm_align|align_first_sound|tempo_detect_set_project|duplicate|delete|dialog_cleanup|dialog_remove_range|dialog_tighten_pauses|dialog_lift_quiet","target": {...}, ...}; add operation "pitch_shift" only when CLIENT CAPABILITY OVERRIDES says this client supports direct audio clip/stem pitch changes
   - NEVER emit a bare `clip_edit` action with a missing or unknown `operation`
   - timeline/arrangement movement is always `clip_edit`, never `mix_model_request`
   - use cut only for clip region splitting (timeline clip split), not for MIDI note chopping
@@ -1334,7 +1343,7 @@ Action data
     - `row:<row_index>:fx_contains:<effect_name_or_token>:param:<param_name_or_id>`
   - for drill-down tutorials, include `row_index`, `effect_index/effect_name`, `param_id/param_name`, `effect_missing`, `show_add_effect`, `drilldown`
 - `clarify`: `{"question":"...","options":["...","..."]}`
-- `clip_edit`: `operation` is one of `trim|auto_trim|cut|stretch|glue|move|tempo_follow|auto_bpm_align|align_first_sound|tempo_detect_set_project|duplicate|delete|dialog_cleanup|dialog_remove_range|dialog_tighten_pauses|dialog_lift_quiet`
+- `clip_edit`: `operation` is one of `trim|auto_trim|cut|stretch|glue|move|tempo_follow|auto_bpm_align|align_first_sound|tempo_detect_set_project|duplicate|delete|dialog_cleanup|dialog_remove_range|dialog_tighten_pauses|dialog_lift_quiet`; add `pitch_shift` only when CLIENT CAPABILITY OVERRIDES says this client supports direct audio clip/stem pitch changes
   - `cut` is clip-region splitting only
   - `glue` merges/consolidates multiple existing clips into one clip
   - include `trim_side` when relevant
@@ -1521,6 +1530,10 @@ Resolve targets in this order:
 4. explicit selection references like "this one", "here", or "selected"
 5. clarify only if multiple plausible targets remain
 
+When the user names an instrument or source, such as synth, piano, bass, drums,
+kick, snare, or vocal, that identity beats the currently selected clip if the
+selection appears to be a different source.
+
 Relative row words are vertical by default. "Bottom track" and "clip on the
 bottom" usually mean the lowest occupied row, not the latest clip in time.
 
@@ -1696,6 +1709,10 @@ make unsupported audio.
   spacing fields like repeat_count, step_beats, or
   step_measures. For longer sections, you may use length_measures,
   duration_seconds, or until_measure instead of giant repeated item lists.
+  sample_insert creates audio clips, so do not target an instrument lane for
+  sample_insert. If the current/selected row is an instrument lane and the user
+  asks for hats, kicks, snares, drums, or other packaged samples, target a
+  nearby audio row or create/use a new audio row instead of refusing.
   For "1 minute" or similar arrangement-extension requests, prefer one
   continuous span with bar-aligned repeated material and small variations
   rather than separate disconnected blocks. Do not substitute low-end
@@ -1857,6 +1874,17 @@ make unsupported audio.
   and offer a generic original alternative.
 - Use stem_separate only for supported audio clip targets. Resolve row
   position, row name, filename, or obvious content cues before clarifying.
+- For compound requests like "remove vocals and lower the pitch/key of the
+  background/instrumental", emit both actions in one daw_assistant_actions call:
+  first stem_separate vocal_instrumental on the source clip, then clip_edit
+  pitch_shift on the instrumental/background stem. Target the second action with
+  label_contains="Instrumental" when helpful. Do not tell the user to ask again
+  for the second step.
+- Audio clip/stem pitch and key edits are client-capability gated. Follow
+  CLIENT CAPABILITY OVERRIDES for whether `clip_edit` operation `pitch_shift`
+  is allowed. Do not add a Pitch Shift effect or automation for plain audio
+  pitch/key requests unless the user explicitly asks for an effect or
+  automation curve.
 - Use role_override only to set or clear a role.
 - Use audio_enhance for phone-mic cleanup, noisy voice-recording cleanup,
   and similar "clean up this recording" requests.
@@ -1951,7 +1979,7 @@ TOOLS = [
         "type": "function",
         "name": "daw_assistant_actions",
         "strict": False,
-        "description": "Use for tutorials, project edits, library sample insertion or replacement, clip arrangement/editing, plugin CRUD, automation edits such as sidechain-like ducking, auto-pan, stereo movement, or filter sweeps, MIDI composition/editing, stem separation, and role override. For drum or beat-building requests using packaged samples, prefer action over explanation: choose semantically matching library files, arrange them with musical spacing, and keep core roles like kick/snare/hats on separate rows when helpful. If the user wants a placed sample swapped out, prefer replacing the targeted clips while preserving timing. Never use for pure sonic mix changes.",
+        "description": "Use for tutorials, project edits, library sample insertion or replacement, clip arrangement/editing, plugin CRUD, automation edits such as sidechain-like ducking, auto-pan, stereo movement, or filter sweeps, MIDI composition/editing, stem separation, and role override. For drum or beat-building requests using packaged samples, prefer action over explanation: choose semantically matching library files, arrange them with musical spacing, and keep core roles like kick/snare/hats on separate rows when helpful. sample_insert creates audio clips; if selection is an instrument lane, target/create a nearby audio row instead of refusing. If the user wants a placed sample swapped out, prefer replacing the targeted clips while preserving timing. Never use for pure sonic mix changes.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -3094,6 +3122,7 @@ TOOLS = [
 
 def _build_tools(client_capabilities: set[str]) -> list[dict[str, Any]]:
     tools = copy.deepcopy(TOOLS)
+    supports_pitch_shift = "daw.clip_edit.pitch_shift" in client_capabilities
     allowed_action_types = [
         "tutorial",
         "clarify",
@@ -3162,6 +3191,40 @@ def _build_tools(client_capabilities: set[str]) -> list[dict[str, Any]]:
                     allowed_values.add(normalized_const)
 
             if allowed_values & set(allowed_action_types):
+                if "clip_edit" in allowed_values:
+                    data_schema = properties.get("data")
+                    data_properties = (
+                        data_schema.get("properties")
+                        if isinstance(data_schema, dict)
+                        else None
+                    )
+                    if isinstance(data_properties, dict):
+                        operation_schema = data_properties.get("operation")
+                        operation_enum = (
+                            operation_schema.get("enum")
+                            if isinstance(operation_schema, dict)
+                            else None
+                        )
+                        if isinstance(operation_enum, list):
+                            operation_enum[:] = [
+                                value
+                                for value in operation_enum
+                                if value != "pitch_shift"
+                            ]
+                            if supports_pitch_shift:
+                                operation_enum.append("pitch_shift")
+                        if supports_pitch_shift:
+                            for field in (
+                                "semitones",
+                                "delta_semitones",
+                                "pitch_semitones",
+                                "new_pitch_semitones",
+                            ):
+                                data_properties[field] = {"type": "number"}
+                            data_properties["mode"] = {
+                                "type": "string",
+                                "enum": ["set", "delta"],
+                            }
                 filtered_variants.append(variant)
 
         if filtered_variants:

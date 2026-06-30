@@ -62,11 +62,14 @@ _BASE_DAW_ACTION_TYPES = frozenset(
         "tutorial",
         "clarify",
         "clip_edit",
+        "row_group_edit",
+        "row_color_edit",
         "effect_edit",
         "automation_edit",
         "midi_compose",
         "stem_separate",
         "role_override",
+        "audio_enhance",
     }
 )
 _ALLOWED_MIX_INTENT_KINDS = frozenset(
@@ -974,6 +977,7 @@ _ALLOWED_CLIP_EDIT_OPERATIONS = frozenset(
         "auto_trim",
         "cut",
         "stretch",
+        "pitch_shift",
         "glue",
         "move",
         "tempo_follow",
@@ -987,6 +991,10 @@ _ALLOWED_CLIP_EDIT_OPERATIONS = frozenset(
         "dialog_lift_quiet",
     }
 )
+_ALLOWED_ROW_GROUP_EDIT_OPERATIONS = frozenset(
+    {"create", "remove_row", "toggle_collapsed"}
+)
+_ALLOWED_ROW_COLOR_EDIT_OPERATIONS = frozenset({"set", "clear"})
 _ALLOWED_EFFECT_EDIT_OPERATIONS = frozenset(
     {"add", "remove", "bypass", "unbypass", "toggle_bypass"}
 )
@@ -1205,6 +1213,154 @@ def _normalize_role_override_operation(raw: Any) -> str:
     return token
 
 
+def _normalize_row_group_edit_operation(raw: Any) -> str:
+    token = re.sub(r"[^a-z0-9]+", "_", str(raw or "").strip().lower()).strip("_")
+    aliases = {
+        "group": "create",
+        "group_rows": "create",
+        "create_group": "create",
+        "create_row_group": "create",
+        "make_group": "create",
+        "make_row_group": "create",
+        "ungroup_row": "remove_row",
+        "remove_from_group": "remove_row",
+        "remove_row_from_group": "remove_row",
+        "toggle": "toggle_collapsed",
+        "fold": "toggle_collapsed",
+        "unfold": "toggle_collapsed",
+        "collapse": "toggle_collapsed",
+        "expand": "toggle_collapsed",
+        "toggle_group": "toggle_collapsed",
+        "toggle_row_group": "toggle_collapsed",
+    }
+    return aliases.get(token, token)
+
+
+def _is_plain_audio_pitch_request(user_text: str) -> bool:
+    text = str(user_text or "").lower()
+    if not re.search(r"\b(pitch|key|semitone|semitones|half[- ]step|transpose)\b", text):
+        return False
+    return not re.search(
+        r"\b(automation|automate|curve|effect|plugin|insert|add\s+pitch\s+shift)\b",
+        text,
+    )
+
+
+def _pitch_delta_from_user_text(user_text: str) -> float | None:
+    text = str(user_text or "").lower()
+    if re.search(r"\b(?:one|1|a)\s+(?:key|semitone|half[- ]step)\b", text):
+        return -1.0 if re.search(r"\b(lower|down|decrease|drop)\b", text) else 1.0
+
+    signed = re.search(r"([+-]\s*\d+(?:\.\d+)?)\s*(?:semitones?|keys?|half[- ]steps?)\b", text)
+    if signed:
+        try:
+            return float(signed.group(1).replace(" ", ""))
+        except ValueError:
+            return None
+
+    amount = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:semitones?|keys?|half[- ]steps?)\b", text)
+    if amount:
+        try:
+            value = float(amount.group(1))
+        except ValueError:
+            return None
+        return -value if re.search(r"\b(lower|down|decrease|drop)\b", text) else value
+    return None
+
+
+def _looks_like_pitch_shift_effect(data: Dict[str, Any], target: Dict[str, Any]) -> bool:
+    fields = (
+        data.get("effect_name"),
+        data.get("plugin_name"),
+        data.get("effect_name_contains"),
+        data.get("plugin_name_contains"),
+        target.get("effect_name"),
+        target.get("plugin_name"),
+        target.get("effect_name_contains"),
+        target.get("plugin_name_contains"),
+    )
+    haystack = " ".join(str(value or "").lower() for value in fields)
+    return "pitch" in haystack and ("shift" in haystack or "shifter" in haystack)
+
+
+def _looks_like_pitch_automation(data: Dict[str, Any], target: Dict[str, Any]) -> bool:
+    fields = (
+        data.get("param_name"),
+        data.get("parameter"),
+        data.get("param_name_contains"),
+        target.get("param_name"),
+        target.get("parameter"),
+        target.get("param_name_contains"),
+        data.get("effect_name"),
+        data.get("plugin_name"),
+        target.get("effect_name"),
+        target.get("plugin_name"),
+    )
+    haystack = " ".join(str(value or "").lower() for value in fields)
+    return "pitch" in haystack
+
+
+def _retarget_plain_pitch_action_if_needed(
+    *,
+    action_type: str,
+    normalized_data: Dict[str, Any],
+    normalized_target: Dict[str, Any],
+    user_text: str,
+    client_capabilities: set[str],
+) -> tuple[str, Dict[str, Any], Dict[str, Any]]:
+    if "daw.clip_edit.pitch_shift" not in client_capabilities:
+        return action_type, normalized_data, normalized_target
+    if not _is_plain_audio_pitch_request(user_text):
+        return action_type, normalized_data, normalized_target
+    if action_type == "effect_edit":
+        if not _looks_like_pitch_shift_effect(normalized_data, normalized_target):
+            return action_type, normalized_data, normalized_target
+    elif action_type == "automation_edit":
+        if not _looks_like_pitch_automation(normalized_data, normalized_target):
+            return action_type, normalized_data, normalized_target
+    else:
+        return action_type, normalized_data, normalized_target
+
+    semitones = (
+        _parse_action_float(normalized_data.get("semitones"))
+        or _parse_action_float(normalized_target.get("semitones"))
+        or _parse_action_float(normalized_data.get("delta_semitones"))
+        or _parse_action_float(normalized_target.get("delta_semitones"))
+        or _parse_action_float(normalized_data.get("pitch_semitones"))
+        or _parse_action_float(normalized_target.get("pitch_semitones"))
+        or _pitch_delta_from_user_text(user_text)
+    )
+    if semitones is None:
+        return action_type, normalized_data, normalized_target
+
+    target = dict(normalized_target)
+    if not any(
+        key in target
+        for key in (
+            "clip_index",
+            "clip_indices",
+            "row_index",
+            "label_contains",
+            "file_name_contains",
+            "scope",
+        )
+    ) and re.search(
+        r"\b(background|backing|instrumental|music|beat)\b",
+        str(user_text or "").lower(),
+    ):
+        target["label_contains"] = "Instrumental"
+
+    return (
+        "clip_edit",
+        {
+            "operation": "pitch_shift",
+            "delta_semitones": semitones,
+            "target": target,
+        },
+        target,
+    )
+
+
 def _normalize_daw_action_payloads(
     actions: list[dict[str, Any]],
     *,
@@ -1233,6 +1389,16 @@ def _normalize_daw_action_payloads(
             normalized_target["row_index"] = parsed_row_index
 
         action_type = str(normalized_action.get("type") or "").strip().lower()
+        action_type, normalized_data, normalized_target = (
+            _retarget_plain_pitch_action_if_needed(
+                action_type=action_type,
+                normalized_data=normalized_data,
+                normalized_target=normalized_target,
+                user_text=user_text,
+                client_capabilities=client_capabilities,
+            )
+        )
+        normalized_action["type"] = action_type
         if action_type not in allowed_action_types:
             continue
         if action_type == "clarify":
@@ -1269,7 +1435,26 @@ def _normalize_daw_action_payloads(
             operation = _normalize_clip_edit_operation(normalized_data.get("operation"))
             if operation not in _ALLOWED_CLIP_EDIT_OPERATIONS:
                 continue
+            if (
+                operation == "pitch_shift"
+                and "daw.clip_edit.pitch_shift" not in client_capabilities
+            ):
+                continue
             normalized_data["operation"] = operation
+            if operation == "pitch_shift":
+                semitones = _parse_action_float(
+                    normalized_data.get("semitones")
+                    or normalized_target.get("semitones")
+                    or normalized_data.get("delta_semitones")
+                    or normalized_target.get("delta_semitones")
+                    or normalized_data.get("pitch_semitones")
+                    or normalized_target.get("pitch_semitones")
+                    or normalized_data.get("new_pitch_semitones")
+                    or normalized_target.get("new_pitch_semitones")
+                )
+                if semitones is None:
+                    continue
+                normalized_data["delta_semitones"] = semitones
             if normalized_target is not None and _user_requested_global_clip_scope(user_text):
                 normalized_target["scope"] = "all"
                 normalized_target.pop("clip_index", None)
@@ -1277,6 +1462,23 @@ def _normalize_daw_action_payloads(
                 normalized_target.pop("row_index", None)
                 normalized_target.pop("prefer_selected", None)
                 normalized_data["target"] = normalized_target
+        elif action_type == "row_group_edit":
+            operation = _normalize_row_group_edit_operation(
+                normalized_data.get("operation")
+            )
+            if operation not in _ALLOWED_ROW_GROUP_EDIT_OPERATIONS:
+                continue
+            normalized_data["operation"] = operation
+        elif action_type == "row_color_edit":
+            operation = re.sub(
+                r"[^a-z0-9]+", "_",
+                str(normalized_data.get("operation") or "set").strip().lower(),
+            ).strip("_")
+            if operation in {"remove", "unset", "delete"}:
+                operation = "clear"
+            if operation not in _ALLOWED_ROW_COLOR_EDIT_OPERATIONS:
+                continue
+            normalized_data["operation"] = operation
         elif action_type == "effect_edit":
             operation = _normalize_effect_edit_operation(normalized_data.get("operation"))
             if operation not in _ALLOWED_EFFECT_EDIT_OPERATIONS:
@@ -1375,6 +1577,16 @@ def _normalize_daw_action_payloads(
         elif action_type == "role_override":
             operation = _normalize_role_override_operation(normalized_data.get("operation") or "set")
             if operation not in _ALLOWED_ROLE_OVERRIDE_OPERATIONS:
+                continue
+            normalized_data["operation"] = operation
+        elif action_type == "audio_enhance":
+            operation = re.sub(
+                r"[^a-z0-9]+", "_",
+                str(normalized_data.get("operation") or "").strip().lower(),
+            ).strip("_")
+            if operation in {"phone_cleanup", "phone_mic", "cleanup", "denoise"}:
+                operation = "phone_mic_cleanup"
+            if operation != "phone_mic_cleanup":
                 continue
             normalized_data["operation"] = operation
 
@@ -1703,6 +1915,313 @@ def _informational_success_payload(
     }
 
 
+def _daw_actions_success_payload(
+    *,
+    payload: Dict[str, Any],
+    assistant_message: str,
+    actions: list[dict[str, Any]],
+) -> Dict[str, Any]:
+    return {
+        "id": payload.get("id"),
+        "model": payload.get("model"),
+        "output": [
+            {
+                "type": "function_call",
+                "name": "daw_assistant_actions",
+                "arguments": {
+                    "assistant_message": assistant_message,
+                    "actions": actions,
+                },
+            }
+        ],
+        "usage": payload.get("usage") if isinstance(payload.get("usage"), dict) else {},
+    }
+
+
+def _is_korean_text(text: str) -> bool:
+    return bool(re.search(r"[\uac00-\ud7af]", str(text or "")))
+
+
+def _is_capability_question(user_text: str) -> bool:
+    text = str(user_text or "").strip().lower()
+    if not text:
+        return False
+    if re.search(
+        r"\b(what can you do|what do you do|help me use|how can you help|"
+        r"available commands|capabilities|what are you able to do)\b",
+        text,
+    ):
+        return True
+    return bool(re.search(r"(무슨|뭐|어떤).{0,8}(작업|기능|할 수|해줄)", text))
+
+
+def _capability_message(user_text: str) -> str:
+    if _is_korean_text(user_text):
+        return (
+            "오디오 편집, 보컬 분리, 피치/키 변경, MIDI 클립 만들기, 샘플 배치, "
+            "트랙 정리, 이펙트/자동화 편집을 도와줄 수 있어요. 원하는 작업을 바로 말해 주세요."
+        )
+    return (
+        "I can edit clips, split vocals, change pitch/key, create MIDI clips, "
+        "place samples, organize tracks, and adjust effects or automation. Tell me the edit you want."
+    )
+
+
+def _is_basic_midi_creation_request(user_text: str) -> bool:
+    text = str(user_text or "").strip().lower()
+    if not text:
+        return False
+    if re.search(r"(미디|midi).{0,12}(찍|만들|생성|클립)", text):
+        return True
+    if re.search(r"(음정|멜로디|코드).{0,12}(찍|만들|생성)", text):
+        return True
+    return bool(
+        re.search(
+            r"\b(create|make|write|add|compose)\b.{0,24}\b(midi|piano|melody|chord)\b",
+            text,
+        )
+    )
+
+
+def _simple_midi_clip_action() -> dict[str, Any]:
+    return {
+        "type": "midi_compose",
+        "data": {
+            "operation": "create_clip",
+            "instrument_name": "Piano",
+            "label": "AI MIDI",
+            "length_measures": 4,
+            "notes": [
+                {"pitch": 60, "start_beat": 0, "length_beats": 1, "velocity": 0.78},
+                {"pitch": 64, "start_beat": 1, "length_beats": 1, "velocity": 0.74},
+                {"pitch": 67, "start_beat": 2, "length_beats": 1, "velocity": 0.76},
+                {"pitch": 72, "start_beat": 3, "length_beats": 1, "velocity": 0.74},
+                {"pitch": 69, "start_beat": 4, "length_beats": 1, "velocity": 0.76},
+                {"pitch": 67, "start_beat": 5, "length_beats": 1, "velocity": 0.74},
+                {"pitch": 64, "start_beat": 6, "length_beats": 1, "velocity": 0.74},
+                {"pitch": 60, "start_beat": 7, "length_beats": 1, "velocity": 0.78},
+                {"pitch": 60, "start_beat": 8, "length_beats": 2, "velocity": 0.70},
+                {"pitch": 65, "start_beat": 10, "length_beats": 2, "velocity": 0.72},
+                {"pitch": 67, "start_beat": 12, "length_beats": 2, "velocity": 0.74},
+                {"pitch": 72, "start_beat": 14, "length_beats": 2, "velocity": 0.76},
+            ],
+            "target": {"prefer_selected": False},
+        },
+    }
+
+
+def _sample_insert_roles_from_user_text(user_text: str) -> list[str]:
+    text = str(user_text or "").strip().lower()
+    if not text:
+        return []
+
+    roles: list[str] = []
+    role_patterns = (
+        ("kick", r"\b(kick|kicks|bd|bass\s*drum)\b"),
+        ("snare", r"\b(snare|snares)\b"),
+        ("clap", r"\b(clap|claps)\b"),
+        ("hat", r"\b(hi[-\s]?hat|hi[-\s]?hats|hihat|hihats|hat|hats)\b"),
+        ("perc", r"\b(perc|percussion|shaker|shakers|rim|rimshot)\b"),
+        ("cymbal", r"\b(cymbal|cymbals|crash|ride|open\s*hat|open\s*hats)\b"),
+        ("tom", r"\b(tom|toms)\b"),
+    )
+    for role, pattern in role_patterns:
+        if re.search(pattern, text) and role not in roles:
+            roles.append(role)
+
+    if not roles and re.search(r"\b(drum|drums|beat|groove|loop)\b", text):
+        roles = ["kick", "snare", "hat"]
+
+    if not re.search(
+        r"\b(add|insert|place|put|make|create|build|lay|drop|give|need|want)\b",
+        text,
+    ):
+        return []
+    return roles
+
+
+def _sample_insert_action_for_roles(roles: list[str]) -> dict[str, Any]:
+    row_by_role = {
+        "kick": 0,
+        "snare": 1,
+        "clap": 1,
+        "hat": 2,
+        "perc": 3,
+        "cymbal": 4,
+        "tom": 5,
+    }
+    step_by_role = {
+        "kick": 2.0,
+        "snare": 4.0,
+        "clap": 4.0,
+        "hat": 0.5,
+        "perc": 1.0,
+        "cymbal": 4.0,
+        "tom": 2.0,
+    }
+    offset_by_role = {
+        "kick": 0.0,
+        "snare": 2.0,
+        "clap": 2.0,
+        "hat": 0.0,
+        "perc": 0.0,
+        "cymbal": 0.0,
+        "tom": 1.0,
+    }
+    items: list[dict[str, Any]] = []
+    for role in roles:
+        item: dict[str, Any] = {
+            "library_path": f"role:{role}",
+            "row_index": row_by_role.get(role, 0),
+            "start_beat": offset_by_role.get(role, 0.0),
+            "length_measures": 4,
+            "step_beats": step_by_role.get(role, 1.0),
+            "target": {
+                "prefer_selected": False,
+                "row_index": row_by_role.get(role, 0),
+            },
+        }
+        items.append(item)
+    return {
+        "type": "sample_insert",
+        "data": {
+            "operation": "insert_audio_clips",
+            "items": items,
+            "target": {"prefer_selected": False},
+        },
+    }
+
+
+def _is_glue_or_combine_request(user_text: str) -> bool:
+    text = str(user_text or "").strip().lower()
+    if not text:
+        return False
+    return bool(
+        re.search(
+            r"\b(combine|merge|glue|consolidate|bounce|render)\b.{0,40}\b("
+            r"clip|clips|sample|samples|audio|drum|drums|track|tracks)\b",
+            text,
+        )
+        or re.search(r"(합치|병합|붙여|묶어).{0,12}(클립|샘플|드럼|오디오)", text)
+    )
+
+
+def _request_selection_has_multiple_clips(request_body: Dict[str, Any]) -> bool:
+    messages = request_body.get("messages")
+    if not isinstance(messages, list):
+        return False
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if not isinstance(content, str) or "SELECTION_SNAPSHOT" not in content:
+            continue
+        match = re.search(r"selected_clip_indices\s*=\s*([0-9,\s]+)", content)
+        if not match:
+            continue
+        indices = [
+            token.strip()
+            for token in match.group(1).split(",")
+            if token.strip().isdigit()
+        ]
+        if len(indices) >= 2:
+            return True
+    return False
+
+
+def _fallback_structured_payload_for_user_text(
+    *,
+    request_body: Dict[str, Any],
+    payload: Dict[str, Any],
+    user_text: str,
+    client_capabilities: set[str],
+) -> Dict[str, Any] | None:
+    if _is_capability_question(user_text):
+        return _informational_success_payload(
+            payload=payload,
+            message=_capability_message(user_text),
+        )
+
+    if _is_basic_midi_creation_request(user_text):
+        if "daw.midi_compose.instrument_insert" not in client_capabilities:
+            message = (
+                "이 버전에서는 새 MIDI 악기 클립 생성이 지원되지 않아요. 기존 MIDI 클립이나 악기를 선택해 주세요."
+                if _is_korean_text(user_text)
+                else "This app version needs an existing MIDI clip or instrument selected for MIDI edits."
+            )
+            return _informational_success_payload(payload=payload, message=message)
+        return _daw_actions_success_payload(
+            payload=payload,
+            assistant_message=(
+                "간단한 피아노 MIDI 클립을 만들게요."
+                if _is_korean_text(user_text)
+                else "I’ll create a simple piano MIDI clip."
+            ),
+            actions=[_simple_midi_clip_action()],
+        )
+
+    sample_roles = _sample_insert_roles_from_user_text(user_text)
+    if sample_roles:
+        if "daw.sample_insert.library" not in client_capabilities:
+            return None
+        return _daw_actions_success_payload(
+            payload=payload,
+            assistant_message=(
+                "드럼 샘플을 오디오 트랙에 배치할게요."
+                if _is_korean_text(user_text)
+                else "I’ll place those drum samples on audio rows."
+            ),
+            actions=[_sample_insert_action_for_roles(sample_roles)],
+        )
+
+    if _is_glue_or_combine_request(user_text):
+        if _request_selection_has_multiple_clips(request_body):
+            return _daw_actions_success_payload(
+                payload=payload,
+                assistant_message=(
+                    "선택한 클립들을 하나로 합칠게요."
+                    if _is_korean_text(user_text)
+                    else "I’ll combine the selected clips into one clip."
+                ),
+                actions=[
+                    {
+                        "type": "clip_edit",
+                        "data": {
+                            "operation": "glue",
+                            "target": {"scope": "selected"},
+                        },
+                    }
+                ],
+            )
+        return _daw_actions_success_payload(
+            payload=payload,
+            assistant_message=(
+                "합칠 클립을 먼저 확인할게요."
+                if _is_korean_text(user_text)
+                else "I need to know which clips to combine."
+            ),
+            actions=[
+                {
+                    "type": "clarify",
+                    "data": {
+                        "question": (
+                            "어떤 클립을 합칠까요?"
+                            if _is_korean_text(user_text)
+                            else "Which clips should I combine?"
+                        ),
+                        "options": (
+                            ["선택한 클립", "드럼 클립"]
+                            if _is_korean_text(user_text)
+                            else ["Selected clips", "Drum clips"]
+                        ),
+                    },
+                }
+            ],
+        )
+
+    return None
+
+
 def _issue_is_refundable(issue: str) -> bool:
     normalized = str(issue or "").strip().lower()
     if not normalized:
@@ -1802,6 +2321,14 @@ def _normalize_success_payload(
             normalized_payload["output"] = normalized_output
             return normalized_payload, issues, False
         if issues:
+            structured_fallback = _fallback_structured_payload_for_user_text(
+                request_body=request_body,
+                payload=payload,
+                user_text=user_text,
+                client_capabilities=client_capabilities,
+            )
+            if structured_fallback is not None:
+                return structured_fallback, issues, False
             return _fallback_success_payload(
                 payload=payload,
                 message=_INVALID_STRUCTURED_OUTPUT_MESSAGE,
@@ -1825,6 +2352,14 @@ def _normalize_success_payload(
         issues.append("Success payload had no function call or usable assistant text.")
 
     if issues:
+        structured_fallback = _fallback_structured_payload_for_user_text(
+            request_body=request_body,
+            payload=payload,
+            user_text=user_text,
+            client_capabilities=client_capabilities,
+        )
+        if structured_fallback is not None:
+            return structured_fallback, issues, False
         return _fallback_success_payload(
             payload=payload,
             message=_INVALID_STRUCTURED_OUTPUT_MESSAGE,

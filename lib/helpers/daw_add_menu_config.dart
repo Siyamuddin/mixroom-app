@@ -31,12 +31,12 @@ List<DawAddMenuActionConfig> buildDawAddMenuActions({
 }) {
   final actions = <DawAddMenuActionConfig>[
     DawAddMenuActionConfig(
-      id: usesTabletAddMenu ? 'audio' : 'audio_row',
-      title: usesTabletAddMenu ? 'Add Audio Clip' : '+ Audio Row',
+      id: 'audio',
+      title: usesTabletAddMenu ? 'Add Audio Clip' : 'Add Audio File',
     ),
     DawAddMenuActionConfig(
       id: 'instrument',
-      title: usesTabletAddMenu ? 'Add Instrument Lane' : '+ MIDI Row',
+      title: 'Add Instrument Lane',
     ),
   ];
 
@@ -59,7 +59,7 @@ List<DawAddMenuActionConfig> buildDawAddMenuActions({
   actions.add(
     const DawAddMenuActionConfig(
       id: 'sample_browser',
-      title: 'Open File Browser',
+      title: 'File Browser',
       subtitle: 'Audition folders and drag and drop',
     ),
   );

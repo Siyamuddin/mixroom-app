@@ -1579,6 +1579,21 @@ void JuceEngine::commitClipGraphMutationLocked(bool armOutputSafety) noexcept
         armOutputSafetyForCurrentRouteLocked();
 }
 
+void JuceEngine::commitGraphMutationLocked(bool armOutputSafety) noexcept
+{
+    if (graphMutationBatchDepth > 0)
+    {
+        graphMutationBatchNeedsRebuild = true;
+        graphMutationBatchNeedsOutputSafety =
+            graphMutationBatchNeedsOutputSafety || armOutputSafety;
+        return;
+    }
+
+    graph.rebuild();
+    if (armOutputSafety)
+        armOutputSafetyForCurrentRouteLocked();
+}
+
 void JuceEngine::refreshMidiInputCallbacks()
 {
     const auto devices = juce::MidiInput::getAvailableDevices();
@@ -1671,8 +1686,12 @@ void JuceEngine::initialiseEngine()
 #if JUCE_IOS
         pluginFormatManager.addFormat(new juce::AudioUnitPluginFormat());
 #endif
+        // On macOS, opening default input and output together can make JUCE create
+        // a CoreAudio aggregate/combiner device. Some Bluetooth output routes crash
+        // inside HAL during that initial open. Start playback-only and open inputs
+        // lazily when recording is armed.
         deviceManager.initialise(
-            2, // numInputChannels
+            0, // numInputChannels
             2, // numOutputChannels
             nullptr,
             true);
@@ -2397,6 +2416,53 @@ void JuceEngine::endProjectClipLoad()
                              .toRawUTF8());
 }
 
+void JuceEngine::beginGraphMutationBatch()
+{
+    int depth = 0;
+    {
+        const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+        ++graphMutationBatchDepth;
+        depth = graphMutationBatchDepth;
+    }
+    juceLogToFlutter(("GraphMutationBatch begin depth=" + juce::String(depth)).toRawUTF8());
+}
+
+void JuceEngine::endGraphMutationBatch()
+{
+    bool rebuiltGraph = false;
+    bool armedOutputSafety = false;
+    bool completed = false;
+    {
+        GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
+        if (graphMutationBatchDepth <= 0)
+            return;
+
+        --graphMutationBatchDepth;
+        if (graphMutationBatchDepth > 0)
+            return;
+
+        if (graphMutationBatchNeedsRebuild)
+        {
+            graph.rebuild();
+            rebuiltGraph = true;
+            graphMutationBatchNeedsRebuild = false;
+        }
+        if (graphMutationBatchNeedsOutputSafety)
+        {
+            armOutputSafetyForCurrentRouteLocked();
+            armedOutputSafety = true;
+            graphMutationBatchNeedsOutputSafety = false;
+        }
+        completed = true;
+    }
+    if (completed)
+        juceLogToFlutter(("GraphMutationBatch end done rebuilt=" +
+                          juce::String(rebuiltGraph ? "true" : "false") +
+                          " outputSafety=" +
+                          juce::String(armedOutputSafety ? "true" : "false"))
+                             .toRawUTF8());
+}
+
 bool JuceEngine::updateMidiClipEvents(int clipId,
                                       const juce::String &instrumentId,
                                       const juce::String &instrumentName,
@@ -2504,6 +2570,8 @@ bool JuceEngine::playPreviewMidiNote(int clipId,
         if (auto *timelineProc =
                 dynamic_cast<TimelineMidiClipProcessor *>(c.playerNode->getProcessor()))
         {
+            if (noteOn)
+                timelineProc->preloadLiveMidiPitch(midiPitch, midiVelocity);
             timelineProc->enqueueLiveMidiEvent(noteOn, 1, midiPitch, midiVelocity);
             return true;
         }
@@ -2727,6 +2795,8 @@ void JuceEngine::dispatchQueuedLiveMidiInputEventsForAudioThread()
         if (auto *timelineProc =
                 dynamic_cast<TimelineMidiClipProcessor *>(c.playerNode->getProcessor()))
         {
+            if (event.noteOn)
+                timelineProc->preloadLiveMidiPitch(event.pitch, event.velocity);
             timelineProc->enqueueLiveMidiEvent(
                 event.noteOn,
                 event.channel,
@@ -3010,7 +3080,8 @@ bool JuceEngine::moveClipToRow(int clipId, int newRowId)
     removeClipFromRowIndex(c.rowId, clipId);
     c.rowId = resolvedRowId;
     addClipToRowIndex(c.rowId, clipId);
-    rewireTrackChain(clipId);
+    rewireTrackChain(clipId, kBatchGraphUpdate);
+    commitGraphMutationLocked();
     return true;
 }
 
@@ -6450,7 +6521,7 @@ bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath)
         juceLogToFlutter(("insertTrackEffect rewire done row=" +
                           juce::String(trackRow) + " path=" + pluginPath)
                              .toRawUTF8());
-        graph.rebuild();
+        commitGraphMutationLocked();
         juceLogToFlutter(("insertTrackEffect graph rebuild done row=" +
                           juce::String(trackRow) + " path=" + pluginPath)
                              .toRawUTF8());
@@ -6540,7 +6611,7 @@ bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath)
         rewireTrackGroupFxChain(groupState->id, kBatchGraphUpdate, true);
     else
         rewireTrackBusFxChain(trackRow, kBatchGraphUpdate, true);
-    graph.rebuild();
+    commitGraphMutationLocked();
 
     return true;
 }
@@ -6605,7 +6676,7 @@ void JuceEngine::removeTrackEffect(int trackRow, int effectIndex)
     closePluginEditorWindowForNode(nodeID);
     if (graph.getNodeForId(nodeID) != nullptr)
         graph.removeNode(nodeID, kBatchGraphUpdate);
-    graph.rebuild();
+    commitGraphMutationLocked();
 }
 
 void JuceEngine::reorderTrackEffects(int trackRow, int fromIndex, int toIndex)
@@ -6676,7 +6747,7 @@ void JuceEngine::reorderTrackEffects(int trackRow, int fromIndex, int toIndex)
         rewireTrackGroupFxChain(groupState->id, kBatchGraphUpdate, true);
     else
         rewireTrackBusFxChain(trackRow, kBatchGraphUpdate, true);
-    graph.rebuild();
+    commitGraphMutationLocked();
 }
 
 juce::StringArray JuceEngine::getTrackEffectsForRow(int trackRow)
@@ -7856,7 +7927,7 @@ bool JuceEngine::insertMasterEffect(const juce::String &pluginPath)
         masterEffectIds.add(pluginPath);
 
         rewireMasterFxChain(kBatchGraphUpdate, true);
-        graph.rebuild();
+        commitGraphMutationLocked();
         return true;
     }
 
@@ -7939,7 +8010,7 @@ bool JuceEngine::insertMasterEffect(const juce::String &pluginPath)
     masterEffectChain->add(pluginNode->nodeID);
     masterEffectIds.add(requestedId);
     rewireMasterFxChain(kBatchGraphUpdate, true);
-    graph.rebuild();
+    commitGraphMutationLocked();
 
     return true;
 }
@@ -7989,7 +8060,7 @@ void JuceEngine::removeMasterEffect(int effectIndex)
     closePluginEditorWindowForNode(nodeID);
     if (graph.getNodeForId(nodeID) != nullptr)
         graph.removeNode(nodeID, kBatchGraphUpdate);
-    graph.rebuild();
+    commitGraphMutationLocked();
 }
 
 void JuceEngine::reorderMasterEffects(int fromIndex, int toIndex)
@@ -8044,7 +8115,7 @@ void JuceEngine::reorderMasterEffects(int fromIndex, int toIndex)
     }
 
     rewireMasterFxChain(kBatchGraphUpdate, true);
-    graph.rebuild();
+    commitGraphMutationLocked();
 }
 
 juce::StringArray JuceEngine::getMasterEffects()

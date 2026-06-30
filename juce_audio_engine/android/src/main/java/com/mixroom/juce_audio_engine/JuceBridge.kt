@@ -27,6 +27,8 @@ object JuceBridge {
 
     // New clip API
     @JvmStatic external fun beginProjectClipLoadTransactionJNI()
+    @JvmStatic external fun beginGraphMutationBatchJNI()
+    @JvmStatic external fun endGraphMutationBatchJNI()
     @JvmStatic external fun loadClipJNI(
         clipIndex: Int,
         rowId: Int,

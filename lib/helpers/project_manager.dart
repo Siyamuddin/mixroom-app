@@ -201,6 +201,11 @@ class ProjectManager {
       "tempoBpm": 120,
       "tracks": [],
       "rowEffects": [],
+      "master": {
+        "gain": 1.0,
+        "pan": 0.5,
+        "effects": {"effects": []},
+      },
       "masterEffects": {"effects": []},
       "projectId": _nextProjectId(),
     };

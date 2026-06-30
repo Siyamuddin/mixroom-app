@@ -965,7 +965,61 @@ void main() {
     expect(activeRect.width, lessThan(keyRect.width));
   });
 
-  testWidgets('white key playback highlight clips adjacent black-row tail',
+  testWidgets('black key row tail previews the black key pitch',
+      (tester) async {
+    final previewedPitches = <int>[];
+    final releasedPitches = <int>[];
+    final clip = await _buildMidiTrack(<MidiNote>[
+      MidiNote(
+        id: 'black_note',
+        pitch: 82,
+        startBeat: 0,
+        lengthBeats: 1,
+        velocity: 0.7,
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+        onKeyboardNoteDown: (
+          AudioTrack clip,
+          int pitch,
+          double velocity, {
+          double? startBeat,
+        }) async {
+          previewedPitches.add(pitch);
+        },
+        onKeyboardNoteUp: (AudioTrack clip, int pitch) async {
+          releasedPitches.add(pitch);
+        },
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 80));
+
+    final blackKeyRect =
+        tester.getRect(find.byKey(const ValueKey<String>('piano_key_82')));
+    final gesture = await tester.startGesture(
+      Offset(
+        blackKeyRect.left + 68.0,
+        blackKeyRect.center.dy,
+      ),
+    );
+    await tester.pump();
+    await gesture.up();
+    await tester.pump();
+
+    expect(previewedPitches, <int>[82]);
+    expect(releasedPitches, <int>[82]);
+  });
+
+  testWidgets('white key playback highlight does not spill into black key row',
       (tester) async {
     final clip = await _buildMidiTrack(<MidiNote>[
       MidiNote(
@@ -991,12 +1045,6 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 80));
 
-    final blackRowRect =
-        tester.getRect(find.byKey(const ValueKey<String>('piano_key_82')));
-    final tailRect = tester.getRect(
-      find.byKey(const ValueKey<String>('piano_key_tail_active_top_82')),
-    );
-
     expect(
       find.byKey(const ValueKey<String>('piano_key_active_overlay_83')),
       findsOneWidget,
@@ -1009,10 +1057,10 @@ void main() {
       find.byKey(const ValueKey<String>('piano_key_tail_active_bottom_82')),
       findsNothing,
     );
-    expect(tailRect.left, closeTo(blackRowRect.left + 46.0, 0.01));
-    expect(tailRect.top, blackRowRect.top);
-    expect(tailRect.height, closeTo(blackRowRect.height / 2.0, 0.01));
-    expect(tailRect.width, lessThan(blackRowRect.width));
+    expect(
+      find.byKey(const ValueKey<String>('piano_key_tail_active_top_82')),
+      findsNothing,
+    );
   });
 
   testWidgets('sequencer tab opens and commits step edits', (tester) async {

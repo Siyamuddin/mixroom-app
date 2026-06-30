@@ -215,6 +215,7 @@ Widget _buildHarness({
   Future<void> Function(int row)? onClearRowEffects,
   Future<void> Function(int clipIndex)? onCreateSamplerFromClip,
   Future<void> Function(int clipIndex)? onDeleteClip,
+  Future<void> Function(int row)? onDeleteRow,
   Future<void> Function(int clipIndex, double startMs)? onStartClipLoopPreview,
   Future<void> Function(int clipIndex, double startMs)? onSeekClipLoopPreview,
   Future<void> Function()? onStopClipLoopPreview,
@@ -373,7 +374,7 @@ Widget _buildHarness({
           onInsertRowAbove: (_) async {},
           onInsertRowBelow: (_) async {},
           onChangeInstrumentLane: onChangeInstrumentLane,
-          onDeleteRow: (_) async {},
+          onDeleteRow: onDeleteRow ?? (_) async {},
           onMoveRow: (_, __) async {},
           onRenameRow: (_, __) async {},
           onRenameRowGroup: onRenameRowGroup,
@@ -2508,6 +2509,51 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(deleteRequests, <int>[0]);
+  });
+
+  testWidgets('desktop delete key removes selected clips', (tester) async {
+    final clips = <AudioTrack>[await _buildClip()];
+    final deleteRequests = <int>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: clips,
+        selectedClipIndex: 0,
+        selectedClipIndices: const <int>[0],
+        onMoveClipCommit: (_, __, ___) async {},
+        onDeleteClip: (clipIndex) async {
+          deleteRequests.add(clipIndex);
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+    await tester.pumpAndSettle();
+
+    expect(deleteRequests, <int>[0]);
+  });
+
+  testWidgets(
+      'desktop backspace key removes the selected row when no clips are selected',
+      (tester) async {
+    final rowDeleteRequests = <int>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        onMoveClipCommit: (_, __, ___) async {},
+        onDeleteRow: (row) async {
+          rowDeleteRequests.add(row);
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+    await tester.pumpAndSettle();
+
+    expect(rowDeleteRequests, <int>[0]);
   });
 
   testWidgets('desktop command-c copies the selected clip', (tester) async {

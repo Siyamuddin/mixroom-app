@@ -248,6 +248,10 @@ make unsupported audio.
   spacing fields like repeat_count, step_beats, or
   step_measures. For longer sections, you may use length_measures,
   duration_seconds, or until_measure instead of giant repeated item lists.
+  sample_insert creates audio clips, so do not target an instrument lane for
+  sample_insert. If the current/selected row is an instrument lane and the user
+  asks for hats, kicks, snares, drums, or other packaged samples, target a
+  nearby audio row or create/use a new audio row instead of refusing.
   For "1 minute" or similar arrangement-extension requests, prefer one
   continuous span with bar-aligned repeated material and small variations
   rather than separate disconnected blocks. Do not substitute low-end
@@ -409,6 +413,11 @@ make unsupported audio.
   and offer a generic original alternative.
 - Use stem_separate only for supported audio clip targets. Resolve row
   position, row name, filename, or obvious content cues before clarifying.
+- Audio clip/stem pitch and key edits are client-capability gated. Follow
+  CLIENT CAPABILITY OVERRIDES for whether `clip_edit` operation `pitch_shift`
+  is allowed. Do not add a Pitch Shift effect or automation for plain audio
+  pitch/key requests unless the user explicitly asks for an effect or
+  automation curve.
 - Use role_override only to set or clear a role.
 - Use audio_enhance for phone-mic cleanup, noisy voice-recording cleanup,
   and similar "clean up this recording" requests.

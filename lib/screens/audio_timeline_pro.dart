@@ -4512,13 +4512,15 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _clearExternalSampleDropPreview() {
-    _externalSampleDragInsideTimeline = false;
-    if (_externalSampleDropRow == null &&
+    final wasInsideTimeline = _externalSampleDragInsideTimeline;
+    if (!wasInsideTimeline &&
+        _externalSampleDropRow == null &&
         _externalSampleDropStartMs == null &&
         _externalSampleDropEndMs == null) {
       return;
     }
     setState(() {
+      _externalSampleDragInsideTimeline = false;
       _externalSampleDropRow = null;
       _externalSampleDropStartMs = null;
       _externalSampleDropEndMs = null;
@@ -5827,6 +5829,22 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       return _stepDuplicateSelectedClipsFromShortcut(isRepeat: isRepeat)
           ? KeyEventResult.handled
           : KeyEventResult.ignored;
+    }
+    if (!isRepeat &&
+        !primaryShortcutPressed &&
+        !keyboard.isAltPressed &&
+        !keyboard.isShiftPressed &&
+        (event.logicalKey == LogicalKeyboardKey.delete ||
+            event.logicalKey == LogicalKeyboardKey.backspace)) {
+      if (_activeSelectedClipIndices().isNotEmpty) {
+        unawaited(_deleteSelectedClips());
+        return KeyEventResult.handled;
+      }
+      if (_selectedRowIndex >= 0 && _selectedRowIndex < _rowCount) {
+        unawaited(widget.onDeleteRow(_selectedRowIndex));
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
     }
     if (!isRepeat &&
         !primaryShortcutPressed &&
@@ -9833,85 +9851,88 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                   onDoubleTapDown: _onTimelineDoubleTapDown,
                   onTapDown: _handleTapDown,
                   onTapUp: _onTimelineTap,
-                  child: Align(
-                    alignment: Alignment.topLeft,
-                    child: ClipRect(
-                      child: RepaintBoundary(
-                        child: CustomPaint(
-                          painter: _TimelinePainter(
-                            rows: widget.rows,
-                            clips: widget.clips,
-                            clipOverlapMode: widget.clipOverlapMode,
-                            getStartMs: widget.getStartMs,
-                            getDurationMs: widget.getDurationMs,
-                            getTimelineDurationMs: widget.getTimelineDurationMs,
-                            getTrimStartMs: widget.getTrimStartMs,
-                            getTrimEndMs: widget.getTrimEndMs,
-                            getFullDurationMs: widget.getFullDurationMs,
-                            getPeaks: widget.getPeaks,
-                            pixelsPerMs: _pixelsPerMs,
-                            scrollOffsetMs: _scrollOffsetMs,
-                            viewportWidth: viewportWidth,
-                            rulerHeight: _timeRulerHeight,
-                            playheadPx: playheadPx,
-                            transportMs: loopPreviewTransportMs,
-                            clipLoopPreviewClipIndex: loopPreviewClipIndex,
-                            clipLoopPreviewStartMs: loopPreviewStartMs,
-                            clipLoopPreviewFallbackMs: loopPreviewFallbackMs,
-                            selectedClipIndex: _selectedClipIndex,
-                            selectedClipIndices:
-                                _selectedClipIndices.toList(growable: false),
-                            clipVisualStackOrder:
-                                Map<String, int>.from(_clipVisualStackOrder),
-                            stretchToolActive:
-                                _activeTool == _TimelineTool.stretch,
-                            trimClipIndex: _trimClipIndex,
-                            draggedClipIndex: _interactionMode == 'drag'
-                                ? _draggedClipIndex
-                                : null,
-                            draggedClipStartMs: _interactionMode == 'drag'
-                                ? _dragStartClipMs
-                                : null,
-                            draggedClipRowIndex: _interactionMode == 'drag'
-                                ? _dragStartRow
-                                : null,
-                            rowExpanded: _rowExpanded,
-                            rowHeight: _rowHeight,
-                            kExpandedRowHeight: _expandedRowHeight,
-                            verticalScrollOffset: _verticalScrollOffset,
-                            expandedTab: _expandedTab,
-                            effectsPanelHeights: _effectsPanelHeights,
-                            expandedHeights: expandedHeights,
-                            automationLaneHeights: automationLaneHeights,
-                            masterAutomationLaneHeight:
-                                _masterAutomationLanePaintHeight,
-                            isRecording: widget.isRecording,
-                            recordingRowIndex: widget.recordingRowIndex,
-                            recordingStartMs: widget.recordingStartMs,
-                            recordingPeaks: widget.recordingPeaks,
-                            bpm: widget.bpm,
-                            beatsPerBar: widget.beatsPerBar,
-                            beatUnit: widget.beatUnit,
-                            quantizeDivisions: _quantizeDivisionsPerBar,
-                            highlightedSegmentRow: _highlightedSegmentRow,
-                            highlightedSegmentStartMs:
-                                _highlightedSegmentStartMs,
-                            highlightedSegmentEndMs: _highlightedSegmentEndMs,
-                            sampleDropPreviewRow: _externalSampleDropRow,
-                            sampleDropPreviewStartMs:
-                                _externalSampleDropStartMs,
-                            sampleDropPreviewEndMs: _externalSampleDropEndMs,
-                            sampleDropPreviewAllowed:
-                                _externalSampleDropAllowed,
-                            cutPreviewClipIndex: _cutPreviewClipIndex,
-                            cutPreviewMs: _cutPreviewMs,
-                            automationClipVisuals:
-                                timelineAutomationClipVisuals,
-                            rowsHiddenByCollapsedGroups:
-                                rowsHiddenByCollapsedGroups,
-                            leftVisibleExtensionPx: 0.0,
+                  child: SizedBox.expand(
+                    child: Align(
+                      alignment: Alignment.topLeft,
+                      child: ClipRect(
+                        child: RepaintBoundary(
+                          child: CustomPaint(
+                            painter: _TimelinePainter(
+                              rows: widget.rows,
+                              clips: widget.clips,
+                              clipOverlapMode: widget.clipOverlapMode,
+                              getStartMs: widget.getStartMs,
+                              getDurationMs: widget.getDurationMs,
+                              getTimelineDurationMs:
+                                  widget.getTimelineDurationMs,
+                              getTrimStartMs: widget.getTrimStartMs,
+                              getTrimEndMs: widget.getTrimEndMs,
+                              getFullDurationMs: widget.getFullDurationMs,
+                              getPeaks: widget.getPeaks,
+                              pixelsPerMs: _pixelsPerMs,
+                              scrollOffsetMs: _scrollOffsetMs,
+                              viewportWidth: viewportWidth,
+                              rulerHeight: _timeRulerHeight,
+                              playheadPx: playheadPx,
+                              transportMs: loopPreviewTransportMs,
+                              clipLoopPreviewClipIndex: loopPreviewClipIndex,
+                              clipLoopPreviewStartMs: loopPreviewStartMs,
+                              clipLoopPreviewFallbackMs: loopPreviewFallbackMs,
+                              selectedClipIndex: _selectedClipIndex,
+                              selectedClipIndices:
+                                  _selectedClipIndices.toList(growable: false),
+                              clipVisualStackOrder:
+                                  Map<String, int>.from(_clipVisualStackOrder),
+                              stretchToolActive:
+                                  _activeTool == _TimelineTool.stretch,
+                              trimClipIndex: _trimClipIndex,
+                              draggedClipIndex: _interactionMode == 'drag'
+                                  ? _draggedClipIndex
+                                  : null,
+                              draggedClipStartMs: _interactionMode == 'drag'
+                                  ? _dragStartClipMs
+                                  : null,
+                              draggedClipRowIndex: _interactionMode == 'drag'
+                                  ? _dragStartRow
+                                  : null,
+                              rowExpanded: _rowExpanded,
+                              rowHeight: _rowHeight,
+                              kExpandedRowHeight: _expandedRowHeight,
+                              verticalScrollOffset: _verticalScrollOffset,
+                              expandedTab: _expandedTab,
+                              effectsPanelHeights: _effectsPanelHeights,
+                              expandedHeights: expandedHeights,
+                              automationLaneHeights: automationLaneHeights,
+                              masterAutomationLaneHeight:
+                                  _masterAutomationLanePaintHeight,
+                              isRecording: widget.isRecording,
+                              recordingRowIndex: widget.recordingRowIndex,
+                              recordingStartMs: widget.recordingStartMs,
+                              recordingPeaks: widget.recordingPeaks,
+                              bpm: widget.bpm,
+                              beatsPerBar: widget.beatsPerBar,
+                              beatUnit: widget.beatUnit,
+                              quantizeDivisions: _quantizeDivisionsPerBar,
+                              highlightedSegmentRow: _highlightedSegmentRow,
+                              highlightedSegmentStartMs:
+                                  _highlightedSegmentStartMs,
+                              highlightedSegmentEndMs: _highlightedSegmentEndMs,
+                              sampleDropPreviewRow: _externalSampleDropRow,
+                              sampleDropPreviewStartMs:
+                                  _externalSampleDropStartMs,
+                              sampleDropPreviewEndMs: _externalSampleDropEndMs,
+                              sampleDropPreviewAllowed:
+                                  _externalSampleDropAllowed,
+                              cutPreviewClipIndex: _cutPreviewClipIndex,
+                              cutPreviewMs: _cutPreviewMs,
+                              automationClipVisuals:
+                                  timelineAutomationClipVisuals,
+                              rowsHiddenByCollapsedGroups:
+                                  rowsHiddenByCollapsedGroups,
+                              leftVisibleExtensionPx: 0.0,
+                            ),
+                            size: Size(viewportWidth, _timelinePaintHeight),
                           ),
-                          size: Size(viewportWidth, _timelinePaintHeight),
                         ),
                       ),
                     ),
@@ -9954,7 +9975,79 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                     placement.startMs,
                   );
                 },
-                builder: (_, __, ___) => timelineContent,
+                builder: (_, candidateData, ___) {
+                  final showDropOverlay = candidateData.isNotEmpty ||
+                      _externalSampleDragInsideTimeline ||
+                      _externalSampleDropRow != null;
+                  if (!showDropOverlay) return timelineContent;
+                  return Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      timelineContent,
+                      IgnorePointer(
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 90),
+                          margin: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: const Color.fromRGBO(43, 136, 222, 0.08),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: _externalSampleDropAllowed == false
+                                  ? const Color.fromRGBO(255, 150, 120, 0.70)
+                                  : const Color.fromRGBO(124, 185, 235, 0.62),
+                              width: 1.4,
+                            ),
+                          ),
+                          child: Center(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color.fromRGBO(15, 24, 34, 0.78),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.12),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    _externalSampleDropAllowed == false
+                                        ? Icons.block_rounded
+                                        : Icons.add_rounded,
+                                    color: Colors.white,
+                                    size: 16,
+                                  ),
+                                  const SizedBox(width: 7),
+                                  Text(
+                                    _externalSampleDropAllowed == false
+                                        ? L10n.translate(
+                                            context,
+                                            'Drop on an audio row',
+                                          )
+                                        : L10n.translate(
+                                            context,
+                                            'Drop audio here',
+                                          ),
+                                    style: const TextStyle(
+                                      fontFamily: 'Pretendard',
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
               );
             },
           ),

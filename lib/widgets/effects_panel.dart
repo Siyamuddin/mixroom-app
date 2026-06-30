@@ -5590,62 +5590,69 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     }
     final before = RowEffectsSnapshot(widget.rowIndex, beforeSnapshots);
 
-    // Remove all current effects on this row
-    while (_effects.isNotEmpty) {
-      await widget.removeEffectFromRow(widget.rowIndex, 0, _effects[0], true);
-      setState(() {
-        _effects.removeAt(0);
-        _bypassed.removeAt(0);
-      });
-    }
+    await JuceAudioEngine.beginGraphMutationBatch();
+    try {
+      // Remove all current effects on this row
+      while (_effects.isNotEmpty) {
+        await widget.removeEffectFromRow(widget.rowIndex, 0, _effects[0], true);
+        setState(() {
+          _effects.removeAt(0);
+          _bypassed.removeAt(0);
+        });
+      }
 
-    // Apply preset chain using callbacks
-    switch (presetName) {
-      case 'Concert Hall':
-        await widget.insertEffectOnRow(widget.rowIndex, 'Reverb');
-        await _setTrackEffectParam(widget.rowIndex, 0, 'Room Size', 53);
-        await _setTrackEffectParam(widget.rowIndex, 0, 'Mix', 20);
-        await widget.insertEffectOnRow(widget.rowIndex, 'EQ 3-Band');
-        await _setTrackEffectParam(widget.rowIndex, 1, 'Low Gain', -1.0);
-        await _setTrackEffectParam(widget.rowIndex, 1, 'Mid Gain', 0.6);
-        await _setTrackEffectParam(widget.rowIndex, 1, 'High Gain', 1.2);
-        break;
+      // Apply preset chain using callbacks
+      switch (presetName) {
+        case 'Concert Hall':
+          await widget.insertEffectOnRow(widget.rowIndex, 'Reverb');
+          await _setTrackEffectParam(widget.rowIndex, 0, 'Room Size', 53);
+          await _setTrackEffectParam(widget.rowIndex, 0, 'Mix', 20);
+          await widget.insertEffectOnRow(widget.rowIndex, 'EQ 3-Band');
+          await _setTrackEffectParam(widget.rowIndex, 1, 'Low Gain', -1.0);
+          await _setTrackEffectParam(widget.rowIndex, 1, 'Mid Gain', 0.6);
+          await _setTrackEffectParam(widget.rowIndex, 1, 'High Gain', 1.2);
+          break;
 
-      case 'Echoes':
-        await widget.insertEffectOnRow(widget.rowIndex, 'Reverb');
-        await _setTrackEffectParam(widget.rowIndex, 0, 'Room Size', 40);
-        await _setTrackEffectParam(widget.rowIndex, 0, 'Mix', 20);
-        await widget.insertEffectOnRow(widget.rowIndex, 'Delay');
-        await _setTrackEffectParam(widget.rowIndex, 1, 'Delay Time', 400);
-        await _setTrackEffectParam(widget.rowIndex, 1, 'Feedback', 30);
-        await _setTrackEffectParam(widget.rowIndex, 1, 'Mix', 30);
-        break;
+        case 'Echoes':
+          await widget.insertEffectOnRow(widget.rowIndex, 'Reverb');
+          await _setTrackEffectParam(widget.rowIndex, 0, 'Room Size', 40);
+          await _setTrackEffectParam(widget.rowIndex, 0, 'Mix', 20);
+          await widget.insertEffectOnRow(widget.rowIndex, 'Delay');
+          await _setTrackEffectParam(widget.rowIndex, 1, 'Delay Time', 400);
+          await _setTrackEffectParam(widget.rowIndex, 1, 'Feedback', 30);
+          await _setTrackEffectParam(widget.rowIndex, 1, 'Mix', 30);
+          break;
 
-      case 'LoFi Effect':
-        await widget.insertEffectOnRow(widget.rowIndex, 'EQ Parametric');
-        await _setTrackEffectParam(widget.rowIndex, 0, 'LPF Frequency', 2600.0);
-        await widget.insertEffectOnRow(widget.rowIndex, 'Distortion');
-        await _setTrackEffectParam(widget.rowIndex, 1, 'Drive', 50);
-        await _setTrackEffectParam(widget.rowIndex, 1, 'Mix', 85);
-        await _setTrackEffectParam(widget.rowIndex, 1, 'Anger', 1);
-        await _setTrackEffectParam(widget.rowIndex, 1, 'LPF Frequency', 2800.0);
-        await _setTrackEffectParam(
-            widget.rowIndex, 1, 'Distortion Type', "Mode 3");
-        break;
+        case 'LoFi Effect':
+          await widget.insertEffectOnRow(widget.rowIndex, 'EQ Parametric');
+          await _setTrackEffectParam(
+              widget.rowIndex, 0, 'LPF Frequency', 2600.0);
+          await widget.insertEffectOnRow(widget.rowIndex, 'Distortion');
+          await _setTrackEffectParam(widget.rowIndex, 1, 'Drive', 50);
+          await _setTrackEffectParam(widget.rowIndex, 1, 'Mix', 85);
+          await _setTrackEffectParam(widget.rowIndex, 1, 'Anger', 1);
+          await _setTrackEffectParam(
+              widget.rowIndex, 1, 'LPF Frequency', 2800.0);
+          await _setTrackEffectParam(
+              widget.rowIndex, 1, 'Distortion Type', "Mode 3");
+          break;
 
-      case 'Heavy Crunch':
-        await widget.insertEffectOnRow(widget.rowIndex, 'Distortion');
-        await _setTrackEffectParam(widget.rowIndex, 0, 'Drive', 100);
-        await _setTrackEffectParam(widget.rowIndex, 0, 'Mix', 100);
-        await _setTrackEffectParam(widget.rowIndex, 0, 'Anger', 1);
-        await _setTrackEffectParam(widget.rowIndex, 0, 'Volume', 12);
-        await _setTrackEffectParam(widget.rowIndex, 0, 'Pre Shape', 3.0);
-        await _setTrackEffectParam(
-            widget.rowIndex, 0, 'Distortion Type', "Mode 3");
-        break;
+        case 'Heavy Crunch':
+          await widget.insertEffectOnRow(widget.rowIndex, 'Distortion');
+          await _setTrackEffectParam(widget.rowIndex, 0, 'Drive', 100);
+          await _setTrackEffectParam(widget.rowIndex, 0, 'Mix', 100);
+          await _setTrackEffectParam(widget.rowIndex, 0, 'Anger', 1);
+          await _setTrackEffectParam(widget.rowIndex, 0, 'Volume', 12);
+          await _setTrackEffectParam(widget.rowIndex, 0, 'Pre Shape', 3.0);
+          await _setTrackEffectParam(
+              widget.rowIndex, 0, 'Distortion Type', "Mode 3");
+          break;
 
-      default:
-        debugPrint('⚠️ No matching preset logic for: $presetName');
+        default:
+          debugPrint('⚠️ No matching preset logic for: $presetName');
+      }
+    } finally {
+      await JuceAudioEngine.endGraphMutationBatch();
     }
 
     await _loadEffects();
@@ -9064,56 +9071,61 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
     //   _bypassed.removeAt(0);
     // }
 
-    for (int i = 0; i < _effects.length; i++) {
-      await widget.removeMasterEffect(0, _effects[0], true);
-    }
-    await _loadEffects();
+    await JuceAudioEngine.beginGraphMutationBatch();
+    try {
+      for (int i = 0; i < _effects.length; i++) {
+        await widget.removeMasterEffect(0, _effects[0], true);
+      }
+      await _loadEffects();
 
-    // Apply preset chain using callbacks
-    switch (presetName) {
-      case 'Concert Hall':
-        await widget.insertMasterEffect('Reverb');
-        await widget.setMasterEffectParam(0, 'Room Size', 53);
-        await widget.setMasterEffectParam(0, 'Mix', 20);
-        await widget.insertMasterEffect('EQ 3-Band');
-        await widget.setMasterEffectParam(1, 'Low Gain', -1.0);
-        await widget.setMasterEffectParam(1, 'Mid Gain', 0.6);
-        await widget.setMasterEffectParam(1, 'High Gain', 1.2);
-        break;
+      // Apply preset chain using callbacks
+      switch (presetName) {
+        case 'Concert Hall':
+          await widget.insertMasterEffect('Reverb');
+          await widget.setMasterEffectParam(0, 'Room Size', 53);
+          await widget.setMasterEffectParam(0, 'Mix', 20);
+          await widget.insertMasterEffect('EQ 3-Band');
+          await widget.setMasterEffectParam(1, 'Low Gain', -1.0);
+          await widget.setMasterEffectParam(1, 'Mid Gain', 0.6);
+          await widget.setMasterEffectParam(1, 'High Gain', 1.2);
+          break;
 
-      case 'Echoes':
-        await widget.insertMasterEffect('Reverb');
-        await widget.setMasterEffectParam(0, 'Room Size', 40);
-        await widget.setMasterEffectParam(0, 'Mix', 20);
-        await widget.insertMasterEffect('Delay');
-        await widget.setMasterEffectParam(1, 'Delay Time', 400);
-        await widget.setMasterEffectParam(1, 'Feedback', 30);
-        await widget.setMasterEffectParam(1, 'Mix', 30);
-        break;
+        case 'Echoes':
+          await widget.insertMasterEffect('Reverb');
+          await widget.setMasterEffectParam(0, 'Room Size', 40);
+          await widget.setMasterEffectParam(0, 'Mix', 20);
+          await widget.insertMasterEffect('Delay');
+          await widget.setMasterEffectParam(1, 'Delay Time', 400);
+          await widget.setMasterEffectParam(1, 'Feedback', 30);
+          await widget.setMasterEffectParam(1, 'Mix', 30);
+          break;
 
-      case 'LoFi Effect':
-        await widget.insertMasterEffect('EQ Parametric');
-        await widget.setMasterEffectParam(0, 'LPF Frequency', 2600.0);
-        await widget.insertMasterEffect('Distortion');
-        await widget.setMasterEffectParam(1, 'Drive', 50);
-        await widget.setMasterEffectParam(1, 'Mix', 85);
-        await widget.setMasterEffectParam(1, 'Anger', 1);
-        await widget.setMasterEffectParam(1, 'LPF Frequency', 2800.0);
-        await widget.setMasterEffectParam(1, 'Distortion Type', "Mode 3");
-        break;
+        case 'LoFi Effect':
+          await widget.insertMasterEffect('EQ Parametric');
+          await widget.setMasterEffectParam(0, 'LPF Frequency', 2600.0);
+          await widget.insertMasterEffect('Distortion');
+          await widget.setMasterEffectParam(1, 'Drive', 50);
+          await widget.setMasterEffectParam(1, 'Mix', 85);
+          await widget.setMasterEffectParam(1, 'Anger', 1);
+          await widget.setMasterEffectParam(1, 'LPF Frequency', 2800.0);
+          await widget.setMasterEffectParam(1, 'Distortion Type', "Mode 3");
+          break;
 
-      case 'Heavy Crunch':
-        await widget.insertMasterEffect('Distortion');
-        await widget.setMasterEffectParam(0, 'Drive', 100);
-        await widget.setMasterEffectParam(0, 'Mix', 100);
-        await widget.setMasterEffectParam(0, 'Anger', 1);
-        await widget.setMasterEffectParam(0, 'Volume', 12);
-        await widget.setMasterEffectParam(0, 'Pre Shape', 3.0);
-        await widget.setMasterEffectParam(0, 'Distortion Type', "Mode 3");
-        break;
+        case 'Heavy Crunch':
+          await widget.insertMasterEffect('Distortion');
+          await widget.setMasterEffectParam(0, 'Drive', 100);
+          await widget.setMasterEffectParam(0, 'Mix', 100);
+          await widget.setMasterEffectParam(0, 'Anger', 1);
+          await widget.setMasterEffectParam(0, 'Volume', 12);
+          await widget.setMasterEffectParam(0, 'Pre Shape', 3.0);
+          await widget.setMasterEffectParam(0, 'Distortion Type', "Mode 3");
+          break;
 
-      default:
-        debugPrint('⚠️ No matching preset logic for: $presetName');
+        default:
+          debugPrint('⚠️ No matching preset logic for: $presetName');
+      }
+    } finally {
+      await JuceAudioEngine.endGraphMutationBatch();
     }
 
     await _loadEffects();

@@ -869,6 +869,14 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           JuceBridge.endProjectClipLoadTransactionJNI()
           result.success(null)
         }
+        "beginGraphMutationBatch" -> {
+          JuceBridge.beginGraphMutationBatchJNI()
+          result.success(null)
+        }
+        "endGraphMutationBatch" -> {
+          JuceBridge.endGraphMutationBatchJNI()
+          result.success(null)
+        }
         "updateMidiClipEvents" -> {
           val instrumentId = args.stringValue("instrumentId", "mixroom.basic_synth")
           ensureInstrumentAssetsReadyIfNeeded(instrumentId)

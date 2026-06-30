@@ -758,6 +758,32 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         [JuceBridge endProjectClipLoadObjC];
         result(nil);
 #endif
+    } else if ([call.method isEqualToString:@"beginGraphMutationBatch"]) {
+#if TARGET_OS_OSX
+        FlutterResult beginResult = [result copy];
+        dispatch_async(MixroomMidiClipLoadQueue(), ^{
+            [JuceBridge beginGraphMutationBatchObjC];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                beginResult(nil);
+            });
+        });
+#else
+        [JuceBridge beginGraphMutationBatchObjC];
+        result(nil);
+#endif
+    } else if ([call.method isEqualToString:@"endGraphMutationBatch"]) {
+#if TARGET_OS_OSX
+        FlutterResult endResult = [result copy];
+        dispatch_async(MixroomMidiClipLoadQueue(), ^{
+            [JuceBridge endGraphMutationBatchObjC];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                endResult(nil);
+            });
+        });
+#else
+        [JuceBridge endGraphMutationBatchObjC];
+        result(nil);
+#endif
     } else if ([call.method isEqualToString:@"loadClip"]) {
         NSInteger clip = [args[@"clip"] integerValue];
         NSInteger rowId  = [args[@"rowId"] integerValue];

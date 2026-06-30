@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mixroom/ffmpeg/ffmpeg.dart';
+import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -1324,69 +1325,102 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
       },
     );
 
+    final dragData = SampleDragData(
+      filePath: filePath,
+      label: p.basenameWithoutExtension(fileName),
+      duration: _durationByFile[filePath],
+    );
+    final dragFeedback = Material(
+      color: Colors.transparent,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 220),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFF7C7872).withOpacity(0.96),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white24),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.music_note, color: Colors.white, size: 16),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                fileName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    void handleDragStarted() {
+      _dragOutsideNotified = false;
+      widget.onDragActivityChanged?.call(true);
+    }
+
+    void handleDragUpdate(DragUpdateDetails details) {
+      if (_dragOutsideNotified || widget.onDragOutsidePanel == null) return;
+      final box = context.findRenderObject() as RenderBox?;
+      if (box == null || !box.hasSize) return;
+      final local = box.globalToLocal(details.globalPosition);
+      final bounds = Rect.fromLTWH(0, 0, box.size.width, box.size.height);
+      if (!bounds.contains(local)) {
+        _dragOutsideNotified = true;
+        widget.onDragOutsidePanel?.call();
+      }
+    }
+
+    void handleDragEnd() {
+      _dragOutsideNotified = false;
+      widget.onDragActivityChanged?.call(false);
+    }
+
+    final draggable = PlatformCapabilities.current.isDesktop
+        ? Draggable<SampleDragData>(
+            data: dragData,
+            dragAnchorStrategy: (draggable, context, position) =>
+                const Offset(42, 48),
+            onDragStarted: handleDragStarted,
+            onDragUpdate: handleDragUpdate,
+            onDragCompleted: handleDragEnd,
+            onDragEnd: (_) => handleDragEnd(),
+            onDraggableCanceled: (_, __) => handleDragEnd(),
+            feedback: dragFeedback,
+            childWhenDragging: Opacity(
+              opacity: 0.38,
+              child: tile,
+            ),
+            child: MouseRegion(
+              cursor: SystemMouseCursors.grab,
+              child: tile,
+            ),
+          )
+        : LongPressDraggable<SampleDragData>(
+            data: dragData,
+            dragAnchorStrategy: (draggable, context, position) =>
+                const Offset(42, 48),
+            delay: const Duration(milliseconds: 135),
+            onDragStarted: handleDragStarted,
+            onDragUpdate: handleDragUpdate,
+            onDragCompleted: handleDragEnd,
+            onDragEnd: (_) => handleDragEnd(),
+            onDraggableCanceled: (_, __) => handleDragEnd(),
+            feedback: dragFeedback,
+            childWhenDragging: Opacity(
+              opacity: 0.38,
+              child: tile,
+            ),
+            child: tile,
+          );
+
     return KeyedSubtree(
       key: _keyForTreePath(line.path),
-      child: LongPressDraggable<SampleDragData>(
-        data: SampleDragData(
-          filePath: filePath,
-          label: p.basenameWithoutExtension(fileName),
-          duration: _durationByFile[filePath],
-        ),
-        dragAnchorStrategy: (draggable, context, position) =>
-            const Offset(42, 48),
-        delay: const Duration(milliseconds: 135),
-        onDragStarted: () {
-          _dragOutsideNotified = false;
-          widget.onDragActivityChanged?.call(true);
-        },
-        onDragUpdate: (details) {
-          if (_dragOutsideNotified || widget.onDragOutsidePanel == null) return;
-          final box = context.findRenderObject() as RenderBox?;
-          if (box == null || !box.hasSize) return;
-          final local = box.globalToLocal(details.globalPosition);
-          final bounds = Rect.fromLTWH(0, 0, box.size.width, box.size.height);
-          if (!bounds.contains(local)) {
-            _dragOutsideNotified = true;
-            widget.onDragOutsidePanel?.call();
-          }
-        },
-        onDragEnd: (_) {
-          _dragOutsideNotified = false;
-          widget.onDragActivityChanged?.call(false);
-        },
-        feedback: Material(
-          color: Colors.transparent,
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 220),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: const Color(0xFF7C7872).withOpacity(0.96),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: Colors.white24),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.music_note, color: Colors.white, size: 16),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    fileName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        childWhenDragging: Opacity(
-          opacity: 0.38,
-          child: tile,
-        ),
-        child: tile,
-      ),
+      child: draggable,
     );
   }
 
@@ -1818,10 +1852,11 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
                                 tooltip: L10n.translate(context, 'Close'),
                                 onPressed: widget.onClose,
                                 padding: EdgeInsets.zero,
-                                visualDensity: const VisualDensity(
-                                    horizontal: -2, vertical: -2),
+                                visualDensity: VisualDensity.standard,
                                 constraints: const BoxConstraints.tightFor(
-                                    width: 36, height: 34),
+                                  width: 44,
+                                  height: 44,
+                                ),
                                 icon: const Icon(Icons.close,
                                     color: Colors.white70, size: 19),
                               ),

@@ -230,23 +230,26 @@ private:
 
 void connectStereo(juce::AudioProcessorGraph &graph,
                    juce::AudioProcessorGraph::NodeID src,
-                   juce::AudioProcessorGraph::NodeID dst)
+                   juce::AudioProcessorGraph::NodeID dst,
+                   juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync)
 {
     for (int ch = 0; ch < 2; ++ch)
-        graph.addConnection({{src, ch}, {dst, ch}});
+        graph.addConnection({{src, ch}, {dst, ch}}, updateKind);
 }
 
 void disconnectStereo(juce::AudioProcessorGraph &graph,
                       juce::AudioProcessorGraph::NodeID src,
-                      juce::AudioProcessorGraph::NodeID dst)
+                      juce::AudioProcessorGraph::NodeID dst,
+                      juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync)
 {
     for (int ch = 0; ch < 2; ++ch)
-        graph.removeConnection({{src, ch}, {dst, ch}});
+        graph.removeConnection({{src, ch}, {dst, ch}}, updateKind);
 }
 
 void clearStereoConnectionsBetweenNodes(
     juce::AudioProcessorGraph &graph,
-    const juce::Array<juce::AudioProcessorGraph::NodeID> &nodeIds)
+    const juce::Array<juce::AudioProcessorGraph::NodeID> &nodeIds,
+    juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync)
 {
     for (auto src : nodeIds)
     {
@@ -254,7 +257,7 @@ void clearStereoConnectionsBetweenNodes(
         {
             if (src == dst)
                 continue;
-            disconnectStereo(graph, src, dst);
+            disconnectStereo(graph, src, dst, updateKind);
         }
     }
 }
@@ -775,6 +778,21 @@ void JuceEngine::armOutputSafetyForCurrentRoute(bool fadeIn) noexcept
 
     outputSafetyFadeSamplesTotal = 0;
     outputSafetyFadeSamplesRemaining = 0;
+}
+
+void JuceEngine::commitGraphMutationLocked(bool armOutputSafety) noexcept
+{
+    if (graphMutationBatchDepth > 0)
+    {
+        graphMutationBatchNeedsRebuild = true;
+        graphMutationBatchNeedsOutputSafety =
+            graphMutationBatchNeedsOutputSafety || armOutputSafety;
+        return;
+    }
+
+    graph.rebuild();
+    if (armOutputSafety)
+        armOutputSafetyForCurrentRoute();
 }
 
 void JuceEngine::refreshMidiInputCallbacks()
@@ -1327,6 +1345,37 @@ void JuceEngine::endProjectClipLoadTransaction()
     armOutputSafetyForCurrentRoute();
 }
 
+void JuceEngine::beginGraphMutationBatch()
+{
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    ++graphMutationBatchDepth;
+}
+
+void JuceEngine::endGraphMutationBatch()
+{
+    bool needsOutputSafety = false;
+    {
+        GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
+        if (graphMutationBatchDepth <= 0)
+            return;
+
+        --graphMutationBatchDepth;
+        if (graphMutationBatchDepth > 0)
+            return;
+
+        if (graphMutationBatchNeedsRebuild)
+        {
+            graph.rebuild();
+            graphMutationBatchNeedsRebuild = false;
+        }
+        needsOutputSafety = graphMutationBatchNeedsOutputSafety;
+        graphMutationBatchNeedsOutputSafety = false;
+    }
+
+    if (needsOutputSafety)
+        armOutputSafetyForCurrentRoute();
+}
+
 bool JuceEngine::loadClip(int clipId, int rowId, const juce::File &file,
                           double startSec, double lengthSec, double inFileOffsetSec)
 {
@@ -1597,6 +1646,7 @@ bool JuceEngine::playPreviewMidiNote(int clipId,
     const float safeVelocity = juce::jlimit(0.0f, 1.0f, velocity);
     const int safeDurationMs = juce::jlimit(60, 4000, durationMs);
 
+    proc->preloadLiveMidiPitch(safePitch, safeVelocity);
     proc->enqueueLiveMidiEvent(false, 1, safePitch, 0.0f);
     proc->enqueueLiveMidiEvent(true, 1, safePitch, safeVelocity);
     juce::Timer::callAfterDelay(
@@ -1661,6 +1711,8 @@ void JuceEngine::dispatchQueuedLiveMidiInputEventsForAudioThread()
         if (proc == nullptr)
             continue;
 
+        if (event.noteOn)
+            proc->preloadLiveMidiPitch(event.pitch, event.velocity);
         proc->enqueueLiveMidiEvent(
             event.noteOn,
             event.channel,
@@ -4621,7 +4673,9 @@ void JuceEngine::debugPrintGraphStructure()
 // ============================================================
 // Row bus FX chain rewiring
 // ============================================================
-void JuceEngine::rewireTrackBusFxChain(int row)
+void JuceEngine::rewireTrackBusFxChain(
+    int row,
+    juce::AudioProcessorGraph::UpdateKind updateKind)
 {
     if (!busGraphInitialised)
         return;
@@ -4645,7 +4699,7 @@ void JuceEngine::rewireTrackBusFxChain(int row)
     localNodes.add(automationNodeId);
     for (auto nodeID : chain)
         localNodes.addIfNotAlreadyThere(nodeID);
-    clearStereoConnectionsBetweenNodes(graph, localNodes);
+    clearStereoConnectionsBetweenNodes(graph, localNodes, updateKind);
 
     auto prevNodeId = inputNodeId;
 
@@ -4654,14 +4708,15 @@ void JuceEngine::rewireTrackBusFxChain(int row)
         auto nodeID = chain.getReference(i);
         if (graph.getNodeForId(nodeID) != nullptr)
         {
-            connectStereo(graph, prevNodeId, nodeID);
+            connectStereo(graph, prevNodeId, nodeID, updateKind);
             prevNodeId = nodeID;
         }
     }
 
-    connectStereo(graph, prevNodeId, automationNodeId);
+    connectStereo(graph, prevNodeId, automationNodeId, updateKind);
 
-    if (!isProjectClipLoadTransactionActive())
+    if (!isProjectClipLoadTransactionActive() &&
+        graphMutationBatchDepth <= 0)
         armOutputSafetyForCurrentRoute();
 }
 
@@ -4701,7 +4756,9 @@ void JuceEngine::compactTrackGroupFxChain(TrackGroupState &group)
         group.fxIds.removeRange(group.fxIds.size() - 1, 1);
 }
 
-void JuceEngine::rewireTrackGroupFxChain(const juce::String &groupId)
+void JuceEngine::rewireTrackGroupFxChain(
+    const juce::String &groupId,
+    juce::AudioProcessorGraph::UpdateKind updateKind)
 {
     auto *group = trackGroupForId(groupId);
     if (group == nullptr || group->inputNode == nullptr ||
@@ -4719,27 +4776,29 @@ void JuceEngine::rewireTrackGroupFxChain(const juce::String &groupId)
     localNodes.add(masterInputNode->nodeID);
     for (auto fx : group->fxChain)
         localNodes.addIfNotAlreadyThere(fx);
-    clearStereoConnectionsBetweenNodes(graph, localNodes);
+    clearStereoConnectionsBetweenNodes(graph, localNodes, updateKind);
 
     auto prevNodeId = group->inputNode->nodeID;
     for (auto fx : group->fxChain)
     {
         if (graph.getNodeForId(fx) == nullptr)
             continue;
-        connectStereo(graph, prevNodeId, fx);
+        connectStereo(graph, prevNodeId, fx, updateKind);
         prevNodeId = fx;
     }
 
-    connectStereo(graph, prevNodeId, group->gainNode->nodeID);
-    connectStereo(graph, group->gainNode->nodeID, group->panNode->nodeID);
-    connectStereo(graph, group->panNode->nodeID, group->meterTapNode->nodeID);
-    connectStereo(graph, group->meterTapNode->nodeID, masterInputNode->nodeID);
+    connectStereo(graph, prevNodeId, group->gainNode->nodeID, updateKind);
+    connectStereo(graph, group->gainNode->nodeID, group->panNode->nodeID, updateKind);
+    connectStereo(graph, group->panNode->nodeID, group->meterTapNode->nodeID, updateKind);
+    connectStereo(graph, group->meterTapNode->nodeID, masterInputNode->nodeID, updateKind);
 
-    if (!isProjectClipLoadTransactionActive())
+    if (!isProjectClipLoadTransactionActive() &&
+        graphMutationBatchDepth <= 0)
         armOutputSafetyForCurrentRoute();
 }
 
-void JuceEngine::reconnectAllRowOutputsToBuses()
+void JuceEngine::reconnectAllRowOutputsToBuses(
+    juce::AudioProcessorGraph::UpdateKind updateKind)
 {
     if (masterInputNode == nullptr)
         return;
@@ -4758,16 +4817,16 @@ void JuceEngine::reconnectAllRowOutputsToBuses()
             continue;
 
         for (auto destination : destinations)
-            disconnectStereo(graph, row.meterTapNode->nodeID, destination);
+            disconnectStereo(graph, row.meterTapNode->nodeID, destination, updateKind);
 
         if (auto *group = trackGroupForMemberRowId(row.rowId);
             group != nullptr && group->inputNode != nullptr)
         {
-            connectStereo(graph, row.meterTapNode->nodeID, group->inputNode->nodeID);
+            connectStereo(graph, row.meterTapNode->nodeID, group->inputNode->nodeID, updateKind);
         }
         else
         {
-            connectStereo(graph, row.meterTapNode->nodeID, masterInputNode->nodeID);
+            connectStereo(graph, row.meterTapNode->nodeID, masterInputNode->nodeID, updateKind);
         }
     }
 }
@@ -4996,6 +5055,7 @@ bool resolveKnownPluginDescription(const juce::KnownPluginList &list,
 bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath)
 {
     GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
+    constexpr auto batchUpdate = juce::AudioProcessorGraph::UpdateKind::none;
 
     // juceLogToFlutter("Hello from JuceEngine::insertTrackEffect");
 
@@ -5064,7 +5124,7 @@ bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath)
             return false;
         }
 
-        auto node = graph.addNode(std::move(plugin));
+        auto node = graph.addNode(std::move(plugin), std::nullopt, batchUpdate);
         if (node == nullptr)
         {
             juceLogToFlutter("insertTrackEffect: graph.addNode failed for built-in");
@@ -5074,9 +5134,10 @@ bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath)
         fxIds.add(pluginPath);
 
         if (groupState != nullptr)
-            rewireTrackGroupFxChain(groupState->id);
+            rewireTrackGroupFxChain(groupState->id, batchUpdate);
         else
-            rewireTrackBusFxChain(trackRow);
+            rewireTrackBusFxChain(trackRow, batchUpdate);
+        commitGraphMutationLocked();
         return true;
     }
 
@@ -5123,7 +5184,7 @@ bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath)
         return false;
     }
 
-    auto pluginNode = graph.addNode(std::move(inst));
+    auto pluginNode = graph.addNode(std::move(inst), std::nullopt, batchUpdate);
     if (pluginNode == nullptr)
     {
         juceLogToFlutter(("insertTrackEffect: graph.addNode failed for '" + requestedId + "'").toRawUTF8());
@@ -5133,15 +5194,17 @@ bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath)
     chain.add(pluginNode->nodeID);
     fxIds.add(requestedId);
     if (groupState != nullptr)
-        rewireTrackGroupFxChain(groupState->id);
+        rewireTrackGroupFxChain(groupState->id, batchUpdate);
     else
-        rewireTrackBusFxChain(trackRow);
+        rewireTrackBusFxChain(trackRow, batchUpdate);
+    commitGraphMutationLocked();
     return true;
 }
 
 void JuceEngine::removeTrackEffect(int trackRow, int effectIndex)
 {
     GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
+    constexpr auto batchUpdate = juce::AudioProcessorGraph::UpdateKind::none;
 
     // juceLogToFlutter("Hello from JuceEngine::removeTrackEffect");
 
@@ -5183,9 +5246,9 @@ void JuceEngine::removeTrackEffect(int trackRow, int effectIndex)
     }
 
     if (groupState != nullptr)
-        rewireTrackGroupFxChain(groupState->id);
+        rewireTrackGroupFxChain(groupState->id, batchUpdate);
     else
-        rewireTrackBusFxChain(trackRow);
+        rewireTrackBusFxChain(trackRow, batchUpdate);
 
     juce::Array<AudioProcessorGraph::Connection> nodeConnections;
     for (const auto &connection : graph.getConnections())
@@ -5195,9 +5258,10 @@ void JuceEngine::removeTrackEffect(int trackRow, int effectIndex)
             nodeConnections.addIfNotAlreadyThere(connection);
     }
     for (const auto &connection : nodeConnections)
-        graph.removeConnection(connection);
+        graph.removeConnection(connection, batchUpdate);
     if (graph.getNodeForId(nodeID) != nullptr)
-        graph.removeNode(nodeID);
+        graph.removeNode(nodeID, batchUpdate);
+    commitGraphMutationLocked();
 }
 
 void JuceEngine::reorderTrackEffects(int trackRow, int fromIndex, int toIndex)
@@ -5265,9 +5329,10 @@ void JuceEngine::reorderTrackEffects(int trackRow, int fromIndex, int toIndex)
     }
 
     if (groupState != nullptr)
-        rewireTrackGroupFxChain(groupState->id);
+        rewireTrackGroupFxChain(groupState->id, juce::AudioProcessorGraph::UpdateKind::none);
     else
-        rewireTrackBusFxChain(trackRow);
+        rewireTrackBusFxChain(trackRow, juce::AudioProcessorGraph::UpdateKind::none);
+    commitGraphMutationLocked();
 }
 
 juce::StringArray JuceEngine::getTrackEffectsForRow(int trackRow)
@@ -6014,6 +6079,7 @@ void JuceEngine::setTrackGroupMixState(const juce::String &groupId,
 bool JuceEngine::insertMasterEffect(const juce::String &pluginPath)
 {
     GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
+    constexpr auto batchUpdate = juce::AudioProcessorGraph::UpdateKind::none;
 
     // juceLogToFlutter("Hello from JuceEngine::insertMasterEffect");
 
@@ -6073,7 +6139,7 @@ bool JuceEngine::insertMasterEffect(const juce::String &pluginPath)
             return false;
         }
 
-        auto node = graph.addNode(std::move(plugin));
+        auto node = graph.addNode(std::move(plugin), std::nullopt, batchUpdate);
         if (node == nullptr)
         {
             juceLogToFlutter("insertMasterEffect: graph.addNode failed for built-in");
@@ -6082,7 +6148,8 @@ bool JuceEngine::insertMasterEffect(const juce::String &pluginPath)
         masterEffectChain->add(node->nodeID);
         masterEffectIds.add(pluginPath);
 
-        rewireMasterFxChain();
+        rewireMasterFxChain(batchUpdate);
+        commitGraphMutationLocked();
         return true;
     }
 
@@ -6128,7 +6195,7 @@ bool JuceEngine::insertMasterEffect(const juce::String &pluginPath)
         return false;
     }
 
-    auto pluginNode = graph.addNode(std::move(inst));
+    auto pluginNode = graph.addNode(std::move(inst), std::nullopt, batchUpdate);
     if (pluginNode == nullptr)
     {
         juceLogToFlutter(("insertMasterEffect: graph.addNode failed for '" + requestedId + "'").toRawUTF8());
@@ -6137,13 +6204,15 @@ bool JuceEngine::insertMasterEffect(const juce::String &pluginPath)
 
     masterEffectChain->add(pluginNode->nodeID);
     masterEffectIds.add(requestedId);
-    rewireMasterFxChain();
+    rewireMasterFxChain(batchUpdate);
+    commitGraphMutationLocked();
     return true;
 }
 
 void JuceEngine::removeMasterEffect(int effectIndex)
 {
     GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
+    constexpr auto batchUpdate = juce::AudioProcessorGraph::UpdateKind::none;
 
     if (!masterEffectChain)
         return;
@@ -6172,7 +6241,7 @@ void JuceEngine::removeMasterEffect(int effectIndex)
         lane.lastAppliedNormalized = std::numeric_limits<float>::quiet_NaN();
     }
 
-    rewireMasterFxChain();
+    rewireMasterFxChain(batchUpdate);
 
     juce::Array<AudioProcessorGraph::Connection> nodeConnections;
     for (const auto &connection : graph.getConnections())
@@ -6182,9 +6251,10 @@ void JuceEngine::removeMasterEffect(int effectIndex)
             nodeConnections.addIfNotAlreadyThere(connection);
     }
     for (const auto &connection : nodeConnections)
-        graph.removeConnection(connection);
+        graph.removeConnection(connection, batchUpdate);
     if (graph.getNodeForId(nodeID) != nullptr)
-        graph.removeNode(nodeID);
+        graph.removeNode(nodeID, batchUpdate);
+    commitGraphMutationLocked();
 }
 
 void JuceEngine::reorderMasterEffects(int fromIndex, int toIndex)
@@ -6238,7 +6308,8 @@ void JuceEngine::reorderMasterEffects(int fromIndex, int toIndex)
         lane.lastAppliedNormalized = std::numeric_limits<float>::quiet_NaN();
     }
 
-    rewireMasterFxChain();
+    rewireMasterFxChain(juce::AudioProcessorGraph::UpdateKind::none);
+    commitGraphMutationLocked();
 }
 
 juce::StringArray JuceEngine::getMasterEffects()
@@ -6412,7 +6483,8 @@ void JuceEngine::setMasterPan(float pan)
 // ============================================================
 // Master FX Chain Rewire
 // ============================================================
-void JuceEngine::rewireMasterFxChain()
+void JuceEngine::rewireMasterFxChain(
+    juce::AudioProcessorGraph::UpdateKind updateKind)
 {
     if (!masterInputNode || !masterGainNode || !masterPanNode || !outputNode)
         return;
@@ -6428,23 +6500,25 @@ void JuceEngine::rewireMasterFxChain()
     localNodes.add(outputNode->nodeID);
     for (auto fx : *masterEffectChain)
         localNodes.addIfNotAlreadyThere(fx);
-    clearStereoConnectionsBetweenNodes(graph, localNodes);
+    clearStereoConnectionsBetweenNodes(graph, localNodes, updateKind);
 
     auto prevNodeId = masterInputNode->nodeID;
     for (auto fx : *masterEffectChain)
     {
         if (graph.getNodeForId(fx) == nullptr)
             continue;
-        connectStereo(graph, prevNodeId, fx);
+        connectStereo(graph, prevNodeId, fx, updateKind);
         prevNodeId = fx;
     }
 
-    connectStereo(graph, prevNodeId, masterGainNode->nodeID);
-    connectStereo(graph, masterGainNode->nodeID, masterPanNode->nodeID);
-    connectStereo(graph, masterPanNode->nodeID, outputNode->nodeID);
-    reconnectAllRowOutputsToBuses();
+    connectStereo(graph, prevNodeId, masterGainNode->nodeID, updateKind);
+    connectStereo(graph, masterGainNode->nodeID, masterPanNode->nodeID, updateKind);
+    connectStereo(graph, masterPanNode->nodeID, outputNode->nodeID, updateKind);
+    reconnectAllRowOutputsToBuses(updateKind);
 
-    armOutputSafetyForCurrentRoute();
+    if (!isProjectClipLoadTransactionActive() &&
+        graphMutationBatchDepth <= 0)
+        armOutputSafetyForCurrentRoute();
 }
 
 int JuceEngine::getTrackIndexForClip(int clipIdx) const

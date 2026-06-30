@@ -23,6 +23,7 @@ usage: $0 [flutter build macos args...]
 Required for distributable builds:
   MACOS_CODESIGN_IDENTITY          Developer ID Application identity name.
                                   If omitted, the first installed Developer ID Application identity is used.
+                                  Set to "-" with MACOS_SKIP_NOTARIZATION=1 for an ad-hoc signed test build.
   MACOS_NOTARY_KEYCHAIN_PROFILE    notarytool keychain profile name.
                                   Required unless MACOS_SKIP_NOTARIZATION=1.
 
@@ -93,7 +94,12 @@ expanded_entitlements_path() {
 
 sign_path() {
   local path="$1"
-  /usr/bin/codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp "$path"
+
+  if [[ "$SIGN_IDENTITY" == "-" ]]; then
+    /usr/bin/codesign --force --sign "$SIGN_IDENTITY" --options runtime "$path"
+  else
+    /usr/bin/codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp "$path"
+  fi
 }
 
 find_macho_files() {
@@ -104,6 +110,33 @@ find_macho_files() {
       /bin/echo "$path"
     fi
   done
+}
+
+resolve_homebrew_dependency() {
+  local dep="$1"
+
+  if [[ -f "$dep" ]]; then
+    echo "$dep"
+    return
+  fi
+
+  if [[ "$dep" == *"*"* ]]; then
+    local basename
+    basename="$(/usr/bin/basename "$dep")"
+
+    local candidate
+    for candidate in \
+      "/opt/homebrew/lib/$basename" \
+      "/opt/homebrew/opt/"*/"lib/$basename" \
+      "/opt/homebrew/Cellar/"*/*/"lib/$basename"; do
+      if [[ -f "$candidate" ]]; then
+        echo "$candidate"
+        return
+      fi
+    done
+  fi
+
+  return 1
 }
 
 homebrew_dependencies_for() {
@@ -122,13 +155,13 @@ embed_homebrew_dylibs() {
     copied=0
 
     while IFS= read -r dep; do
+      local resolved_dep
       local basename
-      basename="$(/usr/bin/basename "$dep")"
-
-      [[ -f "$dep" ]] || fail "Homebrew dylib dependency not found: $dep"
+      resolved_dep="$(resolve_homebrew_dependency "$dep")" || fail "Homebrew dylib dependency not found: $dep"
+      basename="$(/usr/bin/basename "$resolved_dep")"
 
       if [[ ! -f "$dylib_dir/$basename" ]]; then
-        /bin/cp -L "$dep" "$dylib_dir/$basename"
+        /bin/cp -L "$resolved_dep" "$dylib_dir/$basename"
         /bin/chmod u+w "$dylib_dir/$basename"
         copied=1
       fi
@@ -143,8 +176,10 @@ embed_homebrew_dylibs() {
 
   find_macho_files "$APP_BUNDLE" | while IFS= read -r binary; do
     while IFS= read -r dep; do
+      local resolved_dep
       local basename
-      basename="$(/usr/bin/basename "$dep")"
+      resolved_dep="$(resolve_homebrew_dependency "$dep")" || fail "Homebrew dylib dependency not found: $dep"
+      basename="$(/usr/bin/basename "$resolved_dep")"
       /usr/bin/install_name_tool \
         -change "$dep" "@executable_path/../Frameworks/Homebrew/$basename" \
         "$binary"
@@ -191,13 +226,22 @@ sign_app_bundle() {
     done < <(/usr/bin/find "$APP_BUNDLE/Contents/Frameworks" -type d -name "*.framework" -prune)
   fi
 
-  /usr/bin/codesign \
-    --force \
-    --sign "$SIGN_IDENTITY" \
-    --options runtime \
-    --timestamp \
-    --entitlements "$entitlements_path" \
-    "$APP_BUNDLE"
+  if [[ "$SIGN_IDENTITY" == "-" ]]; then
+    /usr/bin/codesign \
+      --force \
+      --sign "$SIGN_IDENTITY" \
+      --options runtime \
+      --entitlements "$entitlements_path" \
+      "$APP_BUNDLE"
+  else
+    /usr/bin/codesign \
+      --force \
+      --sign "$SIGN_IDENTITY" \
+      --options runtime \
+      --timestamp \
+      --entitlements "$entitlements_path" \
+      "$APP_BUNDLE"
+  fi
 }
 
 verify_app_bundle() {
@@ -268,8 +312,10 @@ create_signed_dmg() {
     -format UDZO \
     "$DMG_PATH"
 
-  /usr/bin/codesign --force --sign "$SIGN_IDENTITY" --timestamp "$DMG_PATH"
-  /usr/bin/codesign --verify --verbose=4 "$DMG_PATH"
+  if [[ "$SIGN_IDENTITY" != "-" ]]; then
+    /usr/bin/codesign --force --sign "$SIGN_IDENTITY" --timestamp "$DMG_PATH"
+    /usr/bin/codesign --verify --verbose=4 "$DMG_PATH"
+  fi
 
   /usr/bin/hdiutil attach -nobrowse -readonly "$DMG_PATH" >/dev/null
   local mounted_app="/Volumes/$DMG_VOLUME_NAME/$APP_NAME.app"

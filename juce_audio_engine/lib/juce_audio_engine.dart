@@ -1185,6 +1185,26 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<void> beginGraphMutationBatch() async {
+    try {
+      await _ch.invokeMethod('beginGraphMutationBatch');
+    } on MissingPluginException {
+      return;
+    } on PlatformException catch (e) {
+      _logError('beginGraphMutationBatch', e);
+    }
+  }
+
+  static Future<void> endGraphMutationBatch() async {
+    try {
+      await _ch.invokeMethod('endGraphMutationBatch');
+    } on MissingPluginException {
+      return;
+    } on PlatformException catch (e) {
+      _logError('endGraphMutationBatch', e);
+    }
+  }
+
   static Future<String?> getBundledInstrumentRootPath() async {
     try {
       return await _ch.invokeMethod<String>('getBundledInstrumentRootPath');

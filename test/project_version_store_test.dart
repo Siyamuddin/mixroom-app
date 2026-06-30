@@ -62,6 +62,10 @@ void main() {
       name: 'Versioned Song',
     );
     final initialJson = await ProjectManager.readProjectJson(projectDir);
+    final initialMaster = initialJson['master'] as Map<String, dynamic>;
+    expect(initialMaster['gain'], 1.0);
+    expect(initialMaster['pan'], 0.5);
+    expect(initialMaster['effects'], {'effects': <dynamic>[]});
     final originalProjectId = initialJson['projectId'];
     final audioDir = ProjectManager.audioDir(projectDir);
     await File(p.join(audioDir.path, 'tone.wav')).writeAsBytes(

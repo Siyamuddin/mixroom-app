@@ -107,6 +107,11 @@ public:
         next.sourceTempoBpm = juce::jlimit(1.0, 400.0, sourceTempoBpm);
         next.sampledDefinition =
             resolveSampledDefinition(instrumentId, instrumentName);
+        if (next.sampledDefinition != nullptr)
+            preloadSampledRegionsForNotes(
+                *next.sampledDefinition,
+                next.notes,
+                instrumentId);
         next.sampledAttackOverride =
             params.contains(juce::Identifier("attackMs"));
         next.sampledReleaseOverride =
@@ -149,6 +154,31 @@ public:
                 pendingLiveMidiEvents.begin() +
                     (std::ptrdiff_t)(pendingLiveMidiEvents.size() - 512));
         }
+    }
+
+    bool preloadLiveMidiPitch(int pitch, float velocity)
+    {
+        PendingState state;
+        {
+            const juce::ScopedLock lock(stateLock);
+            state = pendingState;
+        }
+        if (state.sampledDefinition == nullptr ||
+            state.sampledDefinition->regions.empty())
+            return true;
+
+        const int sampledPitch =
+            sampledMidiPitchForInstrument(state.instrumentId, pitch);
+        const int midiVelocity = juce::jlimit(
+            0,
+            127,
+            (int)std::lround(juce::jlimit(0.0f, 1.0f, velocity) * 127.0f));
+        const SampledRegion *region = pickSampledRegion(
+            *state.sampledDefinition,
+            sampledPitch,
+            midiVelocity,
+            sampledPitch);
+        return region != nullptr && ensureSampledRegionLoaded(*region);
     }
 
     void prepareToPlay(double deviceSampleRate, int samplesPerBlock) override
@@ -285,12 +315,17 @@ public:
                                 (int)std::lround(
                                     juce::jlimit(0.0, 1.0, note.velocity) * 127.0));
                             timelinePitches.push_back(sampledPitch);
-                            timelineRegions.push_back(
-                                pickSampledRegion(
-                                    *cachedSampledDefinition,
-                                    sampledPitch,
-                                    midiVelocity,
-                                    (int)timelinePitches.size() - 1));
+                            const SampledRegion *region = pickSampledRegion(
+                                *cachedSampledDefinition,
+                                sampledPitch,
+                                midiVelocity,
+                                (int)timelinePitches.size() - 1);
+                            if (region != nullptr &&
+                                !ensureSampledRegionLoaded(*region))
+                            {
+                                region = nullptr;
+                            }
+                            timelineRegions.push_back(region);
                         }
                     }
 
@@ -702,7 +737,8 @@ private:
 
     struct SampledRegion
     {
-        std::shared_ptr<const DecodedSamplePcm> sample;
+        mutable std::shared_ptr<const DecodedSamplePcm> sample;
+        juce::String sampleAssetPath;
         int loKey = 0;
         int hiKey = 127;
         int keyCenter = 60;
@@ -1418,12 +1454,8 @@ private:
                     ? opcodeValue(r, "default_path")
                     : defaultPathRaw,
                 sampleRaw);
-            auto sample = decodedSampleForAsset(sampleAssetPath);
-            if (sample == nullptr || sample->frameCount() < 2)
-                continue;
-
             SampledRegion regionDef;
-            regionDef.sample = sample;
+            regionDef.sampleAssetPath = sampleAssetPath;
             regionDef.loKey =
                 juce::jlimit(0, 127, (int)std::lround(readSfzNumeric(r, "lokey", 0.0)));
             regionDef.hiKey =
@@ -1526,6 +1558,21 @@ private:
         return sampledDefinitionForAsset(assetPath);
     }
 
+    static bool ensureSampledRegionLoaded(const SampledRegion &region)
+    {
+        if (region.sample != nullptr && region.sample->frameCount() >= 2)
+            return true;
+        if (region.sampleAssetPath.trim().isEmpty())
+            return false;
+
+        auto sample = decodedSampleForAsset(region.sampleAssetPath);
+        if (sample == nullptr || sample->frameCount() < 2)
+            return false;
+
+        region.sample = sample;
+        return true;
+    }
+
     static const SampledRegion *pickSampledRegion(const SampledDefinition &definition,
                                                   int pitch,
                                                   int velocity,
@@ -1591,6 +1638,38 @@ private:
         if (auto *best = pickBest(true, false))
             return best;
         return pickBest(false, false);
+    }
+
+    static void preloadSampledRegionsForNotes(const SampledDefinition &definition,
+                                              const juce::Array<TimelineMidiNote> &notes,
+                                              const juce::String &instrumentId)
+    {
+        std::unordered_set<const SampledRegion *> regionsToLoad;
+        regionsToLoad.reserve((size_t)juce::jmax(1, notes.size()));
+
+        for (int i = 0; i < notes.size(); ++i)
+        {
+            const auto &note = notes.getReference(i);
+            const int sampledPitch =
+                sampledMidiPitchForInstrument(instrumentId, note.pitch);
+            const int midiVelocity = juce::jlimit(
+                0,
+                127,
+                (int)std::lround(
+                    juce::jlimit(0.0, 1.0, note.velocity) * 127.0));
+            if (const auto *region = pickSampledRegion(
+                    definition,
+                    sampledPitch,
+                    midiVelocity,
+                    i))
+            {
+                regionsToLoad.insert(region);
+            }
+        }
+
+        for (const auto *region : regionsToLoad)
+            if (region != nullptr)
+                ensureSampledRegionLoaded(*region);
     }
 
     static int sampledRegionFrameLimit(const SampledRegion &region,
@@ -2126,7 +2205,7 @@ private:
                         sampledPitch,
                         midiVelocity,
                         voice.seedBase);
-                    if (region == nullptr || region->sample == nullptr)
+                    if (region == nullptr || !ensureSampledRegionLoaded(*region))
                         continue;
 
                     voice.sampledMidiPitch = sampledPitch;
