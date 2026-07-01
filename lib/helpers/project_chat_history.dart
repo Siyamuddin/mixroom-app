@@ -153,10 +153,12 @@ class ProjectChatHistoryEntry {
 class ProjectChatHistory {
   final List<ProjectChatHistoryEntry> messages;
   final bool truncated;
+  final String stateSessionId;
 
   const ProjectChatHistory({
     this.messages = const <ProjectChatHistoryEntry>[],
     this.truncated = false,
+    this.stateSessionId = '',
   });
 
   factory ProjectChatHistory.fromJson(
@@ -165,10 +167,12 @@ class ProjectChatHistory {
   }) {
     final parsed = <ProjectChatHistoryEntry>[];
     bool truncated = false;
+    String stateSessionId = '';
 
     if (raw is Map) {
       final json = raw.cast<String, dynamic>();
       truncated = json['truncated'] == true;
+      stateSessionId = (json['stateSessionId'] as String? ?? '').trim();
       final rawMessages = json['messages'];
       if (rawMessages is List) {
         for (int i = 0; i < rawMessages.length; i++) {
@@ -191,12 +195,14 @@ class ProjectChatHistory {
       preserveTruncated: truncated,
       maxMessages: limits.maxStoredMessages,
       maxCharacters: limits.maxStoredCharacters,
+      stateSessionId: stateSessionId,
     );
   }
 
   factory ProjectChatHistory.fromChatMessages(
     Iterable<Message> source, {
     ProjectChatHistoryLimits limits = kDefaultProjectChatHistoryLimits,
+    String stateSessionId = '',
   }) {
     final parsed = <ProjectChatHistoryEntry>[];
     for (final message in source) {
@@ -210,6 +216,7 @@ class ProjectChatHistory {
       preserveTruncated: false,
       maxMessages: limits.maxStoredMessages,
       maxCharacters: limits.maxStoredCharacters,
+      stateSessionId: stateSessionId,
     );
   }
 
@@ -255,8 +262,10 @@ class ProjectChatHistory {
   }
 
   Map<String, dynamic>? toJsonValue() {
-    if (messages.isEmpty) return null;
+    final normalizedSessionId = stateSessionId.trim();
+    if (messages.isEmpty && normalizedSessionId.isEmpty) return null;
     return {
+      if (normalizedSessionId.isNotEmpty) 'stateSessionId': normalizedSessionId,
       'messages': messages.map((entry) => entry.toJson()).toList(),
       if (truncated) 'truncated': true,
     };
@@ -268,6 +277,7 @@ class ProjectChatHistory {
     required bool preserveTruncated,
     required int? maxMessages,
     required int maxCharacters,
+    String stateSessionId = '',
   }) {
     bool truncated = preserveTruncated;
     final normalized = <ProjectChatHistoryEntry>[];
@@ -311,6 +321,7 @@ class ProjectChatHistory {
     return ProjectChatHistory(
       messages: limited.reversed.toList(growable: false),
       truncated: truncated,
+      stateSessionId: stateSessionId.trim(),
     );
   }
 

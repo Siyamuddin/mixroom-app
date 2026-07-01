@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 from typing import Any, Dict, List
 
 from .ai_runtime_defaults import (
@@ -11,6 +12,7 @@ from .ai_runtime_defaults import (
     default_reasoning,
 )
 from .llm_settings import DEFAULT_MODEL
+from .ai_execution_guidance import ai_execution_guidance
 DEFAULT_TEMPERATURE = CHAT_DEFAULT_TEMPERATURE
 PROMPT_CACHE_VERSION = "mixroom-daw-v20260701a"
 DEFAULT_PROMPT_CACHE_RETENTION = "in_memory"
@@ -23,7 +25,17 @@ _KNOWN_CLIENT_CAPABILITIES = frozenset(
         "daw.midi_compose.instrument_insert",
         "daw.midi_compose.transpose_notes",
         "daw.midi_compose.audio_to_midi",
+        "daw.transport_control",
+        "daw.row_mute",
+        "daw.row_solo",
+        "daw.row_rename",
+        "daw.row_select",
+        "daw.row_delete",
+        "daw.row_create",
+        "daw.row_mix",
+        "daw.automation_edit",
         "daw.clip_edit.pitch_shift",
+        "daw.clean_content_rows",
     }
 )
 
@@ -102,6 +114,405 @@ def _read_client_policy(payload: Dict[str, Any]) -> Dict[str, Any]:
         policy["allowed_instrument_ids"] = allowed_instruments
 
     return policy
+
+
+def _read_context_packing_mode(payload: Dict[str, Any]) -> str:
+    raw_context = payload.get("client_context")
+    if not isinstance(raw_context, dict):
+        return "full"
+    normalized = str(raw_context.get("ai_context_packing_mode") or "full").strip().lower()
+    return "compact" if normalized == "compact" else "full"
+
+
+def _read_tool_routing_mode(payload: Dict[str, Any]) -> str:
+    raw_context = payload.get("client_context")
+    if not isinstance(raw_context, dict):
+        return "full"
+    normalized = str(raw_context.get("ai_tool_routing_mode") or "full").strip().lower()
+    return "intent_scoped" if normalized == "intent_scoped" else "full"
+
+
+def _effective_tool_routing_mode(tool_routing_mode: str) -> str:
+    return tool_routing_mode
+
+
+_MIX_INTENT_RE = re.compile(
+    r"\b("
+    r"mix|master|balance|loud|quiet|volume|gain|level|fader|eq|compress|"
+    r"compression|reverb|delay|space|spacious|depth|width|wide|wider|"
+    r"widen|narrow|stereo|spread|warm|warmer|warmth|body|fuller|thin|"
+    r"tone|bright|brighter|brighten|brightness|clear|clearer|clarity|"
+    r"dark|darker|dull|mud|muddy|harsh|presence|air|wet|wetter|dry|"
+    r"saturat|distort|polish|glue|punch|tuck|blend|pan|sidechain|duck|pump"
+    r")\b",
+    re.IGNORECASE,
+)
+_DAW_INTENT_RE = re.compile(
+    r"\b("
+    r"add|insert|put|place|create|make|write|compose|generate|drum|kick|"
+    r"snare|hat|loop|sample|midi|instrument|track|row|clip|split|stem|"
+    r"vocal|instrumental|mute|unmute|solo|rename|select|delete|remove|"
+    r"trash|play|pause|stop|restart|beginning|record|undo|redo|metronome|"
+    r"click|pitch|transpose|tempo|bpm|vinyl|noise|texture|riser|whoosh|"
+    r"fx|808|drop|automation|duck|sidechain|pan|left|right|center|adlib|"
+    r"hook|cleanup|clean"
+    r")\b",
+    re.IGNORECASE,
+)
+_QUESTION_INTENT_RE = re.compile(
+    r"\b(what|where|why|how|which|help|explain|tell me|show me)\b",
+    re.IGNORECASE,
+)
+
+
+def _intent_tool_names(user_text: str, tool_routing_mode: str) -> set[str]:
+    if tool_routing_mode != "intent_scoped":
+        return {"informational_response", "daw_assistant_actions", "mix_model_request"}
+    text = user_text.strip().lower()
+    starter_creation = bool(
+        re.search(r"\b(lofi|lo-fi)\b", text)
+        and re.search(r"\b(make|create|generate|write|compose|build)\b", text)
+        and re.search(r"\b(song|beat|track|instrumental|starter|idea|loop)\b", text)
+        and "remix" not in text
+    )
+    if starter_creation:
+        return {"informational_response", "daw_assistant_actions"}
+    has_mix = bool(_MIX_INTENT_RE.search(text))
+    has_daw = bool(_DAW_INTENT_RE.search(text))
+    wants_info = bool(_QUESTION_INTENT_RE.search(text))
+    if any(word in text for word in ("remix", "lofi", "lo-fi", "vibe", "style")):
+        has_mix = True
+        has_daw = True
+    if has_mix and has_daw:
+        return {"informational_response", "daw_assistant_actions", "mix_model_request"}
+    if has_mix:
+        return {"informational_response", "mix_model_request"}
+    if has_daw:
+        return {"informational_response", "daw_assistant_actions"}
+    if wants_info:
+        return {"informational_response"}
+    return {"informational_response", "daw_assistant_actions", "mix_model_request"}
+
+
+def _negates_stem_separation(text: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(do\s+not|don't|dont|stop|no\s+more|without)\b[^.?!]{0,96}\b(split|stem|stems|separat)",
+            text,
+        )
+        or re.search(
+            r"\b(split|stem|stems|separat)[^.?!]{0,96}\b(no\s+more|anymore|again)\b",
+            text,
+        )
+    )
+
+
+def _intent_daw_action_types(
+    *,
+    allowed_action_types: list[str],
+    user_text: str,
+    tool_routing_mode: str,
+) -> list[str]:
+    if tool_routing_mode != "intent_scoped":
+        return allowed_action_types
+
+    text = user_text.lower()
+    selected: set[str] = {"tutorial", "clarify"}
+    negates_stem = _negates_stem_separation(text)
+
+    def add_if_allowed(*values: str) -> None:
+        for value in values:
+            if value in allowed_action_types:
+                selected.add(value)
+
+    if re.search(r"\b(mute|unmute|silence|unsilence)\b", text):
+        add_if_allowed("row_mute", "row_mix")
+    if re.search(r"\b(solo|unsolo|isolate)\b", text):
+        add_if_allowed("row_solo")
+    if re.search(r"\b(rename|call|label)\b", text):
+        add_if_allowed("row_rename", "role_override")
+    if re.search(r"\b(select|focus|active)\b", text):
+        add_if_allowed("row_select")
+    if re.search(r"\b(delete|remove|trash)\b", text):
+        add_if_allowed("clip_edit", "row_delete")
+    if re.search(
+        r"\b(play|pause|stop|restart|beginning|record|undo|redo|metronome|click|loop)\b",
+        text,
+    ):
+        add_if_allowed("transport_control")
+    if (
+        re.search(r"\b(split|stem|stems|separate|vocal|instrumental)\b", text)
+        and not negates_stem
+    ):
+        add_if_allowed("stem_separate")
+    if re.search(r"\b(pitch|transpose|semitone|octave)\b", text):
+        add_if_allowed("clip_edit", "midi_compose")
+    if re.search(r"\b(tempo|bpm|faster|slower)\b", text):
+        add_if_allowed("project_edit")
+
+    level_target_pattern = (
+        r"(?:vocal|voice|track|row|stem|pad|pads|bass|808|sub|drum|drums|"
+        r"kick|snare|hat|hats|guitar|piano|keys|synth|lead|instrumental)"
+    )
+    pitch_direction_request = bool(
+        re.search(r"\b(pitch|transpose|octave|semitone|semitones|key)\b", text)
+    )
+    concrete_level_change_request = bool(
+        not pitch_direction_request
+        and (
+            re.search(
+                r"\b(volume|gain|level|fader|db|louder|quieter|turn up|turn down)\b",
+                text,
+            )
+            or re.search(
+                rf"\b(turn|bring|pull|push|take|make)\b[^.?!]{{0,64}}\b{level_target_pattern}\b[^.?!]{{0,32}}\b(up|down|lower|louder|quieter)\b",
+                text,
+            )
+            or re.search(
+                rf"\b{level_target_pattern}\b[^.?!]{{0,64}}\b(up|down|lower|louder|quieter|reduc|tuck)\b",
+                text,
+            )
+            or re.search(
+                rf"\b(lower|reduce|tuck)\b[^.?!]{{0,48}}\b{level_target_pattern}\b",
+                text,
+            )
+        )
+    )
+
+    if (
+        re.search(
+            r"\b(add|insert|put|place|create|write|compose|generate|drum|kick|snare|hat|loop|sample|midi|instrument|keys|pad|bassline|melody|texture|vinyl|noise|riser|whoosh|fx|808|drop)\b",
+            text,
+        )
+        and not concrete_level_change_request
+    ):
+        add_if_allowed("sample_insert", "midi_compose", "row_create")
+    if re.search(r"\b(pan|left|right|center)\b", text) or concrete_level_change_request:
+        add_if_allowed("row_mix")
+    if concrete_level_change_request and re.search(
+        r"\b(hook|chorus|verse|bridge|during|whenever|when|over time)\b", text
+    ):
+        add_if_allowed("automation_edit", "row_mix")
+    if re.search(
+        r"\b(remove|delete|take out|bypass|unbypass|toggle)\b[^.?!]{0,64}\b(effect|plugin|fx|distortion|compressor|compress|eq|reverb|delay|limiter|pitch corrector)\b",
+        text,
+    ):
+        add_if_allowed("effect_edit")
+    if re.search(
+        r"\b(effect|plugin|fx|distortion|compressor|compress|eq|reverb|delay|limiter|pitch corrector)\b",
+        text,
+    ):
+        add_if_allowed("effect_edit")
+    if re.search(r"\b(automation|duck|ducking|sidechain|pump|pumping|sweep|fade)\b", text):
+        add_if_allowed("automation_edit")
+    if re.search(r"\b(move|copy|duplicate|trim|cut|glue|adlib|chorus clip)\b", text):
+        add_if_allowed("clip_edit")
+    if re.search(r"\b(clean|cleanup|noise|quiet noise|dialog cleanup|phone mic)\b", text):
+        add_if_allowed("audio_enhance", "clip_edit")
+    if re.search(r"\b(color)\b", text):
+        add_if_allowed("row_color_edit")
+    if re.search(r"\b(group)\b", text):
+        add_if_allowed("row_group_edit")
+    if re.search(r"\b(role)\b", text):
+        add_if_allowed("role_override")
+    if any(word in text for word in ("remix", "lofi", "lo-fi", "vibe", "style")):
+        add_if_allowed(
+            "sample_insert",
+            "midi_compose",
+            "clip_edit",
+            "row_mix",
+            "project_edit",
+        )
+
+    scoped = [value for value in allowed_action_types if value in selected]
+    result = scoped if len(scoped) > 2 else allowed_action_types
+    if negates_stem:
+        result = [value for value in result if value != "stem_separate"]
+    return result
+
+
+def _build_request_local_ai_hints(*, user_text: str) -> str:
+    text = user_text.strip().lower()
+    if not text:
+        return ""
+
+    lines: list[str] = []
+    enable_starter_hints = True
+    enable_action_hints = True
+    enable_drop_and_section_hints = True
+    enable_compound_target_hints = True
+    negates_stem = _negates_stem_separation(text)
+
+    if (
+        negates_stem
+        and re.search(r"\b(only|just)\b", text)
+        and re.search(r"\b(bright|brighter|brighten|clear|clearer|presence|air)\b", text)
+        and re.search(r"\b(vocal|vocals|voice)\b", text)
+    ):
+        lines.extend(
+            [
+                "- Latest user negates further stem splitting but includes a positive vocal mix edit. Execute the positive edit; do not answer with only acknowledgement.",
+                "- For this turn, do not emit stem_separate. Prefer mix_model_request targeting the current vocal stem for brightness/clarity.",
+            ]
+        )
+
+    if enable_compound_target_hints:
+        compound_stem_pitch_request = bool(
+            re.search(
+                r"\b(remove|split|separate|isolate|take out)\b[^.?!]{0,80}\b(vocal|vocals|voice)\b",
+                text,
+            )
+            and re.search(
+                r"\b(lower|raise|change|shift|transpose|pitch|key|semitone|semitones)\b",
+                text,
+            )
+            and re.search(r"\b(background|backing|instrumental|music|song|track)\b", text)
+            and not negates_stem
+        )
+        if compound_stem_pitch_request:
+            lines.extend(
+                [
+                    "- Compound stem+pitch request: emit one daw_assistant_actions tool call containing both stem_separate vocal_instrumental and clip_edit pitch_shift.",
+                    '- For the pitch_shift action, target the resulting or existing instrumental/background/backing stem; use label_contains="Instrumental" when helpful. Treat one key as one semitone and preserve tempo.',
+                ]
+            )
+        if re.search(
+            r"\b(original song|instrumental|backing|background|lead vocal|vocal stem|synth|piano|bass|drums|kick|snare|hat)\b",
+            text,
+        ):
+            lines.append(
+                "- Named-source priority: target the row/clip whose name, label, file, role, or instrument matches the user's named source even if another row is selected."
+            )
+
+    asks_new_drums = bool(
+        re.search(r"\b(add|insert|put|place|make|create|generate|write)\b", text)
+        and re.search(r"\b(drum|drums|kick|snare|hat|hats|loop)\b", text)
+        and not re.search(r"\b(do\s+not|don't|dont)\s+add\b", text)
+    )
+    if asks_new_drums:
+        lines.append(
+            "- Latest user asks to add drum/sample material. If LIBRARY_SNAPSHOT contains matching role aliases or paths, use sample_insert rather than an unsupported explanation."
+        )
+
+    asks_lofi_starter = bool(
+        enable_starter_hints
+        and re.search(r"\b(lofi|lo-fi)\b", text)
+        and re.search(r"\b(make|create|generate|write|compose|build)\b", text)
+        and re.search(r"\b(song|beat|track|instrumental|starter|idea|loop)\b", text)
+        and "remix" not in text
+    )
+    if asks_lofi_starter:
+        lines.extend(
+            [
+                "- Latest user asks for a new lofi starter song. Prefer one daw_assistant_actions call with a bounded 3-5 action starter arrangement rather than a vague reply.",
+                "- Include concrete musical material when assets exist: drums/loop from LIBRARY_SNAPSHOT, soft keys/chords, and bassline/sub. Use midi_compose only with concrete notes or progression.",
+                "- Put new musical parts on clean/new rows unless the user explicitly names the current/selected/named/numbered row. Do not use row_create alone as the result.",
+            ]
+        )
+    elif re.search(r"\b(lofi|lo-fi|remix)\b", text):
+        lines.append(
+            "- Latest user asks for a remix/style transformation. Use a bounded multi-step plan: concrete DAW edits first when requested/available, then a mix pass. Do enough to satisfy named parts without adding unrelated extras."
+        )
+        has_concrete_daw_edit = bool(
+            re.search(
+                r"\b(add|insert|put|place|pitch|lower|raise|shift|transpose|stem|split|separate|mute|solo|rename|delete|automation|duck|sidechain)\b",
+                text,
+            )
+        )
+        has_sonic_mix_goal = bool(
+            re.search(
+                r"\b(warm|warmer|warmth|space|spacious|reverb|delay|wide|wider|width|tone|polish|balance|saturat|compress|glue|bright|brighter|dark|darker)\b",
+                text,
+            )
+        )
+        if has_concrete_daw_edit and has_sonic_mix_goal:
+            lines.append(
+                "- This remix request combines concrete DAW edits with sonic mix goals. If both tool families are available, the response is incomplete unless it emits both calls in this same turn: daw_assistant_actions for the concrete edits, then mix_model_request for the sonic pass. Do not only describe the mix pass in assistant_message."
+            )
+
+    level_target_pattern = (
+        r"(?:vocal|voice|track|row|stem|pad|pads|bass|808|sub|drum|drums|"
+        r"kick|snare|hat|hats|guitar|piano|keys|synth|lead|instrumental)"
+    )
+    pitch_direction_request = bool(
+        re.search(r"\b(pitch|transpose|octave|semitone|semitones|key)\b", text)
+    )
+    concrete_level_change_request = bool(
+        not pitch_direction_request
+        and (
+            re.search(
+                r"\b(volume|gain|level|fader|db|louder|quieter|turn up|turn down)\b",
+                text,
+            )
+            or re.search(
+                rf"\b(turn|bring|pull|push|take|make)\b[^.?!]{{0,64}}\b{level_target_pattern}\b[^.?!]{{0,32}}\b(up|down|lower|louder|quieter)\b",
+                text,
+            )
+            or re.search(
+                rf"\b{level_target_pattern}\b[^.?!]{{0,64}}\b(up|down|lower|louder|quieter|reduc|tuck)\b",
+                text,
+            )
+        )
+    )
+
+    if enable_action_hints:
+        if re.search(
+            r"\b(remove|delete|take out|bypass|unbypass|toggle)\b[^.?!]{0,64}\b(effect|plugin|fx|distortion|compressor|compress|eq|reverb|delay|limiter|pitch corrector)\b",
+            text,
+        ):
+            lines.append(
+                "- Latest user asks for explicit plugin/effect CRUD. Use daw_assistant_actions effect_edit for the named plugin/effect; do not convert this into mix_model_request."
+            )
+        if re.search(r"\b(duck|ducking|sidechain|pump|pumping|fade|sweep)\b", text):
+            lines.append(
+                "- Latest user asks for time-varying movement/ducking. Use daw_assistant_actions automation_edit on the named row/track; do not answer that automation is unavailable when automation_edit is exposed."
+            )
+        if re.search(r"\b(pan|left|right|center)\b", text) and re.search(
+            r"\b(row|track|pad|pads|vocal|bass|drum|instrumental|stem)\b", text
+        ):
+            lines.append(
+                "- Latest user asks for a concrete pan move. Use daw_assistant_actions row_mix set_pan/adjust_pan on the target row; do not use generic mix pan or refuse."
+            )
+
+    if enable_drop_and_section_hints:
+        asks_drop_content = bool(
+            not concrete_level_change_request
+            and (
+                re.search(r"\b(808|bass\s+drop|sub\s+drop|bass|sub)\b", text)
+                or (
+                    re.search(r"\bdrop\b", text)
+                    and re.search(
+                        r"\b(add|insert|put|place|make|create|write|compose|hit|impact|fill|before|right before|hook)\b",
+                        text,
+                    )
+                )
+            )
+        )
+        if concrete_level_change_request and re.search(
+            r"\b(down|lower|reduc|quieter|tuck|drop|too loud|swallowing)\b", text
+        ):
+            lines.append(
+                "- Volume drop routing: treat turn/bring/pull/take/make + named-row + down/lower/quieter language as row_mix for static level changes, or automation_edit when the prompt names a time range such as hook, chorus, verse, during, or whenever. Do not interpret 808/bass/sub wording as musical drop content when the user is changing level."
+            )
+        if asks_drop_content:
+            lines.append(
+                "- Drop source selection: use an 808/sub/bass sample only when the user asks for 808, sub, bass, or bass drop. For generic drop/fill/hit/impact wording, prefer the best matching FX or drum source; compose MIDI bass only when the request is musically bass/sub oriented."
+            )
+        if re.search(r"\b(not an 808|not 808|no 808|without 808)\b", text):
+            lines.append(
+                "- Negative source constraint: the user rejected 808. Do not use an 808 sample path; for a bass/sub drop, compose MIDI with a visible bass/sub instrument or choose a non-808 bass source."
+            )
+        if re.search(
+            r"\b(hook|chorus|verse|bridge|intro|outro|second verse|last chorus|first hook|later hook)\b",
+            text,
+        ):
+            lines.append(
+                "- Section placement: hook/chorus/verse/bridge labels are valid placement hints. If exact measures are unavailable, put the section label in placement/destination and proceed instead of asking for bar numbers."
+            )
+
+    if not lines:
+        return ""
+    return "\n".join(["REQUEST_LOCAL_AI_HINTS", *lines])
 
 
 def _client_capability_signature(capabilities: set[str]) -> str:
@@ -190,6 +601,10 @@ def _build_system_prompt(
         lines.append(
             "- This client may only use midi_compose on an existing editable MIDI/instrument target."
         )
+    if "daw.clean_content_rows" in client_capabilities:
+        lines.append(
+            '- This client supports clean placement for newly added samples, loops, drums, keys, pads, bass, melodies, or generated parts: use placement_policy="clean_row" or prefer_clean_row=true on each sample item/MIDI action or target for broad additions that should move to empty/new rows. User placement wins: if the user asks for the current, selected, named, numbered, or otherwise particular row, target that row and set allow_layer_existing_row=true on that item/action or target.'
+        )
     if "daw.midi_compose.transpose_notes" in client_capabilities:
         lines.append("- This client supports midi_compose transpose_notes.")
     else:
@@ -276,6 +691,36 @@ def _daw_target_schema(*, allow_master_scope: bool = False) -> Dict[str, Any]:
                 "description": (
                     "Use when the user refers to the current selection with "
                     'phrases like "this one", "that one", or "here".'
+                ),
+            },
+            "placement_policy": {
+                "type": "string",
+                "enum": [
+                    "clean_row",
+                    "empty_row",
+                    "new_row",
+                    "separate_row",
+                    "existing_row",
+                    "layer_existing_row",
+                ],
+                "description": (
+                    "Use clean_row/empty_row/new_row/separate_row for broad "
+                    "new musical parts. Use existing_row/layer_existing_row "
+                    "only when the user explicitly asks for a current, "
+                    "selected, named, numbered, or otherwise specific row."
+                ),
+            },
+            "prefer_clean_row": {
+                "type": "boolean",
+                "description": (
+                    "True when broad new content should avoid occupied source rows."
+                ),
+            },
+            "allow_layer_existing_row": {
+                "type": "boolean",
+                "description": (
+                    "True when the user explicitly asked to add to a specific "
+                    "row that may already contain clips."
                 ),
             },
             "automation_target_id": {"type": "string"},
@@ -1192,8 +1637,7 @@ The assistant_message MUST be written in the same language as the User's most re
 If it is not, the response is INVALID. If unclear what the used language is, then prefer to stick to English.
 """.strip()
 
-# Experimental shorter revision for manual A/B testing.
-# To trial it live, temporarily set instructions=SYSTEM_PROMPT_V2 instead of SYSTEM_PROMPT.
+# Alternative compact system prompt kept for explicit local prompt tuning.
 SYSTEM_PROMPT_V2 = """
 You are AI Co-Producer, an on-device DAW mixing collaborator.
 
@@ -1678,6 +2122,10 @@ actions form a coherent scaffold:
 - default to 8 bars for a loop or starter section, and 16 bars only when the
   user asks for a fuller section or arrangement
 - place related parts on separate rows when row capacity allows
+- put broad new samples, drums, MIDI instruments, basses, pads, melodies, and
+  generated parts on clean/empty/new rows when possible; do not layer them onto
+  an occupied source row just because it is selected, unless the user explicitly
+  asks for the current, selected, named, numbered, or otherwise specific row
 - choose simple, valid musical material over asking for genre/key details
 
 If row limits prevent the full scaffold, create the most important supported
@@ -1712,7 +2160,8 @@ make unsupported audio.
   sample_insert creates audio clips, so do not target an instrument lane for
   sample_insert. If the current/selected row is an instrument lane and the user
   asks for hats, kicks, snares, drums, or other packaged samples, target a
-  nearby audio row or create/use a new audio row instead of refusing.
+  nearby audio row or create/use a new audio row instead of refusing, unless the
+  user explicitly asked to add to that current/selected/specific row.
   For "1 minute" or similar arrangement-extension requests, prefer one
   continuous span with bar-aligned repeated material and small variations
   rather than separate disconnected blocks. Do not substitute low-end
@@ -1832,8 +2281,9 @@ make unsupported audio.
   them. Read midi_state and selected_clip_midi like existing musical state: continue,
   transpose, reharmonize, simplify, or vary it before replacing everything.
   If the user explicitly asks for a new instrument, new piano, new MIDI clip,
-  or another separate part, prefer create_clip on a fresh MIDI clip instead of
-  reusing the currently selected MIDI clip.
+  or another separate part, prefer create_clip on a clean/new row instead of
+  reusing the currently selected MIDI clip, unless the user explicitly asked to
+  add it to the current/selected/specific row.
   Use append_notes for continuation/extension, transpose_notes for octave or
   semitone shifts, and replace_notes when the user clearly wants a rewrite, a
   new progression, or the current notes fundamentally conflict with the goal.
@@ -2030,6 +2480,375 @@ TOOLS = [
                                             {"required": ["tempo_bpm"]},
                                             {"required": ["bpm"]},
                                         ],
+                                        "additionalProperties": True,
+                                    },
+                                },
+                                "required": ["type", "data"],
+                                "additionalProperties": False,
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "enum": ["row_mix"],
+                                    },
+                                    "data": {
+                                        "type": "object",
+                                        "properties": {
+                                            "operation": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "set_gain",
+                                                    "adjust_gain",
+                                                    "set_pan",
+                                                    "adjust_pan",
+                                                ],
+                                            },
+                                            "target": _daw_target_schema(),
+                                            "row_index": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                            },
+                                            "row_number": {
+                                                "type": "integer",
+                                                "minimum": 1,
+                                            },
+                                            "track_number": {
+                                                "type": "integer",
+                                                "minimum": 1,
+                                            },
+                                            "value": {"type": "number"},
+                                            "gain": {"type": "number"},
+                                            "gain_db": {"type": "number"},
+                                            "db": {"type": "number"},
+                                            "delta": {"type": "number"},
+                                            "delta_db": {"type": "number"},
+                                            "pan01": {
+                                                "type": "number",
+                                                "minimum": 0,
+                                                "maximum": 1,
+                                            },
+                                            "pan_signed": {
+                                                "type": "number",
+                                                "minimum": -1,
+                                                "maximum": 1,
+                                            },
+                                            "direction": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "up",
+                                                    "down",
+                                                    "left",
+                                                    "right",
+                                                    "center",
+                                                    "hard_left",
+                                                    "hard_right",
+                                                ],
+                                            },
+                                        },
+                                        "required": ["operation"],
+                                        "additionalProperties": True,
+                                    },
+                                },
+                                "required": ["type", "data"],
+                                "additionalProperties": False,
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "enum": ["transport_control"],
+                                    },
+                                    "data": {
+                                        "type": "object",
+                                        "properties": {
+                                            "operation": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "play",
+                                                    "pause",
+                                                    "stop",
+                                                    "restart",
+                                                    "toggle_play_pause",
+                                                    "start_recording",
+                                                    "stop_recording",
+                                                    "toggle_recording",
+                                                    "undo",
+                                                    "redo",
+                                                    "enable_metronome",
+                                                    "disable_metronome",
+                                                    "toggle_metronome",
+                                                    "enable_loop",
+                                                    "disable_loop",
+                                                    "toggle_loop",
+                                                ],
+                                            },
+                                        },
+                                        "required": ["operation"],
+                                        "additionalProperties": True,
+                                    },
+                                },
+                                "required": ["type", "data"],
+                                "additionalProperties": False,
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "enum": ["row_create"],
+                                    },
+                                    "data": {
+                                        "type": "object",
+                                        "properties": {
+                                            "operation": {
+                                                "type": "string",
+                                                "enum": ["create"],
+                                            },
+                                            "position": {
+                                                "type": "string",
+                                                "enum": ["end", "above", "below"],
+                                            },
+                                            "target": _daw_target_schema(),
+                                            "row_index": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                            },
+                                            "row_number": {
+                                                "type": "integer",
+                                                "minimum": 1,
+                                            },
+                                            "track_number": {
+                                                "type": "integer",
+                                                "minimum": 1,
+                                            },
+                                            "name": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 80,
+                                            },
+                                            "new_name": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 80,
+                                            },
+                                        },
+                                        "required": ["operation"],
+                                        "additionalProperties": True,
+                                    },
+                                },
+                                "required": ["type", "data"],
+                                "additionalProperties": False,
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "enum": ["row_delete"],
+                                    },
+                                    "data": {
+                                        "type": "object",
+                                        "properties": {
+                                            "operation": {
+                                                "type": "string",
+                                                "enum": ["delete"],
+                                            },
+                                            "target": _daw_target_schema(),
+                                            "row_index": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                            },
+                                            "row_indices": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                },
+                                                "minItems": 1,
+                                            },
+                                            "track_indices": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                },
+                                                "minItems": 1,
+                                            },
+                                        },
+                                        "required": ["operation"],
+                                        "additionalProperties": True,
+                                    },
+                                },
+                                "required": ["type", "data"],
+                                "additionalProperties": False,
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "enum": ["row_rename"],
+                                    },
+                                    "data": {
+                                        "type": "object",
+                                        "properties": {
+                                            "operation": {
+                                                "type": "string",
+                                                "enum": ["rename"],
+                                            },
+                                            "target": _daw_target_schema(),
+                                            "row_index": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                            },
+                                            "name": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 80,
+                                            },
+                                            "new_name": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 80,
+                                            },
+                                        },
+                                        "required": ["operation"],
+                                        "additionalProperties": True,
+                                    },
+                                },
+                                "required": ["type", "data"],
+                                "additionalProperties": False,
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "enum": ["row_mute"],
+                                    },
+                                    "data": {
+                                        "type": "object",
+                                        "properties": {
+                                            "operation": {
+                                                "type": "string",
+                                                "enum": ["mute", "unmute", "toggle"],
+                                            },
+                                            "target": _daw_target_schema(),
+                                            "row_index": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                            },
+                                            "row_indices": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                },
+                                                "minItems": 1,
+                                            },
+                                            "track_indices": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                },
+                                                "minItems": 1,
+                                            },
+                                            "group_id": {"type": "string"},
+                                            "group_name": {"type": "string"},
+                                        },
+                                        "required": ["operation"],
+                                        "additionalProperties": True,
+                                    },
+                                },
+                                "required": ["type", "data"],
+                                "additionalProperties": False,
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "enum": ["row_solo"],
+                                    },
+                                    "data": {
+                                        "type": "object",
+                                        "properties": {
+                                            "operation": {
+                                                "type": "string",
+                                                "enum": ["solo", "unsolo", "toggle"],
+                                            },
+                                            "target": _daw_target_schema(),
+                                            "row_index": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                            },
+                                            "row_indices": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                },
+                                                "minItems": 1,
+                                            },
+                                            "track_indices": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                },
+                                                "minItems": 1,
+                                            },
+                                            "group_id": {"type": "string"},
+                                            "group_name": {"type": "string"},
+                                        },
+                                        "required": ["operation"],
+                                        "additionalProperties": True,
+                                    },
+                                },
+                                "required": ["type", "data"],
+                                "additionalProperties": False,
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "enum": ["row_select"],
+                                    },
+                                    "data": {
+                                        "type": "object",
+                                        "properties": {
+                                            "operation": {
+                                                "type": "string",
+                                                "enum": ["select"],
+                                            },
+                                            "target": _daw_target_schema(),
+                                            "row_index": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                            },
+                                            "row_indices": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                },
+                                                "minItems": 1,
+                                            },
+                                            "track_indices": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                },
+                                                "minItems": 1,
+                                            },
+                                        },
+                                        "required": ["operation"],
                                         "additionalProperties": True,
                                     },
                                 },
@@ -3120,8 +3939,21 @@ TOOLS = [
 ]
 
 
-def _build_tools(client_capabilities: set[str]) -> list[dict[str, Any]]:
+def _build_tools(
+    client_capabilities: set[str],
+    *,
+    tool_routing_mode: str = "full",
+    user_text: str = "",
+) -> list[dict[str, Any]]:
     tools = copy.deepcopy(TOOLS)
+    if tool_routing_mode == "intent_scoped":
+        allowed_tool_names = _intent_tool_names(user_text, tool_routing_mode)
+        tools = [
+            tool
+            for tool in tools
+            if str(tool.get("name") or "").strip() in allowed_tool_names
+        ]
+
     supports_pitch_shift = "daw.clip_edit.pitch_shift" in client_capabilities
     allowed_action_types = [
         "tutorial",
@@ -3136,10 +3968,31 @@ def _build_tools(client_capabilities: set[str]) -> list[dict[str, Any]]:
         "role_override",
         "audio_enhance",
     ]
+    if "daw.transport_control" in client_capabilities:
+        allowed_action_types.append("transport_control")
+    if "daw.row_mute" in client_capabilities:
+        allowed_action_types.append("row_mute")
+    if "daw.row_solo" in client_capabilities:
+        allowed_action_types.append("row_solo")
+    if "daw.row_rename" in client_capabilities:
+        allowed_action_types.append("row_rename")
+    if "daw.row_select" in client_capabilities:
+        allowed_action_types.append("row_select")
+    if "daw.row_delete" in client_capabilities:
+        allowed_action_types.append("row_delete")
+    if "daw.row_create" in client_capabilities:
+        allowed_action_types.append("row_create")
+    if "daw.row_mix" in client_capabilities:
+        allowed_action_types.append("row_mix")
     if "daw.project_edit.set_tempo" in client_capabilities:
         allowed_action_types.append("project_edit")
     if "daw.sample_insert.library" in client_capabilities:
         allowed_action_types.append("sample_insert")
+    allowed_action_types = _intent_daw_action_types(
+        allowed_action_types=allowed_action_types,
+        user_text=user_text,
+        tool_routing_mode=tool_routing_mode,
+    )
 
     for tool in tools:
         if tool.get("name") != "daw_assistant_actions":
@@ -3252,6 +4105,7 @@ _ALLOWED_OPENAI_COMPATIBLE_FIELDS = frozenset(
         "tool_choice",
         "max_output_tokens",
         "reasoning",
+        "parallel_tool_calls",
         "text",
         "metadata",
         "prompt_cache_key",
@@ -3445,10 +4299,31 @@ def build_llm_request_from_mixroom_payload(
     library_snapshot = _read_optional_string(payload, "library_snapshot")
     client_capabilities = _read_client_capabilities(payload)
     client_policy = _read_client_policy(payload)
+    context_packing_mode = _read_context_packing_mode(payload)
+    tool_routing_mode = _read_tool_routing_mode(payload)
+    effective_tool_routing_mode = _effective_tool_routing_mode(tool_routing_mode)
+    instruction_overlay = ai_execution_guidance()
     capability_signature = _client_capability_signature(client_capabilities)
     if client_policy:
         capability_signature = "|".join(
             [capability_signature, _client_policy_signature(client_policy)]
+        )
+    capability_signature = "|".join(
+        [
+            capability_signature,
+            f"context:{context_packing_mode}",
+            f"tool_routing:{tool_routing_mode}",
+        ]
+    )
+    if instruction_overlay:
+        instruction_overlay_hash = hashlib.sha256(
+            instruction_overlay.encode("utf-8")
+        ).hexdigest()[:12]
+        capability_signature = "|".join(
+            [
+                capability_signature,
+                f"instruction_overlay:{instruction_overlay_hash}",
+            ]
         )
 
     pending_mix_value = payload.get("pending_mix")
@@ -3456,9 +4331,16 @@ def build_llm_request_from_mixroom_payload(
         raise ValueError("'pending_mix' must be an object.")
 
     resolved_model = default_model.strip() or DEFAULT_MODEL
+    instruction_parts = [_build_system_prompt(client_capabilities, client_policy)]
+    if instruction_overlay:
+        instruction_parts.append(instruction_overlay)
+    request_local_hints = _build_request_local_ai_hints(user_text=user_text)
+    if request_local_hints:
+        instruction_parts.append(request_local_hints)
+
     body: NormalizedLlmRequest = {
         "model": resolved_model,
-        "instructions": _build_system_prompt(client_capabilities, client_policy),
+        "instructions": "\n\n".join(instruction_parts).strip(),
         "prompt_cache_key": _default_prompt_cache_key(
             ai_feature, capability_signature
         ),
@@ -3471,8 +4353,16 @@ def build_llm_request_from_mixroom_payload(
             library_snapshot=library_snapshot,
             pending_mix=pending_mix_value,
         ),
-        "tools": _build_tools(client_capabilities),
+        "tools": _build_tools(
+            client_capabilities,
+            tool_routing_mode=effective_tool_routing_mode,
+            user_text=user_text,
+        ),
         "tool_choice": "required",
+        "parallel_tool_calls": True,
+        "context_packing_mode": context_packing_mode,
+        "tool_routing_mode": tool_routing_mode,
+        "effective_tool_routing_mode": effective_tool_routing_mode,
     }
     if _supports_temperature(resolved_model):
         body["temperature"] = DEFAULT_TEMPERATURE
@@ -3531,6 +4421,13 @@ def normalize_openai_compatible_request(
     if reasoning_value is not None and not isinstance(reasoning_value, dict):
         raise ValueError("'reasoning' must be an object.")
 
+    parallel_tool_calls_value = sanitized.get("parallel_tool_calls")
+    if parallel_tool_calls_value is not None and not isinstance(
+        parallel_tool_calls_value,
+        bool,
+    ):
+        raise ValueError("'parallel_tool_calls' must be a boolean.")
+
     temperature_value = sanitized.get("temperature")
     if temperature_value is not None and not isinstance(temperature_value, (int, float)):
         raise ValueError("'temperature' must be numeric.")
@@ -3569,6 +4466,8 @@ def normalize_openai_compatible_request(
         default_reasoning = _default_reasoning(resolved_model)
         if default_reasoning is not None:
             normalized["reasoning"] = default_reasoning
+    if parallel_tool_calls_value is not None:
+        normalized["parallel_tool_calls"] = parallel_tool_calls_value
 
     for key in (
         "max_output_tokens",
@@ -3608,6 +4507,7 @@ def build_openai_responses_request(
         "max_output_tokens",
         "text",
         "metadata",
+        "parallel_tool_calls",
         "prompt_cache_key",
         "prompt_cache_retention",
     ):

@@ -248,6 +248,164 @@ void main() {
       );
     });
 
+    test('sample_insert can prefer clean rows for new content', () {
+      final initial = TimelineActionState.empty(
+        projectTempoBpm: 120.0,
+        selectedRowIndex: 0,
+        clips: <TimelineClip>[
+          _audioClip(id: 'main', row: 0),
+          _audioClip(id: 'vocal', row: 1),
+        ],
+      );
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('sample_insert', <String, dynamic>{
+            'operation': 'insert_audio_clips',
+            'items': [
+              {
+                'library_path': 'Starter Kit v1/Processed Drums/Kick-01.mp3',
+                'row_index': 0,
+                'placement_policy': 'clean_row',
+              },
+            ],
+          }),
+        ],
+        preferCleanContentRows: true,
+      );
+
+      expect(next.clips.length, 3);
+      expect(next.clips.last.rowIndex, 2);
+    });
+
+    test('sample_insert items inherit top-level clean placement hints', () {
+      final initial = TimelineActionState.empty(
+        projectTempoBpm: 120.0,
+        selectedRowIndex: 0,
+        clips: <TimelineClip>[
+          _audioClip(id: 'main', row: 0),
+          _audioClip(id: 'vocal', row: 1),
+        ],
+      );
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('sample_insert', <String, dynamic>{
+            'operation': 'insert_audio_clips',
+            'row_index': 0,
+            'placement_policy': 'clean_row',
+            'items': [
+              {
+                'library_path': 'Starter Kit v1/Processed Drums/Kick-01.mp3',
+              },
+            ],
+          }),
+        ],
+        preferCleanContentRows: true,
+      );
+
+      expect(next.clips.length, 3);
+      expect(next.clips.last.rowIndex, 2);
+    });
+
+    test('sample_insert clean-row mode keeps explicit row without policy', () {
+      final initial = TimelineActionState.empty(
+        projectTempoBpm: 120.0,
+        selectedRowIndex: 0,
+        clips: <TimelineClip>[
+          _audioClip(id: 'main', row: 0),
+          _audioClip(id: 'vocal', row: 1),
+        ],
+      );
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('sample_insert', <String, dynamic>{
+            'operation': 'insert_audio_clips',
+            'items': [
+              {
+                'library_path': 'Starter Kit v1/Processed Drums/Snare-01.mp3',
+                'row_index': 0,
+              },
+            ],
+          }),
+        ],
+        preferCleanContentRows: true,
+      );
+
+      expect(next.clips.length, 3);
+      expect(next.clips.last.rowIndex, 0);
+    });
+
+    test('sample_insert clean-row mode honors explicit layering', () {
+      final initial = TimelineActionState.empty(
+        projectTempoBpm: 120.0,
+        selectedRowIndex: 0,
+        clips: <TimelineClip>[
+          _audioClip(id: 'drums', row: 0),
+        ],
+      );
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('sample_insert', <String, dynamic>{
+            'operation': 'insert_audio_clips',
+            'items': [
+              {
+                'library_path': 'Starter Kit v1/Processed Drums/Snare-01.mp3',
+                'row_index': 0,
+                'allow_layer_existing_row': true,
+                'placement_policy': 'clean_row',
+              },
+            ],
+          }),
+        ],
+        preferCleanContentRows: true,
+      );
+
+      expect(next.clips.length, 2);
+      expect(next.clips.last.rowIndex, 0);
+    });
+
+    test('sample_insert items inherit selected-row layering intent', () {
+      final initial = TimelineActionState.empty(
+        projectTempoBpm: 120.0,
+        selectedRowIndex: 1,
+        clips: <TimelineClip>[
+          _audioClip(id: 'main', row: 0),
+          _audioClip(id: 'vocal', row: 1),
+        ],
+      );
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('sample_insert', <String, dynamic>{
+            'operation': 'insert_audio_clips',
+            'target': <String, dynamic>{
+              'row_index': 1,
+              'scope': 'selected',
+              'allow_layer_existing_row': true,
+              'placement_policy': 'clean_row',
+            },
+            'items': [
+              {
+                'library_path': 'Starter Kit v1/Processed Drums/Hi-Hat-01.mp3',
+              },
+            ],
+          }),
+        ],
+        preferCleanContentRows: true,
+      );
+
+      expect(next.clips.length, 3);
+      expect(next.clips.last.rowIndex, 1);
+    });
+
     test('sample_insert infers sane drum spacing when repeat_count has no step',
         () {
       final initial = TimelineActionState.empty(projectTempoBpm: 120.0);
@@ -1113,6 +1271,86 @@ void main() {
       expect(midiClips.first.midiNotes.length, greaterThan(2));
       expect(midiClips.last.rowIndex, 4);
       expect(midiClips.last.midiNotes, isNotEmpty);
+    });
+
+    test('create_clip can prefer clean rows for new MIDI content', () {
+      final initial = TimelineActionState.empty(
+        projectTempoBpm: 120.0,
+        selectedRowIndex: 0,
+        clips: <TimelineClip>[
+          _audioClip(id: 'main', row: 0),
+          _audioClip(id: 'vocal', row: 1),
+        ],
+      );
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('midi_compose', <String, dynamic>{
+            'operation': 'create_clip',
+            'target': <String, dynamic>{
+              'row_index': 0,
+              'placement_policy': 'clean_row',
+            },
+            'instrument_id': 'mixroom.fm_keys',
+            'notes': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'pitch': 60,
+                'start_beat': 0.0,
+                'length_beats': 2.0,
+                'velocity': 0.8,
+              },
+            ],
+          }),
+        ],
+        preferCleanContentRows: true,
+      );
+
+      final midiClips =
+          next.clips.where((clip) => clip.isMidi).toList(growable: false);
+      expect(midiClips.length, 1);
+      expect(midiClips.single.rowIndex, 2);
+    });
+
+    test('create_clip keeps selected row when user targets current row', () {
+      final initial = TimelineActionState.empty(
+        projectTempoBpm: 120.0,
+        selectedRowIndex: 0,
+        clips: <TimelineClip>[
+          _audioClip(id: 'main', row: 0),
+          _audioClip(id: 'vocal', row: 1),
+        ],
+      );
+
+      final next = AssistantActionTimelineReducer.applyActions(
+        initial,
+        <AssistantAction>[
+          _action('midi_compose', <String, dynamic>{
+            'operation': 'create_clip',
+            'target': <String, dynamic>{
+              'row_index': 0,
+              'scope': 'selected',
+              'prefer_selected': true,
+              'placement_policy': 'clean_row',
+            },
+            'instrument_id': 'mixroom.fm_keys',
+            'notes': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'pitch': 60,
+                'start_beat': 0.0,
+                'length_beats': 2.0,
+                'velocity': 0.8,
+              },
+            ],
+          }),
+        ],
+        preferCleanContentRows: true,
+      );
+
+      final midiClips =
+          next.clips.where((clip) => clip.isMidi).toList(growable: false);
+      expect(midiClips.length, 1);
+      expect(midiClips.single.rowIndex, 0);
     });
 
     test('compose_pattern and stutter controls apply on midi notes', () {

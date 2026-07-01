@@ -282,7 +282,7 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertIn("AI Co-Producer", provider.request_body["instructions"])
         self.assertEqual(
             provider.request_body["prompt_cache_key"],
-            "mixroom-daw-v20260701a:ai_chat:c49fea7425fa",
+            "mixroom-daw-v20260701a:ai_chat:4280ef7acfc3",
         )
         self.assertEqual(provider.request_body["prompt_cache_retention"], "in_memory")
         self.assertEqual(provider.request_body["tools"][0]["name"], "informational_response")
@@ -553,7 +553,7 @@ class ApiResponsesTests(unittest.TestCase):
         request_context = log_request.call_args.kwargs["request_context"]
         self.assertEqual(
             request_context["prompt_cache_key"],
-            "mixroom-daw-v20260701a:ai_chat:c49fea7425fa",
+            "mixroom-daw-v20260701a:ai_chat:4280ef7acfc3",
         )
         self.assertEqual(request_context["prompt_cache_retention"], "in_memory")
         self.assertEqual(request_context["prompt_tokens"], 8099)

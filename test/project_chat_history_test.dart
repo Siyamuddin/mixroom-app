@@ -107,4 +107,34 @@ void main() {
       ],
     );
   });
+
+  test('persists and restores conversation state session id', () {
+    final history = ProjectChatHistory.fromChatMessages(
+      [
+        buildMessage(id: '1', authorId: 'user', text: 'hello'),
+      ],
+      stateSessionId: 'state-session-1',
+    );
+
+    final json = history.toJsonValue();
+    expect(json?['stateSessionId'], 'state-session-1');
+
+    final restored = ProjectChatHistory.fromJson(json);
+    expect(restored.stateSessionId, 'state-session-1');
+    expect(restored.messages.single.text, 'hello');
+  });
+
+  test('legacy chat history without state session id still restores', () {
+    final history = ProjectChatHistory.fromJson([
+      {
+        'id': '1',
+        'authorId': 'user',
+        'text': 'legacy',
+        'createdAtMs': 1,
+      },
+    ]);
+
+    expect(history.stateSessionId, isEmpty);
+    expect(history.messages.single.text, 'legacy');
+  });
 }

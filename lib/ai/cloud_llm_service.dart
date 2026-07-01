@@ -11,6 +11,7 @@ import 'package:mixroom/models/mixing_result.dart';
 import 'package:mixroom/ai/ai_debug.dart';
 import 'package:mixroom/ai/assistant_action_utils.dart';
 import 'package:mixroom/ai/debug_system_prompt.dart';
+import 'package:mixroom/ai/ai_execution_guidance.dart';
 
 class AiPromptRateLimitWindow {
   final int used;
@@ -136,6 +137,18 @@ class AiPromptRateLimitStatus {
   }
 }
 
+class _PackedContextSnapshots {
+  final String projectSnapshot;
+  final String selectionSnapshot;
+  final String librarySnapshot;
+
+  const _PackedContextSnapshots({
+    required this.projectSnapshot,
+    required this.selectionSnapshot,
+    required this.librarySnapshot,
+  });
+}
+
 class LlmResult {
   final String? text; // assistant text (optional)
   final String? toolName;
@@ -170,6 +183,7 @@ class LlmResult {
 
 class CloudLlmService {
   static const _apiUrl = 'https://api.openai.com/v1/responses';
+  static const _conversationsApiUrl = 'https://api.openai.com/v1/conversations';
   static const _promptCacheVersion = 'mixroom-daw-v20260701a';
   static const _directOpenAiMaxOutputTokens = 8192;
   static const _defaultPromptCacheRetention = 'in_memory';
@@ -196,7 +210,10 @@ class CloudLlmService {
   final Future<String?> Function()? authTokenProvider;
   final Future<String?> Function()? refreshAuthTokenProvider;
   final Duration requestTimeout;
+  final String conversationStateMode;
   final http.Client _httpClient;
+  final Map<String, String> _directConversationIds = <String, String>{};
+  final Map<String, int> _conversationTurnCounts = <String, int>{};
 
   CloudLlmService({
     this.apiKey = '',
@@ -206,6 +223,7 @@ class CloudLlmService {
     this.authTokenProvider,
     this.refreshAuthTokenProvider,
     this.requestTimeout = const Duration(seconds: 25),
+    this.conversationStateMode = 'manual_history',
     http.Client? httpClient,
   }) : _httpClient = httpClient ?? http.Client();
 
@@ -253,6 +271,27 @@ class CloudLlmService {
     return 'missing_direct_openai_prompt';
   }
 
+  String get _normalizedConversationStateMode =>
+      _normalizeConversationStateMode(conversationStateMode);
+
+  String _normalizeConversationStateMode(String raw) {
+    switch (raw.trim().toLowerCase()) {
+      case 'openai_conversation_seeded':
+        return 'openai_conversation_seeded';
+      case 'openai_conversation':
+        return 'openai_conversation';
+      case 'manual_history':
+      default:
+        return 'manual_history';
+    }
+  }
+
+  bool get _usesOpenAiConversationState =>
+      _normalizedConversationStateMode == 'openai_conversation' ||
+      _normalizedConversationStateMode == 'openai_conversation_seeded';
+  bool get _usesSeededOpenAiConversationState =>
+      _normalizedConversationStateMode == 'openai_conversation_seeded';
+
   String get _effectiveSystemPrompt {
     final debugPrompt = kDebugMode ? kDebugSystemPrompt.trim() : '';
     return debugPrompt;
@@ -264,7 +303,17 @@ class CloudLlmService {
     'daw.midi_compose.instrument_insert',
     'daw.midi_compose.transpose_notes',
     'daw.midi_compose.audio_to_midi',
+    'daw.transport_control',
+    'daw.row_mute',
+    'daw.row_solo',
+    'daw.row_rename',
+    'daw.row_select',
+    'daw.row_delete',
+    'daw.row_create',
+    'daw.row_mix',
+    'daw.automation_edit',
     'daw.clip_edit.pitch_shift',
+    'daw.clean_content_rows',
   };
 
   Map<String, dynamic> _mergedAnalyticsClientContext(
@@ -291,6 +340,43 @@ class CloudLlmService {
         .toSet();
   }
 
+  String _readContextPackingMode(Map<String, dynamic> clientContext) {
+    final normalized = clientContext['ai_context_packing_mode']
+            ?.toString()
+            .trim()
+            .toLowerCase() ??
+        'full';
+    switch (normalized) {
+      case 'compact':
+        return 'compact';
+      case 'full':
+      default:
+        return 'full';
+    }
+  }
+
+  String _readToolRoutingMode(Map<String, dynamic> clientContext) {
+    final normalized = clientContext['ai_tool_routing_mode']
+            ?.toString()
+            .trim()
+            .toLowerCase() ??
+        'full';
+    return normalized == 'intent_scoped' ? 'intent_scoped' : 'full';
+  }
+
+  String _effectiveToolRoutingMode(Map<String, dynamic> clientContext) {
+    return _readToolRoutingMode(clientContext);
+  }
+
+  String _contextRouteSignature(Map<String, dynamic> clientContext) {
+    final contextPackingMode = _readContextPackingMode(clientContext);
+    final toolRoutingMode = _readToolRoutingMode(clientContext);
+    if (contextPackingMode == 'full' && toolRoutingMode == 'full') {
+      return '';
+    }
+    return 'context:$contextPackingMode|tool_routing:$toolRoutingMode';
+  }
+
   List<String> _readStringList(dynamic value, {int maxItems = 80}) {
     if (value is! List) return const <String>[];
     final normalized = <String>[];
@@ -313,6 +399,390 @@ class CloudLlmService {
       return parsed != null && parsed >= 0 ? parsed : null;
     }
     return null;
+  }
+
+  static final RegExp _trackLineRe = RegExp(r'^Track\s+(\d+):\s*(.*)$');
+  static final RegExp _mixIntentRe = RegExp(
+    r'\b(mix|master|eq|compress|compression|reverb|delay|space|spacious|depth|width|wide|wider|widen|narrow|stereo|spread|warm|warmer|warmth|body|fuller|thin|tone|bright|brighter|brighten|brightness|clear|clearer|clarity|dark|darker|dull|punch|presence|air|wet|wetter|dry|balance|loud|quiet|volume|bass|treble|vocal|instrumental|reference|remix|lofi|lo-fi|vibe)\b',
+    caseSensitive: false,
+  );
+  static final RegExp _dawIntentRe = RegExp(
+    r'\b(mute|unmute|solo|unsolo|split|stem|stems|separate|rename|select|delete|remove|add|insert|put|place|create|make|write|compose|generate|drum|kick|snare|hat|sample|loop|midi|instrument|pitch|transpose|tempo|bpm|play|pause|stop|restart|move|copy|duplicate|trim|cut|fade|automation|effect|plugin|row|track|clip|record|undo|redo|metronome|click|vinyl|noise|texture|riser|whoosh|fx|808|drop|duck|sidechain|pump|pan|left|right|center|adlib|hook|cleanup|clean)\b',
+    caseSensitive: false,
+  );
+  static final RegExp _questionIntentRe = RegExp(
+    r'\b(what|where|why|how|which|help|explain|tell me|show me)\b',
+    caseSensitive: false,
+  );
+
+  String _extractInlineField(String text, String key) {
+    final pattern = RegExp(
+      '${RegExp.escape(key)}=("[^"]*"|\\[[^\\]]*\\]|\\{[^}]*\\}|[^\\s,}]+)',
+    );
+    return pattern.firstMatch(text)?.group(1)?.trim() ?? '';
+  }
+
+  String _extractInlineBlock(String text, String key) {
+    final pattern = RegExp('${RegExp.escape(key)}\\{([^}]*)\\}');
+    final match = pattern.firstMatch(text);
+    final value = match?.group(1)?.trim() ?? '';
+    return value.isEmpty ? '' : '{$value}';
+  }
+
+  String _compactTrackLine(String line) {
+    final match = _trackLineRe.firstMatch(line.trim());
+    if (match == null) return line.trim();
+
+    final trackNumber = int.tryParse(match.group(1) ?? '') ?? 1;
+    final rowIndex = math.max(0, trackNumber - 1);
+    final rest = match.group(2) ?? '';
+    final fields = <String>[
+      'row_index=$rowIndex',
+      'track_number=$trackNumber',
+    ];
+    for (final key in const <String>[
+      'row_name',
+      'lane_kind',
+      'clip_count',
+      'clip_kinds',
+      'labels',
+      'files',
+      'instruments',
+      'sample_hints',
+      'gain',
+      'pan',
+      'roles',
+      'role_consistency',
+      'reference_hints',
+      'fx_count',
+      'active_fx_count',
+      'fx_chain',
+      'automation_targets',
+    ]) {
+      final value = _extractInlineField(rest, key);
+      if (value.isNotEmpty) fields.add('$key=$value');
+    }
+    for (final key in const <String>[
+      'arrangement',
+      'midi_state',
+      'coverage',
+      'interpretation',
+    ]) {
+      final value = _extractInlineBlock(rest, key);
+      if (value.isNotEmpty) fields.add('$key=$value');
+    }
+    final notes = _extractInlineField(rest, 'notes');
+    if (notes.isNotEmpty) fields.add('notes=$notes');
+    return 'ROW ${fields.join(' ')}';
+  }
+
+  String _compactMasterLine(String line) {
+    final rest = line.contains(':') ? line.split(':').skip(1).join(':') : line;
+    final fields = <String>['MASTER'];
+    for (final key in const <String>[
+      'gain',
+      'pan',
+      'fx_count',
+      'active_fx_count',
+      'fx_chain',
+      'automation_targets',
+    ]) {
+      final value = _extractInlineField(rest, key);
+      if (value.isNotEmpty) fields.add('$key=$value');
+    }
+    return fields.join(' ');
+  }
+
+  String _compactProjectSnapshot(String snapshot) {
+    final lines = <String>['COMPACT_PROJECT_SNAPSHOT_V1'];
+    for (final raw in snapshot.split('\n')) {
+      final line = raw.trim();
+      if (line.isEmpty) continue;
+      if (_trackLineRe.hasMatch(line)) {
+        lines.add(_compactTrackLine(line));
+        continue;
+      }
+      if (line.startsWith('Master:')) {
+        lines.add(_compactMasterLine(line));
+        continue;
+      }
+      if (const <String>[
+        'bpm=',
+        'project_key=',
+        'occupied_tracks=',
+        'top_occupied_track=',
+        'empty_rows=',
+        'row_count=',
+      ].any((prefix) => line.startsWith(prefix))) {
+        lines.add(line);
+      }
+    }
+    return lines.join('\n').trim();
+  }
+
+  String _compactSelectedRowContext(String value) {
+    final text = value.trim();
+    if (text.isEmpty) return '';
+    final fields = <String>[];
+    for (final key in const <String>[
+      'row_index',
+      'track_number',
+      'row_name',
+      'lane_kind',
+      'clip_count',
+      'clip_kinds',
+      'labels',
+      'files',
+      'instruments',
+      'sample_hints',
+      'top_role',
+      'source_type',
+      'flags',
+      'reference_hints',
+      'fx_count',
+      'active_fx_count',
+      'fx_chain',
+    ]) {
+      final fieldValue = _extractInlineField(text, key);
+      if (fieldValue.isNotEmpty) fields.add('$key=$fieldValue');
+    }
+    for (final key in const <String>['arrangement', 'midi_state', 'coverage']) {
+      final blockValue = _extractInlineBlock(text, key);
+      if (blockValue.isNotEmpty) fields.add('$key=$blockValue');
+    }
+    return fields.isEmpty ? text : 'selected_row_context{${fields.join(',')}}';
+  }
+
+  String _compactSelectionSnapshot(String snapshot) {
+    final lines = <String>['COMPACT_SELECTION_SNAPSHOT_V1'];
+    for (final raw in snapshot.split('\n')) {
+      final line = raw.trim();
+      if (line.isEmpty) continue;
+      if (line.startsWith('selected_row_context{') && line.endsWith('}')) {
+        final inner =
+            line.substring('selected_row_context{'.length, line.length - 1);
+        final compact = _compactSelectedRowContext(inner);
+        if (compact.isNotEmpty) lines.add(compact);
+        continue;
+      }
+      if (const <String>[
+        'selected_row_index=',
+        'selected_clip_indices=',
+        'primary_selected_clip_index=',
+        'selected_clip[',
+        'occupied_tracks=',
+        'top_occupied_track=',
+        'master_automation_targets=',
+        'selected_row_automation_targets=',
+        'master_context',
+      ].any((prefix) => line.startsWith(prefix))) {
+        lines.add(line);
+      }
+    }
+    return lines.join('\n').trim();
+  }
+
+  String _compactLibrarySnapshot(String snapshot) {
+    final lines = <String>['COMPACT_LIBRARY_SNAPSHOT_V1'];
+    var currentSection = '';
+    var roleHintCount = 0;
+    var instrumentCount = 0;
+    var sampleFolderCount = 0;
+
+    void ensureSection(String name) {
+      currentSection = name;
+      final header = '$name:';
+      if (!lines.contains(header)) {
+        lines.add(header);
+      }
+    }
+
+    List<String> splitInlineEntries(String inner) {
+      final entries = <String>[];
+      final buffer = StringBuffer();
+      var bracketDepth = 0;
+      for (var i = 0; i < inner.length; i++) {
+        final char = inner[i];
+        if (char == '[') {
+          bracketDepth++;
+        } else if (char == ']' && bracketDepth > 0) {
+          bracketDepth--;
+        }
+        if (char == ',' && bracketDepth == 0) {
+          final item = buffer.toString().trim();
+          if (item.isNotEmpty) entries.add(item);
+          buffer.clear();
+          continue;
+        }
+        buffer.write(char);
+      }
+      final item = buffer.toString().trim();
+      if (item.isNotEmpty) entries.add(item);
+      return entries;
+    }
+
+    void appendRoleHintEntries(String inner) {
+      ensureSection('library_role_hints');
+      for (final entry in splitInlineEntries(inner)) {
+        if (roleHintCount >= 18) break;
+        final equalsIndex = entry.indexOf('=');
+        if (equalsIndex <= 0) continue;
+        final role = entry.substring(0, equalsIndex).trim();
+        final value = entry.substring(equalsIndex + 1).trim();
+        if (role.isEmpty || value.isEmpty) continue;
+        final roleName =
+            role.startsWith('role:') ? role.substring('role:'.length) : role;
+        final alias = role.startsWith('role:') ? role : 'role:$roleName';
+        lines.add('- $roleName: alias=$alias examples=$value');
+        roleHintCount++;
+      }
+    }
+
+    void appendInstrumentEntries(String inner) {
+      ensureSection('built_in_instruments');
+      for (final entry in splitInlineEntries(inner)) {
+        if (instrumentCount >= 18) break;
+        final equalsIndex = entry.indexOf('=');
+        final family =
+            (equalsIndex <= 0 ? entry : entry.substring(0, equalsIndex)).trim();
+        final value =
+            equalsIndex <= 0 ? '' : entry.substring(equalsIndex + 1).trim();
+        if (family.isEmpty) continue;
+        lines.add(value.isEmpty ? '- $family' : '- $family: $value');
+        instrumentCount++;
+      }
+    }
+
+    void appendAudioSampleEntries(String inner) {
+      ensureSection('library_audio_samples');
+      for (final entry in splitInlineEntries(inner)) {
+        if (sampleFolderCount >= 12) break;
+        final equalsIndex = entry.indexOf('=');
+        final folder =
+            (equalsIndex <= 0 ? entry : entry.substring(0, equalsIndex)).trim();
+        final value =
+            equalsIndex <= 0 ? '' : entry.substring(equalsIndex + 1).trim();
+        if (folder.isEmpty) continue;
+        lines.add(value.isEmpty ? '- $folder' : '- $folder: $value');
+        sampleFolderCount++;
+      }
+    }
+
+    for (final raw in snapshot.split('\n')) {
+      final line = raw.trim();
+      if (line.isEmpty) continue;
+      if (line.startsWith('library_role_hints:')) {
+        final rest = line.substring('library_role_hints:'.length).trim();
+        if (rest.isEmpty) {
+          ensureSection('library_role_hints');
+        } else {
+          appendRoleHintEntries(rest);
+        }
+        continue;
+      }
+      if (line.startsWith('built_in_instruments:')) {
+        final rest = line.substring('built_in_instruments:'.length).trim();
+        if (rest.isEmpty) {
+          ensureSection('built_in_instruments');
+        } else {
+          appendInstrumentEntries(rest);
+        }
+        continue;
+      }
+      if (line.startsWith('library_audio_samples:')) {
+        final rest = line.substring('library_audio_samples:'.length).trim();
+        if (rest.isEmpty) {
+          ensureSection('library_audio_samples');
+        } else {
+          appendAudioSampleEntries(rest);
+        }
+        continue;
+      }
+      if (line.startsWith('library_role_hints{') && line.endsWith('}')) {
+        final inner =
+            line.substring('library_role_hints{'.length, line.length - 1);
+        appendRoleHintEntries(inner);
+        continue;
+      }
+      if (line.startsWith('instrument_hints{') && line.endsWith('}')) {
+        ensureSection('built_in_instruments');
+        final ids = <String>[];
+        final inner =
+            line.substring('instrument_hints{'.length, line.length - 1);
+        for (final entry in splitInlineEntries(inner)) {
+          final equalsIndex = entry.indexOf('=');
+          final instrumentId =
+              (equalsIndex <= 0 ? entry : entry.substring(0, equalsIndex))
+                  .trim();
+          if (instrumentId.isNotEmpty) ids.add(instrumentId);
+        }
+        if (ids.isNotEmpty && instrumentCount < 18) {
+          lines.add('- Hints: [${ids.take(24).join(', ')}]');
+          instrumentCount++;
+        }
+        continue;
+      }
+      if (line.endsWith(':') && !line.startsWith('- ')) {
+        currentSection = line.substring(0, line.length - 1);
+        if (const <String>{
+          'built_in_instruments',
+          'library_role_hints',
+          'library_audio_samples',
+        }.contains(currentSection)) {
+          lines.add(line);
+        }
+        continue;
+      }
+      if (currentSection == 'built_in_instruments' && line.startsWith('- ')) {
+        if (instrumentCount < 18) lines.add(line);
+        instrumentCount++;
+        continue;
+      }
+      if (currentSection == 'library_role_hints' && line.startsWith('- ')) {
+        if (roleHintCount < 18) lines.add(line);
+        roleHintCount++;
+        continue;
+      }
+      if (currentSection == 'library_audio_samples' && line.startsWith('- ')) {
+        if (sampleFolderCount < 12) lines.add(line);
+        sampleFolderCount++;
+      }
+    }
+    return lines.join('\n').trim();
+  }
+
+  _PackedContextSnapshots _packContextSnapshots({
+    required String mode,
+    required String projectSnapshot,
+    required String selectionSnapshot,
+    required String librarySnapshot,
+  }) {
+    if (mode != 'compact') {
+      return _PackedContextSnapshots(
+        projectSnapshot: projectSnapshot,
+        selectionSnapshot: selectionSnapshot,
+        librarySnapshot: librarySnapshot,
+      );
+    }
+    final normalizedProject = projectSnapshot.trim();
+    final normalizedSelection = selectionSnapshot.trim();
+    final normalizedLibrary = librarySnapshot.trim();
+    return _PackedContextSnapshots(
+      projectSnapshot:
+          normalizedProject.startsWith('COMPACT_PROJECT_SNAPSHOT_V1')
+              ? projectSnapshot
+              : _compactProjectSnapshot(projectSnapshot),
+      selectionSnapshot: normalizedSelection.isEmpty
+          ? ''
+          : normalizedSelection.startsWith('COMPACT_SELECTION_SNAPSHOT_V1')
+              ? selectionSnapshot
+              : _compactSelectionSnapshot(selectionSnapshot),
+      librarySnapshot: normalizedLibrary.isEmpty
+          ? ''
+          : normalizedLibrary.startsWith('COMPACT_LIBRARY_SNAPSHOT_V1')
+              ? librarySnapshot
+              : _compactLibrarySnapshot(librarySnapshot),
+    );
   }
 
   Map<String, dynamic> _readClientPolicy(Map<String, dynamic> clientContext) {
@@ -430,6 +900,11 @@ class CloudLlmService {
     } else {
       lines.add(
         '- This client may only use midi_compose on an existing editable MIDI/instrument target.',
+      );
+    }
+    if (clientCapabilities.contains('daw.clean_content_rows')) {
+      lines.add(
+        '- This client supports clean placement for newly added samples, loops, drums, keys, pads, bass, melodies, or generated parts: use placement_policy="clean_row" or prefer_clean_row=true on each sample item/MIDI action or target for broad additions that should move to empty/new rows. User placement wins: if the user asks for the current, selected, named, numbered, or otherwise particular row, target that row and set allow_layer_existing_row=true on that item/action or target.',
       );
     }
     if (clientCapabilities.contains('daw.midi_compose.transpose_notes')) {
@@ -586,6 +1061,29 @@ class CloudLlmService {
           'description':
               'Use when the user refers to the current selection with phrases like "this one", "that one", or "here".',
         },
+        'placement_policy': {
+          'type': 'string',
+          'enum': [
+            'clean_row',
+            'empty_row',
+            'new_row',
+            'separate_row',
+            'existing_row',
+            'layer_existing_row',
+          ],
+          'description':
+              'Use clean_row/empty_row/new_row/separate_row for broad new musical parts. Use existing_row/layer_existing_row only when the user explicitly asks for a current, selected, named, numbered, or otherwise specific row.',
+        },
+        'prefer_clean_row': {
+          'type': 'boolean',
+          'description':
+              'True when broad new content should avoid occupied source rows.',
+        },
+        'allow_layer_existing_row': {
+          'type': 'boolean',
+          'description':
+              'True when the user explicitly asked to add to a specific row that may already contain clips.',
+        },
         'automation_target_id': {'type': 'string'},
         'target_id': {'type': 'string'},
         'lane_id': {'type': 'string'},
@@ -724,6 +1222,318 @@ class CloudLlmService {
                               'required': ['bpm'],
                             },
                           ],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['row_mix'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'operation': {
+                              'type': 'string',
+                              'enum': [
+                                'set_gain',
+                                'adjust_gain',
+                                'set_pan',
+                                'adjust_pan',
+                              ],
+                            },
+                            'target': _dawTargetSchema(),
+                            'row_index': {'type': 'integer', 'minimum': 0},
+                            'row_number': {'type': 'integer', 'minimum': 1},
+                            'track_number': {'type': 'integer', 'minimum': 1},
+                            'value': {'type': 'number'},
+                            'gain': {'type': 'number'},
+                            'gain_db': {'type': 'number'},
+                            'db': {'type': 'number'},
+                            'delta': {'type': 'number'},
+                            'delta_db': {'type': 'number'},
+                            'pan01': {
+                              'type': 'number',
+                              'minimum': 0,
+                              'maximum': 1,
+                            },
+                            'pan_signed': {
+                              'type': 'number',
+                              'minimum': -1,
+                              'maximum': 1,
+                            },
+                            'direction': {
+                              'type': 'string',
+                              'enum': [
+                                'up',
+                                'down',
+                                'left',
+                                'right',
+                                'center',
+                                'hard_left',
+                                'hard_right',
+                              ],
+                            },
+                          },
+                          'required': ['operation'],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['transport_control'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'operation': {
+                              'type': 'string',
+                              'enum': [
+                                'play',
+                                'pause',
+                                'stop',
+                                'restart',
+                                'toggle_play_pause',
+                                'start_recording',
+                                'stop_recording',
+                                'toggle_recording',
+                                'undo',
+                                'redo',
+                                'enable_metronome',
+                                'disable_metronome',
+                                'toggle_metronome',
+                                'enable_loop',
+                                'disable_loop',
+                                'toggle_loop',
+                              ],
+                            },
+                          },
+                          'required': ['operation'],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['row_create'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'operation': {
+                              'type': 'string',
+                              'enum': ['create'],
+                            },
+                            'position': {
+                              'type': 'string',
+                              'enum': ['end', 'above', 'below'],
+                            },
+                            'target': _dawTargetSchema(),
+                            'row_index': {'type': 'integer', 'minimum': 0},
+                            'row_number': {'type': 'integer', 'minimum': 1},
+                            'track_number': {'type': 'integer', 'minimum': 1},
+                            'name': {
+                              'type': 'string',
+                              'minLength': 1,
+                              'maxLength': 80,
+                            },
+                            'new_name': {
+                              'type': 'string',
+                              'minLength': 1,
+                              'maxLength': 80,
+                            },
+                          },
+                          'required': ['operation'],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['row_delete'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'operation': {
+                              'type': 'string',
+                              'enum': ['delete'],
+                            },
+                            'target': _dawTargetSchema(),
+                            'row_index': {'type': 'integer', 'minimum': 0},
+                            'row_indices': {
+                              'type': 'array',
+                              'items': {'type': 'integer', 'minimum': 0},
+                              'minItems': 1,
+                            },
+                            'track_indices': {
+                              'type': 'array',
+                              'items': {'type': 'integer', 'minimum': 0},
+                              'minItems': 1,
+                            },
+                          },
+                          'required': ['operation'],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['row_rename'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'operation': {
+                              'type': 'string',
+                              'enum': ['rename'],
+                            },
+                            'target': _dawTargetSchema(),
+                            'row_index': {'type': 'integer', 'minimum': 0},
+                            'name': {
+                              'type': 'string',
+                              'minLength': 1,
+                              'maxLength': 80,
+                            },
+                            'new_name': {
+                              'type': 'string',
+                              'minLength': 1,
+                              'maxLength': 80,
+                            },
+                          },
+                          'required': ['operation'],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['row_mute'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'operation': {
+                              'type': 'string',
+                              'enum': ['mute', 'unmute', 'toggle'],
+                            },
+                            'target': _dawTargetSchema(),
+                            'row_index': {'type': 'integer', 'minimum': 0},
+                            'row_indices': {
+                              'type': 'array',
+                              'items': {'type': 'integer', 'minimum': 0},
+                              'minItems': 1,
+                            },
+                            'track_indices': {
+                              'type': 'array',
+                              'items': {'type': 'integer', 'minimum': 0},
+                              'minItems': 1,
+                            },
+                            'group_id': {'type': 'string'},
+                            'group_name': {'type': 'string'},
+                          },
+                          'required': ['operation'],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['row_solo'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'operation': {
+                              'type': 'string',
+                              'enum': ['solo', 'unsolo', 'toggle'],
+                            },
+                            'target': _dawTargetSchema(),
+                            'row_index': {'type': 'integer', 'minimum': 0},
+                            'row_indices': {
+                              'type': 'array',
+                              'items': {'type': 'integer', 'minimum': 0},
+                              'minItems': 1,
+                            },
+                            'track_indices': {
+                              'type': 'array',
+                              'items': {'type': 'integer', 'minimum': 0},
+                              'minItems': 1,
+                            },
+                            'group_id': {'type': 'string'},
+                            'group_name': {'type': 'string'},
+                          },
+                          'required': ['operation'],
+                          'additionalProperties': true,
+                        },
+                      },
+                      'required': ['type', 'data'],
+                      'additionalProperties': false,
+                    },
+                    {
+                      'type': 'object',
+                      'properties': {
+                        'type': {
+                          'type': 'string',
+                          'enum': ['row_select'],
+                        },
+                        'data': {
+                          'type': 'object',
+                          'properties': {
+                            'operation': {
+                              'type': 'string',
+                              'enum': ['select'],
+                            },
+                            'target': _dawTargetSchema(),
+                            'row_index': {'type': 'integer', 'minimum': 0},
+                            'row_indices': {
+                              'type': 'array',
+                              'items': {'type': 'integer', 'minimum': 0},
+                              'minItems': 1,
+                            },
+                            'track_indices': {
+                              'type': 'array',
+                              'items': {'type': 'integer', 'minimum': 0},
+                              'minItems': 1,
+                            },
+                          },
+                          'required': ['operation'],
                           'additionalProperties': true,
                         },
                       },
@@ -1664,6 +2474,196 @@ class CloudLlmService {
         },
       ];
 
+  Set<String> _intentToolNames(String userText, String toolRoutingMode) {
+    if (toolRoutingMode != 'intent_scoped') {
+      return <String>{
+        'informational_response',
+        'daw_assistant_actions',
+        'mix_model_request',
+      };
+    }
+    final text = userText.trim().toLowerCase();
+    final starterCreation = RegExp(r'\b(lofi|lo-fi)\b').hasMatch(text) &&
+        RegExp(r'\b(make|create|generate|write|compose|build)\b')
+            .hasMatch(text) &&
+        RegExp(r'\b(song|beat|track|instrumental|starter|idea|loop)\b')
+            .hasMatch(text) &&
+        !text.contains('remix');
+    if (starterCreation) {
+      return <String>{'informational_response', 'daw_assistant_actions'};
+    }
+    var hasMix = _mixIntentRe.hasMatch(text);
+    var hasDaw = _dawIntentRe.hasMatch(text);
+    final wantsInfo = _questionIntentRe.hasMatch(text);
+    if (const <String>['remix', 'lofi', 'lo-fi', 'vibe', 'style']
+        .any(text.contains)) {
+      hasMix = true;
+      hasDaw = true;
+    }
+    if (hasMix && hasDaw) {
+      return <String>{
+        'informational_response',
+        'daw_assistant_actions',
+        'mix_model_request',
+      };
+    }
+    if (hasMix) return <String>{'informational_response', 'mix_model_request'};
+    if (hasDaw) {
+      return <String>{'informational_response', 'daw_assistant_actions'};
+    }
+    if (wantsInfo) return <String>{'informational_response'};
+    return <String>{
+      'informational_response',
+      'daw_assistant_actions',
+      'mix_model_request',
+    };
+  }
+
+  bool _negatesStemSeparation(String text) {
+    return RegExp(
+          r"\b(do\s+not|don't|dont|stop|no\s+more|without)\b[^.?!]{0,96}\b(split|stem|stems|separat)",
+        ).hasMatch(text) ||
+        RegExp(
+          r'\b(split|stem|stems|separat)[^.?!]{0,96}\b(no\s+more|anymore|again)\b',
+        ).hasMatch(text);
+  }
+
+  List<String> _intentDawActionTypes({
+    required List<String> allowedActionTypes,
+    required String userText,
+    required String toolRoutingMode,
+  }) {
+    if (toolRoutingMode != 'intent_scoped') return allowedActionTypes;
+    final text = userText.toLowerCase();
+    final selected = <String>{'tutorial', 'clarify'};
+    final negatesStem = _negatesStemSeparation(text);
+
+    void addIfAllowed(List<String> values) {
+      for (final value in values) {
+        if (allowedActionTypes.contains(value)) selected.add(value);
+      }
+    }
+
+    if (RegExp(r'\b(mute|unmute|silence|unsilence)\b').hasMatch(text)) {
+      addIfAllowed(<String>['row_mute', 'row_mix']);
+    }
+    if (RegExp(r'\b(solo|unsolo|isolate)\b').hasMatch(text)) {
+      addIfAllowed(<String>['row_solo']);
+    }
+    if (RegExp(r'\b(rename|call|label)\b').hasMatch(text)) {
+      addIfAllowed(<String>['row_rename', 'role_override']);
+    }
+    if (RegExp(r'\b(select|focus|active)\b').hasMatch(text)) {
+      addIfAllowed(<String>['row_select']);
+    }
+    if (RegExp(r'\b(delete|remove|trash)\b').hasMatch(text)) {
+      addIfAllowed(<String>['clip_edit', 'row_delete']);
+    }
+    if (RegExp(
+            r'\b(play|pause|stop|restart|beginning|record|undo|redo|metronome|click|loop)\b')
+        .hasMatch(text)) {
+      addIfAllowed(<String>['transport_control']);
+    }
+    if (!negatesStem &&
+        RegExp(r'\b(split|stem|stems|separate|vocal|instrumental)\b')
+            .hasMatch(text)) {
+      addIfAllowed(<String>['stem_separate']);
+    }
+    if (RegExp(r'\b(pitch|transpose|semitone|octave)\b').hasMatch(text)) {
+      addIfAllowed(<String>['clip_edit', 'midi_compose']);
+    }
+    if (RegExp(r'\b(tempo|bpm|faster|slower)\b').hasMatch(text)) {
+      addIfAllowed(<String>['project_edit']);
+    }
+    const levelTargetPattern =
+        r'(?:vocal|voice|track|row|stem|pad|pads|bass|808|sub|drum|drums|kick|snare|hat|hats|guitar|piano|keys|synth|lead|instrumental)';
+    final pitchDirectionRequest =
+        RegExp(r'\b(pitch|transpose|octave|semitone|semitones|key)\b')
+            .hasMatch(text);
+    final concreteLevelChangeRequest = !pitchDirectionRequest &&
+        (RegExp(r'\b(volume|gain|level|fader|db|louder|quieter|turn up|turn down)\b')
+                .hasMatch(text) ||
+            RegExp(
+              r'\b(turn|bring|pull|push|take|make)\b[^.?!]{0,64}\b' +
+                  levelTargetPattern +
+                  r'\b[^.?!]{0,32}\b(up|down|lower|louder|quieter)\b',
+            ).hasMatch(text) ||
+            RegExp(
+              r'\b' +
+                  levelTargetPattern +
+                  r'\b[^.?!]{0,64}\b(up|down|lower|louder|quieter|reduc|tuck)\b',
+            ).hasMatch(text) ||
+            RegExp(
+              r'\b(lower|reduce|tuck)\b[^.?!]{0,48}\b' +
+                  levelTargetPattern +
+                  r'\b',
+            ).hasMatch(text));
+    if (RegExp(
+          r'\b(add|insert|put|place|create|write|compose|generate|drum|kick|snare|hat|loop|sample|midi|instrument|keys|pad|bassline|melody|texture|vinyl|noise|riser|whoosh|fx|808|drop)\b',
+        ).hasMatch(text) &&
+        !concreteLevelChangeRequest) {
+      addIfAllowed(<String>['sample_insert', 'midi_compose', 'row_create']);
+    }
+    if (RegExp(r'\b(pan|left|right|center)\b').hasMatch(text) ||
+        concreteLevelChangeRequest) {
+      addIfAllowed(<String>['row_mix']);
+    }
+    if (concreteLevelChangeRequest &&
+        RegExp(r'\b(hook|chorus|verse|bridge|during|whenever|when|over time)\b')
+            .hasMatch(text)) {
+      addIfAllowed(<String>['automation_edit', 'row_mix']);
+    }
+    if (RegExp(
+            r'\b(remove|delete|take out|bypass|unbypass|toggle)\b[^.?!]{0,64}\b(effect|plugin|fx|distortion|compressor|compress|eq|reverb|delay|limiter|pitch corrector)\b')
+        .hasMatch(text)) {
+      addIfAllowed(<String>['effect_edit']);
+    }
+    if (RegExp(
+            r'\b(effect|plugin|fx|distortion|compressor|compress|eq|reverb|delay|limiter|pitch corrector)\b')
+        .hasMatch(text)) {
+      addIfAllowed(<String>['effect_edit']);
+    }
+    if (RegExp(
+            r'\b(automation|duck|ducking|sidechain|pump|pumping|sweep|fade)\b')
+        .hasMatch(text)) {
+      addIfAllowed(<String>['automation_edit']);
+    }
+    if (RegExp(r'\b(move|copy|duplicate|trim|cut|glue|adlib|chorus clip)\b')
+        .hasMatch(text)) {
+      addIfAllowed(<String>['clip_edit']);
+    }
+    if (RegExp(
+            r'\b(clean|cleanup|noise|quiet noise|dialog cleanup|phone mic)\b')
+        .hasMatch(text)) {
+      addIfAllowed(<String>['audio_enhance', 'clip_edit']);
+    }
+    if (RegExp(r'\b(color)\b').hasMatch(text)) {
+      addIfAllowed(<String>['row_color_edit']);
+    }
+    if (RegExp(r'\b(group)\b').hasMatch(text)) {
+      addIfAllowed(<String>['row_group_edit']);
+    }
+    if (RegExp(r'\b(role)\b').hasMatch(text)) {
+      addIfAllowed(<String>['role_override']);
+    }
+    if (const <String>['remix', 'lofi', 'lo-fi', 'vibe', 'style']
+        .any(text.contains)) {
+      addIfAllowed(<String>[
+        'sample_insert',
+        'midi_compose',
+        'clip_edit',
+        'row_mix',
+        'project_edit',
+      ]);
+    }
+    final scoped = allowedActionTypes
+        .where((value) => selected.contains(value))
+        .toList(growable: false);
+    final result = scoped.length > 2 ? scoped : allowedActionTypes;
+    if (!negatesStem) return result;
+    return result.where((value) => value != 'stem_separate').toList();
+  }
+
   void _filterDirectToolSchemas(
     List<Map<String, dynamic>> tools,
     Set<String> clientCapabilities,
@@ -1680,6 +2680,15 @@ class CloudLlmService {
       'stem_separate',
       'role_override',
       'audio_enhance',
+      if (clientCapabilities.contains('daw.transport_control'))
+        'transport_control',
+      if (clientCapabilities.contains('daw.row_mute')) 'row_mute',
+      if (clientCapabilities.contains('daw.row_solo')) 'row_solo',
+      if (clientCapabilities.contains('daw.row_rename')) 'row_rename',
+      if (clientCapabilities.contains('daw.row_select')) 'row_select',
+      if (clientCapabilities.contains('daw.row_delete')) 'row_delete',
+      if (clientCapabilities.contains('daw.row_create')) 'row_create',
+      if (clientCapabilities.contains('daw.row_mix')) 'row_mix',
       if (clientCapabilities.contains('daw.project_edit.set_tempo'))
         'project_edit',
       if (clientCapabilities.contains('daw.sample_insert.library'))
@@ -1749,29 +2758,398 @@ class CloudLlmService {
     }
   }
 
+  void _filterDirectToolSchemasForIntent(
+    List<Map<String, dynamic>> tools, {
+    required String userText,
+    required String toolRoutingMode,
+  }) {
+    if (toolRoutingMode != 'intent_scoped') return;
+    final allowedToolNames = _intentToolNames(userText, toolRoutingMode);
+    tools.removeWhere(
+      (tool) => !allowedToolNames.contains(tool['name']?.toString().trim()),
+    );
+
+    for (final tool in tools) {
+      if (tool['name'] != 'daw_assistant_actions') continue;
+      final parameters = tool['parameters'];
+      if (parameters is! Map) continue;
+      final properties = parameters['properties'];
+      if (properties is! Map) continue;
+      final actions = properties['actions'];
+      if (actions is! Map) continue;
+      final items = actions['items'];
+      if (items is! Map) continue;
+
+      final itemProperties = items['properties'];
+      if (itemProperties is Map) {
+        final typeSchema = itemProperties['type'];
+        if (typeSchema is Map) {
+          final rawEnum = typeSchema['enum'];
+          if (rawEnum is List) {
+            final currentTypes = rawEnum
+                .map((value) => value.toString().trim())
+                .where((value) => value.isNotEmpty)
+                .toList(growable: false);
+            typeSchema['enum'] = _intentDawActionTypes(
+              allowedActionTypes: currentTypes,
+              userText: userText,
+              toolRoutingMode: toolRoutingMode,
+            );
+          }
+          return;
+        }
+      }
+
+      final variants = items['oneOf'];
+      if (variants is! List) continue;
+      final variantTypes = <Object, Set<String>>{};
+      final currentTypes = <String>[];
+      for (final variant in variants) {
+        if (variant is! Map) continue;
+        final variantProperties = variant['properties'];
+        if (variantProperties is! Map) continue;
+        final typeSchema = variantProperties['type'];
+        if (typeSchema is! Map) continue;
+        final allowedValues = <String>{};
+        final rawEnum = typeSchema['enum'];
+        if (rawEnum is List) {
+          allowedValues.addAll(
+            rawEnum
+                .map((value) => value.toString().trim())
+                .where((value) => value.isNotEmpty),
+          );
+        }
+        final rawConst = typeSchema['const'];
+        if (rawConst != null) {
+          final normalizedConst = rawConst.toString().trim();
+          if (normalizedConst.isNotEmpty) allowedValues.add(normalizedConst);
+        }
+        if (allowedValues.isEmpty) continue;
+        variantTypes[variant] = allowedValues;
+        for (final value in allowedValues) {
+          if (!currentTypes.contains(value)) currentTypes.add(value);
+        }
+      }
+      final scopedTypes = _intentDawActionTypes(
+        allowedActionTypes: currentTypes,
+        userText: userText,
+        toolRoutingMode: toolRoutingMode,
+      ).toSet();
+      variants.removeWhere((variant) {
+        final allowedValues = variantTypes[variant];
+        if (allowedValues == null) return false;
+        return !allowedValues.any(scopedTypes.contains);
+      });
+      return;
+    }
+  }
+
+  String _conversationSeedHash(String seedInstructions) => crypto.sha256
+      .convert(utf8.encode(seedInstructions.trim()))
+      .toString()
+      .substring(0, 16);
+
+  String _buildDirectSeedInstructions({
+    required Set<String> clientCapabilities,
+    required Map<String, dynamic> clientPolicy,
+    required String instructionOverlay,
+  }) {
+    return <String>[
+      _buildDirectSystemPrompt(clientCapabilities, clientPolicy),
+      if (instructionOverlay.trim().isNotEmpty) instructionOverlay.trim(),
+    ].join('\n\n').trim();
+  }
+
+  List<Map<String, dynamic>> _buildOpenAiConversationSeedItems({
+    required String seedInstructions,
+  }) {
+    final normalizedSeed = seedInstructions.trim();
+    if (normalizedSeed.isEmpty) return const <Map<String, dynamic>>[];
+    return <Map<String, dynamic>>[
+      <String, dynamic>{
+        'type': 'message',
+        'role': 'developer',
+        'content': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'type': 'input_text',
+            'text': <String>[
+              'MIXROOM SEEDED BEHAVIOR CONTRACT',
+              'These persistent instructions apply to this OpenAI Conversation unless a later request-local instruction explicitly overrides them.',
+              '',
+              normalizedSeed,
+            ].join('\n'),
+          },
+        ],
+      },
+    ];
+  }
+
+  String _buildSeededConversationRequestInstructions({
+    required String seedHash,
+    required String contextInstructions,
+  }) {
+    return <String>[
+      'SEEDED MIXROOM CONTRACT ACTIVE',
+      '- The OpenAI conversation already contains the full Mixroom behavior contract seed_hash=$seedHash.',
+      '- The seeded contract includes CLIENT ENTITLEMENT POLICY and client capability overrides for this runtime fingerprint.',
+      '- Current request tools, tool_choice, model settings, PROJECT_SNAPSHOT, SELECTION_SNAPSHOT, LIBRARY_SNAPSHOT, and PENDING_MIX_PROPOSAL are authoritative if they conflict with older conversation memory.',
+      '- Use the seeded contract for behavior, tone, follow-up handling, user-intent priority, action selection, and clean-row placement policy.',
+      if (contextInstructions.trim().isNotEmpty) '',
+      if (contextInstructions.trim().isNotEmpty) contextInstructions.trim(),
+    ].join('\n').trim();
+  }
+
+  String _buildRequestLocalAiHints({required String userText}) {
+    final text = userText.trim().toLowerCase();
+    if (text.isEmpty) return '';
+    final lines = <String>[];
+    const enableStarterHints = true;
+    const enableActionHints = true;
+    const enableDropAndSectionHints = true;
+    const enableCompoundTargetHints = true;
+    final negatesStem = _negatesStemSeparation(text);
+
+    if (negatesStem &&
+        RegExp(r'\b(only|just)\b').hasMatch(text) &&
+        RegExp(r'\b(bright|brighter|brighten|clear|clearer|presence|air)\b')
+            .hasMatch(text) &&
+        RegExp(r'\b(vocal|vocals|voice)\b').hasMatch(text)) {
+      lines
+        ..add(
+          '- Latest user negates further stem splitting but includes a positive vocal mix edit. Execute the positive edit; do not answer with only acknowledgement.',
+        )
+        ..add(
+          '- For this turn, do not emit stem_separate. Prefer mix_model_request targeting the current vocal stem for brightness/clarity.',
+        );
+    }
+
+    if (enableCompoundTargetHints) {
+      final compoundStemPitchRequest = RegExp(
+            r'\b(remove|split|separate|isolate|take out)\b[^.?!]{0,80}\b(vocal|vocals|voice)\b',
+          ).hasMatch(text) &&
+          RegExp(
+            r'\b(lower|raise|change|shift|transpose|pitch|key|semitone|semitones)\b',
+          ).hasMatch(text) &&
+          RegExp(r'\b(background|backing|instrumental|music|song|track)\b')
+              .hasMatch(text) &&
+          !negatesStem;
+      if (compoundStemPitchRequest) {
+        lines
+          ..add(
+            '- Compound stem+pitch request: emit one daw_assistant_actions tool call containing both stem_separate vocal_instrumental and clip_edit pitch_shift.',
+          )
+          ..add(
+            '- For the pitch_shift action, target the resulting or existing instrumental/background/backing stem; use label_contains="Instrumental" when helpful. Treat one key as one semitone and preserve tempo.',
+          );
+      }
+      if (RegExp(
+        r'\b(original song|instrumental|backing|background|lead vocal|vocal stem|synth|piano|bass|drums|kick|snare|hat)\b',
+      ).hasMatch(text)) {
+        lines.add(
+          '- Named-source priority: target the row/clip whose name, label, file, role, or instrument matches the user\'s named source even if another row is selected.',
+        );
+      }
+    }
+
+    final asksNewDrums =
+        RegExp(r'\b(add|insert|put|place|make|create|generate|write)\b')
+                .hasMatch(text) &&
+            RegExp(r'\b(drum|drums|kick|snare|hat|hats|loop)\b')
+                .hasMatch(text) &&
+            !RegExp(r"\b(do\s+not|don't|dont)\s+add\b").hasMatch(text);
+    if (asksNewDrums) {
+      lines.add(
+        '- Latest user asks to add drum/sample material. If LIBRARY_SNAPSHOT contains matching role aliases or paths, use sample_insert rather than an unsupported explanation.',
+      );
+    }
+
+    final asksLofiStarter = enableStarterHints &&
+        RegExp(r'\b(lofi|lo-fi)\b').hasMatch(text) &&
+        RegExp(r'\b(make|create|generate|write|compose|build)\b')
+            .hasMatch(text) &&
+        RegExp(r'\b(song|beat|track|instrumental|starter|idea|loop)\b')
+            .hasMatch(text) &&
+        !text.contains('remix');
+    if (asksLofiStarter) {
+      lines
+        ..add(
+          '- Latest user asks for a new lofi starter song. Prefer one daw_assistant_actions call with a bounded 3-5 action starter arrangement rather than a vague reply.',
+        )
+        ..add(
+          '- Include concrete musical material when assets exist: drums/loop from LIBRARY_SNAPSHOT, soft keys/chords, and bassline/sub. Use midi_compose only with concrete notes or progression.',
+        )
+        ..add(
+          '- Put new musical parts on clean/new rows unless the user explicitly names the current/selected/named/numbered row. Do not use row_create alone as the result.',
+        );
+    } else if (RegExp(r'\b(lofi|lo-fi|remix)\b').hasMatch(text)) {
+      lines.add(
+        '- Latest user asks for a remix/style transformation. Use a bounded multi-step plan: concrete DAW edits first when requested/available, then a mix pass. Do enough to satisfy named parts without adding unrelated extras.',
+      );
+      final hasConcreteDawEdit = RegExp(
+        r'\b(add|insert|put|place|pitch|lower|raise|shift|transpose|stem|split|separate|mute|solo|rename|delete|automation|duck|sidechain)\b',
+      ).hasMatch(text);
+      final hasSonicMixGoal = RegExp(
+        r'\b(warm|warmer|warmth|space|spacious|reverb|delay|wide|wider|width|tone|polish|balance|saturat|compress|glue|bright|brighter|dark|darker)\b',
+      ).hasMatch(text);
+      if (hasConcreteDawEdit && hasSonicMixGoal) {
+        lines.add(
+          '- This remix request combines concrete DAW edits with sonic mix goals. If both tool families are available, the response is incomplete unless it emits both calls in this same turn: daw_assistant_actions for the concrete edits, then mix_model_request for the sonic pass. Do not only describe the mix pass in assistant_message.',
+        );
+      }
+    }
+
+    const levelTargetPattern =
+        r'(?:vocal|voice|track|row|stem|pad|pads|bass|808|sub|drum|drums|kick|snare|hat|hats|guitar|piano|keys|synth|lead|instrumental)';
+    final pitchDirectionRequest =
+        RegExp(r'\b(pitch|transpose|octave|semitone|semitones|key)\b')
+            .hasMatch(text);
+    final concreteLevelChangeRequest = !pitchDirectionRequest &&
+        (RegExp(r'\b(volume|gain|level|fader|db|louder|quieter|turn up|turn down)\b')
+                .hasMatch(text) ||
+            RegExp(
+              r'\b(turn|bring|pull|push|take|make)\b[^.?!]{0,64}\b' +
+                  levelTargetPattern +
+                  r'\b[^.?!]{0,32}\b(up|down|lower|louder|quieter)\b',
+            ).hasMatch(text) ||
+            RegExp(
+              r'\b' +
+                  levelTargetPattern +
+                  r'\b[^.?!]{0,64}\b(up|down|lower|louder|quieter|reduc|tuck)\b',
+            ).hasMatch(text));
+
+    if (enableActionHints) {
+      if (RegExp(
+        r'\b(remove|delete|take out|bypass|unbypass|toggle)\b[^.?!]{0,64}\b(effect|plugin|fx|distortion|compressor|compress|eq|reverb|delay|limiter|pitch corrector)\b',
+      ).hasMatch(text)) {
+        lines.add(
+          '- Latest user asks for explicit plugin/effect CRUD. Use daw_assistant_actions effect_edit for the named plugin/effect; do not convert this into mix_model_request.',
+        );
+      }
+      if (RegExp(r'\b(duck|ducking|sidechain|pump|pumping|fade|sweep)\b')
+          .hasMatch(text)) {
+        lines.add(
+          '- Latest user asks for time-varying movement/ducking. Use daw_assistant_actions automation_edit on the named row/track; do not answer that automation is unavailable when automation_edit is exposed.',
+        );
+      }
+      if (RegExp(r'\b(pan|left|right|center)\b').hasMatch(text) &&
+          RegExp(r'\b(row|track|pad|pads|vocal|bass|drum|instrumental|stem)\b')
+              .hasMatch(text)) {
+        lines.add(
+          '- Latest user asks for a concrete pan move. Use daw_assistant_actions row_mix set_pan/adjust_pan on the target row; do not use generic mix pan or refuse.',
+        );
+      }
+    }
+
+    if (enableDropAndSectionHints) {
+      final asksDropContent = !concreteLevelChangeRequest &&
+          (RegExp(r'\b(808|bass\s+drop|sub\s+drop|bass|sub)\b')
+                  .hasMatch(text) ||
+              (RegExp(r'\bdrop\b').hasMatch(text) &&
+                  RegExp(
+                    r'\b(add|insert|put|place|make|create|write|compose|hit|impact|fill|before|right before|hook)\b',
+                  ).hasMatch(text)));
+      if (concreteLevelChangeRequest &&
+          RegExp(r'\b(down|lower|reduc|quieter|tuck|drop|too loud|swallowing)\b')
+              .hasMatch(text)) {
+        lines.add(
+          '- Volume drop routing: treat turn/bring/pull/take/make + named-row + down/lower/quieter language as row_mix for static level changes, or automation_edit when the prompt names a time range such as hook, chorus, verse, during, or whenever. Do not interpret 808/bass/sub wording as musical drop content when the user is changing level.',
+        );
+      }
+      if (asksDropContent) {
+        lines.add(
+          '- Drop source selection: use an 808/sub/bass sample only when the user asks for 808, sub, bass, or bass drop. For generic drop/fill/hit/impact wording, prefer the best matching FX or drum source; compose MIDI bass only when the request is musically bass/sub oriented.',
+        );
+      }
+      if (RegExp(r'\b(not an 808|not 808|no 808|without 808)\b')
+          .hasMatch(text)) {
+        lines.add(
+          '- Negative source constraint: the user rejected 808. Do not use an 808 sample path; for a bass/sub drop, compose MIDI with a visible bass/sub instrument or choose a non-808 bass source.',
+        );
+      }
+      if (RegExp(
+        r'\b(hook|chorus|verse|bridge|intro|outro|second verse|last chorus|first hook|later hook)\b',
+      ).hasMatch(text)) {
+        lines.add(
+          '- Section placement: hook/chorus/verse/bridge labels are valid placement hints. If exact measures are unavailable, put the section label in placement/destination and proceed instead of asking for bar numbers.',
+        );
+      }
+    }
+
+    if (lines.isEmpty) return '';
+    return <String>['REQUEST_LOCAL_AI_HINTS', ...lines].join('\n');
+  }
+
   Map<String, dynamic> _buildOpenAiRequestBody({
     required List<Map<String, dynamic>> inputMessages,
+    required String userText,
     String? aiFeature,
     Map<String, dynamic> clientContext = const <String, dynamic>{},
+    String? conversationId,
+    String conversationContextInstructions = '',
+    bool seededConversation = false,
+    String seededConversationInstructionHash = '',
   }) {
     final normalizedAiFeature = _normalizeAiFeatureForProxy(aiFeature);
     final clientCapabilities = _readClientCapabilities(clientContext);
     final clientPolicy = _readClientPolicy(clientContext);
+    final instructionOverlay = aiExecutionGuidance();
     var capabilitySignature = _clientCapabilitySignature(clientCapabilities);
+    final contextRouteSignature = _contextRouteSignature(clientContext);
+    if (contextRouteSignature.isNotEmpty) {
+      capabilitySignature = [
+        capabilitySignature,
+        contextRouteSignature,
+      ].join('|');
+    }
     if (clientPolicy.isNotEmpty) {
       capabilitySignature = [
         capabilitySignature,
         _clientPolicySignature(clientPolicy),
       ].join('|');
     }
+    if (instructionOverlay.isNotEmpty) {
+      final overlayHash = crypto.sha256
+          .convert(utf8.encode(instructionOverlay))
+          .toString()
+          .substring(0, 12);
+      capabilitySignature = [
+        capabilitySignature,
+        'instruction_overlay:$overlayHash',
+      ].join('|');
+    }
     final toolSchemas = _directOpenAiToolSchemas();
     _filterDirectToolSchemas(toolSchemas, clientCapabilities);
+    _filterDirectToolSchemasForIntent(
+      toolSchemas,
+      userText: userText,
+      toolRoutingMode: _effectiveToolRoutingMode(clientContext),
+    );
+    final seedInstructions = _buildDirectSeedInstructions(
+      clientCapabilities: clientCapabilities,
+      clientPolicy: clientPolicy,
+      instructionOverlay: instructionOverlay,
+    );
+    final requestLocalHints = _buildRequestLocalAiHints(userText: userText);
+    final contextInstructions = conversationContextInstructions.trim();
+    final seedHash = seededConversationInstructionHash.trim().isNotEmpty
+        ? seededConversationInstructionHash.trim()
+        : _conversationSeedHash(seedInstructions);
+    final instructions = seededConversation
+        ? _buildSeededConversationRequestInstructions(
+            seedHash: seedHash,
+            contextInstructions: <String>[
+              if (requestLocalHints.isNotEmpty) requestLocalHints,
+              if (contextInstructions.isNotEmpty) contextInstructions,
+            ].join('\n\n').trim(),
+          )
+        : <String>[
+            seedInstructions,
+            if (requestLocalHints.isNotEmpty) requestLocalHints,
+            if (contextInstructions.isNotEmpty) contextInstructions,
+          ].join('\n\n').trim();
     final body = <String, dynamic>{
       'model': model,
-      'instructions': _buildDirectSystemPrompt(
-        clientCapabilities,
-        clientPolicy,
-      ),
+      'instructions': instructions,
       'prompt_cache_key': _promptCacheKeyForFeature(
         normalizedAiFeature,
         capabilitySignature: capabilitySignature,
@@ -1783,6 +3161,10 @@ class CloudLlmService {
       'parallel_tool_calls': true,
       'max_output_tokens': _directOpenAiMaxOutputTokens,
     };
+    final normalizedConversationId = (conversationId ?? '').trim();
+    if (normalizedConversationId.isNotEmpty) {
+      body['conversation'] = normalizedConversationId;
+    }
     if (_supportsTemperature) {
       body['temperature'] = 0.2;
     }
@@ -1791,6 +3173,142 @@ class CloudLlmService {
       body['reasoning'] = reasoning;
     }
     return body;
+  }
+
+  String _directConversationKey({
+    required String sessionId,
+    String? aiFeature,
+    Map<String, dynamic> clientContext = const <String, dynamic>{},
+  }) {
+    final normalizedFeature = _normalizeAiFeatureForProxy(aiFeature);
+    final clientCapabilities = _readClientCapabilities(clientContext);
+    final clientPolicy = _readClientPolicy(clientContext);
+    final instructionOverlay = aiExecutionGuidance();
+    var capabilitySignature = _clientCapabilitySignature(clientCapabilities);
+    final contextRouteSignature = _contextRouteSignature(clientContext);
+    if (contextRouteSignature.isNotEmpty) {
+      capabilitySignature = <String>[
+        capabilitySignature,
+        contextRouteSignature,
+      ].join('|');
+    }
+    if (clientPolicy.isNotEmpty) {
+      capabilitySignature = <String>[
+        capabilitySignature,
+        _clientPolicySignature(clientPolicy),
+      ].join('|');
+    }
+    if (instructionOverlay.isNotEmpty) {
+      final overlayHash = crypto.sha256
+          .convert(utf8.encode(instructionOverlay))
+          .toString()
+          .substring(0, 12);
+      capabilitySignature = <String>[
+        capabilitySignature,
+        'instruction_overlay:$overlayHash',
+      ].join('|');
+    }
+    final promptHash = crypto.sha256
+        .convert(
+          utf8.encode(
+            _buildDirectSystemPrompt(clientCapabilities, clientPolicy),
+          ),
+        )
+        .toString()
+        .substring(0, 12);
+    final signatureHash = crypto.sha256
+        .convert(
+          utf8.encode(
+            '$model|$normalizedFeature|$_normalizedConversationStateMode|$capabilitySignature|$promptHash',
+          ),
+        )
+        .toString()
+        .substring(0, 12);
+    return '${sessionId.trim()}|$normalizedFeature|$signatureHash';
+  }
+
+  Future<String> _ensureDirectOpenAiConversation(
+    String conversationKey, {
+    List<Map<String, dynamic>> seedItems = const <Map<String, dynamic>>[],
+    String seedHash = '',
+  }) async {
+    final cached = _directConversationIds[conversationKey]?.trim() ?? '';
+    if (cached.isNotEmpty) {
+      _conversationTurnCounts[conversationKey] =
+          (_conversationTurnCounts[conversationKey] ?? 0) + 1;
+      return cached;
+    }
+
+    final response = await _postJson(
+      uri: Uri.parse(_conversationsApiUrl),
+      headers: <String, String>{
+        'Authorization': 'Bearer $apiKey',
+        'Content-Type': 'application/json',
+      },
+      body: <String, dynamic>{
+        'metadata': <String, dynamic>{
+          'source': 'mixroom_direct_debug',
+          'conversation_state_mode': _normalizedConversationStateMode,
+          'conversation_key_hash': crypto.sha256
+              .convert(utf8.encode(conversationKey))
+              .toString()
+              .substring(0, 16),
+          if (seedHash.trim().isNotEmpty) 'seed_hash': seedHash.trim(),
+        },
+        if (seedItems.isNotEmpty) 'items': seedItems.take(20).toList(),
+      },
+    );
+    final payload = _decodeJsonObject(response.body);
+    final conversationId = payload?['id']?.toString().trim() ?? '';
+    if (response.statusCode < 200 ||
+        response.statusCode >= 300 ||
+        conversationId.isEmpty) {
+      throw StateError(
+        'Could not create OpenAI conversation: ${response.statusCode}',
+      );
+    }
+    _directConversationIds[conversationKey] = conversationId;
+    _conversationTurnCounts[conversationKey] = 1;
+    return conversationId;
+  }
+
+  String _buildConversationContextInstructions({
+    required String projectSnapshot,
+    required String selectionSnapshot,
+    required String librarySnapshot,
+    MixingResult? pendingMix,
+  }) {
+    final lines = <String>[
+      'CURRENT PROJECT CONTEXT',
+      'Treat this context as current request-local DAW state, not durable chat history.',
+      'PROJECT_SNAPSHOT:',
+      projectSnapshot,
+    ];
+    if (selectionSnapshot.trim().isNotEmpty) {
+      lines
+        ..add('')
+        ..add('SELECTION_SNAPSHOT:')
+        ..add(selectionSnapshot);
+    }
+    if (librarySnapshot.trim().isNotEmpty) {
+      lines
+        ..add('')
+        ..add('LIBRARY_SNAPSHOT:')
+        ..add(librarySnapshot);
+    }
+    if (pendingMix != null) {
+      lines
+        ..add('')
+        ..add('PENDING_MIX_PROPOSAL:')
+        ..add(jsonEncode(pendingMix.toJson()))
+        ..add('')
+        ..add(
+          'A mix proposal was previously discussed in the chat at some point.',
+        )
+        ..add('You may refer to this if it is relevant to the current turn.')
+        ..add('If it is not relevant, ignore it.');
+    }
+    return lines.join('\n').trim();
   }
 
   Map<String, dynamic> _buildProxyRequestBody({
@@ -1802,10 +3320,17 @@ class CloudLlmService {
     String? promptTraceId,
     String? projectId,
     String? aiFeature,
+    String? conversationSessionId,
     MixingResult? pendingMix,
     Map<String, dynamic> clientContext = const <String, dynamic>{},
   }) {
     final normalizedAiFeature = _normalizeAiFeatureForProxy(aiFeature);
+    final packedContext = _packContextSnapshots(
+      mode: _readContextPackingMode(clientContext),
+      projectSnapshot: projectSnapshot,
+      selectionSnapshot: selectionSnapshot,
+      librarySnapshot: librarySnapshot,
+    );
     final requestContext = AnalyticsService.instance.buildRequestContext();
     final analyticsClientContext =
         (requestContext['client_context'] as Map?)?.cast<String, dynamic>() ??
@@ -1822,15 +3347,20 @@ class CloudLlmService {
               })
           .toList(),
       'user_text': userText,
-      'project_snapshot': projectSnapshot,
-      if (selectionSnapshot.trim().isNotEmpty)
-        'selection_snapshot': selectionSnapshot,
-      if (librarySnapshot.trim().isNotEmpty)
-        'library_snapshot': librarySnapshot,
+      'project_snapshot': packedContext.projectSnapshot,
+      if (packedContext.selectionSnapshot.trim().isNotEmpty)
+        'selection_snapshot': packedContext.selectionSnapshot,
+      if (packedContext.librarySnapshot.trim().isNotEmpty)
+        'library_snapshot': packedContext.librarySnapshot,
       if ((promptTraceId ?? '').trim().isNotEmpty)
         'prompt_trace_id': promptTraceId!.trim(),
       if ((projectId ?? '').trim().isNotEmpty) 'project_id': projectId,
       if (normalizedAiFeature.isNotEmpty) 'ai_feature': normalizedAiFeature,
+      if (_usesOpenAiConversationState)
+        'conversation_state_mode': _normalizedConversationStateMode,
+      if (_usesOpenAiConversationState &&
+          (conversationSessionId ?? '').trim().isNotEmpty)
+        'conversation_session_id': conversationSessionId!.trim(),
       if (pendingMix != null) 'pending_mix': pendingMix.toJson(),
       ...requestContext,
     };
@@ -1884,6 +3414,7 @@ class CloudLlmService {
     required String? promptTraceId,
     required String? projectId,
     required String? aiFeature,
+    required String? conversationSessionId,
     required MixingResult? pendingMix,
     required Map<String, dynamic> clientContext,
   }) {
@@ -1902,6 +3433,7 @@ class CloudLlmService {
         promptTraceId: promptTraceId,
         projectId: projectId,
         aiFeature: aiFeature,
+        conversationSessionId: conversationSessionId,
         pendingMix: pendingMix,
         clientContext: clientContext,
       ),
@@ -3895,6 +5427,7 @@ class CloudLlmService {
     String? promptTraceId,
     String? projectId,
     String? aiFeature,
+    String? conversationSessionId,
     MixingResult? pendingMix,
     Map<String, dynamic> clientContext = const <String, dynamic>{},
   }) async {
@@ -3923,6 +5456,7 @@ class CloudLlmService {
           promptTraceId: promptTraceId,
           projectId: projectId,
           aiFeature: aiFeature,
+          conversationSessionId: conversationSessionId,
           pendingMix: pendingMix,
           clientContext: clientContext,
         );
@@ -3937,19 +5471,74 @@ class CloudLlmService {
         final effectiveClientContext = _mergedAnalyticsClientContext(
           clientContext,
         );
-        final inputMessages = _buildInputMessages(
-          conversation: conversation,
-          userText: userText,
+        final packedContext = _packContextSnapshots(
+          mode: _readContextPackingMode(effectiveClientContext),
           projectSnapshot: projectSnapshot,
           selectionSnapshot: selectionSnapshot,
           librarySnapshot: librarySnapshot,
-          pendingMix: pendingMix,
         );
+        final normalizedSessionId =
+            (conversationSessionId ?? '').trim().isNotEmpty
+                ? conversationSessionId!.trim()
+                : 'direct-debug-session';
+        final conversationKey = _directConversationKey(
+          sessionId: normalizedSessionId,
+          aiFeature: aiFeature,
+          clientContext: effectiveClientContext,
+        );
+        final directClientCapabilities =
+            _readClientCapabilities(effectiveClientContext);
+        final directClientPolicy = _readClientPolicy(effectiveClientContext);
+        final directInstructionOverlay = aiExecutionGuidance();
+        final directSeedInstructions = _buildDirectSeedInstructions(
+          clientCapabilities: directClientCapabilities,
+          clientPolicy: directClientPolicy,
+          instructionOverlay: directInstructionOverlay,
+        );
+        final directSeedHash = _conversationSeedHash(directSeedInstructions);
+        final directSeedItems = _usesSeededOpenAiConversationState
+            ? _buildOpenAiConversationSeedItems(
+                seedInstructions: directSeedInstructions,
+              )
+            : const <Map<String, dynamic>>[];
+        final directConversationId = _usesOpenAiConversationState
+            ? await _ensureDirectOpenAiConversation(
+                conversationKey,
+                seedItems: directSeedItems,
+                seedHash:
+                    _usesSeededOpenAiConversationState ? directSeedHash : '',
+              )
+            : null;
+        final inputMessages = _usesOpenAiConversationState
+            ? <Map<String, dynamic>>[
+                <String, dynamic>{'role': 'user', 'content': userText},
+              ]
+            : _buildInputMessages(
+                conversation: conversation,
+                userText: userText,
+                projectSnapshot: packedContext.projectSnapshot,
+                selectionSnapshot: packedContext.selectionSnapshot,
+                librarySnapshot: packedContext.librarySnapshot,
+                pendingMix: pendingMix,
+              );
+        final conversationContext = _usesOpenAiConversationState
+            ? _buildConversationContextInstructions(
+                projectSnapshot: packedContext.projectSnapshot,
+                selectionSnapshot: packedContext.selectionSnapshot,
+                librarySnapshot: packedContext.librarySnapshot,
+                pendingMix: pendingMix,
+              )
+            : '';
 
         final requestBody = _buildOpenAiRequestBody(
           inputMessages: inputMessages,
+          userText: userText,
           aiFeature: aiFeature,
           clientContext: effectiveClientContext,
+          conversationId: directConversationId,
+          conversationContextInstructions: conversationContext,
+          seededConversation: _usesSeededOpenAiConversationState,
+          seededConversationInstructionHash: directSeedHash,
         );
         aiDebugLog(
           'direct-openai',
@@ -3958,7 +5547,9 @@ class CloudLlmService {
               'tool_choice=${requestBody['tool_choice']} '
               'tool_count=${(requestBody['tools'] as List?)?.length ?? 0} '
               'prompt_cache_key=${requestBody['prompt_cache_key']} '
-              'prompt_cache_retention=${requestBody['prompt_cache_retention']}',
+              'prompt_cache_retention=${requestBody['prompt_cache_retention']} '
+              'conversation_state=$_normalizedConversationStateMode '
+              'conversation_id=${directConversationId ?? '-'}',
         );
         _debugDumpJson('direct-openai', 'request body', requestBody);
 
@@ -4004,18 +5595,34 @@ class CloudLlmService {
                 '(library_retained=$hasLibrarySnapshot, '
                 'retry_timeout_ms=${remainingTimeout.inMilliseconds})',
           );
-          final retryInputMessages = _buildInputMessages(
-            conversation: conversation,
-            userText: userText,
-            projectSnapshot: projectSnapshot,
-            selectionSnapshot: selectionSnapshot,
-            librarySnapshot: librarySnapshot,
-            pendingMix: null,
-          );
+          final retryInputMessages = _usesOpenAiConversationState
+              ? <Map<String, dynamic>>[
+                  <String, dynamic>{'role': 'user', 'content': userText},
+                ]
+              : _buildInputMessages(
+                  conversation: conversation,
+                  userText: userText,
+                  projectSnapshot: packedContext.projectSnapshot,
+                  selectionSnapshot: packedContext.selectionSnapshot,
+                  librarySnapshot: packedContext.librarySnapshot,
+                  pendingMix: null,
+                );
           final retryRequestBody = _buildOpenAiRequestBody(
             inputMessages: retryInputMessages,
+            userText: userText,
             aiFeature: aiFeature,
             clientContext: effectiveClientContext,
+            conversationId: directConversationId,
+            conversationContextInstructions: _usesOpenAiConversationState
+                ? _buildConversationContextInstructions(
+                    projectSnapshot: packedContext.projectSnapshot,
+                    selectionSnapshot: packedContext.selectionSnapshot,
+                    librarySnapshot: packedContext.librarySnapshot,
+                    pendingMix: null,
+                  )
+                : '',
+            seededConversation: _usesSeededOpenAiConversationState,
+            seededConversationInstructionHash: directSeedHash,
           );
           _debugDumpJson(
             'direct-openai',
@@ -4063,9 +5670,28 @@ class CloudLlmService {
       'http_status_code': response.statusCode,
       'llm_route': _llmRouteLabel,
       'prompt_source': _promptSourceLabel,
+      'conversation_state_mode_requested': _normalizedConversationStateMode,
+      'conversation_state_mode_effective': _usesOpenAiConversationState
+          ? _normalizedConversationStateMode
+          : 'manual_history',
+      'context_packing_mode': _readContextPackingMode(clientContext),
+      'tool_routing_mode': _readToolRoutingMode(clientContext),
+      'effective_tool_routing_mode': _effectiveToolRoutingMode(clientContext),
+      if ((conversationSessionId ?? '').trim().isNotEmpty)
+        'conversation_session_id': conversationSessionId!.trim(),
       if (!_isProxyEnabled && _canUseDirectOpenAi) ...<String, dynamic>{
         'provider': 'openai',
         'effective_model': model.trim(),
+        if (_usesOpenAiConversationState)
+          'conversation_turn_index':
+              _conversationTurnCounts[_directConversationKey(
+                    sessionId: (conversationSessionId ?? '').trim().isNotEmpty
+                        ? conversationSessionId!.trim()
+                        : 'direct-debug-session',
+                    aiFeature: aiFeature,
+                    clientContext: _mergedAnalyticsClientContext(clientContext),
+                  )] ??
+                  0,
         if (directRetriedWithoutPendingMix)
           'direct_retry_without_pending_mix': true,
       },
@@ -4142,6 +5768,7 @@ class CloudLlmService {
                 promptTraceId: promptTraceId,
                 projectId: projectId,
                 aiFeature: aiFeature,
+                conversationSessionId: conversationSessionId,
                 pendingMix: pendingMix,
                 clientContext: clientContext,
               );
@@ -4160,6 +5787,21 @@ class CloudLlmService {
                   'http_status_code': response.statusCode,
                   'llm_route': _llmRouteLabel,
                   'prompt_source': _promptSourceLabel,
+                  'conversation_state_mode_requested':
+                      _normalizedConversationStateMode,
+                  'conversation_state_mode_effective':
+                      _usesOpenAiConversationState
+                          ? _normalizedConversationStateMode
+                          : 'manual_history',
+                  'context_packing_mode': _readContextPackingMode(
+                    clientContext,
+                  ),
+                  'tool_routing_mode': _readToolRoutingMode(clientContext),
+                  'effective_tool_routing_mode': _effectiveToolRoutingMode(
+                    clientContext,
+                  ),
+                  if ((conversationSessionId ?? '').trim().isNotEmpty)
+                    'conversation_session_id': conversationSessionId!.trim(),
                 },
               );
               promptRateLimit = _parsePromptRateLimitStatus(

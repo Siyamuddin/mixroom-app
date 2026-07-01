@@ -25,6 +25,7 @@ class AnalyticsService with WidgetsBindingObserver {
     'daw.midi_compose.audio_to_midi',
     'daw.clip_edit.pitch_shift',
   ];
+  static List<String> get aiCapabilities => _aiCapabilities;
 
   final Posthog _posthog = Posthog();
   final Uuid _uuid = const Uuid();

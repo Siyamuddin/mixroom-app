@@ -2664,6 +2664,55 @@ void main() {
       expect(requestBody.containsKey('temperature'), isFalse);
     });
 
+    test('intent-scoped direct routing keeps mix tool for vocal tone changes',
+        () async {
+      late Map<String, dynamic> requestBody;
+      final client = MockClient((request) async {
+        requestBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(
+          jsonEncode({
+            'output': [
+              {
+                'type': 'function_call',
+                'name': 'informational_response',
+                'arguments': {
+                  'message': 'Done.',
+                  'cancels_pending': false,
+                },
+              }
+            ],
+          }),
+          200,
+        );
+      });
+
+      final service = CloudLlmService(
+        apiKey: 'sk-test',
+        model: 'gpt-5.4-mini',
+        httpClient: client,
+      );
+      await service.send(
+        conversation: const [],
+        userText: 'Make the vocals wider and warmer, but do not touch drums.',
+        projectSnapshot:
+            'Track 1: row_name="Vocals" roles=[vocal]\nTrack 2: row_name="Drums" roles=[drums]',
+        clientContext: const <String, dynamic>{
+          'ai_tool_routing_mode': 'intent_scoped',
+          'ai_capabilities': <String>[
+            'daw.row_mix',
+            'daw.automation_edit',
+            'daw.clip_edit.pitch_shift',
+          ],
+        },
+      );
+
+      final tools = (requestBody['tools'] as List)
+          .whereType<Map>()
+          .map((tool) => tool['name'])
+          .toSet();
+      expect(tools, contains('mix_model_request'));
+    });
+
     test(
         'direct OpenAI requests include prompt cache settings and expose cache telemetry',
         () async {
@@ -2710,7 +2759,7 @@ void main() {
 
       expect(
         requestBody['prompt_cache_key'],
-        'mixroom-daw-v20260701a:ai_chat:b19b24dbe2fb',
+        'mixroom-daw-v20260701a:ai_chat:9f2abc720ff9',
       );
       expect(requestBody['prompt_cache_retention'], 'in_memory');
       expect(requestBody['max_output_tokens'], 8192);

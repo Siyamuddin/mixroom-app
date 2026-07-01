@@ -5490,6 +5490,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _producerCapturePanelMinimized = true;
   bool _producerGuidedPromptMinimized = false;
   late final ChatController _chatController;
+  String _assistantConversationSessionId = '';
   final ScrollController _chatListScrollController = ScrollController();
   double? _desktopChatHistoryHeight;
   bool _chatHistoryPruneScheduled = false;
@@ -5872,6 +5873,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (actionTypes.isEmpty) return normalizedTool;
     if (actionTypes.length == 1) return actionTypes.first;
     return 'multi_action';
+  }
+
+  String _newAssistantConversationSessionId() {
+    final timestamp = DateTime.now().microsecondsSinceEpoch;
+    final random = math.Random().nextInt(0x7fffffff).toRadixString(16);
+    return 'assistant_chat_${timestamp}_$random';
+  }
+
+  String _ensureAssistantConversationSessionId() {
+    final existing = _assistantConversationSessionId.trim();
+    if (existing.isNotEmpty) return existing;
+    _assistantConversationSessionId = _newAssistantConversationSessionId();
+    return _assistantConversationSessionId;
+  }
+
+  void _rotateAssistantConversationSessionId() {
+    _assistantConversationSessionId = _newAssistantConversationSessionId();
   }
 
   void _trackAiToolUsage({
@@ -8489,6 +8507,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         model: LlmConfig.openAiModel,
         proxyApiBaseUrl: LlmConfig.effectiveProxyApiBaseUrl,
         proxyPath: LlmConfig.proxyPath,
+        conversationStateMode: LlmConfig.normalizedConversationStateMode,
         requestTimeout: Duration(seconds: LlmConfig.requestTimeoutSeconds),
         authTokenProvider: authService.getIdTokenOrNull,
         refreshAuthTokenProvider: authService.refreshIdTokenOrNull,
@@ -13686,9 +13705,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
     }
 
-    final assistantChat =
-        ProjectChatHistory.fromChatMessages(_chatController.messages)
-            .toJsonValue();
+    final chatMessages = _chatController.messages;
+    final assistantChat = ProjectChatHistory.fromChatMessages(
+      chatMessages,
+      stateSessionId: chatMessages.isNotEmpty
+          ? _ensureAssistantConversationSessionId()
+          : _assistantConversationSessionId,
+    ).toJsonValue();
     final json = <String, dynamic>{
       "version": 6,
       "name": _projectName,
@@ -26826,7 +26849,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .map((spec) => (spec['id'] as String? ?? '').trim())
         .where((id) => id.isNotEmpty)
         .toList(growable: false);
+    final aiCapabilities = <String>[
+      ...AnalyticsService.aiCapabilities,
+      'daw.transport_control',
+      'daw.row_mute',
+      'daw.row_solo',
+      'daw.row_rename',
+      'daw.row_select',
+      'daw.row_delete',
+      'daw.row_create',
+      'daw.row_mix',
+      'daw.automation_edit',
+      'daw.clean_content_rows',
+    ];
     return <String, dynamic>{
+      'ai_capabilities': aiCapabilities,
+      if (LlmConfig.normalizedContextPackingMode != 'full')
+        'ai_context_packing_mode': LlmConfig.normalizedContextPackingMode,
+      if (LlmConfig.normalizedToolRoutingMode != 'full')
+        'ai_tool_routing_mode': LlmConfig.normalizedToolRoutingMode,
       'subscription_plan': entitlement?.planCode ?? 'free',
       'max_rows': _effectiveMaxRows,
       'current_rows': _rowCount,
@@ -41193,6 +41234,106 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return 0;
   }
 
+  bool _aiActionAllowsLayeringOnExistingRow(Map<String, dynamic> data) {
+    final target = _actionTarget(data);
+    final scope = (data['scope'] ?? target['scope'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    if (scope == 'selected' || scope == 'selection') return true;
+    if (_toActionBool(data['prefer_selected'] ?? target['prefer_selected'])) {
+      return true;
+    }
+    for (final raw in <dynamic>[
+      data['allow_layer_existing_row'],
+      target['allow_layer_existing_row'],
+      data['allow_existing_row'],
+      target['allow_existing_row'],
+      data['place_on_existing_row'],
+      target['place_on_existing_row'],
+      data['target_existing_row'],
+      target['target_existing_row'],
+    ]) {
+      if (_toActionBool(raw)) return true;
+    }
+    final placement = (data['placement_policy'] ??
+            target['placement_policy'] ??
+            data['placement'] ??
+            target['placement'] ??
+            '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    return placement.contains('existing') || placement.contains('layer');
+  }
+
+  bool _aiActionRequestsCleanContentRow(Map<String, dynamic> data) {
+    final target = _actionTarget(data);
+    for (final raw in <dynamic>[
+      data['prefer_clean_row'],
+      target['prefer_clean_row'],
+      data['prefer_empty_row'],
+      target['prefer_empty_row'],
+      data['use_empty_row'],
+      target['use_empty_row'],
+    ]) {
+      if (_toActionBool(raw)) return true;
+    }
+    final placement = (data['placement_policy'] ??
+            target['placement_policy'] ??
+            data['placement'] ??
+            target['placement'] ??
+            '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    return placement.contains('clean') ||
+        placement.contains('empty') ||
+        placement.contains('new_row') ||
+        placement.contains('new row') ||
+        placement.contains('separate');
+  }
+
+  bool _rowHasTimelineClip(int row) {
+    return _audioTracks.any((clip) => clip.rowIndex == row);
+  }
+
+  int? _preferredCleanAiContentRow() {
+    if (_rowCount <= 0) return 0;
+    final occupiedRows = _audioTracks
+        .map((clip) => clip.rowIndex)
+        .where((row) => row >= 0 && row < _rowCount)
+        .toSet();
+    if (occupiedRows.isEmpty) {
+      return _selectedRow.clamp(0, _rowCount - 1).toInt();
+    }
+    final bottomOccupied = occupiedRows.reduce((a, b) => a > b ? a : b);
+    for (int row = bottomOccupied + 1; row < _rowCount; row++) {
+      if (!occupiedRows.contains(row)) return row;
+    }
+    if (_rowCount < _effectiveMaxRows) return _rowCount;
+    for (int row = 0; row < _rowCount; row++) {
+      if (!occupiedRows.contains(row)) return row;
+    }
+    return null;
+  }
+
+  int _resolveAiContentInsertionRowIndexFromActionTarget(
+    Map<String, dynamic> data, {
+    int? fallbackClipIndex,
+  }) {
+    final row = _resolveInsertionRowIndexFromActionTarget(
+      data,
+      fallbackClipIndex: fallbackClipIndex,
+    );
+    if (!_aiActionRequestsCleanContentRow(data) ||
+        _aiActionAllowsLayeringOnExistingRow(data) ||
+        !_rowHasTimelineClip(row)) {
+      return row;
+    }
+    return _preferredCleanAiContentRow() ?? row;
+  }
+
   Future<int> _resolveAudioInsertionRowIndexFromActionTarget(
     Map<String, dynamic> data, {
     int? fallbackClipIndex,
@@ -41203,28 +41344,33 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return _rowCount - 1;
     }
 
-    final requestedRow = _resolveInsertionRowIndexFromActionTarget(
+    final requestedRow = _resolveAiContentInsertionRowIndexFromActionTarget(
       data,
       fallbackClipIndex: fallbackClipIndex,
-    ).clamp(0, _rowCount - 1).toInt();
-    if (!_rows[requestedRow].isInstrumentLane) return requestedRow;
+    );
+    while (requestedRow >= _rowCount && _rowCount < _effectiveMaxRows) {
+      final added = await _addRowImpl();
+      if (!added || _rowCount <= 0) break;
+    }
+    final boundedRow = requestedRow.clamp(0, _rowCount - 1).toInt();
+    if (!_rows[boundedRow].isInstrumentLane) return boundedRow;
 
     for (final offset in const <int>[1, -1, 2, -2, 3, -3]) {
-      final candidate = requestedRow + offset;
+      final candidate = boundedRow + offset;
       if (candidate < 0 || candidate >= _rowCount) continue;
       if (!_rows[candidate].isInstrumentLane) return candidate;
     }
 
     if (_rowCount < _effectiveMaxRows) {
-      final inserted = await _insertRowBelowImpl(requestedRow);
-      if (inserted) return (requestedRow + 1).clamp(0, _rowCount - 1).toInt();
+      final inserted = await _insertRowBelowImpl(boundedRow);
+      if (inserted) return (boundedRow + 1).clamp(0, _rowCount - 1).toInt();
     }
 
     for (int row = 0; row < _rowCount; row++) {
       if (!_rows[row].isInstrumentLane) return row;
     }
 
-    return requestedRow;
+    return boundedRow;
   }
 
   bool _isKickLikeText(String raw) {
@@ -41568,6 +41714,54 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 _throwIfChatFlowStopped(chatFlowId);
               }
               break;
+            case 'row_mute':
+              await _applyRowMuteAction(data);
+              if (chatFlowId != null) {
+                _throwIfChatFlowStopped(chatFlowId);
+              }
+              break;
+            case 'row_solo':
+              await _applyRowSoloAction(data);
+              if (chatFlowId != null) {
+                _throwIfChatFlowStopped(chatFlowId);
+              }
+              break;
+            case 'row_rename':
+              await _applyRowRenameAction(data);
+              if (chatFlowId != null) {
+                _throwIfChatFlowStopped(chatFlowId);
+              }
+              break;
+            case 'row_select':
+              await _applyRowSelectAction(data);
+              if (chatFlowId != null) {
+                _throwIfChatFlowStopped(chatFlowId);
+              }
+              break;
+            case 'row_delete':
+              await _applyRowDeleteAction(data);
+              if (chatFlowId != null) {
+                _throwIfChatFlowStopped(chatFlowId);
+              }
+              break;
+            case 'row_create':
+              await _applyRowCreateAction(data);
+              if (chatFlowId != null) {
+                _throwIfChatFlowStopped(chatFlowId);
+              }
+              break;
+            case 'row_mix':
+              await _applyRowMixAction(data);
+              if (chatFlowId != null) {
+                _throwIfChatFlowStopped(chatFlowId);
+              }
+              break;
+            case 'transport_control':
+              await _applyTransportControlAction(data);
+              if (chatFlowId != null) {
+                _throwIfChatFlowStopped(chatFlowId);
+              }
+              break;
             case 'sample_insert':
               await _applySampleInsertAction(data);
               if (chatFlowId != null) {
@@ -41867,6 +42061,846 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ? '• Cleared row color on ${rows.length} ${rows.length == 1 ? 'row' : 'rows'} •'
           : '• Changed row color on ${rows.length} ${rows.length == 1 ? 'row' : 'rows'} •',
     );
+  }
+
+  Future<void> _applyRowMuteAction(Map<String, dynamic> data) async {
+    final operation = (data['operation'] ?? 'mute')
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+    if (operation != 'mute' && operation != 'unmute' && operation != 'toggle') {
+      _insertAssistantChatText("I couldn't apply that row mute edit.");
+      return;
+    }
+
+    final rows = _resolveRowIndicesFromActionTarget(
+      data,
+      includeSelectionFallback: true,
+    );
+    if (rows.isEmpty) {
+      _insertAssistantChatText("I couldn't resolve which row to mute.");
+      return;
+    }
+
+    for (final row in rows) {
+      final current = row < _rowMuted.length ? _rowMuted[row] : false;
+      final nextMuted = operation == 'toggle' ? !current : operation == 'mute';
+      await _setRowMutedFromUi(row, nextMuted);
+    }
+    final actionText = operation == 'toggle'
+        ? 'Toggled mute'
+        : operation == 'mute'
+            ? 'Muted'
+            : 'Unmuted';
+    _insertSystemChatText(
+      '• $actionText ${rows.length} ${rows.length == 1 ? 'row' : 'rows'} •',
+    );
+  }
+
+  Future<void> _applyRowSoloAction(Map<String, dynamic> data) async {
+    final token = (data['operation'] ?? 'solo')
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+    final operation = switch (token) {
+      'solo' ||
+      'solo_row' ||
+      'solo_track' ||
+      'track_solo' ||
+      'row_solo' =>
+        'solo',
+      'unsolo' ||
+      'un_solo' ||
+      'unsolo_row' ||
+      'unsolo_track' ||
+      'un_solo_row' ||
+      'un_solo_track' ||
+      'clear_solo' =>
+        'unsolo',
+      'toggle' ||
+      'toggle_solo' ||
+      'toggle_row_solo' ||
+      'toggle_track_solo' =>
+        'toggle',
+      _ => token,
+    };
+    if (operation != 'solo' && operation != 'unsolo' && operation != 'toggle') {
+      _insertAssistantChatText("I couldn't apply that row solo edit.");
+      return;
+    }
+
+    final rows = _resolveRowIndicesFromActionTarget(
+      data,
+      includeSelectionFallback: true,
+    );
+    if (rows.isEmpty) {
+      _insertAssistantChatText("I couldn't resolve which row to solo.");
+      return;
+    }
+
+    for (final row in rows) {
+      final current = row < _rowSoloed.length ? _rowSoloed[row] : false;
+      final nextSoloed = operation == 'toggle' ? !current : operation == 'solo';
+      await _setRowSoloedFromUi(row, nextSoloed);
+    }
+    final actionText = operation == 'toggle'
+        ? 'Toggled solo'
+        : operation == 'solo'
+            ? 'Soloed'
+            : 'Unsoloed';
+    _insertSystemChatText(
+      '• $actionText ${rows.length} ${rows.length == 1 ? 'row' : 'rows'} •',
+    );
+  }
+
+  Future<void> _applyRowRenameAction(Map<String, dynamic> data) async {
+    final token = (data['operation'] ?? 'rename')
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+    final operation = switch (token) {
+      'rename' ||
+      'rename_row' ||
+      'rename_track' ||
+      'track_rename' ||
+      'row_rename' ||
+      'set_name' ||
+      'set_row_name' ||
+      'set_track_name' =>
+        'rename',
+      _ => token,
+    };
+    if (operation != 'rename') {
+      _insertAssistantChatText("I couldn't apply that row rename edit.");
+      return;
+    }
+
+    final rows = _resolveRowIndicesFromActionTarget(
+      data,
+      includeSelectionFallback: true,
+    );
+    if (rows.length != 1) {
+      _insertAssistantChatText("I couldn't resolve which row to rename.");
+      return;
+    }
+
+    final target = _actionTarget(data);
+    final rawName = (data['name'] ??
+                data['new_name'] ??
+                target['name'] ??
+                target['new_name'])
+            ?.toString()
+            .trim() ??
+        '';
+    final safeName = rawName.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (safeName.isEmpty) {
+      _insertAssistantChatText("I couldn't resolve the new row name.");
+      return;
+    }
+
+    final row = rows.single;
+    final appliedName =
+        safeName.length > 80 ? safeName.substring(0, 80) : safeName;
+    await _renameRow(row, appliedName);
+    _insertSystemChatText('• Renamed row to $appliedName •');
+  }
+
+  Future<void> _applyRowSelectAction(Map<String, dynamic> data) async {
+    final token = (data['operation'] ?? 'select')
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+    final operation = switch (token) {
+      'select' ||
+      'select_row' ||
+      'select_track' ||
+      'focus' ||
+      'focus_row' ||
+      'focus_track' ||
+      'make_active' ||
+      'activate' =>
+        'select',
+      _ => token,
+    };
+    if (operation != 'select') {
+      _insertAssistantChatText("I couldn't apply that row select edit.");
+      return;
+    }
+
+    final rows = _resolveRowIndicesFromActionTarget(
+      data,
+      includeSelectionFallback: false,
+    );
+    if (rows.length != 1) {
+      _insertAssistantChatText("I couldn't resolve which row to select.");
+      return;
+    }
+
+    final row = rows.single.clamp(0, _rowCount - 1).toInt();
+    setState(() => _selectedRow = row);
+    _insertSystemChatText('• Selected ${_rowDisplayName(row)} •');
+  }
+
+  Future<void> _applyRowDeleteAction(Map<String, dynamic> data) async {
+    final token = (data['operation'] ?? 'delete')
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+    final operation = switch (token) {
+      'delete' ||
+      'remove' ||
+      'delete_row' ||
+      'delete_track' ||
+      'remove_row' ||
+      'remove_track' ||
+      'trash' ||
+      'trash_row' ||
+      'trash_track' =>
+        'delete',
+      _ => token,
+    };
+    if (operation != 'delete') {
+      _insertAssistantChatText("I couldn't apply that row delete edit.");
+      return;
+    }
+
+    final rows = _resolveRowIndicesFromActionTarget(
+      data,
+      includeSelectionFallback: true,
+    );
+    if (rows.length != 1) {
+      _insertAssistantChatText("I couldn't resolve which row to delete.");
+      return;
+    }
+
+    final row = rows.single;
+    if (row < 0 || row >= _rowCount) {
+      _insertAssistantChatText("I couldn't resolve which row to delete.");
+      return;
+    }
+
+    final name = _rowDisplayName(row);
+    await _deleteRow(row);
+    _insertSystemChatText('• Deleted $name •');
+  }
+
+  Future<void> _applyRowCreateAction(Map<String, dynamic> data) async {
+    final token = (data['operation'] ?? 'create')
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+    final operation = switch (token) {
+      'create' ||
+      'add' ||
+      'new' ||
+      'create_row' ||
+      'create_track' ||
+      'add_row' ||
+      'add_track' ||
+      'new_row' ||
+      'new_track' ||
+      'insert_row' ||
+      'insert_track' =>
+        'create',
+      _ => token,
+    };
+    if (operation != 'create') {
+      _insertAssistantChatText("I couldn't apply that row create edit.");
+      return;
+    }
+
+    if (_rowCount >= _effectiveMaxRows) {
+      _insertAssistantChatText(
+          "I couldn't create another row because the row limit is reached.");
+      return;
+    }
+
+    final target = _actionTarget(data);
+    final positionToken = (data['position'] ?? target['position'] ?? 'end')
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+    final position = switch (positionToken) {
+      'above' || 'before' || 'insert_above' || 'above_target' => 'above',
+      'below' ||
+      'after' ||
+      'under' ||
+      'insert_below' ||
+      'below_target' =>
+        'below',
+      'end' ||
+      'bottom' ||
+      'last' ||
+      'append' ||
+      'after_last' ||
+      'at_end' =>
+        'end',
+      _ => positionToken,
+    };
+    if (position != 'end' && position != 'above' && position != 'below') {
+      _insertAssistantChatText("I couldn't resolve where to create the row.");
+      return;
+    }
+
+    int? referenceRow;
+    if (position == 'above' || position == 'below') {
+      final rows = _resolveRowIndicesFromActionTarget(
+        data,
+        includeSelectionFallback: true,
+      );
+      if (rows.length != 1) {
+        _insertAssistantChatText("I couldn't resolve where to create the row.");
+        return;
+      }
+      referenceRow = rows.single;
+      if (referenceRow < 0 || referenceRow >= _rowCount) {
+        _insertAssistantChatText("I couldn't resolve where to create the row.");
+        return;
+      }
+    }
+
+    final rawName = (data['name'] ??
+                data['new_name'] ??
+                target['name'] ??
+                target['new_name'])
+            ?.toString()
+            .trim() ??
+        '';
+    final safeName = rawName.replaceAll(RegExp(r'\s+'), ' ').trim();
+    final appliedName =
+        safeName.length > 80 ? safeName.substring(0, 80) : safeName;
+
+    final beforeCount = _rowCount;
+    int? createdIndex;
+    await _runRowLayoutActionWithUndo(
+      description: 'Create row',
+      perform: () async {
+        bool created;
+        if (position == 'above') {
+          created = await _insertRowAboveImpl(referenceRow!);
+          createdIndex = referenceRow;
+        } else if (position == 'below') {
+          created = await _insertRowBelowImpl(referenceRow!);
+          createdIndex = referenceRow + 1;
+        } else {
+          created = await _addRowImpl();
+          createdIndex = beforeCount;
+        }
+        if (!created) {
+          createdIndex = null;
+          return false;
+        }
+        final row = createdIndex;
+        if (row != null &&
+            row >= 0 &&
+            row < _rowCount &&
+            appliedName.isNotEmpty) {
+          await _renameRowImpl(row, appliedName);
+        }
+        return true;
+      },
+    );
+
+    if (createdIndex == null || _rowCount <= beforeCount) {
+      _insertAssistantChatText("I couldn't create another row.");
+      return;
+    }
+
+    final row = createdIndex!.clamp(0, _rowCount - 1).toInt();
+    setState(() => _selectedRow = row);
+    _insertSystemChatText('• Created ${_rowDisplayName(row)} •');
+  }
+
+  String _normalizeRowMixOperation(Object? raw) {
+    final token = (raw ?? '')
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+    return switch (token) {
+      'set' ||
+      'set_gain' ||
+      'gain' ||
+      'volume' ||
+      'set_volume' ||
+      'track_volume' ||
+      'row_volume' ||
+      'fader' ||
+      'set_fader' =>
+        'set_gain',
+      'adjust' ||
+      'adjust_gain' ||
+      'change_gain' ||
+      'gain_up' ||
+      'gain_down' ||
+      'volume_up' ||
+      'volume_down' ||
+      'turn_up' ||
+      'turn_down' ||
+      'make_louder' ||
+      'make_quieter' =>
+        'adjust_gain',
+      'pan' ||
+      'set_pan' ||
+      'pan_to' ||
+      'center_pan' ||
+      'pan_center' ||
+      'pan_left' ||
+      'pan_right' =>
+        'set_pan',
+      'adjust_pan' ||
+      'pan_more_left' ||
+      'pan_more_right' ||
+      'move_left' ||
+      'move_right' =>
+        'adjust_pan',
+      _ => token,
+    };
+  }
+
+  double? _rowMixDoubleFrom(
+    Map<String, dynamic> data,
+    List<String> keys,
+  ) {
+    final target = _actionTarget(data);
+    for (final key in keys) {
+      final parsed = _toActionDouble(data[key] ?? target[key]);
+      if (parsed != null && parsed.isFinite) return parsed;
+    }
+    return null;
+  }
+
+  String _rowMixDirection(Map<String, dynamic> data) {
+    final target = _actionTarget(data);
+    return (data['direction'] ?? target['direction'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+  }
+
+  double _dbToLinearGain(double db) =>
+      math.pow(10.0, db / 20.0).toDouble().clamp(0.0, 3.0).toDouble();
+
+  double? _resolveRowMixGainValue(
+    Map<String, dynamic> data, {
+    required double oldGain,
+    required String operation,
+  }) {
+    final absoluteDb = _rowMixDoubleFrom(
+      data,
+      const ['gain_db', 'db', 'decibels'],
+    );
+    final absoluteLinear = _rowMixDoubleFrom(
+      data,
+      const ['value', 'gain', 'linear_gain', 'gain_linear'],
+    );
+    final percent = _rowMixDoubleFrom(
+      data,
+      const ['percent', 'gain_percent', 'volume_percent'],
+    );
+    final deltaDb = _rowMixDoubleFrom(
+      data,
+      const ['delta_db', 'db_delta', 'gain_delta_db'],
+    );
+    final deltaLinear = _rowMixDoubleFrom(
+      data,
+      const ['delta', 'gain_delta', 'volume_delta'],
+    );
+    final direction = _rowMixDirection(data);
+
+    if (operation == 'set_gain') {
+      if (absoluteDb != null) return _dbToLinearGain(absoluteDb);
+      if (absoluteLinear != null) {
+        return absoluteLinear.clamp(0.0, 3.0).toDouble();
+      }
+      if (percent != null) return (percent / 100.0).clamp(0.0, 3.0).toDouble();
+    }
+
+    if (operation == 'adjust_gain' ||
+        direction == 'up' ||
+        direction == 'down') {
+      if (deltaDb != null) {
+        return (oldGain * math.pow(10.0, deltaDb / 20.0))
+            .toDouble()
+            .clamp(0.0, 3.0)
+            .toDouble();
+      }
+      if (deltaLinear != null) {
+        return (oldGain + deltaLinear).clamp(0.0, 3.0).toDouble();
+      }
+      if (direction == 'up') {
+        return (oldGain * math.pow(10.0, 3.0 / 20.0))
+            .toDouble()
+            .clamp(0.0, 3.0)
+            .toDouble();
+      }
+      if (direction == 'down') {
+        return (oldGain * math.pow(10.0, -3.0 / 20.0))
+            .toDouble()
+            .clamp(0.0, 3.0)
+            .toDouble();
+      }
+    }
+
+    if (absoluteDb != null) return _dbToLinearGain(absoluteDb);
+    if (absoluteLinear != null) {
+      return absoluteLinear.clamp(0.0, 3.0).toDouble();
+    }
+    return null;
+  }
+
+  double? _resolveRowMixPanValue(
+    Map<String, dynamic> data, {
+    required double oldPan01,
+    required String operation,
+  }) {
+    final direction = _rowMixDirection(data);
+    switch (direction) {
+      case 'hard_left':
+        return 0.0;
+      case 'left':
+        if (operation == 'adjust_pan') {
+          final signed = ((oldPan01 * 2.0) - 1.0 - 0.25).clamp(-1.0, 1.0);
+          return ((signed + 1.0) * 0.5).clamp(0.0, 1.0).toDouble();
+        }
+        return 0.25;
+      case 'center':
+      case 'centre':
+        return 0.5;
+      case 'right':
+        if (operation == 'adjust_pan') {
+          final signed = ((oldPan01 * 2.0) - 1.0 + 0.25).clamp(-1.0, 1.0);
+          return ((signed + 1.0) * 0.5).clamp(0.0, 1.0).toDouble();
+        }
+        return 0.75;
+      case 'hard_right':
+        return 1.0;
+    }
+
+    final pan01 = _rowMixDoubleFrom(data, const ['pan01', 'pan_value']);
+    if (pan01 != null) return pan01.clamp(0.0, 1.0).toDouble();
+
+    final value = _rowMixDoubleFrom(data, const ['value']);
+    if (value != null) return value.clamp(0.0, 1.0).toDouble();
+
+    final signed = _rowMixDoubleFrom(data, const ['pan_signed']);
+    if (signed != null) {
+      return (((signed.clamp(-1.0, 1.0) + 1.0) * 0.5).clamp(0.0, 1.0))
+          .toDouble();
+    }
+
+    final pan = _rowMixDoubleFrom(data, const ['pan']);
+    if (pan != null) {
+      if (pan < 0.0) {
+        return (((pan.clamp(-1.0, 1.0) + 1.0) * 0.5).clamp(0.0, 1.0))
+            .toDouble();
+      }
+      return pan.clamp(0.0, 1.0).toDouble();
+    }
+
+    if (operation == 'adjust_pan') {
+      final delta = _rowMixDoubleFrom(data, const ['delta', 'pan_delta']);
+      if (delta != null) {
+        final oldSigned = (oldPan01 * 2.0) - 1.0;
+        final nextSigned = (oldSigned + delta).clamp(-1.0, 1.0);
+        return ((nextSigned + 1.0) * 0.5).clamp(0.0, 1.0).toDouble();
+      }
+    }
+
+    return null;
+  }
+
+  Map<String, dynamic> _rowMixTargetData(
+    Map<String, dynamic> data,
+    int row,
+  ) {
+    final target = <String, dynamic>{..._actionTarget(data), 'row_index': row};
+    final out = <String, dynamic>{
+      'row': row,
+      'row_index': row,
+      'target': target,
+    };
+    for (final key in const ['scope', 'group_id', 'group_name']) {
+      if (data.containsKey(key)) out[key] = data[key];
+    }
+    return out;
+  }
+
+  Future<void> _applyRowMixAction(Map<String, dynamic> data) async {
+    final operation = _normalizeRowMixOperation(data['operation']);
+    if (operation != 'set_gain' &&
+        operation != 'adjust_gain' &&
+        operation != 'set_pan' &&
+        operation != 'adjust_pan') {
+      _insertAssistantChatText("I couldn't apply that row mix edit.");
+      return;
+    }
+
+    final rows = _resolveRowIndicesFromActionTarget(
+      data,
+      includeSelectionFallback: true,
+    );
+    if (rows.length != 1) {
+      _insertAssistantChatText("I couldn't resolve which row to mix.");
+      return;
+    }
+    final row = rows.single;
+    if (row < 0 || row >= _rowCount) {
+      _insertAssistantChatText("I couldn't resolve which row to mix.");
+      return;
+    }
+
+    final mixData = _rowMixTargetData(data, row);
+    final MixAction action;
+    if (operation == 'set_gain' || operation == 'adjust_gain') {
+      final group = _trackGroupForLeadRowIndex(row);
+      final oldGain = group?.gain ?? _rowGain[row];
+      final value = _resolveRowMixGainValue(
+        data,
+        oldGain: oldGain,
+        operation: operation,
+      );
+      if (value == null) {
+        _insertAssistantChatText("I couldn't resolve the gain change.");
+        return;
+      }
+      action = MixAction('set_row_gain', {
+        ...mixData,
+        'mode': 'set',
+        'value': value,
+      });
+    } else {
+      final group = _trackGroupForLeadRowIndex(row);
+      final oldPan = group?.pan ?? _rowPan[row];
+      final value = _resolveRowMixPanValue(
+        data,
+        oldPan01: oldPan,
+        operation: operation,
+      );
+      if (value == null) {
+        _insertAssistantChatText("I couldn't resolve the pan change.");
+        return;
+      }
+      action = MixAction('set_row_pan', {
+        ...mixData,
+        'mode': 'set',
+        'value': value,
+      });
+    }
+
+    final report = await applyMixingResult(
+      MixingResult(
+        actions: [action],
+        summary: 'Adjusted ${_rowDisplayName(row)}.',
+        isNoOp: false,
+      ),
+    );
+    if (!report.changed) {
+      _insertAssistantChatText("I couldn't apply that row mix edit.");
+    }
+  }
+
+  String _normalizeTransportControlOperation(Object? raw) {
+    final token = (raw ?? '')
+        .toString()
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+    return switch (token) {
+      'play' || 'start_playback' || 'resume' || 'resume_playback' => 'play',
+      'pause' || 'pause_playback' => 'pause',
+      'stop' || 'stop_playback' => 'stop',
+      'restart' ||
+      'restart_song' ||
+      'go_to_start' ||
+      'back_to_start' ||
+      'return_to_start' =>
+        'restart',
+      'toggle' ||
+      'toggle_play' ||
+      'toggle_playback' ||
+      'play_pause' ||
+      'toggle_play_pause' =>
+        'toggle_play_pause',
+      'record' ||
+      'start_record' ||
+      'start_recording' ||
+      'begin_recording' =>
+        'start_recording',
+      'stop_record' || 'stop_recording' => 'stop_recording',
+      'toggle_record' || 'toggle_recording' => 'toggle_recording',
+      'undo' || 'undo_last' || 'undo_last_action' => 'undo',
+      'redo' || 'redo_last' || 'redo_last_action' => 'redo',
+      'enable_metronome' ||
+      'metronome_on' ||
+      'turn_on_metronome' ||
+      'click_on' ||
+      'turn_on_click' =>
+        'enable_metronome',
+      'disable_metronome' ||
+      'metronome_off' ||
+      'turn_off_metronome' ||
+      'click_off' ||
+      'turn_off_click' =>
+        'disable_metronome',
+      'toggle_metronome' ||
+      'metronome' ||
+      'toggle_click' ||
+      'click' =>
+        'toggle_metronome',
+      'enable_loop' || 'loop_on' || 'turn_on_loop' => 'enable_loop',
+      'disable_loop' || 'loop_off' || 'turn_off_loop' => 'disable_loop',
+      'toggle_loop' || 'loop' => 'toggle_loop',
+      _ => token,
+    };
+  }
+
+  Future<void> _applyTransportControlAction(Map<String, dynamic> data) async {
+    final operation = _normalizeTransportControlOperation(data['operation']);
+    switch (operation) {
+      case 'play':
+        if (_isRecording) {
+          _insertSystemChatText('• Recording is already running •');
+          return;
+        }
+        if (!_isPlaying) {
+          await _togglePlayPause();
+        }
+        _insertSystemChatText('• Playback started •');
+        return;
+      case 'pause':
+      case 'stop':
+        if (_isRecording) {
+          await _stopRecordingJuce(keepPlaying: false);
+          _insertSystemChatText('• Recording stopped •');
+          return;
+        }
+        if (_isPlaying) {
+          await _pauseAudio(_safeAudioEditorStateSetter);
+        }
+        _insertSystemChatText(
+          operation == 'pause' ? '• Playback paused •' : '• Playback stopped •',
+        );
+        return;
+      case 'restart':
+        if (_recordButtonVisuallyActive) {
+          _insertAssistantChatText(
+              'Stop recording before restarting playback.');
+          return;
+        }
+        await _restartAudio(_safeAudioEditorStateSetter);
+        _insertSystemChatText('• Playback returned to the start •');
+        return;
+      case 'toggle_play_pause':
+        if (_isRecording) {
+          await _stopRecordingJuce(keepPlaying: false);
+          _insertSystemChatText('• Recording stopped •');
+          return;
+        }
+        final willPlay = !_isPlaying;
+        await _togglePlayPause();
+        _insertSystemChatText(
+          willPlay ? '• Playback started •' : '• Playback paused •',
+        );
+        return;
+      case 'start_recording':
+        if (_recordButtonVisuallyActive) {
+          _insertSystemChatText('• Recording is already running •');
+          return;
+        }
+        await _startRecordingJuce();
+        if (_recordButtonVisuallyActive) {
+          _insertSystemChatText('• Recording started •');
+        }
+        return;
+      case 'stop_recording':
+        if (!_recordButtonVisuallyActive) {
+          _insertSystemChatText('• Recording is not running •');
+          return;
+        }
+        await _stopRecordingJuce(keepPlaying: false);
+        _insertSystemChatText('• Recording stopped •');
+        return;
+      case 'toggle_recording':
+        final wasRecording = _recordButtonVisuallyActive;
+        await _onRecordPressed();
+        if (wasRecording) {
+          _insertSystemChatText('• Recording stopped •');
+        } else if (_recordButtonVisuallyActive) {
+          _insertSystemChatText('• Recording started •');
+        }
+        return;
+      case 'undo':
+        if (!_undoManager.canUndo && _pendingTempoUndoBefore == null) {
+          _insertAssistantChatText("There's nothing to undo.");
+          return;
+        }
+        await _performEditorUndo();
+        _insertSystemChatText('• Undid the last edit •');
+        return;
+      case 'redo':
+        if (!_undoManager.canRedo || _pendingTempoUndoBefore != null) {
+          _insertAssistantChatText("There's nothing to redo.");
+          return;
+        }
+        await _performEditorRedo();
+        _insertSystemChatText('• Redid the last edit •');
+        return;
+      case 'enable_metronome':
+        if (!_metronomeEnabled) {
+          await _toggleMetronomeFromBottomBar();
+        }
+        _insertSystemChatText('• Metronome enabled •');
+        return;
+      case 'disable_metronome':
+        if (_metronomeEnabled) {
+          await _toggleMetronomeFromBottomBar();
+        }
+        _insertSystemChatText('• Metronome disabled •');
+        return;
+      case 'toggle_metronome':
+        final next = !_metronomeEnabled;
+        await _toggleMetronomeFromBottomBar();
+        _insertSystemChatText(
+          next ? '• Metronome enabled •' : '• Metronome disabled •',
+        );
+        return;
+      case 'enable_loop':
+        if (!_loopEnabled) {
+          _toggleLoopFromBottomBar();
+        }
+        _insertSystemChatText('• Loop enabled •');
+        return;
+      case 'disable_loop':
+        if (_loopEnabled) {
+          _toggleLoopFromBottomBar();
+        }
+        _insertSystemChatText('• Loop disabled •');
+        return;
+      case 'toggle_loop':
+        final next = !_loopEnabled;
+        _toggleLoopFromBottomBar();
+        _insertSystemChatText(
+          next ? '• Loop enabled •' : '• Loop disabled •',
+        );
+        return;
+      default:
+        _insertAssistantChatText("I couldn't apply that transport command.");
+    }
   }
 
   String _normalizeEffectEditOperation(String raw) {
@@ -50292,7 +51326,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         operation,
         notes,
       );
-      final row = _resolveInsertionRowIndexFromActionTarget(data);
+      final row = _resolveAiContentInsertionRowIndexFromActionTarget(data);
       final instrumentId = _resolveAiInstrumentIdFromActionData(
         data,
         target,
@@ -54611,6 +55645,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   ) async {
     final history = ProjectChatHistory.fromJson(
         json['assistantChat'] ?? json['chatHistory']);
+    _assistantConversationSessionId = history.stateSessionId.trim();
     await _setChatMessages(
       history.toChatMessages().cast<Message>(),
       animated: false,
@@ -54636,6 +55671,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _clearChatHistory() async {
     await _setChatMessages(const <Message>[], animated: false);
     _chatPipeline.clearConversation();
+    _rotateAssistantConversationSessionId();
     await _persistChatHistoryOnly();
     if (mounted) setState(() {});
   }
@@ -56402,6 +57438,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           promptTraceId: promptTraceId,
           projectId: _projectId,
           aiFeature: aiFeature,
+          conversationSessionId: _ensureAssistantConversationSessionId(),
           bypassLearnedMagnitudes: _producerDataMode,
         );
         _throwIfChatFlowStopped(chatFlowId);
@@ -56972,6 +58009,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         promptTraceId: promptTraceId,
         projectId: _projectId,
         aiFeature: aiFeature,
+        conversationSessionId: _ensureAssistantConversationSessionId(),
         autoApplyProposals: true, // <-- key
         bypassLearnedMagnitudes: _producerDataMode,
       );
