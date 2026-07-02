@@ -277,11 +277,13 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<void> play() async {
+  static Future<bool> play() async {
     try {
-      await _ch.invokeMethod('play');
+      final res = await _ch.invokeMethod<bool>('play');
+      return res ?? true;
     } on PlatformException catch (e) {
       _logError('play', e);
+      return false;
     }
   }
 

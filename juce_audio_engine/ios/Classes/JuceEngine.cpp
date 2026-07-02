@@ -9995,6 +9995,16 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
     if (recordingActive)
         return false;
 
+    const int requiredInputs = juce::jlimit(
+        1,
+        32,
+        juce::jmax(channelStart + channelCount, 1));
+    if (!applyPreferredAudioDeviceSetup(requiredInputs, false, "startRecording"))
+    {
+        if (!applyPreferredAudioDeviceSetup(requiredInputs, true, "startRecording-reopen"))
+            return false;
+    }
+
     auto *dev = deviceManager.getCurrentAudioDevice();
     if (!dev)
         return false;

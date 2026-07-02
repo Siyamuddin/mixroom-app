@@ -222,6 +222,7 @@ object JuceBridge {
     @JvmStatic external fun selectInputDeviceJNI(name: String): Boolean
     @JvmStatic external fun getNumInputChannelsJNI(): Int
     @JvmStatic external fun getActiveInputChannelCountJNI(): Int
+    @JvmStatic external fun getActiveOutputChannelCountJNI(): Int
     @JvmStatic external fun prepareRecordingInputsJNI(desiredInputChannels: Int, reason: String): Boolean
     @JvmStatic external fun refreshAudioRouteJNI(reason: String)
     @JvmStatic external fun hardResetPlaybackOnlyRouteJNI(reason: String): Boolean

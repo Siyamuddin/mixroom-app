@@ -4303,9 +4303,7 @@ void JuceEngine::play()
         (dev == nullptr) || (dev->getActiveOutputChannels().countNumberOfSetBits() <= 0);
     if (missingOutputRoute)
     {
-        const int desiredInputs =
-            desiredInputOpenChannels.load(std::memory_order_relaxed);
-        if (applyPreferredAudioDeviceSetup(desiredInputs, true, "play-recover-output"))
+        if (applyPreferredAudioDeviceSetup(0, true, "play-recover-output"))
             logCurrentAudioDeviceState("play:recovered-output-route");
         else
         {
@@ -7775,6 +7773,13 @@ int JuceEngine::getActiveInputChannelCount() const
 {
     if (auto *dev = deviceManager.getCurrentAudioDevice())
         return dev->getActiveInputChannels().countNumberOfSetBits();
+    return 0;
+}
+
+int JuceEngine::getActiveOutputChannelCount() const
+{
+    if (auto *dev = deviceManager.getCurrentAudioDevice())
+        return dev->getActiveOutputChannels().countNumberOfSetBits();
     return 0;
 }
 

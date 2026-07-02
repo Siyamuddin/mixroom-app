@@ -141,6 +141,7 @@ extern "C"
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_selectInputDeviceJNI(JNIEnv *, jclass, jstring);
     JNIEXPORT jint JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getNumInputChannelsJNI(JNIEnv *, jclass);
     JNIEXPORT jint JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getActiveInputChannelCountJNI(JNIEnv *, jclass);
+    JNIEXPORT jint JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getActiveOutputChannelCountJNI(JNIEnv *, jclass);
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareRecordingInputsJNI(JNIEnv *, jclass, jint, jstring);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_refreshAudioRouteJNI(JNIEnv *, jclass, jstring);
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_hardResetPlaybackOnlyRouteJNI(JNIEnv *, jclass, jstring);

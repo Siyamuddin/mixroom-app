@@ -2636,6 +2636,15 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getActiveInputChannelCountJNI(JN
     return (jint)channels.load();
 }
 
+extern "C" JNIEXPORT jint JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getActiveOutputChannelCountJNI(JNIEnv *, jclass)
+{
+    std::atomic<int> channels{0};
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  { channels = JuceEngine::get().getActiveOutputChannelCount(); });
+    return (jint)channels.load();
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareRecordingInputsJNI(JNIEnv *env,
                                                                           jclass,

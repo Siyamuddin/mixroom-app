@@ -576,8 +576,9 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     val outputName = JuceBridge.getCurrentOutputDeviceNameJNI().trim()
+    val hasActiveOutputRoute = JuceBridge.getActiveOutputChannelCountJNI() > 0
     val shouldReopenPlaybackRoute =
-      hadRoutingAnomaly || outputName.isEmpty() || hasLingeringInputRoute
+      hadRoutingAnomaly || outputName.isEmpty() || !hasActiveOutputRoute || hasLingeringInputRoute
     if (!shouldReopenPlaybackRoute) {
       return true
     }
@@ -657,9 +658,11 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           result.success(JuceBridge.getTrackDurationJNI(args.intValue("track")))
         }
         "play" -> {
-          preparePlaybackRoute("play")
-          JuceBridge.playJNI()
-          result.success(null)
+          val routeReady = preparePlaybackRoute("play")
+          if (routeReady) {
+            JuceBridge.playJNI()
+          }
+          result.success(routeReady)
         }
         "pause" -> {
           JuceBridge.pauseJNI()

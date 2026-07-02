@@ -4530,6 +4530,33 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   bool get _hasTimelineClips => _audioTracks.isNotEmpty;
 
+  Duration _timelineEndPoint() {
+    var endMs = 0.0;
+    for (final track in _audioTracks) {
+      final offsetMs = track.offset * 1000.0;
+      if (!offsetMs.isFinite) continue;
+      final durationMs = _clipTimelineDurationMs(track);
+      if (!durationMs.isFinite || durationMs <= 0.0) continue;
+      endMs = math.max(endMs, offsetMs + durationMs);
+    }
+    if (endMs <= 0.0) return Duration.zero;
+    return Duration(milliseconds: endMs.ceil());
+  }
+
+  Duration _playbackStartFallbackPoint() {
+    if (_loopEnabled && _loopEndMs > _loopStartMs) {
+      return Duration(milliseconds: math.max(0, _loopStartMs));
+    }
+    return Duration.zero;
+  }
+
+  bool _playheadAtOrPastTimelineEnd(Duration playhead) {
+    if (!_hasTimelineClips) return false;
+    final endPoint = _timelineEndPoint();
+    if (endPoint <= Duration.zero) return false;
+    return playhead >= endPoint - const Duration(milliseconds: 8);
+  }
+
   bool get _usesContainedExportPanel {
     if (!mounted) return false;
     return _usesTabletDesktopDawShell(context);
@@ -8406,14 +8433,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _refreshFxUiForPlaybackTick();
 
       // ===== END / LOOP LOGIC (same as before) =====
-      final endPoint = Duration(
-        milliseconds: math.max(_audioOnlyOverallDuration.inMilliseconds,
-            msFor128Bars(_tempo).toInt()),
-      );
+      final endPoint = _timelineEndPoint();
       final withinEndGuard =
           _transportUiStopwatch.elapsed < _transportEndCheckGraceUntil;
 
-      final reachedEnd = _hasTimelineClips && _globalAudioClock >= endPoint;
+      final reachedEnd = _hasTimelineClips &&
+          endPoint > Duration.zero &&
+          _globalAudioClock >= endPoint;
       final reachedLoopEnd = _loopEnabled &&
           _globalAudioClock >= Duration(milliseconds: _loopEndMs);
 
@@ -15767,6 +15793,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _loopEndMs > _loopStartMs &&
         currentVisualClock >= Duration(milliseconds: _loopEndMs)) {
       _syncTransportClock(Duration(milliseconds: _loopStartMs), playing: false);
+    } else if (targetPlaying &&
+        _playheadAtOrPastTimelineEnd(currentVisualClock)) {
+      _syncTransportClock(_playbackStartFallbackPoint(), playing: false);
     } else if (!targetPlaying) {
       _syncTransportClock(currentVisualClock, playing: false);
     }
@@ -15829,6 +15858,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _globalAudioClock >= Duration(milliseconds: _loopEndMs)) {
       final loopStart = Duration(milliseconds: _loopStartMs);
       _syncTransportClock(loopStart, playing: false);
+    } else if (_playheadAtOrPastTimelineEnd(_globalAudioClock)) {
+      _syncTransportClock(_playbackStartFallbackPoint(), playing: false);
     }
     if (!commandIsCurrent()) return;
     _desktopPlaybackStartPoint = _globalAudioClock;
@@ -15836,14 +15867,36 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _transportUiStopwatch.elapsed + _kTransportPlayStartSyncGrace;
     _transportEndCheckGraceUntil =
         _transportUiStopwatch.elapsed + const Duration(milliseconds: 420);
+    final resumeStartPoint = _globalAudioClock;
     await JuceAudioEngine.setTransportSeconds(
-        _globalAudioClock.inMilliseconds / 1000.0);
+        resumeStartPoint.inMilliseconds / 1000.0);
     await JuceAudioEngine.setMetronomeTransportMs(
-        _globalAudioClock.inMilliseconds.toDouble());
+        resumeStartPoint.inMilliseconds.toDouble());
     if (!commandIsCurrent()) return;
-    await _ensurePlaybackRouteReady(reason: 'transportResume');
+    final routeReady =
+        await _ensurePlaybackRouteReady(reason: 'transportResume');
+    if (!routeReady) {
+      _transportDesiredPlaying = false;
+      _transportTicker?.stop();
+      setState(() {
+        _isPlaying = false;
+        _syncTransportClock(resumeStartPoint, playing: false);
+      });
+      _stopMeterPolling();
+      return;
+    }
     if (!commandIsCurrent()) return;
-    await JuceAudioEngine.play();
+    final playStarted = await JuceAudioEngine.play();
+    if (!playStarted) {
+      _transportDesiredPlaying = false;
+      _transportTicker?.stop();
+      setState(() {
+        _isPlaying = false;
+        _syncTransportClock(resumeStartPoint, playing: false);
+      });
+      _stopMeterPolling();
+      return;
+    }
     if (!commandIsCurrent()) return;
     _syncTransportClock(_globalAudioClock, playing: true);
 
@@ -15862,8 +15915,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
     if (!commandIsCurrent()) return;
     if (_transportRateSecPerSec <= 0.0) {
-      await _ensurePlaybackRouteReady(reason: 'transportResumeRetry');
-      await JuceAudioEngine.play();
+      final retryReady =
+          await _ensurePlaybackRouteReady(reason: 'transportResumeRetry');
+      if (retryReady) {
+        await JuceAudioEngine.play();
+      }
     }
   }
 
@@ -19109,7 +19165,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<bool> _ensureMicrophonePermissionForRecording() async {
-    if (!(Platform.isAndroid || Platform.isIOS)) return true;
+    if (!(Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
+      return true;
+    }
 
     if (_microphonePermissionStatus.isGranted ||
         _microphonePermissionStatus.isLimited) {
@@ -26108,18 +26166,37 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _addSampleBrowserRootFolder() async {
-    if (!await _ensureAndroidMediaLibraryAccess()) {
-      return;
-    }
-    final directoryPath = await _runFilePickerRequest<String?>(
-      () => FilePicker.platform.getDirectoryPath(
-        dialogTitle: 'Choose Sample Folder',
-      ),
-    );
+    final directoryPath = await _pickSampleBrowserRootDirectory();
     if (directoryPath == null) {
       return;
     }
     await _addSampleBrowserRootFromPath(directoryPath);
+  }
+
+  Future<String?> _pickSampleBrowserRootDirectory() async {
+    try {
+      return await _runFilePickerRequest<String?>(
+        () => FilePicker.platform.getDirectoryPath(
+          dialogTitle: 'Choose Sample Folder',
+        ),
+      );
+    } on PlatformException catch (error, stackTrace) {
+      debugPrint('Failed to pick sample browser folder: $error');
+      unawaited(
+        CrashReportingService.instance.captureException(
+          error,
+          stackTrace: stackTrace,
+        ),
+      );
+      if (mounted) {
+        _showSmallNotice(
+          Platform.isAndroid
+              ? 'Could not open the folder picker. Try choosing audio files from Import instead.'
+              : 'Could not open the folder picker.',
+        );
+      }
+      return null;
+    }
   }
 
   bool _isAndroidRootFolderPath(String path) {
@@ -33525,6 +33602,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_usesTabletDesktopDawShell(context)) {
       return chatLift +
           _kChatBarStackHeight +
+          _androidTabletDawBottomInset(context) +
           (_isProducerCaptureUiVisible && !chatTypingActive
               ? _kProducerBannerHeightEstimate
               : 0.0) +
@@ -57188,6 +57266,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return baseInset + 2.0;
   }
 
+  double _androidTabletDawBottomInset(BuildContext context) {
+    if (!Platform.isAndroid || !_usesTabletDesktopDawShell(context)) {
+      return 0.0;
+    }
+    final navInset = math.max(
+      math.max(
+        MediaQuery.paddingOf(context).bottom,
+        MediaQuery.viewPaddingOf(context).bottom,
+      ),
+      MediaQuery.systemGestureInsetsOf(context).bottom,
+    );
+    if (navInset <= 0.0) return 0.0;
+    return (navInset + 8.0).clamp(0.0, 88.0).toDouble();
+  }
+
   Widget _buildBottomChatAndTransport({
     bool includeChatBar = true,
     bool includeProducerCapture = true,
@@ -63197,6 +63290,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final topBarReservedHeight = _topBarReservedHeight(editorLayoutSpec);
         final usesBottomControlRow =
             usesTabletDawLayout || PlatformCapabilities.current.isDesktop;
+        final tabletDawBottomInset =
+            usesTabletDawLayout ? _androidTabletDawBottomInset(context) : 0.0;
         final keyboardLift = usesTabletDawLayout
             ? rawKeyboardLift
             : math.max(
@@ -63205,6 +63300,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               );
         final snackBottomInset = usesBottomControlRow
             ? _kChatBarStackHeight +
+                tabletDawBottomInset +
                 (_isProducerCaptureUiVisible
                     ? _kProducerBannerHeightEstimate
                     : 0.0) +
@@ -63239,6 +63335,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             _kTransportBarHeight +
             _chatHistoryBottomGap +
             (Platform.isAndroid ? _kAndroidOverlayPanelLift : 0.0) +
+            tabletDawBottomInset +
             keyboardLift;
         return WillPopScope(
           onWillPop: () async {
@@ -63375,8 +63472,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     child: Padding(
                                       padding: EdgeInsets.only(
                                         right: tabletRightPanelReservedWidth,
-                                        bottom:
-                                            usesTabletDawLayout ? 68.0 : 0.0,
+                                        bottom: usesTabletDawLayout
+                                            ? 68.0 + tabletDawBottomInset
+                                            : 0.0,
                                       ),
                                       child: Halo(
                                         highlighter: _mixHighlighter,
@@ -64402,6 +64500,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           tutorialHighlighter: _mixHighlighter,
                                           bottomDockInset: _kChatBarStackHeight +
                                               _kTransportBarHeight +
+                                              tabletDawBottomInset +
                                               (_isProducerCaptureUiVisible
                                                   ? _kProducerBannerHeightEstimate
                                                   : 0.0),
@@ -65657,7 +65756,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 Positioned(
                   left: 0,
                   right: usesTabletDawLayout ? tabletBottomDockRightInset : 0,
-                  bottom: 0,
+                  bottom: tabletDawBottomInset,
                   child: Material(
                     type: MaterialType.transparency,
                     child: RepaintBoundary(

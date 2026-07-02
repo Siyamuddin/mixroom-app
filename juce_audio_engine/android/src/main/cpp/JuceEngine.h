@@ -4550,6 +4550,7 @@ public:
     juce::String getCurrentOutputDeviceName() const;
     int getNumInputChannels() const;
     int getActiveInputChannelCount() const;
+    int getActiveOutputChannelCount() const;
     void setLiveInputMonitoringEnabled(bool enabled);
     bool isLiveInputMonitoringEnabled() const noexcept;
     void routeLiveInputToRow(int row, int channelCount, int channelStart = 0);
