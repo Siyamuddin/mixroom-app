@@ -41,6 +41,21 @@ class LlmConfig {
     defaultValue: '',
   );
 
+  static const String conversationStateMode = String.fromEnvironment(
+    'LLM_CONVERSATION_STATE_MODE',
+    defaultValue: 'openai_conversation_seeded',
+  );
+
+  static const String contextPackingMode = String.fromEnvironment(
+    'LLM_CONTEXT_PACKING_MODE',
+    defaultValue: 'compact',
+  );
+
+  static const String toolRoutingMode = String.fromEnvironment(
+    'LLM_TOOL_ROUTING_MODE',
+    defaultValue: 'intent_scoped',
+  );
+
   static const int requestTimeoutSeconds = int.fromEnvironment(
     'LLM_REQUEST_TIMEOUT_SECONDS',
     defaultValue: 25,
@@ -85,6 +100,35 @@ class LlmConfig {
       hasOpenAiApiKey &&
       hasOpenAiModel &&
       (kDebugMode || allowDirectOpenAiInRelease);
+
+  static String get normalizedConversationStateMode {
+    final normalized = conversationStateMode.trim().toLowerCase();
+    switch (normalized) {
+      case 'openai_conversation_seeded':
+        return 'openai_conversation_seeded';
+      case 'openai_conversation':
+        return 'openai_conversation';
+      case 'manual_history':
+      default:
+        return 'manual_history';
+    }
+  }
+
+  static String get normalizedContextPackingMode {
+    final normalized = contextPackingMode.trim().toLowerCase();
+    switch (normalized) {
+      case 'compact':
+        return 'compact';
+      case 'full':
+      default:
+        return 'full';
+    }
+  }
+
+  static String get normalizedToolRoutingMode {
+    final normalized = toolRoutingMode.trim().toLowerCase();
+    return normalized == 'intent_scoped' ? 'intent_scoped' : 'full';
+  }
 
   static String _normalizeProxyApiBaseUrl(String raw) {
     final trimmed = raw.trim();

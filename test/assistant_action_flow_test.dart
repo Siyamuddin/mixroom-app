@@ -28,6 +28,7 @@ class _FakeCloudLlmService extends CloudLlmService {
     String? projectId,
     String? aiFeature,
     String? promptTraceId,
+    String? conversationSessionId,
     MixingResult? pendingMix,
     Map<String, dynamic> clientContext = const <String, dynamic>{},
   }) async {
@@ -56,6 +57,7 @@ class _QueuedFakeCloudLlmService extends CloudLlmService {
     String? projectId,
     String? aiFeature,
     String? promptTraceId,
+    String? conversationSessionId,
     MixingResult? pendingMix,
     Map<String, dynamic> clientContext = const <String, dynamic>{},
   }) async {
@@ -1683,7 +1685,7 @@ void main() {
       expect(
         fakeLlm.seenProjectSnapshot,
         contains(
-          'Track 3: row_name="Reference" row_position=middle occupied_row_position=bottom-most-occupied',
+          'Track 3: row_name="Reference" row_color=unset row_position=middle occupied_row_position=bottom-most-occupied',
         ),
       );
       expect(

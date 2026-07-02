@@ -77,6 +77,7 @@ class ChatPipeline {
     String? promptTraceId,
     String? projectId,
     String? aiFeature,
+    String? conversationSessionId,
     Map<String, dynamic> clientContext = const <String, dynamic>{},
     bool autoApplyProposals = false,
     bool bypassLearnedMagnitudes = false,
@@ -155,6 +156,7 @@ class ChatPipeline {
         promptTraceId: promptTraceId,
         projectId: projectId,
         aiFeature: aiFeature,
+        conversationSessionId: conversationSessionId,
         clientContext: clientContext,
         pendingMix: _pendingMix,
       );
@@ -1052,7 +1054,7 @@ class ChatPipeline {
         final activeFxCount =
             group.effects.where((effect) => !effect.bypassed).length;
         b.writeln(
-          'Group "${groupName}": '
+          'Group "$groupName": '
           'group_id=${group.id} '
           'member_tracks=${memberRows.isEmpty ? "none" : memberRows.join(",")} '
           'collapsed=${group.collapsed} '
