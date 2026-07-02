@@ -17,8 +17,10 @@ from common import llm_provider  # noqa: E402
 from common.llm_provider import (  # noqa: E402
     AnthropicMessagesProvider,
     GeminiGenerateContentProvider,
+    OpenAiResponsesProvider,
     get_provider,
 )
+from common.llm_contract import build_openai_responses_request  # noqa: E402
 
 
 def _sample_request() -> dict:
@@ -55,6 +57,64 @@ class LlmProviderTests(unittest.TestCase):
         self.assertEqual(get_provider("claude").name, "claude")
         self.assertEqual(get_provider("google").name, "gemini")
         self.assertEqual(get_provider("gemini").name, "gemini")
+
+    def test_openai_request_builder_passes_conversation_id(self) -> None:
+        request = {
+            **_sample_request(),
+            "conversation": "conv_test123",
+        }
+
+        body = build_openai_responses_request(request)
+
+        self.assertEqual(body["conversation"], "conv_test123")
+
+    def test_openai_provider_appends_function_call_outputs_for_conversation(self) -> None:
+        provider = OpenAiResponsesProvider()
+        calls: list[dict] = []
+
+        def fake_post_json_request(**kwargs):
+            calls.append(kwargs)
+            if kwargs["url"].endswith("/v1/responses"):
+                return (
+                    200,
+                    json.dumps(
+                        {
+                            "id": "resp_123",
+                            "output": [
+                                {
+                                    "type": "function_call",
+                                    "call_id": "call_123",
+                                    "name": "daw_assistant_actions",
+                                    "arguments": "{}",
+                                }
+                            ],
+                        }
+                    ),
+                )
+            return 200, json.dumps({"ok": True})
+
+        with mock.patch.object(
+            llm_provider,
+            "_post_json_request",
+            side_effect=fake_post_json_request,
+        ):
+            result = provider.forward_request(
+                api_key="sk-test",
+                request_body={**_sample_request(), "conversation": "conv_123"},
+                timeout_seconds=30,
+            )
+
+        self.assertEqual(result["statusCode"], 200)
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(calls[1]["url"].endswith("/v1/conversations/conv_123/items"))
+        self.assertEqual(
+            calls[1]["body"]["items"][0]["type"],
+            "function_call_output",
+        )
+        self.assertEqual(
+            result["observability"]["openai_conversation_tool_outputs_appended"],
+            1,
+        )
 
     def test_claude_builds_messages_api_request(self) -> None:
         provider = AnthropicMessagesProvider()

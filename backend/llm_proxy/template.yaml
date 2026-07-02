@@ -160,6 +160,7 @@ Globals:
         AI_USAGE_METRICS_TABLE: !Ref AiUsageMetricsTable
         AI_USAGE_EVENTS_TABLE: !Ref AiUsageEventsTable
         AI_PROMPT_LIMIT_SETTINGS_TABLE: !Ref AiPromptLimitSettingsTable
+        OPENAI_CONVERSATION_STATE_TABLE: !Ref OpenAiConversationStateTable
         ENTITLEMENTS_TABLE: !Ref EntitlementsTableName
         COLLABORATION_TABLE: !Ref CollaborationTableName
         LLM_MAX_OUTPUT_TOKENS: !Ref LlmMaxOutputTokens
@@ -267,6 +268,36 @@ Resources:
         - AttributeName: setting_key
           KeyType: HASH
 
+  OpenAiConversationStateTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub mixroom-openai-conversation-state-${StageName}
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: mapping_key
+          AttributeType: S
+        - AttributeName: session_key
+          AttributeType: S
+        - AttributeName: updated_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: mapping_key
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: session_updated_at_idx
+          KeySchema:
+            - AttributeName: session_key
+              KeyType: HASH
+            - AttributeName: updated_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
   LlmApi:
     Type: AWS::Serverless::HttpApi
     Properties:
@@ -327,6 +358,8 @@ Resources:
             TableName: !Ref AiUsageEventsTable
         - DynamoDBReadPolicy:
             TableName: !Ref AiPromptLimitSettingsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OpenAiConversationStateTable
         - DynamoDBReadPolicy:
             TableName: !Ref EntitlementsTableName
         - !If
@@ -357,6 +390,12 @@ Resources:
             ApiId: !Ref LlmApi
             Path: /v1/llm/limits
             Method: GET
+        ConversationEvents:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref LlmApi
+            Path: /v1/llm/conversation-events
+            Method: POST
 
   MixResolveFunction:
     Type: AWS::Serverless::Function
@@ -495,3 +534,5 @@ Outputs:
     Value: !Ref AiUsageEventsTable
   AiPromptLimitSettingsTableName:
     Value: !Ref AiPromptLimitSettingsTable
+  OpenAiConversationStateTableName:
+    Value: !Ref OpenAiConversationStateTable

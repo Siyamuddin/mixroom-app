@@ -244,6 +244,64 @@ class ApiResponsesTests(unittest.TestCase):
 
         self.assertEqual(result["statusCode"], 413)
 
+    def test_conversation_event_manual_mode_noops(self) -> None:
+        event = _authed_event(
+            json.dumps(
+                {
+                    "event_type": "daw_execution_result",
+                    "conversation_state_mode": "manual_history",
+                    "project_id": "project-123",
+                    "ai_feature": "ai_chat",
+                    "conversation_session_id": "session-123",
+                }
+            ),
+            path="/v1/llm/conversation-events",
+        )
+
+        result = api_responses.handler(event, None)
+        payload = json.loads(result["body"])
+
+        self.assertEqual(result["statusCode"], 200)
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["appended"])
+        self.assertTrue(payload["noop"])
+
+    def test_conversation_session_id_without_mode_stays_manual(self) -> None:
+        self.assertEqual(
+            api_responses._conversation_state_mode_from_body(
+                {"conversation_session_id": "session-123"}
+            ),
+            "manual_history",
+        )
+
+    def test_conversation_runtime_fingerprint_uses_stable_contract_hash(self) -> None:
+        base_request = {
+            "model": "gpt-5.4-mini",
+            "instructions": "PROJECT_SNAPSHOT\nTrack 1: Drums",
+            "reasoning": {"effort": "minimal"},
+            "prompt_cache_retention": "in_memory",
+            "openai_conversation_contract_hash": "stable-contract",
+        }
+        changed_context_request = {
+            **base_request,
+            "instructions": "PROJECT_SNAPSHOT\nTrack 7: Bass",
+        }
+
+        first = api_responses._runtime_config_fingerprint(
+            ai_feature="ai_chat",
+            provider_name="openai",
+            request_body=base_request,
+            runtime_config={},
+        )
+        second = api_responses._runtime_config_fingerprint(
+            ai_feature="ai_chat",
+            provider_name="openai",
+            request_body=changed_context_request,
+            runtime_config={},
+        )
+
+        self.assertEqual(first, second)
+
     def test_handler_builds_server_owned_request_for_mixroom_payload(self) -> None:
         provider = _FakeProvider()
         event = _authed_event(

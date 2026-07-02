@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -113,6 +114,101 @@ class IntentScopedRoutingTests(unittest.TestCase):
         self.assertIn(
             "combines concrete DAW edits with sonic mix goals",
             str(request.get("instructions") or ""),
+        )
+
+    def test_conversation_seeded_excludes_manual_history_from_input(self) -> None:
+        payload = {
+            "conversation_state_mode": "openai_conversation_seeded",
+            "conversation": [
+                {"role": "user", "content": "split the vocals"},
+                {"role": "assistant", "content": "I split the vocals."},
+            ],
+            "user_text": "now mute the original track",
+            "project_snapshot": "PROJECT_SNAPSHOT\nTrack 1: Original Song",
+            "selection_snapshot": "SELECTION_SNAPSHOT\nselected row 1",
+            "library_snapshot": "LIBRARY_SNAPSHOT\nempty",
+            "client_context": {
+                "ai_capabilities": OPTIMIZED_CAPABILITIES,
+                "ai_context_packing_mode": "compact",
+                "ai_tool_routing_mode": "intent_scoped",
+            },
+        }
+
+        request = build_llm_request_from_mixroom_payload(payload)
+
+        self.assertEqual(
+            request["messages"],
+            [{"role": "user", "content": "now mute the original track"}],
+        )
+        instructions = str(request.get("instructions") or "")
+        self.assertIn("SEEDED MIXROOM CONTRACT ACTIVE", instructions)
+        self.assertIn("PROJECT_SNAPSHOT", instructions)
+        self.assertIn("Track 1: Original Song", instructions)
+        self.assertNotIn("split the vocals", json.dumps(request["messages"]))
+        self.assertEqual(
+            request["conversation_state_mode_effective"],
+            "openai_conversation_seeded",
+        )
+        self.assertTrue(request["openai_conversation_seed_items"])
+
+    def test_conversation_contract_hash_ignores_request_local_context(self) -> None:
+        base_payload = {
+            "conversation_state_mode": "openai_conversation_seeded",
+            "conversation": [],
+            "user_text": "mute the drums",
+            "project_snapshot": "PROJECT_SNAPSHOT\nTrack 1: Drums",
+            "selection_snapshot": "SELECTION_SNAPSHOT\nselected row 1",
+            "library_snapshot": "LIBRARY_SNAPSHOT\nempty",
+            "client_context": {
+                "ai_capabilities": OPTIMIZED_CAPABILITIES,
+                "ai_context_packing_mode": "compact",
+                "ai_tool_routing_mode": "intent_scoped",
+            },
+        }
+        changed_context_payload = {
+            **base_payload,
+            "user_text": "turn the bass down",
+            "project_snapshot": "PROJECT_SNAPSHOT\nTrack 7: Bass",
+            "selection_snapshot": "SELECTION_SNAPSHOT\nselected row 7",
+        }
+
+        first = build_llm_request_from_mixroom_payload(base_payload)
+        second = build_llm_request_from_mixroom_payload(changed_context_payload)
+
+        self.assertNotEqual(first["instructions"], second["instructions"])
+        self.assertEqual(
+            first["openai_conversation_contract_hash"],
+            second["openai_conversation_contract_hash"],
+        )
+        self.assertEqual(
+            first["openai_conversation_seed_hash"],
+            second["openai_conversation_seed_hash"],
+        )
+
+    def test_manual_history_keeps_prior_messages_in_input(self) -> None:
+        payload = {
+            "conversation": [
+                {"role": "user", "content": "split the vocals"},
+                {"role": "assistant", "content": "I split the vocals."},
+            ],
+            "user_text": "now mute the original track",
+            "project_snapshot": "PROJECT_SNAPSHOT\nTrack 1: Original Song",
+            "selection_snapshot": "",
+            "library_snapshot": "",
+            "client_context": {
+                "ai_capabilities": OPTIMIZED_CAPABILITIES,
+            },
+        }
+
+        request = build_llm_request_from_mixroom_payload(payload)
+
+        contents = [message["content"] for message in request["messages"]]
+        self.assertTrue(any("PROJECT_SNAPSHOT" in value for value in contents))
+        self.assertIn("split the vocals", contents)
+        self.assertEqual(contents[-1], "now mute the original track")
+        self.assertEqual(
+            request["conversation_state_mode_effective"],
+            "manual_history",
         )
 
 

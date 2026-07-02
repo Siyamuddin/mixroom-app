@@ -132,6 +132,13 @@ def _read_tool_routing_mode(payload: Dict[str, Any]) -> str:
     return "intent_scoped" if normalized == "intent_scoped" else "full"
 
 
+def _read_conversation_state_mode(payload: Dict[str, Any]) -> str:
+    normalized = str(payload.get("conversation_state_mode") or "manual_history").strip().lower()
+    if normalized in {"openai_conversation", "openai_conversation_seeded"}:
+        return normalized
+    return "manual_history"
+
+
 def _effective_tool_routing_mode(tool_routing_mode: str) -> str:
     return tool_routing_mode
 
@@ -4108,6 +4115,7 @@ _ALLOWED_OPENAI_COMPATIBLE_FIELDS = frozenset(
         "parallel_tool_calls",
         "text",
         "metadata",
+        "conversation",
         "prompt_cache_key",
         "prompt_cache_retention",
     }
@@ -4258,6 +4266,88 @@ def _build_input_messages(
     return input_messages
 
 
+def _build_conversation_context_instructions(
+    *,
+    project_snapshot: str,
+    selection_snapshot: str,
+    library_snapshot: str,
+    pending_mix: Dict[str, Any] | None,
+) -> str:
+    lines = [
+        "CURRENT PROJECT CONTEXT",
+        "Treat this context as current request-local DAW state, not durable chat history.",
+        "PROJECT_SNAPSHOT:",
+        project_snapshot,
+    ]
+
+    if selection_snapshot.strip():
+        lines.extend(["", "SELECTION_SNAPSHOT:", selection_snapshot])
+
+    if library_snapshot.strip():
+        lines.extend(["", "LIBRARY_SNAPSHOT:", library_snapshot])
+
+    if pending_mix is not None:
+        lines.extend(
+            [
+                "",
+                "PENDING_MIX_PROPOSAL:",
+                json.dumps(pending_mix, ensure_ascii=False),
+                "",
+                "A mix proposal was previously discussed in the chat at some point.",
+                "You may refer to this if it is relevant to the current turn.",
+                "If it is not relevant, ignore it.",
+            ]
+        )
+
+    return "\n".join(lines).strip()
+
+
+def _conversation_seed_hash(seed_instructions: str) -> str:
+    return hashlib.sha256(seed_instructions.strip().encode("utf-8")).hexdigest()[:16]
+
+
+def _openai_conversation_seed_items(seed_instructions: str) -> List[Dict[str, Any]]:
+    normalized_seed = seed_instructions.strip()
+    if not normalized_seed:
+        return []
+    return [
+        {
+            "type": "message",
+            "role": "developer",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": "\n".join(
+                        [
+                            "MIXROOM SEEDED BEHAVIOR CONTRACT",
+                            "These persistent instructions apply to this OpenAI Conversation unless a later request-local instruction explicitly overrides them.",
+                            "",
+                            normalized_seed,
+                        ]
+                    ),
+                }
+            ],
+        }
+    ]
+
+
+def _build_seeded_conversation_request_instructions(
+    *,
+    seed_hash: str,
+    context_instructions: str,
+) -> str:
+    lines = [
+        "SEEDED MIXROOM CONTRACT ACTIVE",
+        f"- The OpenAI conversation already contains the full Mixroom behavior contract seed_hash={seed_hash}.",
+        "- The seeded contract includes CLIENT ENTITLEMENT POLICY and client capability overrides for this runtime fingerprint.",
+        "- Current request tools, tool_choice, model settings, PROJECT_SNAPSHOT, SELECTION_SNAPSHOT, LIBRARY_SNAPSHOT, and PENDING_MIX_PROPOSAL are authoritative if they conflict with older conversation memory.",
+        "- Use the seeded contract for behavior, tone, follow-up handling, user-intent priority, action selection, and clean-row placement policy.",
+    ]
+    if context_instructions.strip():
+        lines.extend(["", context_instructions.strip()])
+    return "\n".join(lines).strip()
+
+
 def _default_prompt_cache_key(ai_feature: str, capability_signature: str) -> str:
     normalized_feature = str(ai_feature).strip() or "ai_chat"
     normalized_capabilities = capability_signature.strip() or "legacy"
@@ -4301,6 +4391,7 @@ def build_llm_request_from_mixroom_payload(
     client_policy = _read_client_policy(payload)
     context_packing_mode = _read_context_packing_mode(payload)
     tool_routing_mode = _read_tool_routing_mode(payload)
+    conversation_state_mode = _read_conversation_state_mode(payload)
     effective_tool_routing_mode = _effective_tool_routing_mode(tool_routing_mode)
     instruction_overlay = ai_execution_guidance()
     capability_signature = _client_capability_signature(client_capabilities)
@@ -4331,28 +4422,64 @@ def build_llm_request_from_mixroom_payload(
         raise ValueError("'pending_mix' must be an object.")
 
     resolved_model = default_model.strip() or DEFAULT_MODEL
-    instruction_parts = [_build_system_prompt(client_capabilities, client_policy)]
+    stable_instruction_parts = [_build_system_prompt(client_capabilities, client_policy)]
     if instruction_overlay:
-        instruction_parts.append(instruction_overlay)
+        stable_instruction_parts.append(instruction_overlay)
     request_local_hints = _build_request_local_ai_hints(user_text=user_text)
-    if request_local_hints:
-        instruction_parts.append(request_local_hints)
-
-    body: NormalizedLlmRequest = {
-        "model": resolved_model,
-        "instructions": "\n\n".join(instruction_parts).strip(),
-        "prompt_cache_key": _default_prompt_cache_key(
-            ai_feature, capability_signature
-        ),
-        "prompt_cache_retention": _default_prompt_cache_retention(resolved_model),
-        "messages": _build_input_messages(
+    stable_instructions = "\n\n".join(stable_instruction_parts).strip()
+    context_instructions = _build_conversation_context_instructions(
+        project_snapshot=project_snapshot,
+        selection_snapshot=selection_snapshot,
+        library_snapshot=library_snapshot,
+        pending_mix=pending_mix_value,
+    )
+    uses_openai_conversation = conversation_state_mode in {
+        "openai_conversation",
+        "openai_conversation_seeded",
+    }
+    if conversation_state_mode == "openai_conversation_seeded":
+        seed_hash = _conversation_seed_hash(stable_instructions)
+        instructions = _build_seeded_conversation_request_instructions(
+            seed_hash=seed_hash,
+            context_instructions="\n\n".join(
+                part
+                for part in (request_local_hints, context_instructions)
+                if part.strip()
+            ),
+        )
+    elif uses_openai_conversation:
+        instructions = "\n\n".join(
+            part
+            for part in (stable_instructions, request_local_hints, context_instructions)
+            if part.strip()
+        ).strip()
+    else:
+        instructions = "\n\n".join(
+            part
+            for part in (stable_instructions, request_local_hints)
+            if part.strip()
+        ).strip()
+    messages = (
+        [{"role": "user", "content": user_text}]
+        if uses_openai_conversation
+        else _build_input_messages(
             conversation=conversation,
             user_text=user_text,
             project_snapshot=project_snapshot,
             selection_snapshot=selection_snapshot,
             library_snapshot=library_snapshot,
             pending_mix=pending_mix_value,
+        )
+    )
+
+    body: NormalizedLlmRequest = {
+        "model": resolved_model,
+        "instructions": instructions,
+        "prompt_cache_key": _default_prompt_cache_key(
+            ai_feature, capability_signature
         ),
+        "prompt_cache_retention": _default_prompt_cache_retention(resolved_model),
+        "messages": messages,
         "tools": _build_tools(
             client_capabilities,
             tool_routing_mode=effective_tool_routing_mode,
@@ -4363,7 +4490,20 @@ def build_llm_request_from_mixroom_payload(
         "context_packing_mode": context_packing_mode,
         "tool_routing_mode": tool_routing_mode,
         "effective_tool_routing_mode": effective_tool_routing_mode,
+        "conversation_state_mode_requested": conversation_state_mode,
+        "conversation_state_mode_effective": conversation_state_mode,
     }
+    if uses_openai_conversation:
+        body["openai_conversation_contract_hash"] = _conversation_seed_hash(
+            stable_instructions
+        )
+    if conversation_state_mode == "openai_conversation_seeded":
+        body["openai_conversation_seed_items"] = _openai_conversation_seed_items(
+            stable_instructions
+        )
+        body["openai_conversation_seed_hash"] = _conversation_seed_hash(
+            stable_instructions
+        )
     if _supports_temperature(resolved_model):
         body["temperature"] = DEFAULT_TEMPERATURE
     default_reasoning = _default_reasoning(resolved_model)
@@ -4473,6 +4613,7 @@ def normalize_openai_compatible_request(
         "max_output_tokens",
         "text",
         "metadata",
+        "conversation",
         "prompt_cache_key",
         "prompt_cache_retention",
     ):
@@ -4508,6 +4649,7 @@ def build_openai_responses_request(
         "text",
         "metadata",
         "parallel_tool_calls",
+        "conversation",
         "prompt_cache_key",
         "prompt_cache_retention",
     ):
