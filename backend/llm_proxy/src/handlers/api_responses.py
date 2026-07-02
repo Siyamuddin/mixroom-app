@@ -2342,6 +2342,63 @@ def _sample_insert_roles_from_user_text(user_text: str) -> list[str]:
     if not text:
         return []
 
+    if re.search(
+        r"\b(do\s*not|don't|dont|without|no)\b.{0,32}\b("
+        r"add|insert|place|put|create|make|drop|lay)\b.{0,32}\b("
+        r"clip|clips|sample|samples|audio|track|tracks|row|rows|material)\b",
+        text,
+    ):
+        return []
+
+    explicit_insert_intent = bool(
+        re.search(r"\b(add|insert|place|put|drop|lay)\b", text)
+    )
+    creation_intent = bool(
+        re.search(
+            r"\b(make|create|build)\b.{0,32}\b("
+            r"beat|beats|drum|drums|groove|grooves|loop|loops|pattern|patterns|"
+            r"kick|kicks|snare|snares|clap|claps|hat|hats|hihat|hihats|perc|"
+            r"percussion|cymbal|cymbals|tom|toms)\b",
+            text,
+        )
+    )
+    request_intent = bool(
+        re.search(
+            r"\b(give|need|want)\b.{0,32}\b("
+            r"some|a|an|new|more|beat|beats|drum|drums|groove|grooves|loop|"
+            r"loops|pattern|patterns|kick|kicks|snare|snares|clap|claps|"
+            r"hat|hats|hihat|hihats|perc|percussion|cymbal|cymbals|tom|toms)\b",
+            text,
+        )
+    )
+    if not (explicit_insert_intent or creation_intent or request_intent):
+        return []
+
+    has_level_or_existing_edit_intent = bool(
+        re.search(
+            r"\b(louder|quieter|softer|harder|punchier|volume|gain|fader|"
+            r"level|levels|db|turn\s+up|turn\s+down|bring\s+up|bring\s+down|"
+            r"raise|lower|boost|reduce|attenuate|mute|unmute|solo|pan)\b",
+            text,
+        )
+    )
+    has_stable_insert_verb = bool(re.search(r"\b(add|insert|place|put|lay)\b", text))
+    references_existing_material = bool(
+        re.search(
+            r"\b(track|tracks|row|rows|selected|current|existing|already)\b",
+            text,
+        )
+        or re.search(
+            r"\b(the|this|that)\s+(kick|kicks|snare|snares|clap|claps|"
+            r"hat|hats|hihat|hihats|drum|drums|beat|loop|bass\s*drum)\b",
+            text,
+        )
+    )
+    if has_level_or_existing_edit_intent and (
+        references_existing_material or not has_stable_insert_verb
+    ):
+        return []
+
     roles: list[str] = []
     role_patterns = (
         ("kick", r"\b(kick|kicks|bd|bass\s*drum)\b"),
@@ -2359,11 +2416,6 @@ def _sample_insert_roles_from_user_text(user_text: str) -> list[str]:
     if not roles and re.search(r"\b(drum|drums|beat|groove|loop)\b", text):
         roles = ["kick", "snare", "hat"]
 
-    if not re.search(
-        r"\b(add|insert|place|put|make|create|build|lay|drop|give|need|want)\b",
-        text,
-    ):
-        return []
     return roles
 
 
