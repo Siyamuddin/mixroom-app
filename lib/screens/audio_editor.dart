@@ -89,6 +89,7 @@ import 'package:mixroom/helpers/project_manager.dart';
 import 'package:mixroom/helpers/project_undo_history_store.dart';
 import 'package:mixroom/helpers/project_version_preferences.dart';
 import 'package:mixroom/helpers/project_version_store.dart';
+import 'package:mixroom/helpers/sample_browser_roots.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/subscription_limits.dart';
 import 'package:mixroom/helpers/tempo_detection.dart';
@@ -5590,6 +5591,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _topPopupTapMoved = false;
   final List<String> _sampleBrowserRoots = <String>[];
   String? _sampleBrowserUserDropFolderPath;
+  String? _sampleBrowserProjectAudioFolderPath;
+  final Set<String> _sampleBrowserBundledRootFolders = <String>{};
   final List<List<DesktopFileDropItem>> _pendingDesktopFinderDropBatches =
       <List<DesktopFileDropItem>>[];
   final AccessingSecurityScopedResource _securityScopedResource =
@@ -8809,6 +8812,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ..clear()
         ..addAll(sampleRoots);
     });
+    await _ensureDefaultSampleBrowserRoots();
     await _refreshDesktopHostedInstrumentCatalog();
     if (pluginPrefs.hostedWindowsDetached) {
       await _persistDesktopPluginPrefs();
@@ -8840,12 +8844,36 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
-  Future<void> _persistDesktopSampleBrowserRoots() async {
-    if (!PlatformCapabilities.current.isDesktop) return;
-    await DesktopEditorPrefs.saveSampleBrowserRoots(
-      _currentOnboardingUserId(),
-      _sampleBrowserRoots,
+  List<String> _persistableSampleBrowserUserRoots() {
+    return SampleBrowserRootDefaults.persistableUserRoots(
+      roots: _sampleBrowserRoots,
+      nonPersistedRoots: <String>{
+        ..._fixedSampleBrowserRootFolders,
+        ..._sampleBrowserBundledRootFolders,
+      },
     );
+  }
+
+  Future<void> _loadMobileSampleBrowserRoots() async {
+    if (!PlatformCapabilities.current.isMobile) return;
+    final roots = await MobileSampleBrowserPrefs.loadSampleBrowserRoots(
+      _currentOnboardingUserId(),
+    );
+    _sampleBrowserRoots
+      ..clear()
+      ..addAll(roots);
+  }
+
+  Future<void> _persistSampleBrowserRoots() async {
+    final userId = _currentOnboardingUserId();
+    final userRoots = _persistableSampleBrowserUserRoots();
+    if (PlatformCapabilities.current.isDesktop) {
+      await DesktopEditorPrefs.saveSampleBrowserRoots(userId, userRoots);
+      return;
+    }
+    if (PlatformCapabilities.current.isMobile) {
+      await MobileSampleBrowserPrefs.saveSampleBrowserRoots(userId, userRoots);
+    }
   }
 
   Future<void> _persistDesktopPluginPrefs() async {
@@ -11963,8 +11991,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _isProjectLoading = true;
 
     try {
-      if (!PlatformCapabilities.current.isDesktop) {
-        // Mobile file browser roots stay session-scoped.
+      if (PlatformCapabilities.current.isMobile) {
+        await _loadMobileSampleBrowserRoots();
+      } else if (!PlatformCapabilities.current.isDesktop) {
         _sampleBrowserRoots.clear();
       }
       _projectLoadIssues.clear();
@@ -26008,6 +26037,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return false;
   }
 
+  bool _hasAndroidSharedStorageSampleBrowserRoot() {
+    if (!Platform.isAndroid) return false;
+    return _sampleBrowserRoots
+        .any(SampleBrowserRootDefaults.isAndroidSharedStoragePath);
+  }
+
+  Future<bool> _ensureAndroidSampleBrowserMediaAccessIfNeeded() async {
+    if (!Platform.isAndroid) return true;
+    if (!_hasAndroidSharedStorageSampleBrowserRoot()) {
+      return true;
+    }
+    return _ensureAndroidMediaLibraryAccess(
+      rationale:
+          'Mixroom needs access to audio files to show samples in your saved Android folders.',
+    );
+  }
+
   Future<PermissionStatus> _getMicrophonePermissionStatus() async {
     try {
       if (Platform.isAndroid || Platform.isIOS) {
@@ -26182,7 +26228,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _sampleBrowserVisible = true;
       }
     });
-    unawaited(_persistDesktopSampleBrowserRoots());
+    unawaited(_persistSampleBrowserRoots());
     if (revealPanel) {
       _setDawPanelVisible('sample_browser', true);
     }
@@ -26402,43 +26448,43 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  Future<String?> _ensureProjectAudioFolderPath() async {
+    try {
+      final audioDir = ProjectManager.audioDir(_projectDir);
+      if (!await audioDir.exists()) {
+        await audioDir.create(recursive: true);
+      }
+      return p.normalize(audioDir.path);
+    } catch (error, stackTrace) {
+      debugPrint('Failed to prepare project audio folder root: $error');
+      unawaited(
+        CrashReportingService.instance.captureException(
+          error,
+          stackTrace: stackTrace,
+        ),
+      );
+      return null;
+    }
+  }
+
   List<String> _orderedSampleBrowserRootsWithDefaults({
     required List<String> bundledRoots,
+    required String? projectAudioRoot,
     required String? userDropRoot,
   }) {
-    final defaultRoots = <String>[];
-    final seenDefaults = <String>{};
-
-    void addDefaultRoot(String? root) {
-      final normalized = root == null ? '' : p.normalize(root);
-      if (normalized.isEmpty || seenDefaults.contains(normalized)) return;
-      defaultRoots.add(normalized);
-      seenDefaults.add(normalized);
-    }
-
-    for (final root in bundledRoots) {
-      addDefaultRoot(root);
-    }
-    addDefaultRoot(userDropRoot);
-
-    final userRoots = <String>[];
-    final seenUserRoots = Set<String>.from(seenDefaults);
-    for (final root in _sampleBrowserRoots) {
-      final normalized = p.normalize(root);
-      if (normalized.isEmpty || seenUserRoots.contains(normalized)) continue;
-      userRoots.add(normalized);
-      seenUserRoots.add(normalized);
-    }
-
-    return <String>[...defaultRoots, ...userRoots];
+    return SampleBrowserRootDefaults.orderedRoots(
+      bundledRoots: bundledRoots,
+      projectAudioRoot: projectAudioRoot,
+      userDropRoot: userDropRoot,
+      userRoots: _sampleBrowserRoots,
+    );
   }
 
   Set<String> get _fixedSampleBrowserRootFolders {
-    final userDropRoot = _sampleBrowserUserDropFolderPath;
-    if (userDropRoot == null || userDropRoot.trim().isEmpty) {
-      return const <String>{};
-    }
-    return <String>{p.normalize(userDropRoot)};
+    return SampleBrowserRootDefaults.fixedRoots(
+      projectAudioRoot: _sampleBrowserProjectAudioFolderPath,
+      userDropRoot: _sampleBrowserUserDropFolderPath,
+    );
   }
 
   bool _isFixedSampleBrowserRoot(String rootPath) {
@@ -26448,6 +26494,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _ensureDefaultSampleBrowserRoots() async {
     final userDropRoot = await _ensureUserSampleDropFolderPath();
+    final projectAudioRoot = await _ensureProjectAudioFolderPath();
 
     List<String> bundledRoots = const <String>[];
     try {
@@ -26464,21 +26511,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     final nextRoots = _orderedSampleBrowserRootsWithDefaults(
       bundledRoots: bundledRoots,
+      projectAudioRoot: projectAudioRoot,
       userDropRoot: userDropRoot,
     );
     for (final root in nextRoots) {
       await _startSecurityScopedAccessForPath(root);
     }
+    final normalizedProjectAudioRoot =
+        projectAudioRoot == null ? null : p.normalize(projectAudioRoot);
     final normalizedUserDropRoot =
         userDropRoot == null ? null : p.normalize(userDropRoot);
+    final bundledRootSet = bundledRoots
+        .map(SampleBrowserRootDefaults.normalizeRoot)
+        .where((root) => root.isNotEmpty)
+        .toSet();
     final rootsChanged = !_sameStringList(_sampleBrowserRoots, nextRoots);
+    final projectAudioChanged =
+        _sampleBrowserProjectAudioFolderPath != normalizedProjectAudioRoot;
     final userDropChanged =
         _sampleBrowserUserDropFolderPath != normalizedUserDropRoot;
-    if (!rootsChanged && !userDropChanged) return;
+    final bundledRootsChanged =
+        !setEquals<String>(_sampleBrowserBundledRootFolders, bundledRootSet);
+    if (!rootsChanged &&
+        !projectAudioChanged &&
+        !userDropChanged &&
+        !bundledRootsChanged) {
+      return;
+    }
 
     if (mounted) {
       setState(() {
+        _sampleBrowserProjectAudioFolderPath = normalizedProjectAudioRoot;
         _sampleBrowserUserDropFolderPath = normalizedUserDropRoot;
+        _sampleBrowserBundledRootFolders
+          ..clear()
+          ..addAll(bundledRootSet);
         if (rootsChanged) {
           _sampleBrowserRoots
             ..clear()
@@ -26486,7 +26553,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
       });
     } else {
+      _sampleBrowserProjectAudioFolderPath = normalizedProjectAudioRoot;
       _sampleBrowserUserDropFolderPath = normalizedUserDropRoot;
+      _sampleBrowserBundledRootFolders
+        ..clear()
+        ..addAll(bundledRootSet);
       if (rootsChanged) {
         _sampleBrowserRoots
           ..clear()
@@ -26494,8 +26565,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     }
 
-    if (rootsChanged) {
-      unawaited(_persistDesktopSampleBrowserRoots());
+    if (rootsChanged || projectAudioChanged || userDropChanged) {
+      unawaited(_persistSampleBrowserRoots());
+    }
+    if (rootsChanged || bundledRootsChanged) {
       _invalidateAiLibrarySnapshotCache();
     }
   }
@@ -27270,7 +27343,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _sampleBrowserExpanded = false;
       }
     });
-    unawaited(_persistDesktopSampleBrowserRoots());
+    unawaited(_persistSampleBrowserRoots());
     _invalidateAiLibrarySnapshotCache();
 
     for (final key in normalizedCandidates) {
@@ -27284,6 +27357,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _openSampleBrowser({bool promptFolderIfEmpty = false}) async {
     await _ensureDefaultSampleBrowserRoots();
+    await _ensureAndroidSampleBrowserMediaAccessIfNeeded();
     if (promptFolderIfEmpty && _sampleBrowserRoots.isEmpty) {
       await _addSampleBrowserRootFolder();
       if (_sampleBrowserRoots.isEmpty) {
