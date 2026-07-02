@@ -18,6 +18,7 @@ BUCKET_NAME=""
 PREFIX="magnitude"
 REGION="ap-northeast-2"
 PROFILE=""
+CLOUDFORMATION_ROLE_ARN="${MIXROOM_CLOUDFORMATION_ROLE_ARN:-arn:aws:iam::353144603233:role/MixroomCloudFormationDeployRole}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -79,6 +80,7 @@ aws cloudformation deploy \
   "${AWS_ARGS[@]}" \
   --stack-name "${STACK_NAME}" \
   --template-file "${TEMPLATE_PATH}" \
+  --role-arn "${CLOUDFORMATION_ROLE_ARN}" \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides "${PARAMETERS[@]}"
 

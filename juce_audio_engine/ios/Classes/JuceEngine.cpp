@@ -1526,6 +1526,8 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
                                                 int requestedBufferSize)
 {
     desiredInputChannels = juce::jmax(0, desiredInputChannels);
+    const int previousDesiredInputs =
+        desiredInputOpenChannels.load(std::memory_order_relaxed);
 
     double effectiveSampleRate = requestedSampleRate > 1000.0
                                      ? requestedSampleRate
@@ -1539,6 +1541,7 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
         effectiveBufferSize = juce::jlimit(16, 8192, effectiveBufferSize);
 
     auto setup = deviceManager.getAudioDeviceSetup();
+    const auto currentSetup = setup;
     if (effectiveSampleRate > 1000.0)
         setup.sampleRate = effectiveSampleRate;
     if (effectiveBufferSize > 0)
@@ -1584,7 +1587,56 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
 
     desiredInputOpenChannels.store(desiredInputChannels, std::memory_order_relaxed);
 
-    const auto currentSetup = deviceManager.getAudioDeviceSetup();
+    const bool nonBufferSetupChanged =
+        currentSetup.useDefaultOutputChannels != setup.useDefaultOutputChannels ||
+        currentSetup.outputDeviceName != setup.outputDeviceName ||
+        currentSetup.outputChannels != setup.outputChannels ||
+        currentSetup.useDefaultInputChannels != setup.useDefaultInputChannels ||
+        currentSetup.inputDeviceName != setup.inputDeviceName ||
+        currentSetup.inputChannels != setup.inputChannels;
+    const bool sampleRateChanged =
+        effectiveSampleRate > 1000.0 &&
+        std::abs(currentSetup.sampleRate - setup.sampleRate) >= 1.0;
+    const bool bufferSizeChanged =
+        effectiveBufferSize > 0 && currentSetup.bufferSize != setup.bufferSize;
+
+    const auto routeMatchesDesiredInputs = [&]() -> bool
+    {
+        auto *device = deviceManager.getCurrentAudioDevice();
+        if (device == nullptr)
+            return false;
+
+        const int activeOutputs = device->getActiveOutputChannels().countNumberOfSetBits();
+        if (activeOutputs <= 0)
+            return false;
+
+        const int activeInputs = device->getActiveInputChannels().countNumberOfSetBits();
+        if (desiredInputChannels <= 0)
+            return true;
+
+        int availableInputs = device->getInputChannelNames().size();
+        if (availableInputs <= 0)
+            availableInputs = activeInputs;
+        const int expectedInputs = juce::jlimit(
+            1,
+            32,
+            juce::jmin(desiredInputChannels, juce::jmax(1, availableInputs)));
+        return activeInputs >= expectedInputs;
+    };
+
+    if (!nonBufferSetupChanged &&
+        !sampleRateChanged &&
+        !bufferSizeChanged &&
+        routeMatchesDesiredInputs())
+    {
+        const double sr =
+            getKnownDeviceSampleRate(deviceManager, hostSampleRateAtomic.load(std::memory_order_relaxed));
+        if (sr > 1000.0)
+            hostSampleRateAtomic.store(sr, std::memory_order_relaxed);
+        desiredInputOpenChannels.store(desiredInputChannels, std::memory_order_relaxed);
+        return true;
+    }
+
     if (currentSetup.useDefaultInputChannels == setup.useDefaultInputChannels &&
         currentSetup.inputDeviceName == setup.inputDeviceName &&
         currentSetup.outputDeviceName == setup.outputDeviceName &&
@@ -1617,6 +1669,17 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
             ignoredDeviceChangeCallbacks.fetch_sub(1, std::memory_order_acq_rel);
         juceLogToFlutter(("setAudioDeviceSetup failed [" + reason + "]: " + error).toRawUTF8());
         logCurrentAudioDeviceState(reason + "-error");
+        desiredInputOpenChannels.store(previousDesiredInputs, std::memory_order_relaxed);
+        return false;
+    }
+
+    if (!routeMatchesDesiredInputs())
+    {
+        if (detachLiveCallback)
+            deviceManager.addAudioCallback(metronomeCallback.get());
+        juceLogToFlutter(("setAudioDeviceSetup route mismatch [" + reason + "]").toRawUTF8());
+        logCurrentAudioDeviceState(reason + "-post-verify-mismatch");
+        desiredInputOpenChannels.store(previousDesiredInputs, std::memory_order_relaxed);
         return false;
     }
 
@@ -5775,7 +5838,19 @@ void JuceEngine::play()
         ensureMasterOutputRouting();
     }
 
-    preparePlaybackRoute("play:recovered-output-route");
+    auto *dev = deviceManager.getCurrentAudioDevice();
+    const bool missingOutputRoute =
+        (dev == nullptr) || (dev->getActiveOutputChannels().countNumberOfSetBits() <= 0);
+    if (missingOutputRoute)
+    {
+        if (applyPreferredAudioDeviceSetup(0, true, "play-recover-output"))
+            logCurrentAudioDeviceState("play:recovered-output-route");
+        else
+        {
+            juceLogToFlutter("play: output route still invalid after recover attempt");
+            requestAudioDeviceRefreshAsync("play-recover-output");
+        }
+    }
 
     isPlayingAtomic.store(true, std::memory_order_relaxed);
     mixroom::fx::setGlobalTransportPlaying(true);
