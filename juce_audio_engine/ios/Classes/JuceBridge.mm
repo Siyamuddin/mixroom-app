@@ -4450,10 +4450,27 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     return out;
 }
 
++ (NSArray<NSString *> *)getOutputDevicesObjC
+{
+    auto arr = JuceEngine::get().getAvailableOutputDevices();
+
+    NSMutableArray *out = [NSMutableArray arrayWithCapacity:arr.size()];
+    for (auto &s : arr)
+        [out addObject:[NSString stringWithUTF8String:s.toRawUTF8()]];
+
+    return out;
+}
+
 + (BOOL)selectInputDeviceObjC:(NSString *)name
 {
     juce::String dev = juceStringFromNSString(name);
     return JuceEngine::get().selectInputDevice(dev);
+}
+
++ (BOOL)selectOutputDeviceObjC:(NSString *)name
+{
+    juce::String dev = juceStringFromNSString(name);
+    return JuceEngine::get().selectOutputDevice(dev);
 }
 
 + (NSNumber *)getNumInputChannelsObjC

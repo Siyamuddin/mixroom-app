@@ -4,6 +4,10 @@
 #import <AVFoundation/AVFoundation.h>
 #import <TargetConditionals.h>
 
+#if TARGET_OS_OSX
+#import <CoreAudio/CoreAudio.h>
+#endif
+
 #if __has_include(<Flutter/Flutter.h>)
 #import <Flutter/Flutter.h>
 #elif __has_include(<FlutterMacOS/FlutterMacOS.h>)
@@ -112,6 +116,213 @@ static NSString *MixroomRouteKindForPortType(NSString *portType) {
 #endif
 }
 
+#if TARGET_OS_OSX
+static const AudioObjectPropertyElement kMixroomCoreAudioElement =
+    kAudioObjectPropertyElementMain;
+
+static NSString *MixroomStringFromCoreAudioObject(AudioObjectID objectID,
+                                                  AudioObjectPropertySelector selector) {
+    AudioObjectPropertyAddress address = {
+        selector,
+        kAudioObjectPropertyScopeGlobal,
+        kMixroomCoreAudioElement,
+    };
+    if (!AudioObjectHasProperty(objectID, &address)) {
+        return @"";
+    }
+
+    CFStringRef value = NULL;
+    UInt32 size = sizeof(value);
+    if (AudioObjectGetPropertyData(objectID, &address, 0, NULL, &size, &value) != noErr ||
+        value == NULL) {
+        return @"";
+    }
+
+    NSString *result = [(__bridge NSString *)value copy];
+    CFRelease(value);
+    return [result autorelease];
+}
+
+static BOOL MixroomCoreAudioDeviceHasInput(AudioDeviceID deviceID) {
+    AudioObjectPropertyAddress address = {
+        kAudioDevicePropertyStreams,
+        kAudioDevicePropertyScopeInput,
+        kMixroomCoreAudioElement,
+    };
+    UInt32 size = 0;
+    return AudioObjectHasProperty(deviceID, &address) &&
+        AudioObjectGetPropertyDataSize(deviceID, &address, 0, NULL, &size) == noErr &&
+        size > 0;
+}
+
+static UInt32 MixroomCoreAudioDeviceTransport(AudioDeviceID deviceID) {
+    AudioObjectPropertyAddress address = {
+        kAudioDevicePropertyTransportType,
+        kAudioObjectPropertyScopeGlobal,
+        kMixroomCoreAudioElement,
+    };
+    UInt32 transport = kAudioDeviceTransportTypeUnknown;
+    UInt32 size = sizeof(transport);
+    if (AudioObjectHasProperty(deviceID, &address)) {
+        AudioObjectGetPropertyData(deviceID, &address, 0, NULL, &size, &transport);
+    }
+    return transport;
+}
+
+static AudioDeviceID MixroomDefaultCoreAudioInputDevice(void) {
+    AudioDeviceID deviceID = kAudioObjectUnknown;
+    AudioObjectPropertyAddress address = {
+        kAudioHardwarePropertyDefaultInputDevice,
+        kAudioObjectPropertyScopeGlobal,
+        kMixroomCoreAudioElement,
+    };
+    UInt32 size = sizeof(deviceID);
+    if (AudioObjectGetPropertyData(kAudioObjectSystemObject,
+                                   &address,
+                                   0,
+                                   NULL,
+                                   &size,
+                                   &deviceID) != noErr) {
+        return kAudioObjectUnknown;
+    }
+    return deviceID;
+}
+
+static BOOL MixroomTransportIsBluetooth(UInt32 transport) {
+    return transport == kAudioDeviceTransportTypeBluetooth ||
+        transport == kAudioDeviceTransportTypeBluetoothLE;
+}
+
+static BOOL MixroomTransportIsBuiltIn(UInt32 transport) {
+    return transport == kAudioDeviceTransportTypeBuiltIn;
+}
+
+static NSString *MixroomTransportLabel(UInt32 transport) {
+    switch (transport) {
+        case kAudioDeviceTransportTypeBuiltIn:
+            return @"builtIn";
+        case kAudioDeviceTransportTypeUSB:
+            return @"usb";
+        case kAudioDeviceTransportTypeFireWire:
+            return @"firewire";
+        case kAudioDeviceTransportTypePCI:
+            return @"pci";
+        case kAudioDeviceTransportTypeAggregate:
+            return @"aggregate";
+        case kAudioDeviceTransportTypeVirtual:
+            return @"virtual";
+        case kAudioDeviceTransportTypeBluetooth:
+        case kAudioDeviceTransportTypeBluetoothLE:
+            return @"bluetooth";
+        default:
+            return @"unknown";
+    }
+}
+
+static NSString *MixroomNormalizeAudioDeviceName(NSString *name) {
+    NSString *lower = [[name ?: @"" lowercaseString]
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (lower.length == 0) {
+        return @"";
+    }
+    NSCharacterSet *allowed = [NSCharacterSet alphanumericCharacterSet];
+    NSMutableString *out = [NSMutableString stringWithCapacity:lower.length];
+    BOOL lastWasSpace = NO;
+    for (NSUInteger i = 0; i < lower.length; i++) {
+        unichar ch = [lower characterAtIndex:i];
+        if ([allowed characterIsMember:ch]) {
+            [out appendFormat:@"%C", ch];
+            lastWasSpace = NO;
+        } else if (!lastWasSpace) {
+            [out appendString:@" "];
+            lastWasSpace = YES;
+        }
+    }
+    return [out stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+}
+
+static BOOL MixroomAudioDeviceNameLooksBluetooth(NSString *name) {
+    NSString *normalized = MixroomNormalizeAudioDeviceName(name);
+    return [normalized containsString:@"airpods"] ||
+        [normalized containsString:@"bluetooth"] ||
+        [normalized containsString:@"beats"] ||
+        [normalized containsString:@"buds"] ||
+        [normalized containsString:@"headset"];
+}
+
+static NSArray<NSDictionary<NSString *, id> *> *MixroomMacInputDeviceInfos(void) {
+    AudioObjectPropertyAddress address = {
+        kAudioHardwarePropertyDevices,
+        kAudioObjectPropertyScopeGlobal,
+        kMixroomCoreAudioElement,
+    };
+    UInt32 size = 0;
+    if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject,
+                                       &address,
+                                       0,
+                                       NULL,
+                                       &size) != noErr ||
+        size == 0) {
+        return @[];
+    }
+
+    UInt32 count = size / sizeof(AudioDeviceID);
+    AudioDeviceID *devices = calloc(count, sizeof(AudioDeviceID));
+    if (devices == NULL) {
+        return @[];
+    }
+
+    NSMutableArray<NSDictionary<NSString *, id> *> *infos =
+        [NSMutableArray arrayWithCapacity:count];
+    if (AudioObjectGetPropertyData(kAudioObjectSystemObject,
+                                   &address,
+                                   0,
+                                   NULL,
+                                   &size,
+                                   devices) == noErr) {
+        AudioDeviceID defaultInput = MixroomDefaultCoreAudioInputDevice();
+        for (UInt32 i = 0; i < count; i++) {
+            AudioDeviceID deviceID = devices[i];
+            if (!MixroomCoreAudioDeviceHasInput(deviceID)) {
+                continue;
+            }
+            NSString *name = MixroomStringFromCoreAudioObject(deviceID, kAudioObjectPropertyName);
+            if (name.length == 0) {
+                continue;
+            }
+            UInt32 transport = MixroomCoreAudioDeviceTransport(deviceID);
+            BOOL isBluetooth = MixroomTransportIsBluetooth(transport) ||
+                MixroomAudioDeviceNameLooksBluetooth(name);
+            [infos addObject:@{
+                @"name": name,
+                @"isBluetoothInput": @(isBluetooth),
+                @"isBuiltIn": @(MixroomTransportIsBuiltIn(transport)),
+                @"isDefault": @(deviceID == defaultInput),
+                @"transport": MixroomTransportLabel(transport),
+            }];
+        }
+    }
+    free(devices);
+    return infos;
+}
+
+static BOOL MixroomMacInputDeviceNameIsBluetooth(NSString *name) {
+    NSString *target = MixroomNormalizeAudioDeviceName(name);
+    if (target.length == 0) {
+        return NO;
+    }
+    for (NSDictionary<NSString *, id> *info in MixroomMacInputDeviceInfos()) {
+        NSString *candidate = MixroomNormalizeAudioDeviceName(info[@"name"]);
+        if ([candidate isEqualToString:target] ||
+            [candidate containsString:target] ||
+            [target containsString:candidate]) {
+            return [info[@"isBluetoothInput"] boolValue];
+        }
+    }
+    return MixroomAudioDeviceNameLooksBluetooth(name);
+}
+#endif
+
 static NSString *MixroomFlutterAssetRootPath(void) {
     NSBundle *mainBundle = [NSBundle mainBundle];
     NSFileManager *fileManager = [NSFileManager defaultManager];
@@ -194,7 +405,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         @"outputRouteKind": @"unknown",
         @"outputRouteName": outputDeviceName,
         @"inputDeviceName": inputDeviceName,
-        @"inputIsBluetoothHeadset": @NO,
+        @"inputIsBluetoothHeadset": @(MixroomMacInputDeviceNameIsBluetooth(inputDeviceName)),
     };
 #else
     AVAudioSession *session = [AVAudioSession sharedInstance];
@@ -1394,10 +1605,33 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSDictionary *stats = [JuceBridge analyzeAudioStereo16kObjC:path];
         result(stats);
     } else if ([call.method isEqualToString:@"getInputDevices"]) {
-    result([JuceBridge getInputDevicesObjC]);
+        result([JuceBridge getInputDevicesObjC]);
+    }
+    else if ([call.method isEqualToString:@"getOutputDevices"]) {
+        result([JuceBridge getOutputDevicesObjC]);
+    }
+    else if ([call.method isEqualToString:@"getInputDeviceInfos"]) {
+#if TARGET_OS_OSX
+        result(MixroomMacInputDeviceInfos());
+#else
+        NSMutableArray *infos = [NSMutableArray array];
+        for (NSString *name in [JuceBridge getInputDevicesObjC]) {
+            [infos addObject:@{
+                @"name": name ?: @"",
+                @"isBluetoothInput": @NO,
+                @"isBuiltIn": @NO,
+                @"isDefault": @NO,
+                @"transport": @"unknown",
+            }];
+        }
+        result(infos);
+#endif
     }
     else if ([call.method isEqualToString:@"selectInputDevice"]) {
         result(@([JuceBridge selectInputDeviceObjC:args[@"name"]]));
+    }
+    else if ([call.method isEqualToString:@"selectOutputDevice"]) {
+        result(@([JuceBridge selectOutputDeviceObjC:args[@"name"]]));
     }
     else if ([call.method isEqualToString:@"getNumInputChannels"]) {
         result([JuceBridge getNumInputChannelsObjC]);

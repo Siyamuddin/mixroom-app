@@ -4,6 +4,7 @@
 #include <unordered_set>
 
 #if JUCE_MAC
+#include <CoreAudio/CoreAudio.h>
 #include <mach-o/fat.h>
 #include <mach-o/loader.h>
 #include <mach/machine.h>
@@ -141,6 +142,247 @@ bool isHostedPluginIdentifierQuarantined(const juce::String &identifier)
         return false;
     return hostedPluginQuarantineFile(trimmed).existsAsFile();
 }
+
+#if JUCE_MAC && !JUCE_IOS
+struct MacAudioInputDeviceInfo
+{
+    juce::String name;
+    UInt32 transport = kAudioDeviceTransportTypeUnknown;
+    bool isDefault = false;
+};
+
+constexpr AudioObjectPropertyElement kMixroomCoreAudioElement =
+    kAudioObjectPropertyElementMain;
+
+juce::String stringFromCoreAudioObject(AudioObjectID objectId,
+                                       AudioObjectPropertySelector selector)
+{
+    AudioObjectPropertyAddress address{
+        selector,
+        kAudioObjectPropertyScopeGlobal,
+        kMixroomCoreAudioElement,
+    };
+    if (!AudioObjectHasProperty(objectId, &address))
+        return {};
+
+    CFStringRef value = nullptr;
+    UInt32 size = sizeof(value);
+    if (AudioObjectGetPropertyData(objectId, &address, 0, nullptr, &size, &value) != noErr ||
+        value == nullptr)
+    {
+        return {};
+    }
+
+    const CFIndex length = CFStringGetLength(value);
+    const CFIndex maxSize =
+        CFStringGetMaximumSizeForEncoding(length, kCFStringEncodingUTF8) + 1;
+    juce::HeapBlock<char> buffer;
+    buffer.calloc((size_t)maxSize);
+    juce::String result;
+    if (CFStringGetCString(value, buffer.get(), maxSize, kCFStringEncodingUTF8))
+        result = juce::String::fromUTF8(buffer.get());
+    CFRelease(value);
+    return result;
+}
+
+UInt32 coreAudioDeviceTransport(AudioDeviceID deviceId)
+{
+    AudioObjectPropertyAddress address{
+        kAudioDevicePropertyTransportType,
+        kAudioObjectPropertyScopeGlobal,
+        kMixroomCoreAudioElement,
+    };
+    UInt32 transport = kAudioDeviceTransportTypeUnknown;
+    UInt32 size = sizeof(transport);
+    if (AudioObjectHasProperty(deviceId, &address))
+        AudioObjectGetPropertyData(deviceId, &address, 0, nullptr, &size, &transport);
+    return transport;
+}
+
+bool coreAudioDeviceHasInput(AudioDeviceID deviceId)
+{
+    AudioObjectPropertyAddress address{
+        kAudioDevicePropertyStreams,
+        kAudioDevicePropertyScopeInput,
+        kMixroomCoreAudioElement,
+    };
+    UInt32 size = 0;
+    return AudioObjectHasProperty(deviceId, &address) &&
+           AudioObjectGetPropertyDataSize(deviceId, &address, 0, nullptr, &size) == noErr &&
+           size > 0;
+}
+
+AudioDeviceID defaultCoreAudioInputDevice()
+{
+    AudioDeviceID deviceId = kAudioObjectUnknown;
+    AudioObjectPropertyAddress address{
+        kAudioHardwarePropertyDefaultInputDevice,
+        kAudioObjectPropertyScopeGlobal,
+        kMixroomCoreAudioElement,
+    };
+    UInt32 size = sizeof(deviceId);
+    if (AudioObjectGetPropertyData(kAudioObjectSystemObject,
+                                   &address,
+                                   0,
+                                   nullptr,
+                                   &size,
+                                   &deviceId) != noErr)
+    {
+        return kAudioObjectUnknown;
+    }
+    return deviceId;
+}
+
+juce::Array<MacAudioInputDeviceInfo> getMacAudioInputDeviceInfos()
+{
+    juce::Array<MacAudioInputDeviceInfo> infos;
+    AudioObjectPropertyAddress address{
+        kAudioHardwarePropertyDevices,
+        kAudioObjectPropertyScopeGlobal,
+        kMixroomCoreAudioElement,
+    };
+    UInt32 size = 0;
+    if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject,
+                                       &address,
+                                       0,
+                                       nullptr,
+                                       &size) != noErr ||
+        size == 0)
+    {
+        return infos;
+    }
+
+    juce::HeapBlock<AudioDeviceID> devices;
+    const int deviceCount = (int)(size / sizeof(AudioDeviceID));
+    devices.calloc((size_t)deviceCount);
+    if (AudioObjectGetPropertyData(kAudioObjectSystemObject,
+                                   &address,
+                                   0,
+                                   nullptr,
+                                   &size,
+                                   devices.get()) != noErr)
+    {
+        return infos;
+    }
+
+    const auto defaultInput = defaultCoreAudioInputDevice();
+    for (int i = 0; i < deviceCount; ++i)
+    {
+        const auto deviceId = devices[i];
+        if (!coreAudioDeviceHasInput(deviceId))
+            continue;
+
+        auto name = stringFromCoreAudioObject(deviceId, kAudioObjectPropertyName).trim();
+        if (name.isEmpty())
+            continue;
+
+        MacAudioInputDeviceInfo info;
+        info.name = name;
+        info.transport = coreAudioDeviceTransport(deviceId);
+        info.isDefault = deviceId == defaultInput;
+        infos.add(info);
+    }
+    return infos;
+}
+
+bool isBluetoothCoreAudioTransport(UInt32 transport)
+{
+    return transport == kAudioDeviceTransportTypeBluetooth ||
+           transport == kAudioDeviceTransportTypeBluetoothLE;
+}
+
+bool isBuiltInCoreAudioTransport(UInt32 transport)
+{
+    return transport == kAudioDeviceTransportTypeBuiltIn;
+}
+
+juce::String normaliseAudioDeviceNameForMatch(const juce::String &name)
+{
+    const auto cleaned = name.trim().toLowerCase()
+        .replaceCharacters(".,;:/\\()[]{}_-", "              ")
+        .retainCharacters("abcdefghijklmnopqrstuvwxyz0123456789 ");
+    juce::StringArray tokens;
+    tokens.addTokens(cleaned, " ", "");
+    tokens.removeEmptyStrings();
+    return tokens.joinIntoString(" ");
+}
+
+bool macInputDeviceNameLooksBluetooth(const juce::String &name)
+{
+    const auto normalized = name.trim().toLowerCase();
+    return normalized.contains("airpods") ||
+           normalized.contains("bluetooth") ||
+           normalized.contains("beats") ||
+           normalized.contains("buds") ||
+           normalized.contains("headset");
+}
+
+bool macInputDeviceInfoIsBluetooth(const MacAudioInputDeviceInfo &info)
+{
+    return isBluetoothCoreAudioTransport(info.transport) ||
+           macInputDeviceNameLooksBluetooth(info.name);
+}
+
+bool macInputDeviceInfoMatchesName(const MacAudioInputDeviceInfo &info,
+                                   const juce::String &name)
+{
+    const auto needle = normaliseAudioDeviceNameForMatch(name);
+    const auto candidate = normaliseAudioDeviceNameForMatch(info.name);
+    return needle.isNotEmpty() &&
+           (candidate == needle || candidate.contains(needle) || needle.contains(candidate));
+}
+
+juce::String chooseSafeMacInputDeviceName(const juce::String &preferredName,
+                                          const juce::String &currentSetupName)
+{
+    const auto infos = getMacAudioInputDeviceInfos();
+    const auto findSafeByName = [&infos](const juce::String &name) -> juce::String
+    {
+        if (name.trim().isEmpty())
+            return {};
+        for (const auto &info : infos)
+        {
+            if (macInputDeviceInfoMatchesName(info, name) &&
+                !macInputDeviceInfoIsBluetooth(info))
+            {
+                return info.name;
+            }
+        }
+        return {};
+    };
+
+    if (auto safe = findSafeByName(preferredName); safe.isNotEmpty())
+        return safe;
+    if (auto safe = findSafeByName(currentSetupName); safe.isNotEmpty())
+        return safe;
+
+    for (const auto &info : infos)
+        if (info.isDefault && !macInputDeviceInfoIsBluetooth(info))
+            return info.name;
+
+    for (const auto &info : infos)
+        if (isBuiltInCoreAudioTransport(info.transport) &&
+            !macInputDeviceInfoIsBluetooth(info))
+            return info.name;
+
+    for (const auto &info : infos)
+        if (!macInputDeviceInfoIsBluetooth(info) &&
+            (info.transport == kAudioDeviceTransportTypeUSB ||
+             info.transport == kAudioDeviceTransportTypeFireWire ||
+             info.transport == kAudioDeviceTransportTypePCI ||
+             info.transport == kAudioDeviceTransportTypeAggregate ||
+             info.transport == kAudioDeviceTransportTypeVirtual))
+        {
+            return info.name;
+        }
+
+    for (const auto &info : infos)
+        if (!macInputDeviceInfoIsBluetooth(info))
+            return info.name;
+
+    return {};
+}
+#endif
 
 void clearHostedPluginPendingLoadAttempt()
 {
@@ -1301,16 +1543,43 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
         setup.sampleRate = effectiveSampleRate;
     if (effectiveBufferSize > 0)
         setup.bufferSize = effectiveBufferSize;
+    if (setup.outputDeviceName.isEmpty())
+    {
+        const auto currentOutputName = getCurrentOutputDeviceName();
+        if (currentOutputName.isNotEmpty())
+            setup.outputDeviceName = currentOutputName;
+    }
     setup.useDefaultInputChannels = false;
     setup.inputChannels.clear();
-    if (preferredInputDeviceName.isNotEmpty())
-        setup.inputDeviceName = preferredInputDeviceName;
 
     if (desiredInputChannels > 0)
     {
+#if JUCE_MAC && !JUCE_IOS
+        const auto safeInputName =
+            chooseSafeMacInputDeviceName(preferredInputDeviceName, setup.inputDeviceName);
+        if (safeInputName.isEmpty())
+        {
+            desiredInputOpenChannels.store(0, std::memory_order_relaxed);
+            juceLogToFlutter(("setAudioDeviceSetup blocked [" + reason +
+                              "]: no non-Bluetooth macOS input device available")
+                                 .toRawUTF8());
+            return false;
+        }
+        if (safeInputName != preferredInputDeviceName)
+            juceLogToFlutter(("Using non-Bluetooth input device: " + safeInputName).toRawUTF8());
+        preferredInputDeviceName = safeInputName;
+        setup.inputDeviceName = safeInputName;
+#else
+        if (preferredInputDeviceName.isNotEmpty())
+            setup.inputDeviceName = preferredInputDeviceName;
+#endif
         desiredInputChannels = juce::jlimit(1, 32, desiredInputChannels);
         for (int ch = 0; ch < desiredInputChannels; ++ch)
             setup.inputChannels.setBit(ch);
+    }
+    else if (preferredInputDeviceName.isNotEmpty())
+    {
+        setup.inputDeviceName = preferredInputDeviceName;
     }
 
     desiredInputOpenChannels.store(desiredInputChannels, std::memory_order_relaxed);
@@ -1318,6 +1587,7 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
     const auto currentSetup = deviceManager.getAudioDeviceSetup();
     if (currentSetup.useDefaultInputChannels == setup.useDefaultInputChannels &&
         currentSetup.inputDeviceName == setup.inputDeviceName &&
+        currentSetup.outputDeviceName == setup.outputDeviceName &&
         currentSetup.inputChannels == setup.inputChannels &&
         (effectiveSampleRate <= 1000.0 || std::abs(currentSetup.sampleRate - setup.sampleRate) < 1.0) &&
         (effectiveBufferSize <= 0 || currentSetup.bufferSize == setup.bufferSize) &&
@@ -1691,7 +1961,11 @@ void JuceEngine::initialiseEngine()
         // inside HAL during that initial open. Start playback-only and open inputs
         // lazily when recording is armed.
         deviceManager.initialise(
+#if JUCE_MAC && !JUCE_IOS
             0, // numInputChannels
+#else
+            2, // numInputChannels
+#endif
             2, // numOutputChannels
             nullptr,
             true);
@@ -9844,6 +10118,25 @@ juce::StringArray JuceEngine::getAvailableInputDevices()
     return names;
 }
 
+juce::StringArray JuceEngine::getAvailableOutputDevices()
+{
+    juce::StringArray names;
+
+    auto &types = deviceManager.getAvailableDeviceTypes();
+
+    for (auto *t : types)
+    {
+        if (t == nullptr)
+            continue;
+        t->scanForDevices();
+        names.addArray(t->getDeviceNames(false));
+    }
+
+    names.removeDuplicates(true);
+    names.removeEmptyStrings();
+    return names;
+}
+
 bool JuceEngine::selectInputDevice(const juce::String &name)
 {
     const auto availableInputs = getAvailableInputDevices();
@@ -9852,6 +10145,14 @@ bool JuceEngine::selectInputDevice(const juce::String &name)
         juceLogToFlutter(("selectInputDevice ignored non-input device: " + name).toRawUTF8());
         return false;
     }
+
+#if JUCE_MAC && !JUCE_IOS
+    if (isBluetoothInputDeviceName(name))
+    {
+        juceLogToFlutter(("selectInputDevice blocked Bluetooth input on macOS: " + name).toRawUTF8());
+        return false;
+    }
+#endif
 
     const auto previousPreferredInputDeviceName = preferredInputDeviceName;
     auto setup = deviceManager.getAudioDeviceSetup();
@@ -9886,6 +10187,65 @@ bool JuceEngine::selectInputDevice(const juce::String &name)
         desiredInputOpenChannels.load(std::memory_order_relaxed),
         true,
         "selectInputDevice");
+}
+
+bool JuceEngine::selectOutputDevice(const juce::String &name)
+{
+    const auto availableOutputs = getAvailableOutputDevices();
+    if (name.isNotEmpty() && !availableOutputs.contains(name))
+    {
+        juceLogToFlutter(("selectOutputDevice ignored non-output device: " + name).toRawUTF8());
+        return false;
+    }
+
+    auto setup = deviceManager.getAudioDeviceSetup();
+    setup.outputDeviceName = name;
+
+    const bool detachLiveCallback = metronomeCallback != nullptr;
+    if (detachLiveCallback)
+        deviceManager.removeAudioCallback(metronomeCallback.get());
+
+    ignoredDeviceChangeCallbacks.fetch_add(1, std::memory_order_acq_rel);
+    juce::String error = deviceManager.setAudioDeviceSetup(setup, true);
+    if (!error.isEmpty())
+    {
+        if (detachLiveCallback)
+            deviceManager.addAudioCallback(metronomeCallback.get());
+        ignoredDeviceChangeCallbacks.fetch_sub(1, std::memory_order_acq_rel);
+        juceLogToFlutter(("selectOutputDevice failed: " + error).toRawUTF8());
+        return false;
+    }
+
+    if (detachLiveCallback)
+        deviceManager.addAudioCallback(metronomeCallback.get());
+
+    const double sr =
+        getKnownDeviceSampleRate(deviceManager, hostSampleRateAtomic.load(std::memory_order_relaxed));
+    if (sr > 1000.0)
+        hostSampleRateAtomic.store(sr, std::memory_order_relaxed);
+
+    return applyPreferredAudioDeviceSetup(
+        desiredInputOpenChannels.load(std::memory_order_relaxed),
+        true,
+        "selectOutputDevice");
+}
+
+bool JuceEngine::isBluetoothInputDeviceName(const juce::String &name) const
+{
+#if JUCE_MAC && !JUCE_IOS
+    if (name.trim().isEmpty())
+        return false;
+
+    for (const auto &info : getMacAudioInputDeviceInfos())
+    {
+        if (macInputDeviceInfoMatchesName(info, name))
+            return macInputDeviceInfoIsBluetooth(info);
+    }
+    return macInputDeviceNameLooksBluetooth(name);
+#else
+    juce::ignoreUnused(name);
+    return false;
+#endif
 }
 
 juce::String JuceEngine::getCurrentInputDeviceName() const
@@ -10061,26 +10421,32 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
 
     routeLiveInputToRow(/*row=*/0, channelCount, channelStart);
 
-    recordingActive = true;
+    {
+        juce::SpinLock::ScopedLockType lock(recordLock);
+        recordingActive = true;
+    }
     logCurrentAudioDeviceState("recording-started");
     return true;
 }
 
 void JuceEngine::stopRecording()
 {
-    recordingActive = false;
-
     {
         juce::SpinLock::ScopedLockType lock(recordLock);
+        recordingActive = false;
         recorderWriter.reset(); // flush + finalize WAV
         recorderStream.reset();
     }
 
     routeLiveInputToRow(/*row=*/0, /*channelCount=*/0, /*channelStart=*/0);
+#if JUCE_IOS
+    logCurrentAudioDeviceState("recording-stopped");
+#else
     applyPreferredAudioDeviceSetup(/*desiredInputChannels=*/0,
                                    /*forceReopen=*/true,
                                    "stopRecording-restorePlayback");
     logCurrentAudioDeviceState("recording-stopped");
+#endif
 }
 
 bool JuceEngine::isRecording() const
@@ -10090,6 +10456,8 @@ bool JuceEngine::isRecording() const
 
 void JuceEngine::captureInput(const float *const *input, int numInputChannels, int numSamples)
 {
+    juce::SpinLock::ScopedLockType lock(recordLock);
+
     if (!recordingActive || !recorderWriter)
         return;
 
