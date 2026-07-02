@@ -45,14 +45,25 @@ class MainFlutterWindow: NSWindow {
 
   override func sendEvent(_ event: NSEvent) {
     switch event.type {
-    case .leftMouseDown, .rightMouseDown, .otherMouseDown:
-      let previousMovableByBackground = self.isMovableByWindowBackground
-      self.isMovableByWindowBackground = isInTitleBarDragRegion(event.locationInWindow)
-      super.sendEvent(event)
-      self.isMovableByWindowBackground = previousMovableByBackground
+    case .leftMouseDown:
+      if event.clickCount == 2 && isInTitleBarDragRegion(event.locationInWindow) {
+        self.performZoom(nil)
+        return
+      }
+
+      sendMouseDownWithTitleBarDragRegion(event)
+    case .rightMouseDown, .otherMouseDown:
+      sendMouseDownWithTitleBarDragRegion(event)
     default:
       super.sendEvent(event)
     }
+  }
+
+  private func sendMouseDownWithTitleBarDragRegion(_ event: NSEvent) {
+    let previousMovableByBackground = self.isMovableByWindowBackground
+    self.isMovableByWindowBackground = isInTitleBarDragRegion(event.locationInWindow)
+    super.sendEvent(event)
+    self.isMovableByWindowBackground = previousMovableByBackground
   }
 
   private func isInTitleBarDragRegion(_ location: NSPoint) -> Bool {

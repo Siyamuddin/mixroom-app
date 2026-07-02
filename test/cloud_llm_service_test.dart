@@ -242,6 +242,56 @@ void main() {
       );
     });
 
+    test('repairs one-key audio pitch shift payloads', () async {
+      final client = MockClient((_) async {
+        return http.Response(
+          jsonEncode({
+            'output': [
+              {
+                'type': 'function_call',
+                'name': 'daw_assistant_actions',
+                'arguments': {
+                  'assistant_message':
+                      'Lowering the instrumental stem by one key.',
+                  'actions': [
+                    {
+                      'type': 'clip_edit',
+                      'data': {
+                        'operation': 'pitch_shift',
+                        'target': {
+                          'row_name': 'Instrumental',
+                        },
+                      },
+                    }
+                  ],
+                },
+              }
+            ],
+          }),
+          200,
+        );
+      });
+
+      final service = CloudLlmService(
+        apiKey: 'sk-test',
+        model: 'gpt-5.4-mini',
+        httpClient: client,
+      );
+      final result = await service.send(
+        conversation: const [],
+        userText: 'lower the background track one key',
+        projectSnapshot: 'Track 1: Vocals\nTrack 2: Instrumental',
+      );
+
+      expect(result.toolName, 'daw_assistant_actions');
+      final action = ((result.toolArgs?['actions'] as List).single
+          as Map<String, dynamic>);
+      final data = Map<String, dynamic>.from(action['data'] as Map);
+      expect(action['type'], 'clip_edit');
+      expect(data['operation'], 'pitch_shift');
+      expect(data['delta_semitones'], -1.0);
+    });
+
     test('does not rewrite bare dialog_remove_range based on prompt text',
         () async {
       final client = MockClient((_) async {
@@ -2660,7 +2710,7 @@ void main() {
 
       expect(
         requestBody['prompt_cache_key'],
-        'mixroom-daw-v20260422a:ai_chat:ff7d5b4759e7',
+        'mixroom-daw-v20260701a:ai_chat:b19b24dbe2fb',
       );
       expect(requestBody['prompt_cache_retention'], 'in_memory');
       expect(requestBody['max_output_tokens'], 8192);

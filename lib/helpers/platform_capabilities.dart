@@ -62,6 +62,11 @@ class PlatformCapabilities {
 
   static PlatformCapabilities get current => _cached;
 
+  @visibleForTesting
+  static void debugResetForCurrentPlatform() {
+    _cached = _fallbackForCurrentPlatform();
+  }
+
   static PlatformCapabilities _fallbackForCurrentPlatform() {
     if (kIsWeb) {
       return const PlatformCapabilities(

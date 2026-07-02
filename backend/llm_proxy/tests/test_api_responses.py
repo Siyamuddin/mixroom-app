@@ -173,6 +173,20 @@ class ApiResponsesTests(unittest.TestCase):
                 allowed.append(type_schema["const"])
         return allowed
 
+    def _tool_clip_edit_operations(self, daw_tool):
+        actions = daw_tool["parameters"]["properties"]["actions"]
+        items = actions["items"]
+        for variant in items.get("oneOf", []):
+            properties = variant.get("properties", {})
+            type_schema = properties.get("type", {})
+            type_values = set(type_schema.get("enum", []))
+            if "const" in type_schema:
+                type_values.add(type_schema["const"])
+            if "clip_edit" not in type_values:
+                continue
+            return properties["data"]["properties"]["operation"]["enum"]
+        return []
+
     def setUp(self) -> None:
         api_responses._secret_cache = None
         api_responses._secret_cache_loaded_at = None
@@ -268,7 +282,7 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertIn("AI Co-Producer", provider.request_body["instructions"])
         self.assertEqual(
             provider.request_body["prompt_cache_key"],
-            "mixroom-daw-v20260422a:ai_chat:c49fea7425fa",
+            "mixroom-daw-v20260701a:ai_chat:c49fea7425fa",
         )
         self.assertEqual(provider.request_body["prompt_cache_retention"], "in_memory")
         self.assertEqual(provider.request_body["tools"][0]["name"], "informational_response")
@@ -337,7 +351,7 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertIn("mixroom.basic_synth", instructions)
         self.assertNotEqual(
             provider.request_body["prompt_cache_key"],
-            "mixroom-daw-v20260422a:ai_chat:c49fea7425fa",
+            "mixroom-daw-v20260701a:ai_chat:c49fea7425fa",
         )
 
     def test_handler_applies_remote_ai_runtime_overrides(self) -> None:
@@ -539,7 +553,7 @@ class ApiResponsesTests(unittest.TestCase):
         request_context = log_request.call_args.kwargs["request_context"]
         self.assertEqual(
             request_context["prompt_cache_key"],
-            "mixroom-daw-v20260422a:ai_chat:c49fea7425fa",
+            "mixroom-daw-v20260701a:ai_chat:c49fea7425fa",
         )
         self.assertEqual(request_context["prompt_cache_retention"], "in_memory")
         self.assertEqual(request_context["prompt_tokens"], 8099)
@@ -1678,6 +1692,548 @@ class ApiResponsesTests(unittest.TestCase):
         )
         action_types = self._tool_action_types(daw_tool)
         self.assertIn("sample_insert", action_types)
+
+    def test_handler_soft_fails_pitch_shift_for_legacy_clients(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_pitch_legacy",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "Lowering the instrumental one key.",
+                            "actions": [
+                                {
+                                    "type": "clip_edit",
+                                    "data": {
+                                        "operation": "pitch_shift",
+                                        "target": {"prefer_selected": True},
+                                        "delta_semitones": -1,
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 90,
+                    "output_tokens": 60,
+                    "total_tokens": 150,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "lower the background one key",
+                    "project_snapshot": "Track 1: instrumental",
+                    "selection_snapshot": "selected_clip_indices=0",
+                    "ai_feature": "assistant_chat",
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "informational_response")
+        self.assertEqual(payload["soft_error"]["code"], "invalid_structured_output")
+        daw_tool = next(
+            tool
+            for tool in provider.request_body["tools"]
+            if tool.get("name") == "daw_assistant_actions"
+        )
+        self.assertNotIn("pitch_shift", self._tool_clip_edit_operations(daw_tool))
+
+    def test_handler_preserves_pitch_shift_for_capable_clients(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_pitch_capable",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "Lowering the instrumental one key.",
+                            "actions": [
+                                {
+                                    "type": "clip_edit",
+                                    "data": {
+                                        "operation": "pitch_shift",
+                                        "target": {"prefer_selected": True},
+                                        "semitones": "-1",
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 90,
+                    "output_tokens": 60,
+                    "total_tokens": 150,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "lower the background one key",
+                    "project_snapshot": "Track 1: instrumental",
+                    "selection_snapshot": "selected_clip_indices=0",
+                    "ai_feature": "assistant_chat",
+                    "client_context": {
+                        "ai_capabilities": ["daw.clip_edit.pitch_shift"],
+                    },
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "daw_assistant_actions")
+        action = output["arguments"]["actions"][0]
+        self.assertEqual(action["type"], "clip_edit")
+        self.assertEqual(action["data"]["operation"], "pitch_shift")
+        self.assertEqual(action["data"]["delta_semitones"], -1.0)
+        daw_tool = next(
+            tool
+            for tool in provider.request_body["tools"]
+            if tool.get("name") == "daw_assistant_actions"
+        )
+        self.assertIn("pitch_shift", self._tool_clip_edit_operations(daw_tool))
+
+    def test_handler_repairs_pitch_shift_effect_for_capable_clients(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_pitch_effect_repair",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "Pitching the instrumental down.",
+                            "actions": [
+                                {
+                                    "type": "effect_edit",
+                                    "data": {
+                                        "operation": "add",
+                                        "effect_name": "Pitch Shift",
+                                        "target": {},
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 90,
+                    "output_tokens": 60,
+                    "total_tokens": 150,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "lower the background music by 1 key",
+                    "project_snapshot": "Track 3: instrumental",
+                    "selection_snapshot": "",
+                    "ai_feature": "assistant_chat",
+                    "client_context": {
+                        "ai_capabilities": ["daw.clip_edit.pitch_shift"],
+                    },
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "daw_assistant_actions")
+        action = output["arguments"]["actions"][0]
+        self.assertEqual(action["type"], "clip_edit")
+        self.assertEqual(action["data"]["operation"], "pitch_shift")
+        self.assertEqual(action["data"]["delta_semitones"], -1.0)
+        self.assertEqual(action["data"]["target"]["label_contains"], "Instrumental")
+
+    def test_handler_repairs_pitch_automation_for_capable_clients(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_pitch_automation_repair",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "Pulling the pitch down.",
+                            "actions": [
+                                {
+                                    "type": "automation_edit",
+                                    "data": {
+                                        "operation": "set_points",
+                                        "param_name": "Pitch",
+                                        "target": {},
+                                        "points": [
+                                            {"time_ms": 0, "value": -1},
+                                        ],
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 90,
+                    "output_tokens": 60,
+                    "total_tokens": 150,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "lower the background music by 1 key",
+                    "project_snapshot": "Track 3: instrumental",
+                    "selection_snapshot": "",
+                    "ai_feature": "assistant_chat",
+                    "client_context": {
+                        "ai_capabilities": ["daw.clip_edit.pitch_shift"],
+                    },
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        action = output["arguments"]["actions"][0]
+        self.assertEqual(action["type"], "clip_edit")
+        self.assertEqual(action["data"]["operation"], "pitch_shift")
+        self.assertEqual(action["data"]["delta_semitones"], -1.0)
+
+    def test_handler_fallbacks_capability_question_when_model_output_invalid(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_capability_fallback",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "",
+                            "actions": [],
+                        },
+                    }
+                ],
+                "usage": {"input_tokens": 40, "output_tokens": 10, "total_tokens": 50},
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "무슨 작업을 해줄수있어",
+                    "project_snapshot": "Track 1: empty",
+                    "selection_snapshot": "",
+                    "ai_feature": "assistant_chat",
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "informational_response")
+        self.assertIn("MIDI", output["arguments"]["message"])
+        self.assertNotIn("soft_error", payload)
+
+    def test_handler_fallbacks_basic_midi_creation_for_capable_clients(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_midi_fallback",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "",
+                            "actions": [],
+                        },
+                    }
+                ],
+                "usage": {"input_tokens": 40, "output_tokens": 10, "total_tokens": 50},
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "미디 클립 만들기",
+                    "project_snapshot": "Track 1: empty",
+                    "selection_snapshot": "selected_row=0",
+                    "ai_feature": "assistant_chat",
+                    "client_context": {
+                        "ai_capabilities": ["daw.midi_compose.instrument_insert"],
+                    },
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "daw_assistant_actions")
+        action = output["arguments"]["actions"][0]
+        self.assertEqual(action["type"], "midi_compose")
+        self.assertEqual(action["data"]["operation"], "create_clip")
+        self.assertGreater(len(action["data"]["notes"]), 0)
+        self.assertNotIn("soft_error", payload)
+
+    def test_handler_fallbacks_hihat_sample_insert_for_capable_clients(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_hihat_fallback",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "",
+                            "actions": [],
+                        },
+                    }
+                ],
+                "usage": {"input_tokens": 40, "output_tokens": 10, "total_tokens": 50},
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "add some dope hihats",
+                    "project_snapshot": "Track 1: Piano (instrument)",
+                    "selection_snapshot": "selected_row=0",
+                    "ai_feature": "assistant_chat",
+                    "client_context": {
+                        "ai_capabilities": ["daw.sample_insert.library"],
+                    },
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "daw_assistant_actions")
+        action = output["arguments"]["actions"][0]
+        self.assertEqual(action["type"], "sample_insert")
+        self.assertEqual(action["data"]["operation"], "insert_audio_clips")
+        item = action["data"]["items"][0]
+        self.assertEqual(item["library_path"], "role:hat")
+        self.assertEqual(item["target"]["prefer_selected"], False)
+        self.assertNotIn("soft_error", payload)
+
+    def test_handler_fallbacks_glue_selected_clips_when_model_output_invalid(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_glue_fallback",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "",
+                            "actions": [],
+                        },
+                    }
+                ],
+                "usage": {"input_tokens": 40, "output_tokens": 10, "total_tokens": 50},
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "combine the selected clips into one sample",
+                    "project_snapshot": "Track 1: drums",
+                    "selection_snapshot": "selected_clip_indices=0,1",
+                    "ai_feature": "assistant_chat",
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        action = output["arguments"]["actions"][0]
+        self.assertEqual(action["type"], "clip_edit")
+        self.assertEqual(action["data"]["operation"], "glue")
+        self.assertEqual(action["data"]["target"]["scope"], "selected")
+        self.assertNotIn("soft_error", payload)
+
+    def test_handler_clarifies_glue_request_without_selected_clips(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_glue_clarify",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "",
+                            "actions": [],
+                        },
+                    }
+                ],
+                "usage": {"input_tokens": 40, "output_tokens": 10, "total_tokens": 50},
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "combine the drums to one sample",
+                    "project_snapshot": "Track 1: Kick\nTrack 2: Snare",
+                    "selection_snapshot": "",
+                    "ai_feature": "assistant_chat",
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        action = output["arguments"]["actions"][0]
+        self.assertEqual(action["type"], "clarify")
+        self.assertIn("Which clips", action["data"]["question"])
+        self.assertNotIn("soft_error", payload)
+
+    def test_handler_preserves_existing_daw_actions(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp_existing_actions",
+                "model": "server-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "daw_assistant_actions",
+                        "arguments": {
+                            "assistant_message": "Updated the project.",
+                            "actions": [
+                                {
+                                    "type": "audio_enhance",
+                                    "data": {
+                                        "operation": "cleanup",
+                                        "target": {"prefer_selected": True},
+                                    },
+                                },
+                                {
+                                    "type": "row_group_edit",
+                                    "data": {
+                                        "operation": "group_rows",
+                                        "row_indices": [0, 1],
+                                        "name": "Vocals",
+                                    },
+                                },
+                                {
+                                    "type": "row_color_edit",
+                                    "data": {
+                                        "operation": "delete",
+                                        "target": {"row_index": 1},
+                                    },
+                                },
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 90,
+                    "output_tokens": 60,
+                    "total_tokens": 150,
+                },
+            }
+        )
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "clean this recording and group the vocals",
+                    "project_snapshot": "Track 1: voice\nTrack 2: harmony",
+                    "selection_snapshot": "selected_clip_indices=0",
+                    "ai_feature": "assistant_chat",
+                }
+            )
+        )
+
+        with mock.patch.object(api_responses, "_load_api_key", return_value="sk-test"):
+            with mock.patch.object(api_responses, "get_provider", return_value=provider):
+                result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        payload = json.loads(result["body"])
+        output = payload["output"][0]
+        self.assertEqual(output["name"], "daw_assistant_actions")
+        actions = output["arguments"]["actions"]
+        self.assertEqual([action["type"] for action in actions], [
+            "audio_enhance",
+            "row_group_edit",
+            "row_color_edit",
+        ])
+        self.assertEqual(actions[0]["data"]["operation"], "phone_mic_cleanup")
+        self.assertEqual(actions[1]["data"]["operation"], "create")
+        self.assertEqual(actions[2]["data"]["operation"], "clear")
 
     def test_handler_preserves_sample_replace_for_capable_clients(self) -> None:
         provider = _FakeProvider(

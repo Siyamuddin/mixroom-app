@@ -23,6 +23,7 @@ class AnalyticsService with WidgetsBindingObserver {
     'daw.midi_compose.instrument_insert',
     'daw.midi_compose.transpose_notes',
     'daw.midi_compose.audio_to_midi',
+    'daw.clip_edit.pitch_shift',
   ];
 
   final Posthog _posthog = Posthog();

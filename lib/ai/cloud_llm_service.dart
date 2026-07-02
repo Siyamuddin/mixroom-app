@@ -170,7 +170,7 @@ class LlmResult {
 
 class CloudLlmService {
   static const _apiUrl = 'https://api.openai.com/v1/responses';
-  static const _promptCacheVersion = 'mixroom-daw-v20260422a';
+  static const _promptCacheVersion = 'mixroom-daw-v20260701a';
   static const _directOpenAiMaxOutputTokens = 8192;
   static const _defaultPromptCacheRetention = 'in_memory';
   static const _recoverableAuthMessage =
@@ -264,6 +264,7 @@ class CloudLlmService {
     'daw.midi_compose.instrument_insert',
     'daw.midi_compose.transpose_notes',
     'daw.midi_compose.audio_to_midi',
+    'daw.clip_edit.pitch_shift',
   };
 
   Map<String, dynamic> _mergedAnalyticsClientContext(
@@ -415,7 +416,7 @@ class CloudLlmService {
     }
     if (clientCapabilities.contains('daw.sample_insert.library')) {
       lines.add(
-        '- This client supports sample_insert using exact library_path values or role aliases like role:kick from LIBRARY_SNAPSHOT.',
+        '- This client supports sample_insert using exact library_path values or role aliases like role:kick from LIBRARY_SNAPSHOT. sample_insert creates audio clips; if the selected row is an instrument lane, target or create a nearby audio row instead of refusing.',
       );
     } else {
       lines.add(
@@ -445,6 +446,21 @@ class CloudLlmService {
         '- This client does not support audio-to-MIDI transcription; do not emit midi_compose convert_audio_to_midi.',
       );
     }
+    if (clientCapabilities.contains('daw.clip_edit.pitch_shift')) {
+      lines.add(
+        '- This client supports direct audio clip/stem pitch and key changes. For audio clip or stem pitch/key changes, use daw_assistant_actions clip_edit operation pitch_shift with semitones or delta_semitones. Do not add a Pitch Shift effect or automation unless the user explicitly asks for an effect/automation. Treat "one key" as one semitone.',
+      );
+    } else {
+      lines.add(
+        '- This client does not support direct audio clip/stem pitch and key changes. Do not emit clip_edit pitch_shift. Do not add a Pitch Shift effect or automation unless the user explicitly asks for an effect/automation.',
+      );
+    }
+    lines.add(
+      '- For compound requests like "remove vocals and lower the pitch/key of the background/instrumental", emit both actions in one daw_assistant_actions call: first stem_separate vocal_instrumental on the source clip, then clip_edit pitch_shift on the instrumental/background stem. Target the second action with label_contains="Instrumental" when helpful. Do not tell the user to ask again for the second step.',
+    );
+    lines.add(
+      '- When the user names an instrument or source, such as synth, piano, bass, drums, kick, snare, or vocal, target that identity over the currently selected clip if the selection appears to be a different source.',
+    );
     return lines.join('\n').trim();
   }
 
@@ -650,7 +666,7 @@ class CloudLlmService {
           'name': 'daw_assistant_actions',
           'strict': false,
           'description':
-              'Use for tutorials, project edits like BPM changes, row-group creation/folding, row color changes, library sample insertion or replacement, clip arrangement/editing, plugin CRUD, automation edits such as sidechain-like ducking, auto-pan, stereo movement, or filter sweeps, MIDI composition/editing, stem separation, and role override. For group bus plugin or mix requests, target the existing group with scope=group plus group_id or group_name so the app edits the group bus, not each child row. Use row_group_edit only for creating, removing from, or folding/unfolding row groups. Use clip_edit glue for merge/consolidate/bounce-clip requests. For autotune, auto-tune, pitch correction, or Melodyne-style vocal tuning, add the built-in Pitch Corrector effect. For drum or beat-building requests using packaged samples, prefer action over explanation: choose semantically matching library files or advertised role aliases like role:kick, arrange them with musical spacing, and keep core roles like kick/snare/hats on separate rows when helpful. For 8+ bar starter grooves or build-ups, prefer a workable scaffold with repetition plus light variation or fills instead of one identical bar copied forever. If the user wants a placed sample swapped out, prefer replacing the targeted clips while preserving timing. Inspect existing plugin chains and selected MIDI note state when available: prefer modifying, unbypassing, extending, or reshaping what is already there when it is close, and remove conflicting effects or rewrite notes only when the current state clearly fights the user goal. Never use for pure sonic mix changes. Only emit actions the app can actually execute.',
+              'Use for tutorials, project edits like BPM changes, row-group creation/folding, row color changes, library sample insertion or replacement, clip arrangement/editing, plugin CRUD, automation edits such as sidechain-like ducking, auto-pan, stereo movement, or filter sweeps, MIDI composition/editing, stem separation, and role override. For audio clip or stem pitch/key changes, use clip_edit pitch_shift with semitones or delta_semitones, not a Pitch Shift effect or automation, unless the user explicitly asks for an effect or automation. For group bus plugin or mix requests, target the existing group with scope=group plus group_id or group_name so the app edits the group bus, not each child row. Use row_group_edit only for creating, removing from, or folding/unfolding row groups. Use clip_edit glue for merge/consolidate/bounce-clip requests. For autotune, auto-tune, pitch correction, or Melodyne-style vocal tuning, add the built-in Pitch Corrector effect. For drum or beat-building requests using packaged samples, prefer action over explanation: choose semantically matching library files or advertised role aliases like role:kick, arrange them with musical spacing, and keep core roles like kick/snare/hats on separate rows when helpful. sample_insert creates audio clips; if selection is an instrument lane, target/create a nearby audio row instead of refusing. For 8+ bar starter grooves or build-ups, prefer a workable scaffold with repetition plus light variation or fills instead of one identical bar copied forever. If the user wants a placed sample swapped out, prefer replacing the targeted clips while preserving timing. Inspect existing plugin chains and selected MIDI note state when available: prefer modifying, unbypassing, extending, or reshaping what is already there when it is close, and remove conflicting effects or rewrite notes only when the current state clearly fights the user goal. Never use for pure sonic mix changes. Only emit actions the app can actually execute.',
           'parameters': <String, dynamic>{
             'type': 'object',
             'properties': <String, dynamic>{
@@ -2336,6 +2352,11 @@ class CloudLlmService {
       'pitch_clip': 'pitch_shift',
       'pitch_shift_clip': 'pitch_shift',
       'shift_pitch': 'pitch_shift',
+      'lower_pitch': 'pitch_shift',
+      'raise_pitch': 'pitch_shift',
+      'lower_key': 'pitch_shift',
+      'raise_key': 'pitch_shift',
+      'change_key': 'pitch_shift',
       'transpose_audio': 'pitch_shift',
       'transpose_clip': 'pitch_shift',
       'glue_clips': 'glue',
@@ -3358,6 +3379,28 @@ class CloudLlmService {
     if (actionType == 'clip_edit') {
       final operation =
           data['operation']?.toString().trim().toLowerCase() ?? '';
+      if (operation == 'pitch_shift' &&
+          _parseActionDouble(data['semitones'] ??
+                  target['semitones'] ??
+                  data['delta_semitones'] ??
+                  target['delta_semitones'] ??
+                  data['pitch_semitones'] ??
+                  target['pitch_semitones'] ??
+                  data['new_pitch_semitones'] ??
+                  target['new_pitch_semitones']) ==
+              null) {
+        final text = userText.toLowerCase();
+        final oneKey =
+            RegExp(r'\b(?:one|1|a)\s+(?:key|semitone|half[- ]step)\b')
+                .hasMatch(text);
+        if (oneKey) {
+          final direction =
+              RegExp(r'\b(lower|down|decrease|drop)\b').hasMatch(text)
+                  ? -1.0
+                  : 1.0;
+          data['delta_semitones'] = direction;
+        }
+      }
       if (operation == 'dialog_remove_range' &&
           !_hasCompleteDialogRemoveRangePayload(data)) {
         data['operation'] = 'dialog_remove_range';

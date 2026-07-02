@@ -303,11 +303,13 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<void> play() async {
+  static Future<bool> play() async {
     try {
-      await _ch.invokeMethod('play');
+      final res = await _ch.invokeMethod<bool>('play');
+      return res ?? true;
     } on PlatformException catch (e) {
       _logError('play', e);
+      return false;
     }
   }
 
@@ -1208,6 +1210,26 @@ class JuceAudioEngine {
       await _ch.invokeMethod('endProjectClipLoad');
     } on PlatformException catch (e) {
       _logError('endProjectClipLoad', e);
+    }
+  }
+
+  static Future<void> beginGraphMutationBatch() async {
+    try {
+      await _ch.invokeMethod('beginGraphMutationBatch');
+    } on MissingPluginException {
+      return;
+    } on PlatformException catch (e) {
+      _logError('beginGraphMutationBatch', e);
+    }
+  }
+
+  static Future<void> endGraphMutationBatch() async {
+    try {
+      await _ch.invokeMethod('endGraphMutationBatch');
+    } on MissingPluginException {
+      return;
+    } on PlatformException catch (e) {
+      _logError('endGraphMutationBatch', e);
     }
   }
 

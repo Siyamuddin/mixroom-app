@@ -1928,26 +1928,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     if (contentY < 0.0 || contentY >= _contentHeight) return null;
     final rowIndex = (contentY / _rowHeight).floor();
     final safeRowIndex = rowIndex.clamp(0, _pitchCount - 1);
-    final pitch = _visiblePitchRange.max - safeRowIndex;
-    if (!_isBlackKey(pitch) || localPosition.dx <= _pianoKeyBlackWidth) {
-      return pitch;
-    }
-
-    final rowLocalY = contentY - (safeRowIndex * _rowHeight);
-    final abovePitch = pitch + 1;
-    final belowPitch = pitch - 1;
-    final hasAboveWhite =
-        abovePitch <= _visiblePitchRange.max && !_isBlackKey(abovePitch);
-    final hasBelowWhite =
-        belowPitch >= _visiblePitchRange.min && !_isBlackKey(belowPitch);
-    if (rowLocalY < _rowHeight / 2.0) {
-      if (hasAboveWhite) return abovePitch;
-      if (hasBelowWhite) return belowPitch;
-    } else {
-      if (hasBelowWhite) return belowPitch;
-      if (hasAboveWhite) return abovePitch;
-    }
-    return pitch;
+    return _visiblePitchRange.max - safeRowIndex;
   }
 
   void _handlePianoKeyPointerMove(PointerMoveEvent event) {
@@ -6342,7 +6323,6 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   }) {
     const blackKeyWidth = _pianoKeyBlackWidth;
     final pitchRange = _visiblePitchRange;
-    final minPitch = pitchRange.min;
     final maxPitch = pitchRange.max;
     return Container(
       decoration: BoxDecoration(
@@ -6375,24 +6355,10 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                 children: List<Widget>.generate(_pitchCount, (i) {
                   final pitch = maxPitch - i;
                   final isBlack = _isBlackKey(pitch);
-                  final belowPitch = pitch - 1;
-                  final belowIsBlack =
-                      belowPitch >= minPitch && _isBlackKey(belowPitch);
-                  final abovePitch = pitch + 1;
                   final noteName = _noteNameForPitch(pitch);
                   final isPressed = _isPreviewPitchActive(pitch) ||
                       playbackPitches.contains(pitch);
                   final showLabel = pitch % 12 == 0 || isPressed;
-                  final topHalfPressed = isBlack &&
-                      abovePitch <= maxPitch &&
-                      !_isBlackKey(abovePitch) &&
-                      (_isPreviewPitchActive(abovePitch) ||
-                          playbackPitches.contains(abovePitch));
-                  final bottomHalfPressed = isBlack &&
-                      belowPitch >= minPitch &&
-                      !_isBlackKey(belowPitch) &&
-                      (_isPreviewPitchActive(belowPitch) ||
-                          playbackPitches.contains(belowPitch));
                   final blackTop = isPressed
                       ? const Color(0xFF737D86)
                       : const Color(0xFF525A62);
@@ -6400,9 +6366,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                       ? const Color(0xFF626B74)
                       : const Color(0xFF454C54);
                   final rowFill = isBlack
-                      ? (isPressed
-                          ? const Color(0xFF6A747D)
-                          : const Color(0xFF50575F))
+                      ? const Color(0xFFF6F8FA)
                       : (isPressed
                           ? const Color(0xFFE0EAF7)
                           : const Color(0xFFF8F9FA));
@@ -6410,8 +6374,6 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                           ? const Color(0xFF79B5FF)
                           : const Color(0xFF5FA8FF))
                       .withValues(alpha: isBlack ? 0.18 : 0.14);
-                  final tailOverlayColor =
-                      const Color(0xFF5FA8FF).withValues(alpha: 0.12);
                   return SizedBox(
                     key: ValueKey<String>('piano_key_$pitch'),
                     height: _rowHeight,
@@ -6420,18 +6382,6 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                         Positioned.fill(
                           child: Container(color: rowFill),
                         ),
-                        if (isBlack)
-                          Positioned(
-                            left: blackKeyWidth,
-                            right: 0,
-                            top: 0,
-                            bottom: 0,
-                            child: Container(
-                              color: isPressed
-                                  ? const Color(0xFFE0EAF7)
-                                  : const Color(0xFFF6F8FA),
-                            ),
-                          ),
                         if (isBlack)
                           Positioned(
                             left: 0,
@@ -6465,42 +6415,11 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                         if (!isBlack)
                           Positioned(
                             left: 0,
-                            right: belowIsBlack ? null : 0,
+                            right: 0,
                             bottom: 0,
-                            width: belowIsBlack ? blackKeyWidth : null,
                             child: Container(
                               height: 0.7,
                               color: const Color(0xFFD8DDE1),
-                            ),
-                          ),
-                        if (topHalfPressed)
-                          Positioned(
-                            left: blackKeyWidth,
-                            right: 0,
-                            top: 0,
-                            height: _rowHeight / 2.0,
-                            child: IgnorePointer(
-                              child: Container(
-                                key: ValueKey<String>(
-                                  'piano_key_tail_active_top_$pitch',
-                                ),
-                                color: tailOverlayColor,
-                              ),
-                            ),
-                          ),
-                        if (bottomHalfPressed)
-                          Positioned(
-                            left: blackKeyWidth,
-                            right: 0,
-                            bottom: 0,
-                            height: _rowHeight / 2.0,
-                            child: IgnorePointer(
-                              child: Container(
-                                key: ValueKey<String>(
-                                  'piano_key_tail_active_bottom_$pitch',
-                                ),
-                                color: tailOverlayColor,
-                              ),
                             ),
                           ),
                         if (isPressed)

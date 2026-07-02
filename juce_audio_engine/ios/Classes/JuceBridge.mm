@@ -3671,6 +3671,16 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     JuceEngine::get().endProjectClipLoad();
 }
 
++ (void)beginGraphMutationBatchObjC
+{
+    JuceEngine::get().beginGraphMutationBatch();
+}
+
++ (void)endGraphMutationBatchObjC
+{
+    JuceEngine::get().endGraphMutationBatch();
+}
+
 + (BOOL)supportsLiveMidiClipPlaybackObjC
 {
     bool supported = false;

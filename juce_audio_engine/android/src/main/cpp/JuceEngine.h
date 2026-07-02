@@ -1540,6 +1540,11 @@ public:
         next.sourceTempoBpm = juce::jlimit(1.0, 400.0, sourceTempoBpm);
         next.sampledDefinition =
             resolveSampledDefinition(instrumentId, instrumentName);
+        if (next.sampledDefinition != nullptr)
+            preloadSampledRegionsForNotes(
+                *next.sampledDefinition,
+                next.notes,
+                instrumentId);
         next.sampledAttackOverride =
             params.contains(juce::Identifier("attackMs"));
         next.sampledReleaseOverride =
@@ -1594,6 +1599,38 @@ public:
                 pendingLiveMidiEvents.begin() +
                     (std::ptrdiff_t)(pendingLiveMidiEvents.size() - 512));
         }
+    }
+
+    bool preloadLiveMidiPitch(int pitch, float velocity)
+    {
+        PendingState state;
+        {
+            const juce::ScopedLock lock(stateLock);
+            state = pendingState;
+        }
+        if (state.sampledDefinition == nullptr ||
+            state.sampledDefinition->regions.empty())
+            return true;
+
+        const int sampledPitch =
+            sampledMidiPitchForInstrument(state.instrumentId, pitch);
+        const int lowKey =
+            juce::jlimit(0, 127, (int)std::round(state.preset.sampleLowKey));
+        const int highKey =
+            juce::jlimit(lowKey, 127, (int)std::round(state.preset.sampleHighKey));
+        if (sampledPitch < lowKey || sampledPitch > highKey)
+            return true;
+
+        const int midiVelocity = juce::jlimit(
+            0,
+            127,
+            (int)std::lround(juce::jlimit(0.0f, 1.0f, velocity) * 127.0f));
+        const SampledRegion *region = pickSampledRegion(
+            *state.sampledDefinition,
+            sampledPitch,
+            midiVelocity,
+            sampledPitch);
+        return region != nullptr && ensureSampledRegionLoaded(*region);
     }
 
     void prepareToPlay(double deviceSampleRate, int samplesPerBlock) override
@@ -1758,6 +1795,11 @@ public:
                                       midiVelocity,
                                       (int)noteIndex)
                                 : nullptr;
+                        if (sampledRegion != nullptr &&
+                            !ensureSampledRegionLoaded(*sampledRegion))
+                        {
+                            sampledRegion = nullptr;
+                        }
                         if (sampledMode && sampledRegion == nullptr)
                             continue;
                         if (sampledMode)
@@ -2261,7 +2303,8 @@ private:
 
     struct SampledRegion
     {
-        std::shared_ptr<const DecodedSamplePcm> sample;
+        mutable std::shared_ptr<const DecodedSamplePcm> sample;
+        juce::String sampleAssetPath;
         int loKey = 0;
         int hiKey = 127;
         int keyCenter = 60;
@@ -3014,12 +3057,8 @@ private:
                     ? opcodeValue(r, "default_path")
                     : defaultPathRaw,
                 sampleRaw);
-            auto sample = decodedSampleForAsset(sampleAssetPath);
-            if (sample == nullptr || sample->frameCount() < 2)
-                continue;
-
             SampledRegion regionDef;
-            regionDef.sample = sample;
+            regionDef.sampleAssetPath = sampleAssetPath;
             regionDef.loKey =
                 juce::jlimit(0, 127, (int)std::lround(readSfzNumeric(r, "lokey", 0.0)));
             regionDef.hiKey =
@@ -3123,6 +3162,21 @@ private:
         return sampledDefinitionForAsset(assetPath);
     }
 
+    static bool ensureSampledRegionLoaded(const SampledRegion &region)
+    {
+        if (region.sample != nullptr && region.sample->frameCount() >= 2)
+            return true;
+        if (region.sampleAssetPath.trim().isEmpty())
+            return false;
+
+        auto sample = decodedSampleForAsset(region.sampleAssetPath);
+        if (sample == nullptr || sample->frameCount() < 2)
+            return false;
+
+        region.sample = sample;
+        return true;
+    }
+
     static const SampledRegion *pickSampledRegion(const SampledDefinition &definition,
                                                   int pitch,
                                                   int velocity,
@@ -3190,6 +3244,38 @@ private:
         if (auto *best = pickBest(true, false))
             return best;
         return pickBest(false, false);
+    }
+
+    static void preloadSampledRegionsForNotes(const SampledDefinition &definition,
+                                              const juce::Array<TimelineMidiNote> &notes,
+                                              const juce::String &instrumentId)
+    {
+        std::unordered_set<const SampledRegion *> regionsToLoad;
+        regionsToLoad.reserve((size_t)juce::jmax(1, notes.size()));
+
+        for (int i = 0; i < notes.size(); ++i)
+        {
+            const auto &note = notes.getReference(i);
+            const int sampledPitch =
+                sampledMidiPitchForInstrument(instrumentId, note.pitch);
+            const int midiVelocity = juce::jlimit(
+                0,
+                127,
+                (int)std::lround(
+                    juce::jlimit(0.0, 1.0, note.velocity) * 127.0));
+            if (const auto *region = pickSampledRegion(
+                    definition,
+                    sampledPitch,
+                    midiVelocity,
+                    i))
+            {
+                regionsToLoad.insert(region);
+            }
+        }
+
+        for (const auto *region : regionsToLoad)
+            if (region != nullptr)
+                ensureSampledRegionLoaded(*region);
     }
 
     static int sampledRegionFrameLimit(const SampledRegion &region,
@@ -4073,7 +4159,7 @@ private:
                         sampledPitch,
                         midiVelocity,
                         liveSampleSequenceCounter++);
-                    if (region == nullptr || region->sample == nullptr)
+                    if (region == nullptr || !ensureSampledRegionLoaded(*region))
                         continue;
                     const SampledRegion effectiveRegion =
                         samplerRegionForPreset(*region, cachedPreset, sampledPitch);
@@ -4284,6 +4370,8 @@ public:
                       double inFileOffsetSec = 0.0);
     void beginProjectClipLoadTransaction();
     void endProjectClipLoadTransaction();
+    void beginGraphMutationBatch();
+    void endGraphMutationBatch();
     bool updateMidiClipEvents(int clipId,
                               const juce::String &instrumentId,
                               const juce::String &instrumentName,
@@ -4462,6 +4550,7 @@ public:
     juce::String getCurrentOutputDeviceName() const;
     int getNumInputChannels() const;
     int getActiveInputChannelCount() const;
+    int getActiveOutputChannelCount() const;
     void setLiveInputMonitoringEnabled(bool enabled);
     bool isLiveInputMonitoringEnabled() const noexcept;
     void routeLiveInputToRow(int row, int channelCount, int channelStart = 0);
@@ -4537,16 +4626,22 @@ private:
 
     void rewireTrackChain(int trackIdx,
                           juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync); // clip-level FX+gain+pan → row
-    void rewireMasterFxChain();                  // master FX chain
+    void rewireMasterFxChain(
+        juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync); // master FX chain
     void rebuildClipProcessorsFromStoredStateLocked(
         juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::none);
     void reapplyClipProcessorStateLocked();
     void primeClipProcessorsForOfflineRenderLocked();
     void armOutputSafetyForCurrentRoute(bool fadeIn = false) noexcept;
     void ensureBusGraphInitialised();            // rows + master
-    void rewireTrackBusFxChain(int trackRow);    // row-level FX between input and automation
-    void rewireTrackGroupFxChain(const juce::String &groupId);
-    void reconnectAllRowOutputsToBuses();
+    void rewireTrackBusFxChain(
+        int trackRow,
+        juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync); // row-level FX between input and automation
+    void rewireTrackGroupFxChain(
+        const juce::String &groupId,
+        juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync);
+    void reconnectAllRowOutputsToBuses(
+        juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync);
     int getTrackIndexForClip(int clipIdx) const; // clip → row mapping
     float panUIToNormalized(float uiPan)         // OLD: uiPan ∈ [-1, 1] NEW: uiPan ∈ [0, 1]
     {
@@ -4831,6 +4926,9 @@ private:
 
     bool busGraphInitialised = false;
     int projectClipLoadTransactionDepth = 0;
+    int graphMutationBatchDepth = 0;
+    bool graphMutationBatchNeedsRebuild = false;
+    bool graphMutationBatchNeedsOutputSafety = false;
 
     std::unique_ptr<MetronomeAudioCallback> metronomeCallback;
 
@@ -4873,6 +4971,7 @@ private:
     bool isProjectClipLoadTransactionActive() const noexcept { return projectClipLoadTransactionDepth > 0; }
 
     void rebuildBusesAndRewireClips();
+    void commitGraphMutationLocked(bool armOutputSafety = true) noexcept;
     void attachRowBusNodes(RowState &r);
     void ensureRowBusNodesAttached(int rowIndex);
     void retargetRowMeterTapPointers();

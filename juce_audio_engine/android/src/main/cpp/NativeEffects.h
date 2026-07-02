@@ -2382,6 +2382,7 @@ public:
     void prepare(double newSampleRate, int maxBlockSize)
     {
         sampleRate = newSampleRate;
+        updateCoefficients();
 
         juce::dsp::ProcessSpec spec;
         spec.sampleRate = sampleRate;
@@ -2419,14 +2420,23 @@ private:
         const auto midG = juce::Decibels::decibelsToGain(params.midGainDb);
         const auto highG = juce::Decibels::decibelsToGain(params.highGainDb);
 
-        *chain.get<LowShelf>().state =
-            *juce::dsp::IIR::Coefficients<float>::makeLowShelf(sampleRate, EQ3_LOW_FC, EQ3_SHELF_Q, lowG);
+        setCoefficients(chain.get<LowShelf>().state,
+                        juce::dsp::IIR::Coefficients<float>::makeLowShelf(sampleRate, EQ3_LOW_FC, EQ3_SHELF_Q, lowG));
 
-        *chain.get<MidPeak>().state =
-            *juce::dsp::IIR::Coefficients<float>::makePeakFilter(sampleRate, EQ3_MID_FC, EQ3_MID_Q, midG);
+        setCoefficients(chain.get<MidPeak>().state,
+                        juce::dsp::IIR::Coefficients<float>::makePeakFilter(sampleRate, EQ3_MID_FC, EQ3_MID_Q, midG));
 
-        *chain.get<HighShelf>().state =
-            *juce::dsp::IIR::Coefficients<float>::makeHighShelf(sampleRate, EQ3_HIGH_FC, EQ3_SHELF_Q, highG);
+        setCoefficients(chain.get<HighShelf>().state,
+                        juce::dsp::IIR::Coefficients<float>::makeHighShelf(sampleRate, EQ3_HIGH_FC, EQ3_SHELF_Q, highG));
+    }
+
+    static void setCoefficients(juce::dsp::IIR::Coefficients<float>::Ptr &target,
+                                juce::dsp::IIR::Coefficients<float>::Ptr next)
+    {
+        if (target == nullptr)
+            target = next;
+        else
+            *target = *next;
     }
 
     double sampleRate = 44100.0;

@@ -347,6 +347,60 @@ void main() {
     }
   });
 
+  test('android asset pack upright piano matches chromatic source preset',
+      () async {
+    final repoRoot = Directory.current;
+    final sourceSfz = File(p.join(repoRoot.path, 'assets', 'instruments',
+        'VSCO-2-CE-1.1.0', 'UprightPiano.sfz'));
+    final androidSfz = File(p.join(
+      repoRoot.path,
+      'android',
+      'assetpacks',
+      'instruments',
+      'src',
+      'main',
+      'assets',
+      'assets',
+      'instruments',
+      'VSCO-2-CE-1.1.0',
+      'UprightPiano.sfz',
+    ));
+    expect(sourceSfz.existsSync(), isTrue,
+        reason: 'Missing source upright piano SFZ.');
+    expect(androidSfz.existsSync(), isTrue,
+        reason: 'Missing Android asset-pack upright piano SFZ.');
+    expect(
+      await androidSfz.readAsString(),
+      await sourceSfz.readAsString(),
+      reason:
+          'Android upright piano SFZ must stay in sync with the chromatic source preset.',
+    );
+
+    final regions = (await _parseSfzRegions(androidSfz))
+        .where((region) => (region['sample'] ?? '').trim().isNotEmpty)
+        .toList(growable: false);
+    expect(regions.length, 176,
+        reason:
+            'Android upright piano must include two velocity layers for 88 keys.');
+
+    const androidSfzAssetPath =
+        'android/assetpacks/instruments/src/main/assets/assets/instruments/VSCO-2-CE-1.1.0/UprightPiano.sfz';
+    for (final region in regions) {
+      final sampleAssetPath = _resolveSfzSampleAssetPath(
+        sfzAssetPath: androidSfzAssetPath,
+        defaultPathRaw: '',
+        samplePathRaw: region['sample'] ?? '',
+      );
+      final sampleFile = File(p.join(repoRoot.path, sampleAssetPath));
+      expect(
+        sampleFile.existsSync(),
+        isTrue,
+        reason:
+            'Android asset pack missing upright piano sample: $sampleAssetPath',
+      );
+    }
+  });
+
   test('native sampled resolver does not hardcode bundled SFZ asset paths',
       () async {
     final repoRoot = Directory.current;

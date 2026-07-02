@@ -1362,6 +1362,20 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_endProjectClipLoadTransactionJNI
                                                   { JuceEngine::get().endProjectClipLoadTransaction(); });
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_beginGraphMutationBatchJNI(JNIEnv *, jclass)
+{
+    juce::MessageManager::getInstance()->callSync([]
+                                                  { JuceEngine::get().beginGraphMutationBatch(); });
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_endGraphMutationBatchJNI(JNIEnv *, jclass)
+{
+    juce::MessageManager::getInstance()->callSync([]
+                                                  { JuceEngine::get().endGraphMutationBatch(); });
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_loadMidiClipJNI(JNIEnv *env,
                                                                  jclass,
@@ -2619,6 +2633,15 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getActiveInputChannelCountJNI(JN
     std::atomic<int> channels{0};
     juce::MessageManager::getInstance()->callSync([&]
                                                   { channels = JuceEngine::get().getActiveInputChannelCount(); });
+    return (jint)channels.load();
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getActiveOutputChannelCountJNI(JNIEnv *, jclass)
+{
+    std::atomic<int> channels{0};
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  { channels = JuceEngine::get().getActiveOutputChannelCount(); });
     return (jint)channels.load();
 }
 

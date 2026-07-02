@@ -85,6 +85,8 @@
      inFileOffsetSec:(double)inFileOffsetSec;
 + (void)beginProjectClipLoadObjC;
 + (void)endProjectClipLoadObjC;
++ (void)beginGraphMutationBatchObjC;
++ (void)endGraphMutationBatchObjC;
 + (BOOL)supportsLiveMidiClipPlaybackObjC;
 + (BOOL)loadMidiClipObjC:(NSInteger)clipIndex
                    rowId:(NSInteger)rowId
