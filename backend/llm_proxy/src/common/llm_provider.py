@@ -19,6 +19,7 @@ DEFAULT_PROVIDER = "openai"
 DEFAULT_ANTHROPIC_VERSION = "2023-06-01"
 DEFAULT_ANTHROPIC_MAX_TOKENS = 1024
 _OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
+_OPENAI_CONVERSATIONS_URL = "https://api.openai.com/v1/conversations"
 _ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 _GEMINI_GENERATE_CONTENT_URL_TEMPLATE = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -62,12 +63,23 @@ class OpenAiResponsesProvider(LlmProviderAdapter):
             timeout_seconds=timeout_seconds,
             fallback_error_message="OpenAI upstream error",
         )
+        conversation_id = str(upstream_body.get("conversation") or "").strip()
+        appended_tool_outputs = 0
+        if 200 <= status_code < 300 and conversation_id:
+            appended_tool_outputs = append_openai_function_call_outputs(
+                api_key=api_key,
+                conversation_id=conversation_id,
+                response_body=response_body,
+                timeout_seconds=timeout_seconds,
+            )
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)
         return {
             **_json_response(status_code, response_body),
             "observability": {
                 "provider_roundtrip_ms": elapsed_ms,
                 "openai_api_ms": elapsed_ms,
+                "openai_conversation_tool_outputs_appended": appended_tool_outputs
+                or None,
             },
         }
 
@@ -563,6 +575,122 @@ def _parse_json_object(body: str) -> Dict[str, Any]:
     if isinstance(payload, dict):
         return payload
     return {}
+
+
+def _openai_headers(api_key: str) -> Dict[str, str]:
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+
+def create_openai_conversation(
+    *,
+    api_key: str,
+    metadata: Dict[str, Any] | None = None,
+    seed_items: List[Dict[str, Any]] | None = None,
+    timeout_seconds: int,
+) -> str:
+    body: Dict[str, Any] = {}
+    if metadata:
+        body["metadata"] = metadata
+    if seed_items:
+        body["items"] = seed_items[:20]
+
+    status_code, response_body = _post_json_request(
+        url=_OPENAI_CONVERSATIONS_URL,
+        headers=_openai_headers(api_key),
+        body=body,
+        timeout_seconds=timeout_seconds,
+        fallback_error_message="OpenAI conversation create error",
+    )
+    payload = _parse_json_object(response_body)
+    conversation_id = str(payload.get("id") or "").strip()
+    if status_code < 200 or status_code >= 300 or not conversation_id:
+        raise RuntimeError(
+            f"OpenAI conversation create failed with status {status_code}."
+        )
+    return conversation_id
+
+
+def append_openai_conversation_items(
+    *,
+    api_key: str,
+    conversation_id: str,
+    items: List[Dict[str, Any]],
+    timeout_seconds: int,
+) -> bool:
+    normalized_id = conversation_id.strip()
+    if not normalized_id or not items:
+        return False
+
+    status_code, _response_body = _post_json_request(
+        url=f"{_OPENAI_CONVERSATIONS_URL}/{urllib.parse.quote(normalized_id, safe='')}/items",
+        headers=_openai_headers(api_key),
+        body={"items": items[:20]},
+        timeout_seconds=timeout_seconds,
+        fallback_error_message="OpenAI conversation item append error",
+    )
+    return 200 <= status_code < 300
+
+
+def _function_call_output_items_from_response(response_body: str) -> List[Dict[str, Any]]:
+    payload = _parse_json_object(response_body)
+    output = payload.get("output")
+    if not isinstance(output, list):
+        return []
+
+    items: List[Dict[str, Any]] = []
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("type") or "").strip() != "function_call":
+            continue
+        call_id = str(item.get("call_id") or "").strip()
+        if not call_id:
+            continue
+        name = str(item.get("name") or "tool").strip() or "tool"
+        items.append(
+            {
+                "type": "function_call_output",
+                "call_id": call_id,
+                "output": json.dumps(
+                    {
+                        "status": "queued_for_mixroom_execution",
+                        "message": (
+                            "Mixroom accepted this tool call for app-side "
+                            "execution. Fresh PROJECT_SNAPSHOT in the next "
+                            "request is authoritative for what actually changed."
+                        ),
+                        "tool_name": name,
+                    },
+                    separators=(",", ":"),
+                ),
+            }
+        )
+    return items
+
+
+def append_openai_function_call_outputs(
+    *,
+    api_key: str,
+    conversation_id: str,
+    response_body: str,
+    timeout_seconds: int,
+) -> int:
+    items = _function_call_output_items_from_response(response_body)
+    if not items:
+        return 0
+    try:
+        appended = append_openai_conversation_items(
+            api_key=api_key,
+            conversation_id=conversation_id,
+            items=items,
+            timeout_seconds=timeout_seconds,
+        )
+    except Exception:
+        return 0
+    return len(items) if appended else 0
 
 
 def _network_retry_attempts() -> int:

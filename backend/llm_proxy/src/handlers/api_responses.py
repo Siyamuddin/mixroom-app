@@ -38,7 +38,12 @@ from common.llm_contract import (
     build_llm_request_from_mixroom_payload,
     normalize_openai_compatible_request,
 )
-from common.llm_provider import DEFAULT_PROVIDER, get_provider
+from common.llm_provider import (
+    DEFAULT_PROVIDER,
+    append_openai_conversation_items,
+    create_openai_conversation,
+    get_provider,
+)
 from common.logging_utils import build_request_log_context, log_request_complete
 from common.monitoring import capture_exception, init_sentry
 from common.usage_repository import AiUsageRepository
@@ -46,6 +51,7 @@ from common.usage_repository import AiUsageRepository
 _secret_cache: Any | None = None
 _secret_cache_loaded_at: float | None = None
 _usage_repo = AiUsageRepository()
+_conversation_state_table: Any | None = None
 _STRUCTURED_MIXROOM_FIELDS = frozenset(
     {
         "conversation",
@@ -417,6 +423,319 @@ def _request_timeout_seconds() -> int:
     return max(1, value)
 
 
+def _conversation_state_table_name() -> str:
+    return _env_value("OPENAI_CONVERSATION_STATE_TABLE")
+
+
+def _conversation_state_mode_from_body(body: Dict[str, Any]) -> str:
+    normalized = str(body.get("conversation_state_mode") or "").strip().lower()
+    if normalized in {"openai_conversation", "openai_conversation_seeded"}:
+        return normalized
+    return "manual_history"
+
+
+def _uses_openai_conversation_state(mode: str) -> bool:
+    return mode in {"openai_conversation", "openai_conversation_seeded"}
+
+
+def _conversation_state_table_client() -> Any | None:
+    table_name = _conversation_state_table_name()
+    if not table_name or boto3 is None:
+        return None
+
+    global _conversation_state_table
+    if _conversation_state_table is None:
+        _conversation_state_table = boto3.resource("dynamodb").Table(table_name)
+    return _conversation_state_table
+
+
+def _conversation_safe_key_part(value: str, fallback: str) -> str:
+    normalized = str(value or "").strip()
+    return normalized if normalized else fallback
+
+
+def _conversation_session_key(
+    *,
+    user_id: str,
+    project_id: str,
+    ai_feature: str,
+    conversation_session_id: str,
+) -> str:
+    parts = [
+        _conversation_safe_key_part(user_id, "anonymous"),
+        _conversation_safe_key_part(project_id, "no_project"),
+        _conversation_safe_key_part(ai_feature, "ai_chat"),
+        _conversation_safe_key_part(conversation_session_id, "default_session"),
+    ]
+    return "#".join(parts)
+
+
+def _conversation_mapping_key(
+    *,
+    user_id: str,
+    project_id: str,
+    ai_feature: str,
+    conversation_session_id: str,
+    runtime_config_fingerprint: str,
+) -> str:
+    return "#".join(
+        [
+            _conversation_session_key(
+                user_id=user_id,
+                project_id=project_id,
+                ai_feature=ai_feature,
+                conversation_session_id=conversation_session_id,
+            ),
+            _conversation_safe_key_part(
+                runtime_config_fingerprint,
+                "runtime_unknown",
+            ),
+        ]
+    )
+
+
+def _short_hash(value: str, *, length: int = 16) -> str:
+    return hashlib.sha256(value.strip().encode("utf-8")).hexdigest()[:length]
+
+
+def _utc_timestamp() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _conversation_metadata(
+    *,
+    user_id: str,
+    project_id: str,
+    ai_feature: str,
+    conversation_state_mode: str,
+    conversation_session_id: str,
+    runtime_config_fingerprint: str,
+    seed_hash: str = "",
+) -> Dict[str, Any]:
+    return _compact_dict(
+        {
+            "source": "mixroom_llm_proxy",
+            "conversation_state_mode": conversation_state_mode,
+            "user_hash": _short_hash(user_id),
+            "project_hash": _short_hash(project_id or "no_project"),
+            "ai_feature": ai_feature,
+            "session_hash": _short_hash(conversation_session_id or "default_session"),
+            "runtime_config_fingerprint": runtime_config_fingerprint,
+            "seed_hash": seed_hash,
+        }
+    )
+
+
+def _ensure_openai_conversation_id(
+    *,
+    api_key: str,
+    user_id: str,
+    project_id: str,
+    ai_feature: str,
+    conversation_state_mode: str,
+    conversation_session_id: str,
+    runtime_config_fingerprint: str,
+    request_body: Dict[str, Any],
+) -> tuple[str, bool]:
+    table = _conversation_state_table_client()
+    if table is None:
+        return "", False
+
+    session_key = _conversation_session_key(
+        user_id=user_id,
+        project_id=project_id,
+        ai_feature=ai_feature,
+        conversation_session_id=conversation_session_id,
+    )
+    mapping_key = _conversation_mapping_key(
+        user_id=user_id,
+        project_id=project_id,
+        ai_feature=ai_feature,
+        conversation_session_id=conversation_session_id,
+        runtime_config_fingerprint=runtime_config_fingerprint,
+    )
+    existing = table.get_item(Key={"mapping_key": mapping_key}).get("Item")
+    if isinstance(existing, dict):
+        existing_id = str(existing.get("openai_conversation_id") or "").strip()
+        if existing_id:
+            return existing_id, False
+
+    seed_hash = str(request_body.get("openai_conversation_seed_hash") or "").strip()
+    seed_items = request_body.get("openai_conversation_seed_items")
+    if not isinstance(seed_items, list):
+        seed_items = []
+    conversation_id = create_openai_conversation(
+        api_key=api_key,
+        metadata=_conversation_metadata(
+            user_id=user_id,
+            project_id=project_id,
+            ai_feature=ai_feature,
+            conversation_state_mode=conversation_state_mode,
+            conversation_session_id=conversation_session_id,
+            runtime_config_fingerprint=runtime_config_fingerprint,
+            seed_hash=seed_hash,
+        ),
+        seed_items=seed_items,
+        timeout_seconds=_request_timeout_seconds(),
+    )
+    now = _utc_timestamp()
+    table.put_item(
+        Item={
+            "mapping_key": mapping_key,
+            "session_key": session_key,
+            "openai_conversation_id": conversation_id,
+            "conversation_state_mode": conversation_state_mode,
+            "user_id": user_id,
+            "project_id": project_id,
+            "ai_feature": ai_feature,
+            "conversation_session_id": conversation_session_id,
+            "runtime_config_fingerprint": runtime_config_fingerprint,
+            "seed_hash": seed_hash,
+            "created_at": now,
+            "updated_at": now,
+        }
+    )
+    return conversation_id, True
+
+
+def _latest_openai_conversation_id_for_session(
+    *,
+    user_id: str,
+    project_id: str,
+    ai_feature: str,
+    conversation_session_id: str,
+) -> str:
+    table = _conversation_state_table_client()
+    if table is None or not conversation_session_id.strip():
+        return ""
+
+    try:
+        from boto3.dynamodb.conditions import Key
+    except Exception:
+        return ""
+
+    session_key = _conversation_session_key(
+        user_id=user_id,
+        project_id=project_id,
+        ai_feature=ai_feature,
+        conversation_session_id=conversation_session_id,
+    )
+    result = table.query(
+        IndexName="session_updated_at_idx",
+        KeyConditionExpression=Key("session_key").eq(session_key),
+        ScanIndexForward=False,
+        Limit=1,
+    )
+    items = result.get("Items")
+    if not isinstance(items, list) or not items:
+        return ""
+    item = items[0]
+    if not isinstance(item, dict):
+        return ""
+    return str(item.get("openai_conversation_id") or "").strip()
+
+
+def _conversation_execution_event_text(body: Dict[str, Any]) -> str:
+    action_types = body.get("action_types")
+    if not isinstance(action_types, list):
+        action_types = []
+    normalized_actions = [
+        str(action).strip()
+        for action in action_types
+        if isinstance(action, str) and action.strip()
+    ][:24]
+
+    failed_actions = body.get("failed_actions")
+    if not isinstance(failed_actions, list):
+        failed_actions = []
+    normalized_failed = [
+        str(action).strip()
+        for action in failed_actions
+        if isinstance(action, str) and action.strip()
+    ][:24]
+
+    summary = str(body.get("summary") or "").strip()[:2000]
+    prompt_trace_id = str(body.get("prompt_trace_id") or "").strip()
+    applied = body.get("applied")
+
+    return "\n".join(
+        [
+            "MIXROOM DAW EXECUTION RESULT",
+            f"prompt_trace_id: {prompt_trace_id}",
+            f"applied: {bool(applied)}",
+            f"action_types: {', '.join(normalized_actions) if normalized_actions else 'none'}",
+            f"failed_actions: {', '.join(normalized_failed) if normalized_failed else 'none'}",
+            f"summary: {summary or 'No additional execution summary was provided.'}",
+            "",
+            "Use this compact result only as prior-turn execution memory. Fresh PROJECT_SNAPSHOT remains authoritative.",
+        ]
+    ).strip()
+
+
+def _handle_conversation_event(
+    *,
+    body: Dict[str, Any],
+    user_id: str,
+) -> Dict[str, Any]:
+    event_type = str(body.get("event_type") or "").strip()
+    if event_type != "daw_execution_result":
+        return json_response(400, {"error": "Unsupported conversation event type."})
+
+    conversation_state_mode = _conversation_state_mode_from_body(body)
+    if not _uses_openai_conversation_state(conversation_state_mode):
+        return json_response(200, {"ok": True, "appended": False, "noop": True})
+
+    project_id = str(body.get("project_id") or "").strip()
+    raw_ai_feature = str(body.get("ai_feature") or "ai_chat").strip() or "ai_chat"
+    try:
+        ai_feature = validate_feature(raw_ai_feature)
+    except ValueError as error:
+        return json_response(400, {"error": str(error)})
+
+    conversation_session_id = str(body.get("conversation_session_id") or "").strip()
+    if not conversation_session_id:
+        return json_response(200, {"ok": True, "appended": False, "noop": True})
+
+    conversation_id = _latest_openai_conversation_id_for_session(
+        user_id=user_id,
+        project_id=project_id,
+        ai_feature=ai_feature,
+        conversation_session_id=conversation_session_id,
+    )
+    if not conversation_id:
+        return json_response(200, {"ok": True, "appended": False, "noop": True})
+
+    api_key = _load_api_key(DEFAULT_PROVIDER)
+    if not api_key:
+        return json_response(500, {"error": "LLM API key is not configured."})
+
+    appended = append_openai_conversation_items(
+        api_key=api_key,
+        conversation_id=conversation_id,
+        items=[
+            {
+                "type": "message",
+                "role": "developer",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": _conversation_execution_event_text(body),
+                    }
+                ],
+            }
+        ],
+        timeout_seconds=_request_timeout_seconds(),
+    )
+    return json_response(
+        200,
+        {
+            "ok": True,
+            "appended": appended,
+            "openai_conversation_id_hash": _short_hash(conversation_id),
+        },
+    )
+
+
 def _normalize_request_body(
     body: Dict[str, Any],
     *,
@@ -564,10 +883,18 @@ def _runtime_config_fingerprint(
     request_body: Dict[str, Any],
     runtime_config: Dict[str, Any],
 ) -> str:
-    system_prompt = str(
-        request_body.get("instructions") or runtime_config.get("system_prompt") or ""
-    )
-    system_prompt_hash = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()[:16]
+    conversation_contract_hash = str(
+        request_body.get("openai_conversation_contract_hash") or ""
+    ).strip()
+    if conversation_contract_hash:
+        system_prompt_hash = conversation_contract_hash
+    else:
+        system_prompt = str(
+            request_body.get("instructions") or runtime_config.get("system_prompt") or ""
+        )
+        system_prompt_hash = hashlib.sha256(system_prompt.encode("utf-8")).hexdigest()[
+            :16
+        ]
     payload = {
         "feature": ai_feature,
         "provider": provider_name,
@@ -2015,6 +2342,63 @@ def _sample_insert_roles_from_user_text(user_text: str) -> list[str]:
     if not text:
         return []
 
+    if re.search(
+        r"\b(do\s*not|don't|dont|without|no)\b.{0,32}\b("
+        r"add|insert|place|put|create|make|drop|lay)\b.{0,32}\b("
+        r"clip|clips|sample|samples|audio|track|tracks|row|rows|material)\b",
+        text,
+    ):
+        return []
+
+    explicit_insert_intent = bool(
+        re.search(r"\b(add|insert|place|put|drop|lay)\b", text)
+    )
+    creation_intent = bool(
+        re.search(
+            r"\b(make|create|build)\b.{0,32}\b("
+            r"beat|beats|drum|drums|groove|grooves|loop|loops|pattern|patterns|"
+            r"kick|kicks|snare|snares|clap|claps|hat|hats|hihat|hihats|perc|"
+            r"percussion|cymbal|cymbals|tom|toms)\b",
+            text,
+        )
+    )
+    request_intent = bool(
+        re.search(
+            r"\b(give|need|want)\b.{0,32}\b("
+            r"some|a|an|new|more|beat|beats|drum|drums|groove|grooves|loop|"
+            r"loops|pattern|patterns|kick|kicks|snare|snares|clap|claps|"
+            r"hat|hats|hihat|hihats|perc|percussion|cymbal|cymbals|tom|toms)\b",
+            text,
+        )
+    )
+    if not (explicit_insert_intent or creation_intent or request_intent):
+        return []
+
+    has_level_or_existing_edit_intent = bool(
+        re.search(
+            r"\b(louder|quieter|softer|harder|punchier|volume|gain|fader|"
+            r"level|levels|db|turn\s+up|turn\s+down|bring\s+up|bring\s+down|"
+            r"raise|lower|boost|reduce|attenuate|mute|unmute|solo|pan)\b",
+            text,
+        )
+    )
+    has_stable_insert_verb = bool(re.search(r"\b(add|insert|place|put|lay)\b", text))
+    references_existing_material = bool(
+        re.search(
+            r"\b(track|tracks|row|rows|selected|current|existing|already)\b",
+            text,
+        )
+        or re.search(
+            r"\b(the|this|that)\s+(kick|kicks|snare|snares|clap|claps|"
+            r"hat|hats|hihat|hihats|drum|drums|beat|loop|bass\s*drum)\b",
+            text,
+        )
+    )
+    if has_level_or_existing_edit_intent and (
+        references_existing_material or not has_stable_insert_verb
+    ):
+        return []
+
     roles: list[str] = []
     role_patterns = (
         ("kick", r"\b(kick|kicks|bd|bass\s*drum)\b"),
@@ -2032,11 +2416,6 @@ def _sample_insert_roles_from_user_text(user_text: str) -> list[str]:
     if not roles and re.search(r"\b(drum|drums|beat|groove|loop)\b", text):
         roles = ["kick", "snare", "hat"]
 
-    if not re.search(
-        r"\b(add|insert|place|put|make|create|build|lay|drop|give|need|want)\b",
-        text,
-    ):
-        return []
     return roles
 
 
@@ -2523,6 +2902,20 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             error="invalid_body_type",
         )
 
+    if http_method == "POST" and request_path.endswith("/v1/llm/conversation-events"):
+        try:
+            return _finalize(_handle_conversation_event(body=body, user_id=user_id))
+        except Exception as error:
+            capture_exception(
+                error,
+                context=request_log_context,
+                tags={"service": "llm_proxy"},
+            )
+            return _finalize(
+                json_response(500, {"error": "Conversation event could not be recorded."}),
+                error="conversation_event_failed",
+            )
+
     prompt_trace_id = _prompt_trace_id_from_body(body)
     request_log_context["prompt_trace_id"] = prompt_trace_id
     project_id = str(body.get("project_id") or "").strip()
@@ -2556,10 +2949,23 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     default_model = configured_model or DEFAULT_MODEL
     runtime_config = get_ai_feature_runtime(ai_feature, fallback_model=default_model)
     is_structured_request = any(key in body for key in _STRUCTURED_MIXROOM_FIELDS)
+    conversation_state_mode_requested = _conversation_state_mode_from_body(body)
+    conversation_session_id = str(body.get("conversation_session_id") or "").strip()
+    conversation_state_mode_effective = conversation_state_mode_requested
+    if _uses_openai_conversation_state(conversation_state_mode_effective):
+        if (
+            provider.name != DEFAULT_PROVIDER
+            or not conversation_session_id
+            or _conversation_state_table_client() is None
+        ):
+            conversation_state_mode_effective = "manual_history"
+
+    normalized_body = dict(body)
+    normalized_body["conversation_state_mode"] = conversation_state_mode_effective
 
     try:
         request_body = _normalize_request_body(
-            body,
+            normalized_body,
             default_model=str(runtime_config.get("model") or default_model),
             ai_feature=ai_feature,
         )
@@ -2595,11 +3001,24 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     request_log_context["provider"] = provider.name
     request_log_context["effective_model"] = str(request_body.get("model") or "").strip()
     request_log_context["runtime_config_fingerprint"] = runtime_config_fingerprint
+    request_log_context["conversation_state_mode_requested"] = (
+        conversation_state_mode_requested
+    )
+    request_log_context["conversation_state_mode_effective"] = (
+        conversation_state_mode_effective
+    )
+    if conversation_session_id:
+        request_log_context["conversation_session_id_hash"] = _short_hash(
+            conversation_session_id
+        )
 
     provider_roundtrip_ms = 0
     openai_api_ms = 0
     response_normalize_ms = 0
     provider_response_id = ""
+    openai_conversation_id = ""
+    openai_conversation_created = False
+    openai_conversation_tool_outputs_appended = 0
 
     def _observability_payload() -> dict[str, Any]:
         return _compact_dict(
@@ -2610,6 +3029,32 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 "effective_model": str(request_body.get("model") or "").strip(),
                 "provider_response_id": provider_response_id,
                 "runtime_config_fingerprint": runtime_config_fingerprint,
+                "conversation_state_mode_requested": conversation_state_mode_requested,
+                "conversation_state_mode_effective": conversation_state_mode_effective,
+                "conversation_session_id_hash": (
+                    _short_hash(conversation_session_id)
+                    if conversation_session_id
+                    else ""
+                ),
+                "openai_conversation_id_hash": (
+                    _short_hash(openai_conversation_id)
+                    if openai_conversation_id
+                    else ""
+                ),
+                "openai_conversation_created": (
+                    True if openai_conversation_created else None
+                ),
+                "openai_conversation_tool_outputs_appended": (
+                    openai_conversation_tool_outputs_appended or None
+                ),
+                "openai_conversation_id": (
+                    openai_conversation_id
+                    if os.environ.get("LLM_EXPOSE_OPENAI_CONVERSATION_IDS", "false")
+                    .strip()
+                    .lower()
+                    == "true"
+                    else ""
+                ),
                 "has_system_prompt_override": runtime_config.get("has_system_prompt_override")
                 is True,
                 "provider_roundtrip_ms": provider_roundtrip_ms or None,
@@ -2631,6 +3076,73 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             json_response(500, {"error": "LLM API key is not configured."}),
             error="missing_api_key",
         )
+
+    if _uses_openai_conversation_state(conversation_state_mode_effective):
+        try:
+            openai_conversation_id, openai_conversation_created = (
+                _ensure_openai_conversation_id(
+                    api_key=api_key,
+                    user_id=user_id,
+                    project_id=project_id,
+                    ai_feature=ai_feature,
+                    conversation_state_mode=conversation_state_mode_effective,
+                    conversation_session_id=conversation_session_id,
+                    runtime_config_fingerprint=runtime_config_fingerprint,
+                    request_body=request_body,
+                )
+            )
+            if openai_conversation_id:
+                request_body["conversation"] = openai_conversation_id
+                request_log_context["openai_conversation_id_hash"] = _short_hash(
+                    openai_conversation_id
+                )
+        except Exception as error:
+            capture_exception(
+                error,
+                context={
+                    **request_log_context,
+                    "conversation_state_mode_requested": conversation_state_mode_requested,
+                },
+                tags={"service": "llm_proxy"},
+            )
+            conversation_state_mode_effective = "manual_history"
+            normalized_body = dict(body)
+            normalized_body["conversation_state_mode"] = "manual_history"
+            request_body = _normalize_request_body(
+                normalized_body,
+                default_model=str(runtime_config.get("model") or default_model),
+                ai_feature=ai_feature,
+            )
+            if configured_model and (
+                not allow_model_override or not request_body.get("model")
+            ):
+                request_body["model"] = configured_model
+            _apply_ai_runtime_overrides(
+                request_body,
+                ai_feature=ai_feature,
+                runtime_config=runtime_config,
+                is_structured_request=is_structured_request,
+            )
+            apply_server_output_token_cap(request_body)
+            _update_request_log_context_with_cache_request(
+                request_log_context,
+                request_body,
+            )
+            runtime_config_fingerprint = _runtime_config_fingerprint(
+                ai_feature=ai_feature,
+                provider_name=provider.name,
+                request_body=request_body,
+                runtime_config=runtime_config,
+            )
+            request_log_context["effective_model"] = str(
+                request_body.get("model") or ""
+            ).strip()
+            request_log_context["runtime_config_fingerprint"] = (
+                runtime_config_fingerprint
+            )
+            request_log_context["conversation_state_mode_effective"] = (
+                conversation_state_mode_effective
+            )
 
     reserved_tokens = estimate_reserved_tokens(request_body)
     reserved_credits = get_feature_base_cost(ai_feature) + calculate_token_cost(
@@ -2750,6 +3262,18 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 "model": request_body.get("model"),
                 "tier": subscription_tier,
                 "feature": ai_feature,
+                "conversation_state_mode_requested": conversation_state_mode_requested,
+                "conversation_state_mode_effective": conversation_state_mode_effective,
+                "conversation_session_id_hash": (
+                    _short_hash(conversation_session_id)
+                    if conversation_session_id
+                    else ""
+                ),
+                "openai_conversation_id_hash": (
+                    _short_hash(openai_conversation_id)
+                    if openai_conversation_id
+                    else ""
+                ),
             }
         )
     )
@@ -2784,10 +3308,20 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         if isinstance(provider_observability, dict):
             provider_roundtrip_ms = int(provider_observability.get("provider_roundtrip_ms") or 0)
             openai_api_ms = int(provider_observability.get("openai_api_ms") or 0)
+            openai_conversation_tool_outputs_appended = int(
+                provider_observability.get(
+                    "openai_conversation_tool_outputs_appended"
+                )
+                or 0
+            )
             if provider_roundtrip_ms > 0:
                 request_log_context["provider_roundtrip_ms"] = provider_roundtrip_ms
             if openai_api_ms > 0:
                 request_log_context["openai_api_ms"] = openai_api_ms
+            if openai_conversation_tool_outputs_appended > 0:
+                request_log_context["openai_conversation_tool_outputs_appended"] = (
+                    openai_conversation_tool_outputs_appended
+                )
     except Exception as error:
         capture_exception(
             error,

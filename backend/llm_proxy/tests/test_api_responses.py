@@ -244,6 +244,64 @@ class ApiResponsesTests(unittest.TestCase):
 
         self.assertEqual(result["statusCode"], 413)
 
+    def test_conversation_event_manual_mode_noops(self) -> None:
+        event = _authed_event(
+            json.dumps(
+                {
+                    "event_type": "daw_execution_result",
+                    "conversation_state_mode": "manual_history",
+                    "project_id": "project-123",
+                    "ai_feature": "ai_chat",
+                    "conversation_session_id": "session-123",
+                }
+            ),
+            path="/v1/llm/conversation-events",
+        )
+
+        result = api_responses.handler(event, None)
+        payload = json.loads(result["body"])
+
+        self.assertEqual(result["statusCode"], 200)
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["appended"])
+        self.assertTrue(payload["noop"])
+
+    def test_conversation_session_id_without_mode_stays_manual(self) -> None:
+        self.assertEqual(
+            api_responses._conversation_state_mode_from_body(
+                {"conversation_session_id": "session-123"}
+            ),
+            "manual_history",
+        )
+
+    def test_conversation_runtime_fingerprint_uses_stable_contract_hash(self) -> None:
+        base_request = {
+            "model": "gpt-5.4-mini",
+            "instructions": "PROJECT_SNAPSHOT\nTrack 1: Drums",
+            "reasoning": {"effort": "minimal"},
+            "prompt_cache_retention": "in_memory",
+            "openai_conversation_contract_hash": "stable-contract",
+        }
+        changed_context_request = {
+            **base_request,
+            "instructions": "PROJECT_SNAPSHOT\nTrack 7: Bass",
+        }
+
+        first = api_responses._runtime_config_fingerprint(
+            ai_feature="ai_chat",
+            provider_name="openai",
+            request_body=base_request,
+            runtime_config={},
+        )
+        second = api_responses._runtime_config_fingerprint(
+            ai_feature="ai_chat",
+            provider_name="openai",
+            request_body=changed_context_request,
+            runtime_config={},
+        )
+
+        self.assertEqual(first, second)
+
     def test_handler_builds_server_owned_request_for_mixroom_payload(self) -> None:
         provider = _FakeProvider()
         event = _authed_event(
@@ -2074,6 +2132,69 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertEqual(item["library_path"], "role:hat")
         self.assertEqual(item["target"]["prefer_selected"], False)
         self.assertNotIn("soft_error", payload)
+
+    def test_handler_does_not_fallback_existing_kick_edits_to_sample_insert(self) -> None:
+        prompts = [
+            "make the kicks on track 1 louder",
+            "do not add clips. make kicks on track 1 louder",
+            "turn up the kick volume on the selected row",
+            "drop the kick volume",
+            "make the kick hit harder",
+        ]
+        for prompt in prompts:
+            with self.subTest(prompt=prompt):
+                provider = _FakeProvider(
+                    response_body={
+                        "id": "resp_no_sample_insert_fallback",
+                        "model": "server-model",
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "name": "daw_assistant_actions",
+                                "arguments": {
+                                    "assistant_message": "",
+                                    "actions": [],
+                                },
+                            }
+                        ],
+                        "usage": {
+                            "input_tokens": 40,
+                            "output_tokens": 10,
+                            "total_tokens": 50,
+                        },
+                    }
+                )
+                event = _authed_event(
+                    json.dumps(
+                        {
+                            "conversation": [],
+                            "user_text": prompt,
+                            "project_snapshot": "Track 1: Kick loop",
+                            "selection_snapshot": "selected_row=0",
+                            "ai_feature": "assistant_chat",
+                            "client_context": {
+                                "ai_capabilities": [
+                                    "daw.sample_insert.library",
+                                    "daw.row_mix",
+                                ],
+                            },
+                        }
+                    )
+                )
+
+                with mock.patch.object(
+                    api_responses, "_load_api_key", return_value="sk-test"
+                ):
+                    with mock.patch.object(
+                        api_responses, "get_provider", return_value=provider
+                    ):
+                        result = api_responses.handler(event, None)
+
+                self.assertEqual(result["statusCode"], 200)
+                payload = json.loads(result["body"])
+                output = payload["output"][0]
+                self.assertEqual(output["name"], "informational_response")
+                self.assertIn("soft_error", payload)
 
     def test_handler_fallbacks_glue_selected_clips_when_model_output_invalid(self) -> None:
         provider = _FakeProvider(
