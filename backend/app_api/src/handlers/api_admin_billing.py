@@ -111,6 +111,23 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 payload["updated_email"] = admin_email
                 return _finalize(json_response(200, payload))
 
+        if path.endswith("/v1/internal/admin/billing/one-time-products"):
+            if method == "GET":
+                return _finalize(json_response(200, {"products": catalog_repo.list_one_time_products()}))
+            if method == "POST":
+                product = catalog_repo.save_one_time_product(
+                    parse_json_body(event), updated_by_user_id=admin_user_id, updated_by_email=admin_email
+                )
+                return _finalize(json_response(201, {"product": product}))
+
+        if "/v1/internal/admin/billing/one-time-products/" in path and method == "PATCH":
+            body = parse_json_body(event)
+            body["code"] = path.rsplit("/", 1)[-1].strip().lower()
+            product = catalog_repo.save_one_time_product(
+                body, updated_by_user_id=admin_user_id, updated_by_email=admin_email
+            )
+            return _finalize(json_response(200, {"product": product}))
+
         if path.endswith("/v1/internal/admin/settings/feature-flags"):
             if method == "GET":
                 payload = feature_flags_repo.get_flags()

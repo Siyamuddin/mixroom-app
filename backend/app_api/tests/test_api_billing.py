@@ -507,7 +507,7 @@ class ApiBillingTests(unittest.TestCase):
         self.assertEqual(self.repo.queued_projection_ids, [payload["event_id"]])
         module.confirm_toss_payment.assert_called_once_with("pay-1", order["order_id"], 149000)
 
-    def test_toss_confirm_rejects_checkout_order_without_auth(self):
+    def test_toss_confirm_rejects_account_checkout_order_without_auth(self):
         module.catalog_repo.get_product.return_value = {
             "code": "studio_monthly",
             "plan_code": "studio",
@@ -561,10 +561,143 @@ class ApiBillingTests(unittest.TestCase):
             object(),
         )
 
-        self.assertEqual(response["statusCode"], 401)
+        self.assertEqual(response["statusCode"], 403)
         payload = decode_json_response(response)
-        self.assertEqual(payload["error"], "Unauthorized")
+        self.assertIn("not eligible", payload["error"])
         module.confirm_toss_payment.assert_not_called()
+
+    def test_toss_confirm_allows_fixed_anonymous_one_time_payment_without_subscription(self):
+        module.extract_user_id_from_event = lambda event: ""
+        module.confirm_toss_payment = mock.Mock(
+            return_value={
+                "paymentKey": "pay-galhyeon-1",
+                "orderId": "galhyeon-material-1760000000000-abc123",
+                "orderName": "갈현 재료비",
+                "status": "DONE",
+                "totalAmount": 1589000,
+                "method": "카드",
+            }
+        )
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/toss/confirm",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps(
+                    {
+                        "payment_key": "pay-galhyeon-1",
+                        "order_id": "galhyeon-material-1760000000000-abc123",
+                        "amount": 1589000,
+                    }
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertTrue(payload["accepted"])
+        self.assertEqual(payload["product_code"], "galhyeon-material")
+        self.assertEqual(payload["amount"], 1589000)
+        self.assertEqual(self.repo.queued_projection_ids, [])
+        self.assertEqual(self.repo.subscriptions, {})
+        event = self.repo.get_billing_event("toss:confirm-pay-galhyeon-1")
+        self.assertEqual(event["event_type"], "toss_anonymous_one_time_payment_confirmed")
+        self.assertEqual(event["user_id"], "")
+        self.assertEqual(event["normalized"], {})
+        self.assertEqual(event["processing_result"], "not_applicable_one_time_payment")
+        module.confirm_toss_payment.assert_called_once_with(
+            "pay-galhyeon-1",
+            "galhyeon-material-1760000000000-abc123",
+            1589000,
+        )
+
+    def test_toss_confirm_rejects_anonymous_one_time_wrong_amount_before_toss(self):
+        module.extract_user_id_from_event = lambda event: ""
+        module.confirm_toss_payment = mock.Mock()
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/toss/confirm",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps(
+                    {
+                        "payment_key": "pay-galhyeon-1",
+                        "order_id": "galhyeon-instructor-1760000000000-abc123",
+                        "amount": 1589000,
+                    }
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 409)
+        self.assertIn("amount mismatch", response["body"])
+        module.confirm_toss_payment.assert_not_called()
+
+    def test_toss_confirm_allows_testgal_anonymous_one_time_payment(self):
+        module.confirm_toss_payment = mock.Mock(
+            return_value={
+                "paymentKey": "pay-testgal-1",
+                "orderId": "testgal-1000-1760000000000-abc123",
+                "orderName": "결제 테스트",
+                "status": "DONE",
+                "totalAmount": 1000,
+            }
+        )
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/toss/confirm",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps(
+                    {
+                        "payment_key": "pay-testgal-1",
+                        "order_id": "testgal-1000-1760000000000-abc123",
+                        "amount": 1000,
+                    }
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertTrue(payload["accepted"])
+        self.assertEqual(payload["product_code"], "testgal-1000")
+        self.assertEqual(payload["amount"], 1000)
+        self.assertEqual(self.repo.queued_projection_ids, [])
+        self.assertEqual(self.repo.subscriptions, {})
+
+    def test_toss_confirm_routes_testgal_to_one_time_flow_when_visitor_is_logged_in(self):
+        module.confirm_toss_payment = mock.Mock(
+            return_value={
+                "paymentKey": "pay-testgal-signed-in",
+                "orderId": "testgal-1000-1760000000000-def456",
+                "orderName": "결제 테스트",
+                "status": "DONE",
+                "totalAmount": 1000,
+            }
+        )
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/billing/web/toss/confirm",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps(
+                    {
+                        "payment_key": "pay-testgal-signed-in",
+                        "order_id": "testgal-1000-1760000000000-def456",
+                        "amount": 1000,
+                    }
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(self.repo.queued_projection_ids, [])
+        self.assertEqual(self.repo.subscriptions, {})
 
     def test_toss_same_plan_legacy_one_time_renewal_starts_billing_checkout(self):
         self.repo.upsert_subscription(

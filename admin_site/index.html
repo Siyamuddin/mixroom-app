@@ -1251,6 +1251,21 @@
                 </details>
                 <p id="billing-catalog-feedback" class="panel-meta"></p>
               </article>
+              <article id="one-time-products-panel" class="panel">
+                <div class="panel-header"><div><p class="panel-label">One-time payments</p><h2>Public Toss payment links</h2></div><p class="panel-meta">Create, copy, and disable payment links without a deployment.</p></div>
+                <form id="one-time-product-form" class="form-stack">
+                  <div class="inspector-grid">
+                    <label class="search-input-wrap"><span class="search-label">URL slug / product code</span><input id="one-time-code" class="text-input" required pattern="[a-z0-9][a-z0-9-]{0,62}" placeholder="workshop-fee" /></label>
+                    <label class="search-input-wrap"><span class="search-label">Korean payment name</span><input id="one-time-name" class="text-input" required placeholder="워크숍 참가비" /></label>
+                    <label class="search-input-wrap"><span class="search-label">Amount (KRW)</span><input id="one-time-amount" class="text-input" required type="number" min="1" step="1" /></label>
+                    <label class="search-input-wrap"><span class="search-label">Optional expiry (KST)</span><input id="one-time-expiry" class="text-input" type="datetime-local" /></label>
+                  </div>
+                  <label class="search-input-wrap"><span class="search-label">State</span><select id="one-time-enabled" class="text-input"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
+                  <div class="search-actions"><button class="button button-secondary" type="submit">Save payment link</button></div>
+                </form>
+                <p id="one-time-feedback" class="panel-meta"></p>
+                <div id="one-time-products" class="billing-preview-grid"><div class="inspector-empty">Sign in to load one-time payment links.</div></div>
+              </article>
               </section>
 
               <section class="dev-section" aria-labelledby="dev-records-title">

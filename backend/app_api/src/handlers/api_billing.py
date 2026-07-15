@@ -72,6 +72,23 @@ _TOSS_KRW_AMOUNTS = {
     "storage_1tb_addon_monthly": 15000,
     "storage_1tb_addon_yearly": 149000,
 }
+# These are intentionally kept outside the billing catalog.  They are anonymous,
+# fixed-price, offline-class payments and must never create an application plan,
+# entitlement, or subscription record.
+_TOSS_ANONYMOUS_ONE_TIME_PRODUCTS = {
+    "testgal-1000": {
+        "amount": 1_000,
+        "order_name": "결제 테스트",
+    },
+    "galhyeon-material": {
+        "amount": 1_589_000,
+        "order_name": "갈현 재료비",
+    },
+    "galhyeon-instructor": {
+        "amount": 800_000,
+        "order_name": "갈현 강사비",
+    },
+}
 _TOSS_STUDIO_INCLUDED_SEATS = 5
 _PLAN_RANK = {
     "free": 0,
@@ -945,6 +962,177 @@ def _handle_toss_confirm(event: Dict[str, Any], user_id: str) -> Dict[str, Any]:
                 or product_code
                 or order_id
             ),
+            "amount": expected_amount,
+            "method": str(payment.get("method") or payment.get("paymentMethod") or ""),
+        },
+    )
+
+
+def _anonymous_toss_product_for_order(order_id: str) -> tuple[str, Dict[str, Any]]:
+    """Return the only anonymous product allowed for a client-created order ID.
+
+    The live page generates IDs as ``{product_code}-{timestamp}-{random}``.  The
+    server uses that prefix instead of trusting an arbitrary client product code.
+    """
+    for product_code, product in _TOSS_ANONYMOUS_ONE_TIME_PRODUCTS.items():
+        if order_id.startswith(f"{product_code}-"):
+            return product_code, product
+    raise RequestBodyError("This order is not eligible for anonymous Toss confirmation.", status_code=403)
+
+
+def _is_anonymous_toss_one_time_order(event: Dict[str, Any]) -> bool:
+    """Whether this confirmation belongs to the fixed public one-time flow.
+
+    The shared success page attaches an Authorization header when a visitor is
+    already signed in.  Public one-time orders must retain their public-payment
+    semantics in that case instead of being routed into account billing.
+    """
+    try:
+        body = parse_json_body(event)
+    except RequestBodyError:
+        return False
+    order_id = str(body.get("order_id") or body.get("orderId") or "").strip()
+    return any(
+        order_id.startswith(f"{product_code}-")
+        for product_code in _TOSS_ANONYMOUS_ONE_TIME_PRODUCTS
+    )
+
+
+def _checkout_intent_for_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        body = parse_json_body(event)
+    except RequestBodyError:
+        return {}
+    intent = catalog_repo.get_one_time_checkout_intent(
+        str(body.get("order_id") or body.get("orderId") or "").strip()
+    )
+    return intent if isinstance(intent, dict) else {}
+
+
+def _handle_public_one_time_lookup(path: str) -> Dict[str, Any]:
+    code = path.rsplit("/", 1)[-1].strip().lower()
+    product = catalog_repo.get_one_time_product(code, public_only=True)
+    if not product:
+        return json_response(404, {"error": "Payment link is unavailable."})
+    return json_response(200, {"code": product["code"], "order_name": product["order_name"], "amount": product["amount"], "currency": "KRW"})
+
+
+def _handle_public_one_time_checkout_intent(event: Dict[str, Any]) -> Dict[str, Any]:
+    body = parse_json_body(event)
+    intent = catalog_repo.create_one_time_checkout_intent(str(body.get("code") or body.get("product_code") or ""))
+    if not intent:
+        return json_response(404, {"error": "Payment link is unavailable."})
+    return json_response(201, intent)
+
+
+def _handle_checkout_intent_toss_confirm(event: Dict[str, Any], intent: Dict[str, Any]) -> Dict[str, Any]:
+    body = parse_json_body(event)
+    payment_key = str(body.get("payment_key") or body.get("paymentKey") or "").strip()
+    order_id = str(body.get("order_id") or body.get("orderId") or "").strip()
+    if not payment_key or order_id != intent.get("order_id"):
+        raise RequestBodyError("payment_key and the registered order_id are required.")
+    try: submitted_amount = int(body.get("amount") or body.get("totalAmount") or 0)
+    except (TypeError, ValueError): submitted_amount = 0
+    if submitted_amount != int(intent["amount"]):
+        raise ProviderVerificationError("Toss payment amount mismatch.", status_code=409)
+    prior_event = repo.get_billing_event(provider_event_key("toss", f"confirm-{payment_key}"))
+    if prior_event:
+        return json_response(409, {"accepted": False, "provider": "toss", "event_id": prior_event.get("event_id"), "idempotent_replay": True})
+    payment = confirm_toss_payment(payment_key, order_id, int(intent["amount"]))
+    if not payment:
+        raise ProviderVerificationError("Toss payment could not be confirmed.", status_code=502)
+    try: actual_amount = int(payment.get("totalAmount") or payment.get("amount") or 0)
+    except (TypeError, ValueError): actual_amount = 0
+    if (str(payment.get("orderId") or "").strip() != order_id or actual_amount != int(intent["amount"])
+            or str(payment.get("status") or "").upper() != "DONE"
+            or str(payment.get("orderName") or "").strip() != str(intent["order_name"])):
+        raise ProviderVerificationError("Toss payment details do not match the checkout intent.", status_code=409)
+    record = build_event_record(provider="toss", provider_event_id=f"confirm-{payment_key}",
+        event_type="toss_one_time_payment_confirmed", user_id="", payload={"payment_type": "one_time", "checkout_intent": intent, "payment": payment}, normalized={})
+    record["processing_result"] = "not_applicable_one_time_payment"
+    inserted = _persist_event(record, enqueue_projection=False)
+    return json_response(200, {"accepted": inserted, "provider": "toss", "event_id": record["event_id"], "product_code": intent["product_code"], "order_name": intent["order_name"], "amount": intent["amount"], "method": str(payment.get("method") or payment.get("paymentMethod") or "")})
+
+
+def _handle_anonymous_toss_one_time_confirm(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Confirm one of the two fixed Galhyeon offline-class payments.
+
+    This endpoint path is shared with account billing for compatibility with the
+    already-deployed success page.  It deliberately records a non-projectable
+    payment audit event only: no customer link, subscription, entitlement, or
+    billing-key is created.
+    """
+    body = parse_json_body(event)
+    payment_key = str(body.get("payment_key") or body.get("paymentKey") or "").strip()
+    order_id = str(body.get("order_id") or body.get("orderId") or "").strip()
+    if not payment_key or not order_id:
+        raise RequestBodyError("payment_key and order_id are required.")
+    product_code, product = _anonymous_toss_product_for_order(order_id)
+    submitted_product_code = str(body.get("product_code") or body.get("productCode") or "").strip().lower()
+    if submitted_product_code and submitted_product_code != product_code:
+        raise RequestBodyError("product_code does not match the order.", status_code=409)
+    try:
+        submitted_amount = int(body.get("amount") or body.get("totalAmount") or 0)
+    except (TypeError, ValueError):
+        submitted_amount = 0
+    expected_amount = int(product["amount"])
+    if submitted_amount != expected_amount:
+        raise ProviderVerificationError("Toss payment amount mismatch.", status_code=409)
+
+    prior_event = repo.get_billing_event(provider_event_key("toss", f"confirm-{payment_key}"))
+    if prior_event:
+        return json_response(
+            409,
+            {
+                "accepted": False,
+                "provider": "toss",
+                "event_id": prior_event.get("event_id"),
+                "idempotent_replay": True,
+            },
+        )
+
+    payment = confirm_toss_payment(payment_key, order_id, expected_amount)
+    if not payment:
+        raise ProviderVerificationError("Toss payment could not be confirmed.", status_code=502)
+    if str(payment.get("orderId") or "").strip() != order_id:
+        raise ProviderVerificationError("Toss payment order mismatch.", status_code=409)
+    try:
+        actual_amount = int(payment.get("totalAmount") or payment.get("amount") or 0)
+    except (TypeError, ValueError):
+        actual_amount = 0
+    if actual_amount != expected_amount:
+        raise ProviderVerificationError("Toss payment amount mismatch.", status_code=409)
+    if str(payment.get("status") or "").strip().upper() != "DONE":
+        raise ProviderVerificationError("Toss payment is not complete.", status_code=409)
+    if str(payment.get("orderName") or "").strip() != str(product["order_name"]):
+        raise ProviderVerificationError("Toss payment order name mismatch.", status_code=409)
+
+    payload = {
+        "payment_type": "anonymous_one_time",
+        "product_code": product_code,
+        "order_id": order_id,
+        "amount": expected_amount,
+        "currency": "KRW",
+        "payment": payment,
+    }
+    record = build_event_record(
+        provider="toss",
+        provider_event_id=f"confirm-{payment_key}",
+        event_type="toss_anonymous_one_time_payment_confirmed",
+        user_id="",
+        payload=payload,
+        normalized={},
+    )
+    record["processing_result"] = "not_applicable_one_time_payment"
+    inserted = _persist_event(record, enqueue_projection=False)
+    return json_response(
+        200,
+        {
+            "accepted": inserted,
+            "provider": "toss",
+            "event_id": record["event_id"],
+            "product_code": product_code,
+            "order_name": product["order_name"],
             "amount": expected_amount,
             "method": str(payment.get("method") or payment.get("paymentMethod") or ""),
         },
@@ -2175,13 +2363,38 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         )
         return response
 
+    path = _path(event)
+    method = _method(event)
+    if method == "GET" and "/v1/billing/public/one-time-products/" in path:
+        return _finalize(_handle_public_one_time_lookup(path))
+    if method == "POST" and path.endswith("/v1/billing/public/toss/checkout-intents"):
+        try:
+            return _finalize(_handle_public_one_time_checkout_intent(event))
+        except RequestBodyError as exc:
+            return _finalize(json_response(exc.status_code, {"error": exc.message}), error=exc.message)
+    # The Galhyeon checkout is the only no-login route in this function.  Its
+    # handler restricts the payment to two exact products, amounts, order-ID
+    # prefixes, and Toss-confirmed order names.
+    if (
+        method == "POST"
+        and path.endswith("/v1/billing/web/toss/confirm")
+        and (not user_id or _is_anonymous_toss_one_time_order(event) or _checkout_intent_for_event(event))
+    ):
+        try:
+            intent = _checkout_intent_for_event(event)
+            return _finalize(_handle_checkout_intent_toss_confirm(event, intent) if intent else _handle_anonymous_toss_one_time_confirm(event))
+        except RequestBodyError as exc:
+            return _finalize(json_response(exc.status_code, {"error": exc.message}), error=exc.message)
+        except ProviderVerificationError as exc:
+            return _finalize(json_response(exc.status_code, {"error": str(exc)}), error=str(exc))
+        except Exception as exc:
+            capture_exception(exc, request_context=request_context)
+            return _finalize(json_response(500, {"error": "Internal server error"}), error=str(exc))
+
     if not user_id:
         return _finalize(unauthorized(), error="unauthorized")
 
     try:
-        path = _path(event)
-        method = _method(event)
-
         if method == "POST" and path.endswith("/v1/billing/web/checkout-session"):
             return _finalize(_handle_checkout(event, user_id))
         if method == "POST" and path.endswith("/v1/billing/web/toss/confirm"):

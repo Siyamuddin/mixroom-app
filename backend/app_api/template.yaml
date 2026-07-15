@@ -1953,6 +1953,24 @@ Resources:
             RestApiId: !Ref BillingApi
             Path: /v1/internal/admin/settings/billing-catalog
             Method: put
+        AdminOneTimeProductsGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/billing/one-time-products
+            Method: get
+        AdminOneTimeProductsPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/billing/one-time-products
+            Method: post
+        AdminOneTimeProductsPatch:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/billing/one-time-products/{code}
+            Method: patch
         AdminFeatureFlagsGet:
           Type: Api
           Properties:
@@ -2263,6 +2281,18 @@ Resources:
                 Resource: !Ref AppAuthSecretArn
           - !Ref AWS::NoValue
       Events:
+        PublicOneTimeProductGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/billing/public/one-time-products/{code}
+            Method: get
+        PublicOneTimeCheckoutIntentPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/billing/public/toss/checkout-intents
+            Method: post
         BillingCheckoutSession:
           Type: Api
           Properties:

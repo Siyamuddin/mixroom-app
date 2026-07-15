@@ -16,6 +16,7 @@ const ADMIN_FEEDBACK_PATH = "/v1/internal/admin/feedback";
 const ADMIN_AI_PROMPT_LIMITS_PATH = "/v1/internal/admin/settings/ai-prompt-limits";
 const ADMIN_AI_RUNTIME_PATH = "/v1/internal/admin/settings/ai-runtime";
 const ADMIN_BILLING_CATALOG_PATH = "/v1/internal/admin/settings/billing-catalog";
+const ADMIN_ONE_TIME_PRODUCTS_PATH = "/v1/internal/admin/billing/one-time-products";
 const ADMIN_FEATURE_FLAGS_PATH = "/v1/internal/admin/settings/feature-flags";
 const ADMIN_BILLING_ORGANIZATIONS_PATH = "/v1/internal/admin/billing/organizations";
 const ADMIN_BILLING_EDUCATION_PROVISIONING_PATH =
@@ -2257,6 +2258,9 @@ async function loadDevTabData({ silent = false, force = false } = {}) {
   }
   if (force || !state.loadedTabs.dev || !state.billingCatalog) {
     requests.push(loadBillingCatalogSettings({ silent }));
+  }
+  if (force || !state.loadedTabs.dev) {
+    document.dispatchEvent(new Event("admin:ready"));
   }
   if (force || !state.loadedTabs.dev || !state.billingOrganizationsLoaded) {
     requests.push(loadBillingOrganizations({ silent }));
@@ -7837,3 +7841,30 @@ function base64UrlEncode(bytes) {
   });
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
+
+// Self-serve public one-time payment links. Kept independent from subscription catalog editing.
+(() => {
+  const form = document.querySelector("#one-time-product-form");
+  const list = document.querySelector("#one-time-products");
+  const feedback = document.querySelector("#one-time-feedback");
+  if (!form || !list || !feedback) return;
+  const esc = (value) => String(value || "").replace(/[&<>\"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  async function load() {
+    try {
+      const data = await fetchAdminJson(ADMIN_ONE_TIME_PRODUCTS_PATH);
+      const products = data.products || [];
+      list.innerHTML = products.length ? products.map((p) => `<section class="billing-preview-section"><strong>${esc(p.order_name)}</strong><p>${esc(p.code)} · ₩${Number(p.amount).toLocaleString("ko-KR")} · ${p.enabled ? "Enabled" : "Disabled"}</p><p><a href="https://www.mixroom.ai/pay/${encodeURIComponent(p.code)}" target="_blank" rel="noopener">https://www.mixroom.ai/pay/${esc(p.code)}</a></p><button class="button button-secondary" data-disable="${esc(p.code)}">${p.enabled ? "Disable" : "Enable"}</button></section>`).join("") : '<div class="inspector-empty">No one-time payment links yet.</div>';
+    } catch (error) { list.innerHTML = `<div class="inspector-empty">${esc(error.message)}</div>`; }
+  }
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault(); feedback.textContent = "Saving…";
+    const expires = document.querySelector("#one-time-expiry").value;
+    const payload = { code: document.querySelector("#one-time-code").value, order_name: document.querySelector("#one-time-name").value, amount: Number(document.querySelector("#one-time-amount").value), enabled: document.querySelector("#one-time-enabled").value === "true", expires_at: expires ? new Date(expires).toISOString() : "" };
+    try { await fetchAdminJson(ADMIN_ONE_TIME_PRODUCTS_PATH, {method:"POST", body:JSON.stringify(payload)}); feedback.textContent = `Saved: https://www.mixroom.ai/pay/${payload.code}`; await load(); } catch (error) { feedback.textContent = error.message; }
+  });
+  list.addEventListener("click", async (event) => {
+    const code = event.target?.dataset?.disable; if (!code) return;
+    try { const current = (await fetchAdminJson(ADMIN_ONE_TIME_PRODUCTS_PATH)).products.find((p) => p.code === code); await fetchAdminJson(`${ADMIN_ONE_TIME_PRODUCTS_PATH}/${encodeURIComponent(code)}`, {method:"PATCH", body:JSON.stringify({...current, enabled: !current.enabled})}); await load(); } catch (error) { feedback.textContent = error.message; }
+  });
+  document.addEventListener("admin:ready", load);
+})();
