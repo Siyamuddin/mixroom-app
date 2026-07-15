@@ -7849,11 +7849,20 @@ function base64UrlEncode(bytes) {
   const feedback = document.querySelector("#one-time-feedback");
   if (!form || !list || !feedback) return;
   const esc = (value) => String(value || "").replace(/[&<>\"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const renderProduct = (p) => {
+    const url = `https://www.mixroom.ai/pay/${encodeURIComponent(p.code)}`;
+    return `<section class="billing-preview-section one-time-link-row">
+      <div class="one-time-link-main"><strong>${esc(p.order_name)}</strong><p>${esc(p.code)} · ₩${Number(p.amount).toLocaleString("ko-KR")}</p><a href="${url}" target="_blank" rel="noopener">${esc(url)}</a></div>
+      <div class="one-time-link-actions"><span class="status-chip ${p.enabled ? "status-chip-success" : ""}">${p.enabled ? "Active" : "Disabled"}</span><button class="button button-secondary" data-disable="${esc(p.code)}">${p.enabled ? "Disable" : "Enable"}</button></div>
+    </section>`;
+  };
   async function load() {
     try {
       const data = await fetchAdminJson(ADMIN_ONE_TIME_PRODUCTS_PATH);
       const products = data.products || [];
-      list.innerHTML = products.length ? products.map((p) => `<section class="billing-preview-section"><strong>${esc(p.order_name)}</strong><p>${esc(p.code)} · ₩${Number(p.amount).toLocaleString("ko-KR")} · ${p.enabled ? "Enabled" : "Disabled"}</p><p><a href="https://www.mixroom.ai/pay/${encodeURIComponent(p.code)}" target="_blank" rel="noopener">https://www.mixroom.ai/pay/${esc(p.code)}</a></p><button class="button button-secondary" data-disable="${esc(p.code)}">${p.enabled ? "Disable" : "Enable"}</button></section>`).join("") : '<div class="inspector-empty">No one-time payment links yet.</div>';
+      const active = products.filter((p) => p.enabled);
+      const inactive = products.filter((p) => !p.enabled);
+      list.innerHTML = products.length ? `<div class="one-time-link-group"><h3>Active links <span>${active.length}</span></h3>${active.length ? active.map(renderProduct).join("") : '<div class="inspector-empty">No active links.</div>'}</div>${inactive.length ? `<details class="one-time-link-archive"><summary>Disabled links (${inactive.length})</summary>${inactive.map(renderProduct).join("")}</details>` : ""}` : '<div class="inspector-empty">No one-time payment links yet.</div>';
     } catch (error) { list.innerHTML = `<div class="inspector-empty">${esc(error.message)}</div>`; }
   }
   form.addEventListener("submit", async (event) => {
