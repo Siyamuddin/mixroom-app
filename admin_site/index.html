@@ -1255,13 +1255,16 @@
                 <div class="panel-header"><div><p class="panel-label">One-time payments</p><h2>Public Toss payment links</h2></div><p class="panel-meta">Create, copy, and disable payment links without a deployment.</p></div>
                 <form id="one-time-product-form" class="form-stack">
                   <div class="inspector-grid">
-                    <label class="search-input-wrap"><span class="search-label">URL slug / product code</span><input id="one-time-code" class="text-input" required pattern="[a-z0-9][a-z0-9-]{0,62}" placeholder="workshop-fee" /></label>
-                    <label class="search-input-wrap"><span class="search-label">Korean payment name</span><input id="one-time-name" class="text-input" required placeholder="워크숍 참가비" /></label>
-                    <label class="search-input-wrap"><span class="search-label">Amount (KRW)</span><input id="one-time-amount" class="text-input" required type="number" min="1" step="1" /></label>
+                    <label class="search-input-wrap"><span class="search-label">URL slug</span><input id="one-time-code" class="text-input" required pattern="[a-z0-9][a-z0-9-]{0,62}" placeholder="workshop-fee" /></label>
+                    <label class="search-input-wrap"><span class="search-label">Payment page title</span><input id="one-time-page-title" class="text-input" required placeholder="워크숍 결제" /></label>
                     <label class="search-input-wrap"><span class="search-label">Optional expiry (KST)</span><input id="one-time-expiry" class="text-input" type="datetime-local" /></label>
+                    <label class="search-input-wrap"><span class="search-label">State</span><select id="one-time-enabled" class="text-input"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
                   </div>
-                  <label class="search-input-wrap"><span class="search-label">State</span><select id="one-time-enabled" class="text-input"><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
-                  <div class="search-actions"><button class="button button-secondary" type="submit">Save payment link</button></div>
+                  <div class="one-time-items-editor">
+                    <div class="one-time-items-header"><div><span class="search-label">Independent payment items</span><p class="panel-meta">Each item is paid separately and can use a different card or payment method.</p></div><button id="one-time-add-item" class="button button-secondary" type="button">Add payment item</button></div>
+                    <div id="one-time-item-fields"></div>
+                  </div>
+                  <div class="search-actions"><button class="button button-secondary" type="submit">Create payment link</button></div>
                 </form>
                 <p id="one-time-feedback" class="panel-meta"></p>
                 <div id="one-time-products" class="billing-preview-grid"><div class="inspector-empty">Sign in to load one-time payment links.</div></div>
@@ -1964,6 +1967,6 @@
       </main>
     </div>
 
-    <script src="./app.js" type="module"></script>
+    <script src="./app.js?v=payment-links-multi-item-20260715" type="module"></script>
   </body>
 </html>

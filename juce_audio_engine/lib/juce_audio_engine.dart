@@ -58,6 +58,18 @@ class JuceEngineDiagnostics {
     required this.outputDeviceName,
     required this.inputChannelCount,
     required this.outputChannelCount,
+    this.realtimeCallbackCount = 0,
+    this.realtimeCallbackLastMs = 0.0,
+    this.realtimeCallbackMaxMs = 0.0,
+    this.realtimeCallbackAvgMs = 0.0,
+    this.realtimeCallbackBudgetMs = 0.0,
+    this.realtimeCallbackOverBudgetCount = 0,
+    this.realtimeCallbackMaxSamples = 0,
+    this.realtimeGraphRebuildCommittedCount = 0,
+    this.realtimeGraphRebuildImmediateCount = 0,
+    this.realtimeGraphRebuildDeferredCount = 0,
+    this.realtimeGraphRebuildBatchCommitCount = 0,
+    this.realtimeGraphRebuildProjectLoadCommitCount = 0,
   });
 
   final double sampleRate;
@@ -73,6 +85,18 @@ class JuceEngineDiagnostics {
   final String outputDeviceName;
   final int inputChannelCount;
   final int outputChannelCount;
+  final int realtimeCallbackCount;
+  final double realtimeCallbackLastMs;
+  final double realtimeCallbackMaxMs;
+  final double realtimeCallbackAvgMs;
+  final double realtimeCallbackBudgetMs;
+  final int realtimeCallbackOverBudgetCount;
+  final int realtimeCallbackMaxSamples;
+  final int realtimeGraphRebuildCommittedCount;
+  final int realtimeGraphRebuildImmediateCount;
+  final int realtimeGraphRebuildDeferredCount;
+  final int realtimeGraphRebuildBatchCommitCount;
+  final int realtimeGraphRebuildProjectLoadCommitCount;
 
   factory JuceEngineDiagnostics.fromMap(Map<String, dynamic> map) {
     return JuceEngineDiagnostics(
@@ -95,6 +119,32 @@ class JuceEngineDiagnostics {
       outputDeviceName: map['outputDeviceName']?.toString() ?? '',
       inputChannelCount: (map['inputChannelCount'] as num?)?.toInt() ?? 0,
       outputChannelCount: (map['outputChannelCount'] as num?)?.toInt() ?? 0,
+      realtimeCallbackCount:
+          (map['realtimeCallbackCount'] as num?)?.toInt() ?? 0,
+      realtimeCallbackLastMs:
+          (map['realtimeCallbackLastMs'] as num?)?.toDouble() ?? 0.0,
+      realtimeCallbackMaxMs:
+          (map['realtimeCallbackMaxMs'] as num?)?.toDouble() ?? 0.0,
+      realtimeCallbackAvgMs:
+          (map['realtimeCallbackAvgMs'] as num?)?.toDouble() ?? 0.0,
+      realtimeCallbackBudgetMs:
+          (map['realtimeCallbackBudgetMs'] as num?)?.toDouble() ?? 0.0,
+      realtimeCallbackOverBudgetCount:
+          (map['realtimeCallbackOverBudgetCount'] as num?)?.toInt() ?? 0,
+      realtimeCallbackMaxSamples:
+          (map['realtimeCallbackMaxSamples'] as num?)?.toInt() ?? 0,
+      realtimeGraphRebuildCommittedCount:
+          (map['realtimeGraphRebuildCommittedCount'] as num?)?.toInt() ?? 0,
+      realtimeGraphRebuildImmediateCount:
+          (map['realtimeGraphRebuildImmediateCount'] as num?)?.toInt() ?? 0,
+      realtimeGraphRebuildDeferredCount:
+          (map['realtimeGraphRebuildDeferredCount'] as num?)?.toInt() ?? 0,
+      realtimeGraphRebuildBatchCommitCount:
+          (map['realtimeGraphRebuildBatchCommitCount'] as num?)?.toInt() ?? 0,
+      realtimeGraphRebuildProjectLoadCommitCount:
+          (map['realtimeGraphRebuildProjectLoadCommitCount'] as num?)
+                  ?.toInt() ??
+              0,
     );
   }
 }
@@ -791,7 +841,7 @@ class JuceAudioEngine {
           pluginsScanned: false,
           knownPluginCount: 0,
           pluginScanFailureCount: 0,
-          pluginScanFailures: const <String>[],
+          pluginScanFailures: <String>[],
           rowCount: 0,
           clipCount: 0,
           inputDeviceName: '',
@@ -810,7 +860,7 @@ class JuceAudioEngine {
         pluginsScanned: false,
         knownPluginCount: 0,
         pluginScanFailureCount: 0,
-        pluginScanFailures: const <String>[],
+        pluginScanFailures: <String>[],
         rowCount: 0,
         clipCount: 0,
         inputDeviceName: '',
@@ -827,7 +877,7 @@ class JuceAudioEngine {
         pluginsScanned: false,
         knownPluginCount: 0,
         pluginScanFailureCount: 0,
-        pluginScanFailures: const <String>[],
+        pluginScanFailures: <String>[],
         rowCount: 0,
         clipCount: 0,
         inputDeviceName: '',
@@ -835,6 +885,42 @@ class JuceAudioEngine {
         inputChannelCount: 0,
         outputChannelCount: 0,
       );
+    }
+  }
+
+  static Future<void> resetRealtimePerformanceStats() async {
+    try {
+      await _ch.invokeMethod<void>('resetRealtimePerformanceStats');
+    } on MissingPluginException catch (e) {
+      _logError('resetRealtimePerformanceStats', e);
+    } on PlatformException catch (e) {
+      _logError('resetRealtimePerformanceStats', e);
+    }
+  }
+
+  static Future<Map<String, dynamic>> runEngineStressTest({
+    int clipCount = 256,
+    int blockCount = 1024,
+    int blockSize = 512,
+    double sampleRate = 48000.0,
+  }) async {
+    try {
+      final raw = await _ch.invokeMethod<Map<dynamic, dynamic>>(
+        'runEngineStressTest',
+        <String, dynamic>{
+          'clipCount': clipCount,
+          'blockCount': blockCount,
+          'blockSize': blockSize,
+          'sampleRate': sampleRate,
+        },
+      );
+      return raw == null ? <String, dynamic>{} : Map<String, dynamic>.from(raw);
+    } on MissingPluginException catch (e) {
+      _logError('runEngineStressTest', e);
+      return <String, dynamic>{};
+    } on PlatformException catch (e) {
+      _logError('runEngineStressTest', e);
+      return <String, dynamic>{};
     }
   }
 
@@ -1293,6 +1379,28 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<int> unloadClips(Iterable<int> clipIndices) async {
+    final clips = clipIndices.where((clip) => clip >= 0).toSet().toList();
+    if (clips.isEmpty) return 0;
+    try {
+      final removed = await _ch.invokeMethod<int>('unloadClips', {
+        'clips': clips,
+      });
+      return removed ?? 0;
+    } on MissingPluginException {
+      for (final clip in clips) {
+        await unloadClip(clip);
+      }
+      return clips.length;
+    } on PlatformException catch (e) {
+      _logError('unloadClips', e);
+      for (final clip in clips) {
+        await unloadClip(clip);
+      }
+      return clips.length;
+    }
+  }
+
   static Future<void> setClipGain(int clipIndex, double gain0to3) async {
     try {
       await _ch.invokeMethod('setClipGain', {
@@ -1406,6 +1514,21 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<int> updateClipTimelineBatch(
+    List<Map<String, dynamic>> updates,
+  ) async {
+    if (updates.isEmpty) return 0;
+    try {
+      final applied = await _ch.invokeMethod<int>('updateClipTimelineBatch', {
+        'updates': updates,
+      });
+      return applied ?? 0;
+    } on PlatformException catch (e) {
+      _logError('updateClipTimelineBatch', e);
+      return 0;
+    }
+  }
+
   static Future<void> setClipFades(
     int clipIndex, {
     required double fadeInSec,
@@ -1421,6 +1544,39 @@ class JuceAudioEngine {
       });
     } on PlatformException catch (e) {
       _logError('setClipFades', e);
+    }
+  }
+
+  static Future<int> updateClipFadesBatch(
+    List<Map<String, dynamic>> updates,
+  ) async {
+    if (updates.isEmpty) return 0;
+    try {
+      final applied = await _ch.invokeMethod<int>('updateClipFadesBatch', {
+        'updates': updates,
+      });
+      return applied ?? 0;
+    } on MissingPluginException {
+      for (final update in updates) {
+        await setClipFades(
+          (update['clip'] as num).toInt(),
+          fadeInSec: (update['fadeInSec'] as num?)?.toDouble() ?? 0.0,
+          fadeOutSec: (update['fadeOutSec'] as num?)?.toDouble() ?? 0.0,
+          fadeCurve: (update['fadeCurve'] as num?)?.toInt() ?? 0,
+        );
+      }
+      return updates.length;
+    } on PlatformException catch (e) {
+      _logError('updateClipFadesBatch', e);
+      for (final update in updates) {
+        await setClipFades(
+          (update['clip'] as num).toInt(),
+          fadeInSec: (update['fadeInSec'] as num?)?.toDouble() ?? 0.0,
+          fadeOutSec: (update['fadeOutSec'] as num?)?.toDouble() ?? 0.0,
+          fadeCurve: (update['fadeCurve'] as num?)?.toInt() ?? 0,
+        );
+      }
+      return updates.length;
     }
   }
 

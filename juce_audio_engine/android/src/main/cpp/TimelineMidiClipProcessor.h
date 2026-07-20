@@ -321,7 +321,7 @@ public:
                                 midiVelocity,
                                 (int)timelinePitches.size() - 1);
                             if (region != nullptr &&
-                                !ensureSampledRegionLoaded(*region))
+                                !isSampledRegionReady(*region))
                             {
                                 region = nullptr;
                             }
@@ -1573,6 +1573,11 @@ private:
         return true;
     }
 
+    static bool isSampledRegionReady(const SampledRegion &region) noexcept
+    {
+        return region.sample != nullptr && region.sample->frameCount() >= 2;
+    }
+
     static const SampledRegion *pickSampledRegion(const SampledDefinition &definition,
                                                   int pitch,
                                                   int velocity,
@@ -2205,7 +2210,7 @@ private:
                         sampledPitch,
                         midiVelocity,
                         voice.seedBase);
-                    if (region == nullptr || !ensureSampledRegionLoaded(*region))
+                    if (region == nullptr || !isSampledRegionReady(*region))
                         continue;
 
                     voice.sampledMidiPitch = sampledPitch;

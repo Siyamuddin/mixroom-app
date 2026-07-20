@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <atomic>
 #include <cmath>
 
 #include "JuceLogBridge.h" // Bring in the function
@@ -24,8 +25,18 @@ public:
                          "volume", "Volume", kUiMin, kUiMax, kUiUnity));
     }
 
-    void setMuted(bool m) { muted = m; }
-    bool isMuted() const { return muted; }
+    void setMuted(bool m) { muted.store(m, std::memory_order_relaxed); }
+    bool isMuted() const { return muted.load(std::memory_order_relaxed); }
+    void setAutomationGainUiRealtime(float userGain) noexcept
+    {
+        automationGainUi.store(juce::jlimit(kUiMin, kUiMax, userGain),
+                               std::memory_order_relaxed);
+        automationGainOverrideActive.store(true, std::memory_order_release);
+    }
+    void clearAutomationGainOverride() noexcept
+    {
+        automationGainOverrideActive.store(false, std::memory_order_release);
+    }
 
     // Lifecycle
     void prepareToPlay(double sampleRate, int samplesPerBlock) override {}
@@ -39,7 +50,13 @@ public:
 
     void processBlock(juce::AudioBuffer<float> &buffer, juce::MidiBuffer &) override
     {
-        const float userGain = juce::jlimit(kUiMin, kUiMax, gain->get());
+        const bool useAutomationGain =
+            automationGainOverrideActive.load(std::memory_order_acquire);
+        const float userGain = juce::jlimit(
+            kUiMin,
+            kUiMax,
+            useAutomationGain ? automationGainUi.load(std::memory_order_relaxed)
+                              : gain->get());
         float db = 0.0f;
 
         if (userGain <= kUiUnity)
@@ -61,7 +78,7 @@ public:
                                      ? 0.0f
                                      : std::pow(10.0f, db / 20.0f);
 
-        if (muted)
+        if (muted.load(std::memory_order_relaxed))
         {
             buffer.applyGain(0.0f); // clean mute (no clicks)
         }
@@ -101,5 +118,7 @@ public:
     juce::AudioParameterFloat *gain;
 
 private:
-    bool muted = false;
+    std::atomic<bool> muted{false};
+    std::atomic<bool> automationGainOverrideActive{false};
+    std::atomic<float> automationGainUi{kUiUnity};
 };

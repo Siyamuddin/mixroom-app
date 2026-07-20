@@ -31,16 +31,19 @@ extern "C"
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_endGraphMutationBatchJNI(JNIEnv *, jclass);
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_loadClipJNI(JNIEnv *, jclass, jint, jint, jstring, jdouble, jdouble, jdouble);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_unloadClipJNI(JNIEnv *, jclass, jint);
+    JNIEXPORT jint JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_unloadClipsJNI(JNIEnv *, jclass, jintArray);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipGainJNI(JNIEnv *, jclass, jint, jfloat);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipExtraGainLinearJNI(JNIEnv *, jclass, jint, jfloat);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_muteClipJNI(JNIEnv *, jclass, jint, jboolean);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipPanJNI(JNIEnv *, jclass, jint, jfloat);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipFadesJNI(JNIEnv *, jclass, jint, jdouble, jdouble, jint);
+    JNIEXPORT jint JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_updateClipFadesBatchJNI(JNIEnv *, jclass, jobject);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipPitchJNI(JNIEnv *, jclass, jint, jfloat);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipReversedJNI(JNIEnv *, jclass, jint, jboolean);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipStretchOptionsJNI(JNIEnv *, jclass, jint, jdouble, jboolean);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_moveClipToRowJNI(JNIEnv *, jclass, jint, jint);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipTimeJNI(JNIEnv *, jclass, jint, jdouble, jdouble, jdouble);
+    JNIEXPORT jint JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_updateClipTimelineBatchJNI(JNIEnv *, jclass, jobject);
 
     // Live MIDI clip playback
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_supportsLiveMidiClipPlaybackJNI(JNIEnv *, jclass);
@@ -122,6 +125,9 @@ extern "C"
     // Debug graph
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_debugPrintGraphJNI(JNIEnv *, jclass, jstring);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_debugPrintGraphStructureJNI(JNIEnv *, jclass);
+    JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getEngineDiagnosticsJNI(JNIEnv *, jclass);
+    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_resetRealtimePerformanceStatsJNI(JNIEnv *, jclass);
+    JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_runEngineStressTestJNI(JNIEnv *, jclass, jint, jint, jint, jdouble);
 
     // Metronome
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMetronomeEnabledJNI(JNIEnv *, jclass, jboolean);

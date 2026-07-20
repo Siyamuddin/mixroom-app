@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 class ProjectUndoSnapshotRecord {
@@ -100,7 +101,11 @@ class ProjectUndoHistoryStore {
         redo: <ProjectUndoSnapshotRecord>[],
       );
     }
-    final decoded = jsonDecode(await file.readAsString());
+    final decoded = await compute<String, Object?>(
+      jsonDecode,
+      await file.readAsString(),
+      debugLabel: 'project-undo-history-json-decode',
+    );
     if (decoded is! Map) {
       return const ProjectUndoHistorySnapshot(
         undo: <ProjectUndoSnapshotRecord>[],
@@ -124,7 +129,12 @@ class ProjectUndoHistoryStore {
       undo: undo,
       redo: redo,
     ).toJson(maxEntries: maxEntries);
-    await _manifestFile(projectDir).writeAsString(jsonEncode(payload));
+    final encoded = await compute<Object?, String>(
+      jsonEncode,
+      payload,
+      debugLabel: 'project-undo-history-json-encode',
+    );
+    await _manifestFile(projectDir).writeAsString(encoded);
   }
 
   static List<ProjectUndoSnapshotRecord> decodeRecords(Object? raw) {

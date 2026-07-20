@@ -1384,6 +1384,25 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       return;
     }
 
+    if (method_call.method_name() == "unloadClips") {
+      juce::Array<int> clips;
+      if (const auto* raw = FindValue(args, "clips")) {
+        if (const auto* list = std::get_if<flutter::EncodableList>(raw)) {
+          clips.ensureStorageAllocated(static_cast<int>(list->size()));
+          for (const auto& value : *list) {
+            if (const auto* clip = std::get_if<int32_t>(&value))
+              clips.addIfNotAlreadyThere(static_cast<int>(*clip));
+            else if (const auto* clip64 = std::get_if<int64_t>(&value))
+              clips.addIfNotAlreadyThere(static_cast<int>(*clip64));
+          }
+        }
+      }
+      const int removed = CallOnMessageThreadSync(
+          [&clips] { return JuceEngine::get().unloadClips(clips); });
+      result->Success(flutter::EncodableValue(static_cast<int32_t>(removed)));
+      return;
+    }
+
     if (method_call.method_name() == "setClipGain") {
       const int clip = FindInt(args, "clip", 0);
       const float gain = static_cast<float>(FindDouble(args, "gain", 0.0));
@@ -1409,6 +1428,43 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       CallOnMessageThreadSync(
           [clip, pan] { JuceEngine::get().setClipPan(clip, pan); });
       result->Success(flutter::EncodableValue());
+      return;
+    }
+
+    if (method_call.method_name() == "setClipFades") {
+      const int clip = FindInt(args, "clip", 0);
+      const double fade_in = FindDouble(args, "fadeInSec", 0.0);
+      const double fade_out = FindDouble(args, "fadeOutSec", 0.0);
+      const int curve = FindInt(args, "fadeCurve", 0);
+      CallOnMessageThreadSync([=] {
+        JuceEngine::get().setClipFades(clip, fade_in, fade_out, curve);
+      });
+      result->Success(flutter::EncodableValue());
+      return;
+    }
+
+    if (method_call.method_name() == "updateClipFadesBatch") {
+      juce::Array<juce::NamedValueSet> updates;
+      if (const auto* raw = FindValue(args, "updates")) {
+        if (const auto* list = std::get_if<flutter::EncodableList>(raw)) {
+          updates.ensureStorageAllocated(static_cast<int>(list->size()));
+          for (const auto& value : *list) {
+            const auto* map = std::get_if<flutter::EncodableMap>(&value);
+            if (map == nullptr) continue;
+            const int clip = FindInt(map, "clip", -1);
+            if (clip < 0) continue;
+            juce::NamedValueSet update;
+            update.set("clip", clip);
+            update.set("fadeInSec", FindDouble(map, "fadeInSec", 0.0));
+            update.set("fadeOutSec", FindDouble(map, "fadeOutSec", 0.0));
+            update.set("fadeCurve", FindInt(map, "fadeCurve", 0));
+            updates.add(update);
+          }
+        }
+      }
+      const int applied = CallOnMessageThreadSync(
+          [&updates] { return JuceEngine::get().updateClipFadesBatch(updates); });
+      result->Success(flutter::EncodableValue(static_cast<int32_t>(applied)));
       return;
     }
 
@@ -1471,6 +1527,54 @@ void JuceAudioEnginePlugin::HandleMethodCall(
         JuceEngine::get().setClipTime(clip, start_sec, length_sec, offset_sec);
       });
       result->Success(flutter::EncodableValue());
+      return;
+    }
+
+    if (method_call.method_name() == "updateClipTimelineBatch") {
+      juce::Array<juce::NamedValueSet> updates;
+      if (const auto* raw = FindValue(args, "updates")) {
+        if (const auto* list = std::get_if<flutter::EncodableList>(raw)) {
+          updates.ensureStorageAllocated(static_cast<int>(list->size()));
+          for (const auto& value : *list) {
+            const auto* map = std::get_if<flutter::EncodableMap>(&value);
+            if (map == nullptr) continue;
+            const int clip = FindInt(map, "clip", -1);
+            if (clip < 0) continue;
+            juce::NamedValueSet update;
+            update.set("clip", clip);
+            if (FindValue(map, "rowId") != nullptr)
+              update.set("rowId", FindInt(map, "rowId", -1));
+            if (FindValue(map, "startSec") != nullptr)
+              update.set("startSec", FindDouble(map, "startSec", 0.0));
+            if (FindValue(map, "lengthSec") != nullptr)
+              update.set("lengthSec", FindDouble(map, "lengthSec", 0.0));
+            if (FindValue(map, "inFileOffsetSec") != nullptr)
+              update.set("inFileOffsetSec",
+                         FindDouble(map, "inFileOffsetSec", 0.0));
+            if (FindValue(map, "gain") != nullptr)
+              update.set("gain", FindDouble(map, "gain", 1.0));
+            if (FindValue(map, "extraGainLinear") != nullptr)
+              update.set("extraGainLinear",
+                         FindDouble(map, "extraGainLinear", 1.0));
+            if (FindValue(map, "reversed") != nullptr)
+              update.set("reversed", FindBool(map, "reversed", false));
+            if (FindValue(map, "tempoRatio") != nullptr)
+              update.set("tempoRatio", FindDouble(map, "tempoRatio", 1.0));
+            if (FindValue(map, "preservePitch") != nullptr)
+              update.set("preservePitch",
+                         FindBool(map, "preservePitch", true));
+            if (FindValue(map, "pitchSemitones") != nullptr)
+              update.set("pitchSemitones",
+                         FindDouble(map, "pitchSemitones", 0.0));
+            if (FindValue(map, "muted") != nullptr)
+              update.set("muted", FindBool(map, "muted", false));
+            updates.add(update);
+          }
+        }
+      }
+      const int applied = CallOnMessageThreadSync(
+          [&updates] { return JuceEngine::get().updateClipTimelineBatch(updates); });
+      result->Success(flutter::EncodableValue(static_cast<int32_t>(applied)));
       return;
     }
 

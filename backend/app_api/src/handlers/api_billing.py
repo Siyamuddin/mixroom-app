@@ -1014,12 +1014,21 @@ def _handle_public_one_time_lookup(path: str) -> Dict[str, Any]:
     product = catalog_repo.get_one_time_product(code, public_only=True)
     if not product:
         return json_response(404, {"error": "Payment link is unavailable."})
-    return json_response(200, {"code": product["code"], "order_name": product["order_name"], "amount": product["amount"], "currency": "KRW"})
+    items = product.get("items") if isinstance(product.get("items"), list) else []
+    if not items:
+        items = [{"code": product["code"], "order_name": product["order_name"], "amount": product["amount"], "currency": "KRW"}]
+    return json_response(200, {"code": product["code"],
+        "page_title": product.get("page_title") or product["order_name"],
+        "order_name": product["order_name"], "amount": product["amount"],
+        "currency": "KRW", "items": items})
 
 
 def _handle_public_one_time_checkout_intent(event: Dict[str, Any]) -> Dict[str, Any]:
     body = parse_json_body(event)
-    intent = catalog_repo.create_one_time_checkout_intent(str(body.get("code") or body.get("product_code") or ""))
+    intent = catalog_repo.create_one_time_checkout_intent(
+        str(body.get("code") or body.get("product_code") or ""),
+        str(body.get("item_code") or body.get("itemCode") or ""),
+    )
     if not intent:
         return json_response(404, {"error": "Payment link is unavailable."})
     return json_response(201, intent)
@@ -2372,9 +2381,9 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return _finalize(_handle_public_one_time_checkout_intent(event))
         except RequestBodyError as exc:
             return _finalize(json_response(exc.status_code, {"error": exc.message}), error=exc.message)
-    # The Galhyeon checkout is the only no-login route in this function.  Its
-    # handler restricts the payment to two exact products, amounts, order-ID
-    # prefixes, and Toss-confirmed order names.
+    # Public one-time confirmations do not require a login. Checkout-intent
+    # orders are restricted to the server-stored item, amount, and order name;
+    # the legacy Galhyeon/test routes retain their fixed-product validation.
     if (
         method == "POST"
         and path.endswith("/v1/billing/web/toss/confirm")

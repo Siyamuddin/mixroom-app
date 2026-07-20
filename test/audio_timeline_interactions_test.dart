@@ -283,6 +283,8 @@ Widget _buildHarness({
   void Function(bool magnetEnabled, int quantizeDivisionsPerBar)?
       onSnapSettingsChanged,
   ValueNotifier<Duration>? transportClockListenable,
+  void Function(double ms)? onScrubRequested,
+  bool isPlaying = false,
   bool loopEnabled = false,
   int loopStartMs = 0,
   int loopEndMs = 0,
@@ -392,8 +394,8 @@ Widget _buildHarness({
               (_, __, ___, ____, _____, ______, {newStartMs}) {},
           transportClockListenable: transportClockListenable ??
               ValueNotifier<Duration>(Duration.zero),
-          onScrubRequested: (_) {},
-          isPlaying: false,
+          onScrubRequested: onScrubRequested ?? (_) {},
+          isPlaying: isPlaying,
           maxDuration: const Duration(seconds: 30),
           bpm: 120.0,
           beatsPerBar: 4,
@@ -491,6 +493,87 @@ Widget _buildHarness({
 }
 
 void main() {
+  testWidgets('mobile timeline pan seeks only after the gesture ends',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.android);
+    try {
+      final scrubs = <double>[];
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          onMoveClipCommit: (_, __, ___) async {},
+          onScrubRequested: scrubs.add,
+          isPlaying: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final gesture = await tester.startGesture(
+        _laneCenter(tester),
+        kind: PointerDeviceKind.touch,
+      );
+      await gesture.moveBy(const Offset(-40, 0));
+      await tester.pump();
+      await gesture.moveBy(const Offset(-40, 0));
+      await tester.pump();
+
+      expect(scrubs, isEmpty);
+
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      expect(scrubs, hasLength(1));
+      expect(scrubs.single, greaterThan(500.0));
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('tablet long-press enters touch multi-select mode',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.android);
+    try {
+      final first = await _buildClip();
+      final second = await _buildClip();
+      second.offset = 2200.0;
+      final selectionSnapshots = <List<int>>[];
+      final moveCommits = <int>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: <AudioTrack>[first, second],
+          useTabletDawLayout: true,
+          onMoveClipCommit: (clipIndex, _, __) async {
+            moveCommits.add(clipIndex);
+          },
+          onSelectionChanged: (selectedClipIndices, _) {
+            selectionSnapshots.add(
+              selectedClipIndices.toList(growable: false),
+            );
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.longPressAt(_clipCenter(tester));
+      await tester.pumpAndSettle();
+      expect(selectionSnapshots.last, <int>[0]);
+
+      await tester.tapAt(_clipCenter(tester, additionalDx: 220.0));
+      await tester.pumpAndSettle();
+      expect(selectionSnapshots.last, <int>[0, 1]);
+
+      await tester.dragFrom(
+        _clipCenter(tester, additionalDx: 220.0),
+        const Offset(40.0, 0.0),
+      );
+      await tester.pumpAndSettle();
+      expect(moveCommits, <int>[0, 1]);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
   testWidgets('swiping an unselected clip does not select or move it',
       (tester) async {
     final clips = <AudioTrack>[await _buildClip()];
@@ -3372,6 +3455,35 @@ void main() {
     final paintText = tester.widget<Text>(find.text('Paint').last);
     expect(paintText.maxLines, 1);
     expect(paintText.overflow, TextOverflow.ellipsis);
+  });
+
+  testWidgets('tool selector toggles foreground grid rendering',
+      (tester) async {
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.near_me_outlined));
+    await tester.pumpAndSettle();
+    var gridItem = tester.widget<CheckedPopupMenuItem<Object>>(
+      find.byKey(const ValueKey('timeline_foreground_grid_toggle')),
+    );
+    expect(gridItem.checked, isTrue);
+
+    await tester.tap(
+      find.byKey(const ValueKey('timeline_foreground_grid_toggle')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.near_me_outlined));
+    await tester.pumpAndSettle();
+    gridItem = tester.widget<CheckedPopupMenuItem<Object>>(
+      find.byKey(const ValueKey('timeline_foreground_grid_toggle')),
+    );
+    expect(gridItem.checked, isFalse);
   });
 
   testWidgets('number keys select timeline tools in toolbar order',

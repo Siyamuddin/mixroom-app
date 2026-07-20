@@ -612,6 +612,70 @@ class ApiBillingTests(unittest.TestCase):
             1589000,
         )
 
+    def test_public_payment_link_exposes_independent_items(self):
+        module.catalog_repo.get_one_time_product.return_value = {
+            "code": "workshop",
+            "page_title": "워크숍 결제",
+            "order_name": "워크숍 결제",
+            "amount": 120000,
+            "enabled": True,
+            "items": [
+                {"code": "materials", "order_name": "재료비", "amount": 120000, "currency": "KRW"},
+                {"code": "tuition", "order_name": "수강료", "amount": 80000, "currency": "KRW"},
+            ],
+        }
+
+        response = module.handler(
+            {"rawPath": "/v1/billing/public/one-time-products/workshop", "requestContext": {"http": {"method": "GET"}}},
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        payload = decode_json_response(response)
+        self.assertEqual(payload["page_title"], "워크숍 결제")
+        self.assertEqual([item["code"] for item in payload["items"]], ["materials", "tuition"])
+        module.catalog_repo.get_one_time_product.assert_called_once_with("workshop", public_only=True)
+
+    def test_public_payment_link_creates_and_confirms_selected_item_only(self):
+        intent = {
+            "order_id": "one-workshop-materials-123",
+            "page_code": "workshop",
+            "item_code": "materials",
+            "product_code": "workshop-materials",
+            "order_name": "재료비",
+            "amount": 120000,
+            "currency": "KRW",
+        }
+        module.catalog_repo.create_one_time_checkout_intent.return_value = intent
+
+        create = module.handler(
+            {
+                "rawPath": "/v1/billing/public/toss/checkout-intents",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps({"code": "workshop", "item_code": "materials"}),
+            }, object(),
+        )
+        self.assertEqual(create["statusCode"], 201)
+        self.assertEqual(decode_json_response(create)["amount"], 120000)
+        module.catalog_repo.create_one_time_checkout_intent.assert_called_once_with("workshop", "materials")
+
+        module.catalog_repo.get_one_time_checkout_intent.return_value = intent
+        module.confirm_toss_payment = mock.Mock(return_value={
+            "paymentKey": "pay-materials", "orderId": intent["order_id"], "orderName": "재료비",
+            "status": "DONE", "totalAmount": 120000, "method": "카드",
+        })
+        confirm = module.handler(
+            {
+                "rawPath": "/v1/billing/web/toss/confirm",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": json.dumps({"payment_key": "pay-materials", "order_id": intent["order_id"], "amount": 120000}),
+            }, object(),
+        )
+        self.assertEqual(confirm["statusCode"], 200)
+        self.assertEqual(decode_json_response(confirm)["product_code"], "workshop-materials")
+        self.assertEqual(self.repo.queued_projection_ids, [])
+        module.confirm_toss_payment.assert_called_once_with("pay-materials", intent["order_id"], 120000)
+
     def test_toss_confirm_rejects_anonymous_one_time_wrong_amount_before_toss(self):
         module.extract_user_id_from_event = lambda event: ""
         module.confirm_toss_payment = mock.Mock()

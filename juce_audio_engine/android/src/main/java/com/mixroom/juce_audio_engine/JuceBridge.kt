@@ -39,6 +39,7 @@ object JuceBridge {
     ): Boolean
 
     @JvmStatic external fun unloadClipJNI(clipIndex: Int)
+    @JvmStatic external fun unloadClipsJNI(clipIndices: IntArray): Int
     @JvmStatic external fun endProjectClipLoadTransactionJNI()
     @JvmStatic external fun setClipGainJNI(clipIndex: Int, gain: Float)
     @JvmStatic external fun setClipExtraGainLinearJNI(clipIndex: Int, gain: Float)
@@ -65,6 +66,12 @@ object JuceBridge {
         lengthSec: Double,
         inFileOffsetSec: Double,
     )
+    @JvmStatic external fun updateClipTimelineBatchJNI(
+        updates: List<Map<String, Any>>,
+    ): Int
+    @JvmStatic external fun updateClipFadesBatchJNI(
+        updates: List<Map<String, Any>>,
+    ): Int
 
     // Live MIDI clip playback
     @JvmStatic external fun supportsLiveMidiClipPlaybackJNI(): Boolean
@@ -197,6 +204,14 @@ object JuceBridge {
     // Debug
     @JvmStatic external fun debugPrintGraphJNI(title: String)
     @JvmStatic external fun debugPrintGraphStructureJNI()
+    @JvmStatic external fun getEngineDiagnosticsJNI(): HashMap<String, Any>
+    @JvmStatic external fun resetRealtimePerformanceStatsJNI()
+    @JvmStatic external fun runEngineStressTestJNI(
+        clipCount: Int,
+        blockCount: Int,
+        blockSize: Int,
+        sampleRate: Double,
+    ): HashMap<String, Any>
 
     // Metronome
     @JvmStatic external fun setMetronomeEnabledJNI(enabled: Boolean)

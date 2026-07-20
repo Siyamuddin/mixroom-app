@@ -7847,12 +7847,23 @@ function base64UrlEncode(bytes) {
   const form = document.querySelector("#one-time-product-form");
   const list = document.querySelector("#one-time-products");
   const feedback = document.querySelector("#one-time-feedback");
-  if (!form || !list || !feedback) return;
+  const itemFields = document.querySelector("#one-time-item-fields");
+  const addItemButton = document.querySelector("#one-time-add-item");
+  if (!form || !list || !feedback || !itemFields || !addItemButton) return;
   const esc = (value) => String(value || "").replace(/[&<>\"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const productItems = (p) => Array.isArray(p.items) && p.items.length ? p.items : [{code:p.code, order_name:p.order_name, amount:p.amount}];
+  const addItemRow = () => {
+    if (itemFields.children.length >= 20) { feedback.textContent = "A payment link can contain up to 20 items."; return; }
+    const row = document.createElement("div");
+    row.className = "one-time-item-editor-row";
+    row.innerHTML = `<label class="search-input-wrap"><span class="search-label">Item title</span><input class="text-input one-time-item-name" required maxlength="100" placeholder="재료비" /></label><label class="search-input-wrap"><span class="search-label">Amount (KRW)</span><input class="text-input one-time-item-amount" required type="number" min="1" max="1000000000" step="1" placeholder="100000" /></label><button class="button button-secondary one-time-remove-item" type="button">Remove</button>`;
+    itemFields.appendChild(row);
+  };
   const renderProduct = (p) => {
     const url = `https://www.mixroom.ai/pay/${encodeURIComponent(p.code)}`;
+    const items = productItems(p);
     return `<section class="billing-preview-section one-time-link-row">
-      <div class="one-time-link-main"><strong>${esc(p.order_name)}</strong><p>${esc(p.code)} · ₩${Number(p.amount).toLocaleString("ko-KR")}</p><a href="${url}" target="_blank" rel="noopener">${esc(url)}</a></div>
+      <div class="one-time-link-main"><strong>${esc(p.page_title || p.order_name)}</strong><p>${esc(p.code)} · ${items.length} payment item${items.length === 1 ? "" : "s"}</p><ul class="one-time-link-items">${items.map((item) => `<li>${esc(item.order_name)} <span>₩${Number(item.amount).toLocaleString("ko-KR")}</span></li>`).join("")}</ul><a href="${url}" target="_blank" rel="noopener">${esc(url)}</a></div>
       <div class="one-time-link-actions"><span class="status-chip ${p.enabled ? "status-chip-success" : ""}">${p.enabled ? "Active" : "Disabled"}</span><button class="button button-secondary" data-disable="${esc(p.code)}">${p.enabled ? "Disable" : "Enable"}</button></div>
     </section>`;
   };
@@ -7868,12 +7879,21 @@ function base64UrlEncode(bytes) {
   form.addEventListener("submit", async (event) => {
     event.preventDefault(); feedback.textContent = "Saving…";
     const expires = document.querySelector("#one-time-expiry").value;
-    const payload = { code: document.querySelector("#one-time-code").value, order_name: document.querySelector("#one-time-name").value, amount: Number(document.querySelector("#one-time-amount").value), enabled: document.querySelector("#one-time-enabled").value === "true", expires_at: expires ? new Date(expires).toISOString() : "" };
-    try { await fetchAdminJson(ADMIN_ONE_TIME_PRODUCTS_PATH, {method:"POST", body:JSON.stringify(payload)}); feedback.textContent = `Saved: https://www.mixroom.ai/pay/${payload.code}`; await load(); } catch (error) { feedback.textContent = error.message; }
+    const items = Array.from(itemFields.querySelectorAll(".one-time-item-editor-row")).map((row, index) => ({code:`item-${index + 1}`, order_name:row.querySelector(".one-time-item-name").value, amount:Number(row.querySelector(".one-time-item-amount").value)}));
+    const payload = { code: document.querySelector("#one-time-code").value, page_title: document.querySelector("#one-time-page-title").value, items, enabled: document.querySelector("#one-time-enabled").value === "true", expires_at: expires ? new Date(expires).toISOString() : "" };
+    try { await fetchAdminJson(ADMIN_ONE_TIME_PRODUCTS_PATH, {method:"POST", body:JSON.stringify(payload)}); feedback.textContent = `Created: https://www.mixroom.ai/pay/${payload.code}`; form.reset(); itemFields.innerHTML = ""; addItemRow(); await load(); } catch (error) { feedback.textContent = error.message; }
+  });
+  addItemButton.addEventListener("click", addItemRow);
+  itemFields.addEventListener("click", (event) => {
+    const removeButton = event.target.closest(".one-time-remove-item");
+    if (!removeButton) return;
+    if (itemFields.children.length === 1) { feedback.textContent = "A payment link needs at least one payment item."; return; }
+    removeButton.closest(".one-time-item-editor-row").remove();
   });
   list.addEventListener("click", async (event) => {
     const code = event.target?.dataset?.disable; if (!code) return;
     try { const current = (await fetchAdminJson(ADMIN_ONE_TIME_PRODUCTS_PATH)).products.find((p) => p.code === code); await fetchAdminJson(`${ADMIN_ONE_TIME_PRODUCTS_PATH}/${encodeURIComponent(code)}`, {method:"PATCH", body:JSON.stringify({...current, enabled: !current.enabled})}); await load(); } catch (error) { feedback.textContent = error.message; }
   });
+  addItemRow();
   document.addEventListener("admin:ready", load);
 })();

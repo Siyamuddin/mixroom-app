@@ -1132,8 +1132,8 @@ EQ3AudioProcessor::EQ3AudioProcessor()
 
 void EQ3AudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
-    eq3.prepare(sampleRate, samplesPerBlock);
     eq3.setParameters(parameters);
+    eq3.prepare(sampleRate, samplesPerBlock);
     waveformRing.fill(0.0f);
     waveformWritePos.store(0, std::memory_order_relaxed);
 }
@@ -1877,7 +1877,10 @@ float PitchCorrectorAudioProcessor::estimatePitchHz()
         return 0.0f;
 
     if ((int)pitchAnalysisMono.size() < analysisSamples)
-        pitchAnalysisMono.resize((size_t)analysisSamples);
+    {
+        jassertfalse;
+        return 0.0f;
+    }
 
     auto *mono = pitchAnalysisMono.data();
     int readPos = pitchAnalysisHistoryWritePos - analysisSamples;
@@ -2292,7 +2295,7 @@ void StereoAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     bypassRampRemaining = 0;
     bypassRampDirection = BypassRampDirection::none;
     lastBlockWasBypassed = false;
-    ensureBypassBufferCapacity(samplesPerBlock);
+    ensureBypassBufferCapacity(juce::jmax(samplesPerBlock, kMixroomEffectRealtimeScratchMaxSamples));
 }
 
 void StereoAudioProcessor::reset()
@@ -2318,8 +2321,10 @@ void StereoAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::
 
     if (bypassRampDirection == BypassRampDirection::toWet)
     {
-        ensureBypassBufferCapacity(buffer.getNumSamples());
-        bypassDryBuffer.makeCopyOf(buffer, true);
+        if (!ensureBypassBufferCapacity(buffer.getNumSamples()))
+            bypassRampDirection = BypassRampDirection::none;
+        else
+            bypassDryBuffer.makeCopyOf(buffer, true);
     }
 
     stereoFx.setParameters(parameters);
@@ -2344,27 +2349,39 @@ void StereoAudioProcessor::processBlockBypassed(juce::AudioBuffer<float> &buffer
 
     if (bypassRampDirection == BypassRampDirection::toDry)
     {
-        ensureBypassBufferCapacity(buffer.getNumSamples());
-        bypassDryBuffer.makeCopyOf(buffer, true);
-        bypassWetBuffer.makeCopyOf(buffer, true);
-        stereoFx.setParameters(parameters);
-        stereoFx.process(bypassWetBuffer);
-        applyBypassRamp(buffer, bypassDryBuffer, bypassWetBuffer);
+        if (ensureBypassBufferCapacity(buffer.getNumSamples()))
+        {
+            bypassDryBuffer.makeCopyOf(buffer, true);
+            bypassWetBuffer.makeCopyOf(buffer, true);
+            stereoFx.setParameters(parameters);
+            stereoFx.process(bypassWetBuffer);
+            applyBypassRamp(buffer, bypassDryBuffer, bypassWetBuffer);
+        }
+        else
+        {
+            bypassRampDirection = BypassRampDirection::none;
+        }
     }
 
     lastBlockWasBypassed = true;
 }
 
-void StereoAudioProcessor::ensureBypassBufferCapacity(int numSamples)
+bool StereoAudioProcessor::ensureBypassBufferCapacity(int numSamples)
 {
     const int channels = juce::jmax(1, getTotalNumOutputChannels());
     const int samples = juce::jmax(1, numSamples);
+    if (samples > kMixroomEffectRealtimeScratchMaxSamples)
+    {
+        jassertfalse;
+        return false;
+    }
     if (bypassDryBuffer.getNumChannels() != channels ||
         bypassDryBuffer.getNumSamples() < samples)
         bypassDryBuffer.setSize(channels, samples, false, false, true);
     if (bypassWetBuffer.getNumChannels() != channels ||
         bypassWetBuffer.getNumSamples() < samples)
         bypassWetBuffer.setSize(channels, samples, false, false, true);
+    return true;
 }
 
 void StereoAudioProcessor::beginBypassRamp(BypassRampDirection direction)
@@ -2498,7 +2515,7 @@ void StereoProAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlo
     bypassRampRemaining = 0;
     bypassRampDirection = BypassRampDirection::none;
     lastBlockWasBypassed = false;
-    ensureBypassBufferCapacity(samplesPerBlock);
+    ensureBypassBufferCapacity(juce::jmax(samplesPerBlock, kMixroomEffectRealtimeScratchMaxSamples));
     scopeRing.fill(0.0f);
     scopeWritePos.store(0, std::memory_order_relaxed);
 }
@@ -2528,8 +2545,10 @@ void StereoProAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, juc
 
     if (bypassRampDirection == BypassRampDirection::toWet)
     {
-        ensureBypassBufferCapacity(buffer.getNumSamples());
-        bypassDryBuffer.makeCopyOf(buffer, true);
+        if (!ensureBypassBufferCapacity(buffer.getNumSamples()))
+            bypassRampDirection = BypassRampDirection::none;
+        else
+            bypassDryBuffer.makeCopyOf(buffer, true);
     }
 
     stereoProFx.setParameters(parameters);
@@ -2555,27 +2574,39 @@ void StereoProAudioProcessor::processBlockBypassed(juce::AudioBuffer<float> &buf
 
     if (bypassRampDirection == BypassRampDirection::toDry)
     {
-        ensureBypassBufferCapacity(buffer.getNumSamples());
-        bypassDryBuffer.makeCopyOf(buffer, true);
-        bypassWetBuffer.makeCopyOf(buffer, true);
-        stereoProFx.setParameters(parameters);
-        stereoProFx.process(bypassWetBuffer);
-        applyBypassRamp(buffer, bypassDryBuffer, bypassWetBuffer);
+        if (ensureBypassBufferCapacity(buffer.getNumSamples()))
+        {
+            bypassDryBuffer.makeCopyOf(buffer, true);
+            bypassWetBuffer.makeCopyOf(buffer, true);
+            stereoProFx.setParameters(parameters);
+            stereoProFx.process(bypassWetBuffer);
+            applyBypassRamp(buffer, bypassDryBuffer, bypassWetBuffer);
+        }
+        else
+        {
+            bypassRampDirection = BypassRampDirection::none;
+        }
     }
 
     lastBlockWasBypassed = true;
 }
 
-void StereoProAudioProcessor::ensureBypassBufferCapacity(int numSamples)
+bool StereoProAudioProcessor::ensureBypassBufferCapacity(int numSamples)
 {
     const int channels = juce::jmax(1, getTotalNumOutputChannels());
     const int samples = juce::jmax(1, numSamples);
+    if (samples > kMixroomEffectRealtimeScratchMaxSamples)
+    {
+        jassertfalse;
+        return false;
+    }
     if (bypassDryBuffer.getNumChannels() != channels ||
         bypassDryBuffer.getNumSamples() < samples)
         bypassDryBuffer.setSize(channels, samples, false, false, true);
     if (bypassWetBuffer.getNumChannels() != channels ||
         bypassWetBuffer.getNumSamples() < samples)
         bypassWetBuffer.setSize(channels, samples, false, false, true);
+    return true;
 }
 
 void StereoProAudioProcessor::beginBypassRamp(BypassRampDirection direction)

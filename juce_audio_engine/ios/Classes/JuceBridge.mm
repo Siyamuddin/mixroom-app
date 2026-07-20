@@ -3149,6 +3149,28 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     return result ?: @{};
 }
 
++ (void)resetRealtimePerformanceStatsObjC
+{
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        mm->callSync([]
+                     { JuceEngine::get().resetRealtimePerformanceStats(); });
+    }
+}
+
++ (NSDictionary<NSString *, id> *)runEngineStressTestObjC:(NSInteger)clipCount
+                                               blockCount:(NSInteger)blockCount
+                                                blockSize:(NSInteger)blockSize
+                                               sampleRate:(double)sampleRate
+{
+    const auto stats = JuceEngine::get().runTimelineRendererStressTest(
+        (int)clipCount,
+        (int)blockCount,
+        (int)blockSize,
+        sampleRate);
+    return namedValueStatsToNSDictionary(stats);
+}
+
 + (BOOL)openTrackPluginEditorObjC:(NSInteger)trackRow
                      effectIndex:(NSInteger)effectIndex
 {
@@ -3602,8 +3624,12 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 + (void)loadVideoAudioObjC:(NSString *)path
 {
     juce::String jucePath = juceStringFromNSString(path);
-    juce::MessageManager::callAsync([jucePath]
-                                    { JuceEngine::get().loadVideoAudio(juce::File(jucePath)); });
+    auto file = juce::File(jucePath);
+    auto preparedAsset = JuceEngine::get().prepareClipAudioAsset(file);
+    juce::MessageManager::callAsync([jucePath, preparedAsset]
+                                    { JuceEngine::get().loadVideoAudioWithPreparedAudioAsset(
+                                          juce::File(jucePath),
+                                          preparedAsset); });
 }
 
 + (void)unloadVideoAudioObjC
@@ -3653,12 +3679,36 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
      inFileOffsetSec:(double)inFileOffsetSec
 {
     juce::String jucePath = juceStringFromNSString(path);
-    return JuceEngine::get().loadClip((int)clipIndex,
-                                      (int)rowId,
-                                      juce::File(jucePath),
-                                      startSec,
-                                      lengthSec,
-                                      inFileOffsetSec);
+    juce::File file(jucePath);
+    auto preparedAsset = JuceEngine::get().prepareClipAudioAsset(file);
+    if (preparedAsset == nullptr)
+        return NO;
+
+    BOOL ok = NO;
+    auto installPreparedClip = [&]
+    {
+        ok = JuceEngine::get().loadClipWithPreparedAudioAsset((int)clipIndex,
+                                                              (int)rowId,
+                                                              file,
+                                                              preparedAsset,
+                                                              startSec,
+                                                              lengthSec,
+                                                              inFileOffsetSec);
+    };
+
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        if (mm->isThisTheMessageThread())
+            installPreparedClip();
+        else
+            mm->callSync(installPreparedClip);
+    }
+    else
+    {
+        installPreparedClip();
+    }
+
+    return ok;
 }
 
 + (void)beginProjectClipLoadObjC
@@ -3709,21 +3759,12 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     const auto parsedNotes = parseTimelineMidiNotes(notes);
     const auto parsedParams = parseMidiParams(params);
 
+    if (!JuceEngine::get().prepareMidiClipSampleAssets(iid, iname, parsedNotes))
+        return NO;
+
     bool ok = false;
-#if JUCE_MAC && !JUCE_IOS
-    ok = JuceEngine::get().loadMidiClip((int)clipIndex,
-                                        (int)rowId,
-                                        iid,
-                                        iname,
-                                        parsedNotes,
-                                        parsedParams,
-                                        sourceTempoBpm,
-                                        startSec,
-                                        lengthSec,
-                                        inFileOffsetSec);
-#else
-    juce::MessageManager::getInstance()->callSync([&]
-                                                  {
+    auto installMidiClip = [&]
+    {
         ok = JuceEngine::get().loadMidiClip((int)clipIndex,
                                             (int)rowId,
                                             iid,
@@ -3733,8 +3774,21 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
                                             sourceTempoBpm,
                                             startSec,
                                             lengthSec,
-                                            inFileOffsetSec); });
-#endif
+                                            inFileOffsetSec);
+    };
+
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        if (mm->isThisTheMessageThread())
+            installMidiClip();
+        else
+            mm->callSync(installMidiClip);
+    }
+    else
+    {
+        installMidiClip();
+    }
+
     return (BOOL)ok;
 }
 
@@ -3754,15 +3808,32 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     const auto parsedNotes = parseTimelineMidiNotes(notes);
     const auto parsedParams = parseMidiParams(params);
 
+    if (!JuceEngine::get().prepareMidiClipSampleAssets(iid, iname, parsedNotes))
+        return NO;
+
     bool ok = false;
-    juce::MessageManager::getInstance()->callSync([&]
-                                                  {
+    auto updateMidiClip = [&]
+    {
         ok = JuceEngine::get().updateMidiClipEvents((int)clipIndex,
                                                     iid,
                                                     iname,
                                                     parsedNotes,
                                                     parsedParams,
-                                                    sourceTempoBpm); });
+                                                    sourceTempoBpm);
+    };
+
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        if (mm->isThisTheMessageThread())
+            updateMidiClip();
+        else
+            mm->callSync(updateMidiClip);
+    }
+    else
+    {
+        updateMidiClip();
+    }
+
     return (BOOL)ok;
 }
 
@@ -3911,6 +3982,26 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
                                     { JuceEngine::get().unloadClip((int)clipIndex); });
 }
 
++ (NSInteger)unloadClipsObjC:(NSArray<NSNumber *> *)clipIndices
+{
+    juce::Array<int> clips;
+    clips.ensureStorageAllocated((int)clipIndices.count);
+    for (NSNumber *value in clipIndices)
+    {
+        if ([value respondsToSelector:@selector(integerValue)])
+            clips.addIfNotAlreadyThere((int)value.integerValue);
+    }
+
+#if JUCE_MAC && !JUCE_IOS
+    return (NSInteger)JuceEngine::get().unloadClips(clips);
+#else
+    int removed = 0;
+    juce::MessageManager::getInstance()->callSync([&clips, &removed]
+                                                  { removed = JuceEngine::get().unloadClips(clips); });
+    return (NSInteger)removed;
+#endif
+}
+
 + (void)setClipGainObjC:(NSInteger)clipIndex gain:(float)gain
 {
 #if JUCE_MAC && !JUCE_IOS
@@ -3961,6 +4052,37 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 #else
     juce::MessageManager::getInstance()->callSync([clipIndex, fadeInSec, fadeOutSec, fadeCurve]
                                                   { JuceEngine::get().setClipFades((int)clipIndex, fadeInSec, fadeOutSec, (int)fadeCurve); });
+#endif
+}
+
++ (NSInteger)updateClipFadesBatchObjC:(NSArray<NSDictionary *> *)updates
+{
+    juce::Array<juce::NamedValueSet> parsed;
+    parsed.ensureStorageAllocated((int)updates.count);
+    for (NSDictionary *entry in updates)
+    {
+        if (![entry isKindOfClass:[NSDictionary class]])
+            continue;
+
+        NSNumber *clip = entry[@"clip"];
+        if (![clip respondsToSelector:@selector(integerValue)])
+            continue;
+
+        juce::NamedValueSet update;
+        update.set("clip", (int)clip.integerValue);
+        update.set("fadeInSec", [entry[@"fadeInSec"] doubleValue]);
+        update.set("fadeOutSec", [entry[@"fadeOutSec"] doubleValue]);
+        update.set("fadeCurve", (int)[entry[@"fadeCurve"] integerValue]);
+        parsed.add(update);
+    }
+
+#if JUCE_MAC && !JUCE_IOS
+    return (NSInteger)JuceEngine::get().updateClipFadesBatch(parsed);
+#else
+    int applied = 0;
+    juce::MessageManager::getInstance()->callSync([&parsed, &applied]
+                                                  { applied = JuceEngine::get().updateClipFadesBatch(parsed); });
+    return (NSInteger)applied;
 #endif
 }
 
@@ -4016,6 +4138,79 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 #else
     juce::MessageManager::getInstance()->callSync([clipIndex, startSec, lengthSec, inFileOffsetSec]
                                                   { JuceEngine::get().setClipTime((int)clipIndex, startSec, lengthSec, inFileOffsetSec); });
+#endif
+}
+
++ (NSInteger)updateClipTimelineBatchObjC:(NSArray<NSDictionary *> *)updates
+{
+    juce::Array<juce::NamedValueSet> parsed;
+    parsed.ensureStorageAllocated((int)updates.count);
+    for (NSDictionary *entry in updates)
+    {
+        if (![entry isKindOfClass:[NSDictionary class]])
+            continue;
+
+        NSNumber *clip = entry[@"clip"];
+        if (![clip respondsToSelector:@selector(integerValue)])
+            continue;
+
+        juce::NamedValueSet update;
+        update.set("clip", (int)[clip integerValue]);
+
+        NSNumber *rowId = entry[@"rowId"];
+        if ([rowId respondsToSelector:@selector(integerValue)])
+            update.set("rowId", (int)[rowId integerValue]);
+
+        NSNumber *startSec = entry[@"startSec"];
+        if ([startSec respondsToSelector:@selector(doubleValue)])
+            update.set("startSec", (double)[startSec doubleValue]);
+
+        NSNumber *lengthSec = entry[@"lengthSec"];
+        if ([lengthSec respondsToSelector:@selector(doubleValue)])
+            update.set("lengthSec", (double)[lengthSec doubleValue]);
+
+        NSNumber *inFileOffsetSec = entry[@"inFileOffsetSec"];
+        if ([inFileOffsetSec respondsToSelector:@selector(doubleValue)])
+            update.set("inFileOffsetSec", (double)[inFileOffsetSec doubleValue]);
+
+        NSNumber *gain = entry[@"gain"];
+        if ([gain respondsToSelector:@selector(doubleValue)])
+            update.set("gain", (double)[gain doubleValue]);
+
+        NSNumber *extraGainLinear = entry[@"extraGainLinear"];
+        if ([extraGainLinear respondsToSelector:@selector(doubleValue)])
+            update.set("extraGainLinear", (double)[extraGainLinear doubleValue]);
+
+        NSNumber *reversed = entry[@"reversed"];
+        if ([reversed respondsToSelector:@selector(boolValue)])
+            update.set("reversed", (bool)[reversed boolValue]);
+
+        NSNumber *tempoRatio = entry[@"tempoRatio"];
+        if ([tempoRatio respondsToSelector:@selector(doubleValue)])
+            update.set("tempoRatio", (double)[tempoRatio doubleValue]);
+
+        NSNumber *preservePitch = entry[@"preservePitch"];
+        if ([preservePitch respondsToSelector:@selector(boolValue)])
+            update.set("preservePitch", (bool)[preservePitch boolValue]);
+
+        NSNumber *pitchSemitones = entry[@"pitchSemitones"];
+        if ([pitchSemitones respondsToSelector:@selector(doubleValue)])
+            update.set("pitchSemitones", (double)[pitchSemitones doubleValue]);
+
+        NSNumber *muted = entry[@"muted"];
+        if ([muted respondsToSelector:@selector(boolValue)])
+            update.set("muted", (bool)[muted boolValue]);
+
+        parsed.add(update);
+    }
+
+#if JUCE_MAC && !JUCE_IOS
+    return (NSInteger)JuceEngine::get().updateClipTimelineBatch(parsed);
+#else
+    int applied = 0;
+    juce::MessageManager::getInstance()->callSync([&parsed, &applied]
+                                                  { applied = JuceEngine::get().updateClipTimelineBatch(parsed); });
+    return (NSInteger)applied;
 #endif
 }
 

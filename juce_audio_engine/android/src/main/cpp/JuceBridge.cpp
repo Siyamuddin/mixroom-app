@@ -10,6 +10,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -92,16 +93,21 @@ double javaObjectToDouble(JNIEnv *env, jobject value, double fallback = 0.0)
     if (env->IsInstanceOf(value, numberClass))
     {
         jmethodID toDouble = env->GetMethodID(numberClass, "doubleValue", "()D");
-        return env->CallDoubleMethod(value, toDouble);
+        const double result = env->CallDoubleMethod(value, toDouble);
+        env->DeleteLocalRef(numberClass);
+        return result;
     }
+    env->DeleteLocalRef(numberClass);
 
     jclass stringClass = env->FindClass("java/lang/String");
     if (env->IsInstanceOf(value, stringClass))
     {
         juce::String s = juceStringFromJString(env, (jstring)value);
         const double parsed = s.getDoubleValue();
+        env->DeleteLocalRef(stringClass);
         return std::isfinite(parsed) ? parsed : fallback;
     }
+    env->DeleteLocalRef(stringClass);
     return fallback;
 }
 
@@ -114,14 +120,62 @@ int javaObjectToInt(JNIEnv *env, jobject value, int fallback = 0)
     if (env->IsInstanceOf(value, numberClass))
     {
         jmethodID toInt = env->GetMethodID(numberClass, "intValue", "()I");
-        return env->CallIntMethod(value, toInt);
+        const int result = env->CallIntMethod(value, toInt);
+        env->DeleteLocalRef(numberClass);
+        return result;
     }
+    env->DeleteLocalRef(numberClass);
 
     jclass stringClass = env->FindClass("java/lang/String");
     if (env->IsInstanceOf(value, stringClass))
     {
         juce::String s = juceStringFromJString(env, (jstring)value);
-        return s.getIntValue();
+        const int result = s.getIntValue();
+        env->DeleteLocalRef(stringClass);
+        return result;
+    }
+    env->DeleteLocalRef(stringClass);
+    return fallback;
+}
+
+bool javaObjectToBool(JNIEnv *env, jobject value, bool fallback = false)
+{
+    if (value == nullptr)
+        return fallback;
+
+    jclass booleanClass = env->FindClass("java/lang/Boolean");
+    if (env->IsInstanceOf(value, booleanClass))
+    {
+        jmethodID boolValue = env->GetMethodID(booleanClass, "booleanValue", "()Z");
+        const bool result = env->CallBooleanMethod(value, boolValue) == JNI_TRUE;
+        env->DeleteLocalRef(booleanClass);
+        return result;
+    }
+    env->DeleteLocalRef(booleanClass);
+
+    jclass numberClass = env->FindClass("java/lang/Number");
+    if (env->IsInstanceOf(value, numberClass))
+    {
+        jmethodID intValue = env->GetMethodID(numberClass, "intValue", "()I");
+        const bool result = env->CallIntMethod(value, intValue) != 0;
+        env->DeleteLocalRef(numberClass);
+        return result;
+    }
+    env->DeleteLocalRef(numberClass);
+
+    jclass stringClass = env->FindClass("java/lang/String");
+    if (env->IsInstanceOf(value, stringClass))
+    {
+        const auto text = juceStringFromJString(env, (jstring)value).trim().toLowerCase();
+        env->DeleteLocalRef(stringClass);
+        if (text == "true" || text == "1")
+            return true;
+        if (text == "false" || text == "0")
+            return false;
+    }
+    else
+    {
+        env->DeleteLocalRef(stringClass);
     }
     return fallback;
 }
@@ -273,37 +327,44 @@ juce::var javaObjectToVar(JNIEnv *env, jobject valueObj)
     jclass booleanClass = env->FindClass("java/lang/Boolean");
     jclass stringClass = env->FindClass("java/lang/String");
 
+    juce::var result;
     if (env->IsInstanceOf(valueObj, doubleClass))
     {
         jmethodID doubleValue = env->GetMethodID(doubleClass, "doubleValue", "()D");
-        return juce::var((double)env->CallDoubleMethod(valueObj, doubleValue));
+        result = juce::var((double)env->CallDoubleMethod(valueObj, doubleValue));
     }
-    if (env->IsInstanceOf(valueObj, integerClass))
+    else if (env->IsInstanceOf(valueObj, integerClass))
     {
         jmethodID intValue = env->GetMethodID(integerClass, "intValue", "()I");
-        return juce::var((int)env->CallIntMethod(valueObj, intValue));
+        result = juce::var((int)env->CallIntMethod(valueObj, intValue));
     }
-    if (env->IsInstanceOf(valueObj, longClass))
+    else if (env->IsInstanceOf(valueObj, longClass))
     {
         jmethodID longValue = env->GetMethodID(longClass, "longValue", "()J");
-        return juce::var((juce::int64)env->CallLongMethod(valueObj, longValue));
+        result = juce::var((juce::int64)env->CallLongMethod(valueObj, longValue));
     }
-    if (env->IsInstanceOf(valueObj, floatClass))
+    else if (env->IsInstanceOf(valueObj, floatClass))
     {
         jmethodID floatValue = env->GetMethodID(floatClass, "floatValue", "()F");
-        return juce::var((double)env->CallFloatMethod(valueObj, floatValue));
+        result = juce::var((double)env->CallFloatMethod(valueObj, floatValue));
     }
-    if (env->IsInstanceOf(valueObj, booleanClass))
+    else if (env->IsInstanceOf(valueObj, booleanClass))
     {
         jmethodID boolValue = env->GetMethodID(booleanClass, "booleanValue", "()Z");
-        return juce::var((bool)(env->CallBooleanMethod(valueObj, boolValue) == JNI_TRUE));
+        result = juce::var((bool)(env->CallBooleanMethod(valueObj, boolValue) == JNI_TRUE));
     }
-    if (env->IsInstanceOf(valueObj, stringClass))
+    else if (env->IsInstanceOf(valueObj, stringClass))
     {
-        return juce::var(juceStringFromJString(env, (jstring)valueObj));
+        result = juce::var(juceStringFromJString(env, (jstring)valueObj));
     }
 
-    return {};
+    env->DeleteLocalRef(doubleClass);
+    env->DeleteLocalRef(integerClass);
+    env->DeleteLocalRef(longClass);
+    env->DeleteLocalRef(floatClass);
+    env->DeleteLocalRef(booleanClass);
+    env->DeleteLocalRef(stringClass);
+    return result;
 }
 
 juce::Array<juce::NamedValueSet> parseTrackGroups(JNIEnv *env, jobject groupsList)
@@ -749,23 +810,55 @@ jobject namedValueStatsToJavaMap(JNIEnv *env, const juce::NamedValueSet &stats)
                                         "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
     jobject outMap = env->NewObject(mapClass, mapCtor);
 
+    jclass listClass = env->FindClass("java/util/ArrayList");
+    jmethodID listCtor = env->GetMethodID(listClass, "<init>", "()V");
+    jmethodID listAdd = env->GetMethodID(listClass, "add", "(Ljava/lang/Object;)Z");
     jclass doubleCls = env->FindClass("java/lang/Double");
     jmethodID doubleCtor = env->GetMethodID(doubleCls, "<init>", "(D)V");
+    jclass longCls = env->FindClass("java/lang/Long");
+    jmethodID longCtor = env->GetMethodID(longCls, "<init>", "(J)V");
+    jclass boolCls = env->FindClass("java/lang/Boolean");
+    jmethodID boolCtor = env->GetMethodID(boolCls, "<init>", "(Z)V");
 
-    auto putDouble = [&](const char *key, double value)
+    std::function<jobject(const juce::var &)> objectFromVar =
+        [&](const juce::var &value) -> jobject
+    {
+        if (value.isBool())
+            return env->NewObject(boolCls, boolCtor, (jboolean)((bool)value ? JNI_TRUE : JNI_FALSE));
+        if (value.isInt() || value.isInt64())
+            return env->NewObject(longCls, longCtor, (jlong)(juce::int64)value);
+        if (value.isDouble())
+            return env->NewObject(doubleCls, doubleCtor, (jdouble)(double)value);
+        if (value.isArray())
+        {
+            jobject outList = env->NewObject(listClass, listCtor);
+            if (auto *array = value.getArray())
+            {
+                for (const auto &entry : *array)
+                {
+                    jobject item = objectFromVar(entry);
+                    env->CallBooleanMethod(outList, listAdd, item);
+                    env->DeleteLocalRef(item);
+                }
+            }
+            return outList;
+        }
+
+        return env->NewStringUTF(value.toString().toRawUTF8());
+    };
+
+    auto putObject = [&](const char *key, jobject value)
     {
         jstring jKey = env->NewStringUTF(key);
-        jobject jValue = env->NewObject(doubleCls, doubleCtor, (jdouble)value);
-        env->CallObjectMethod(outMap, mapPut, jKey, jValue);
+        env->CallObjectMethod(outMap, mapPut, jKey, value);
         env->DeleteLocalRef(jKey);
-        env->DeleteLocalRef(jValue);
+        env->DeleteLocalRef(value);
     };
 
     for (int i = 0; i < stats.size(); ++i)
     {
         const auto key = stats.getName(i).toString();
-        const auto value = (double)stats.getValueAt(i);
-        putDouble(key.toRawUTF8(), value);
+        putObject(key.toRawUTF8(), objectFromVar(stats.getValueAt(i)));
     }
     return outMap;
 }
@@ -823,7 +916,9 @@ jobject javaMapValue(JNIEnv *env, jobject map, jstring key)
 {
     jclass mapClass = env->FindClass("java/util/Map");
     jmethodID mapGet = env->GetMethodID(mapClass, "get", "(Ljava/lang/Object;)Ljava/lang/Object;");
-    return env->CallObjectMethod(map, mapGet, key);
+    jobject result = env->CallObjectMethod(map, mapGet, key);
+    env->DeleteLocalRef(mapClass);
+    return result;
 }
 
 std::vector<PitchLabRange> parsePitchLabRanges(JNIEnv *env, jobject rangesList)
@@ -1281,6 +1376,214 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipTimeJNI(JNIEnv *, jclass,
                                                   { JuceEngine::get().setClipTime((int)clipIndex, (double)startSec, (double)lengthSec, (double)inFileOffsetSec); });
 }
 
+extern "C" JNIEXPORT jint JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_updateClipTimelineBatchJNI(JNIEnv *env,
+                                                                           jclass,
+                                                                           jobject updatesList)
+{
+    juce::Array<juce::NamedValueSet> updates;
+    if (updatesList != nullptr)
+    {
+        jclass listClass = env->FindClass("java/util/List");
+        jmethodID sizeMethod = env->GetMethodID(listClass, "size", "()I");
+        jmethodID getMethod = env->GetMethodID(listClass, "get", "(I)Ljava/lang/Object;");
+        jclass mapClass = env->FindClass("java/util/Map");
+        jstring keyClip = env->NewStringUTF("clip");
+        jstring keyRowId = env->NewStringUTF("rowId");
+        jstring keyStartSec = env->NewStringUTF("startSec");
+        jstring keyLengthSec = env->NewStringUTF("lengthSec");
+        jstring keyInFileOffsetSec = env->NewStringUTF("inFileOffsetSec");
+        jstring keyGain = env->NewStringUTF("gain");
+        jstring keyExtraGainLinear = env->NewStringUTF("extraGainLinear");
+        jstring keyReversed = env->NewStringUTF("reversed");
+        jstring keyTempoRatio = env->NewStringUTF("tempoRatio");
+        jstring keyPreservePitch = env->NewStringUTF("preservePitch");
+        jstring keyPitchSemitones = env->NewStringUTF("pitchSemitones");
+        jstring keyMuted = env->NewStringUTF("muted");
+
+        const jint count = env->CallIntMethod(updatesList, sizeMethod);
+        updates.ensureStorageAllocated((int)count);
+        for (jint i = 0; i < count; ++i)
+        {
+            jobject entry = env->CallObjectMethod(updatesList, getMethod, i);
+            if (entry == nullptr || !env->IsInstanceOf(entry, mapClass))
+            {
+                if (entry != nullptr)
+                    env->DeleteLocalRef(entry);
+                continue;
+            }
+
+            jobject clipObj = javaMapValue(env, entry, keyClip);
+            const int clip = javaObjectToInt(env, clipObj, -1);
+            if (clip >= 0)
+            {
+                juce::NamedValueSet update;
+                update.set("clip", clip);
+
+                jobject rowIdObj = javaMapValue(env, entry, keyRowId);
+                if (rowIdObj != nullptr)
+                    update.set("rowId", javaObjectToInt(env, rowIdObj, -1));
+
+                jobject startSecObj = javaMapValue(env, entry, keyStartSec);
+                if (startSecObj != nullptr)
+                    update.set("startSec", javaObjectToDouble(env, startSecObj, 0.0));
+
+                jobject lengthSecObj = javaMapValue(env, entry, keyLengthSec);
+                if (lengthSecObj != nullptr)
+                    update.set("lengthSec", javaObjectToDouble(env, lengthSecObj, 0.0));
+
+                jobject inFileOffsetSecObj = javaMapValue(env, entry, keyInFileOffsetSec);
+                if (inFileOffsetSecObj != nullptr)
+                    update.set("inFileOffsetSec", javaObjectToDouble(env, inFileOffsetSecObj, 0.0));
+
+                jobject gainObj = javaMapValue(env, entry, keyGain);
+                if (gainObj != nullptr)
+                    update.set("gain", javaObjectToDouble(env, gainObj, 1.0));
+
+                jobject extraGainLinearObj = javaMapValue(env, entry, keyExtraGainLinear);
+                if (extraGainLinearObj != nullptr)
+                    update.set("extraGainLinear", javaObjectToDouble(env, extraGainLinearObj, 1.0));
+
+                jobject reversedObj = javaMapValue(env, entry, keyReversed);
+                if (reversedObj != nullptr)
+                    update.set("reversed", javaObjectToBool(env, reversedObj));
+
+                jobject tempoRatioObj = javaMapValue(env, entry, keyTempoRatio);
+                if (tempoRatioObj != nullptr)
+                    update.set("tempoRatio", javaObjectToDouble(env, tempoRatioObj, 1.0));
+
+                jobject preservePitchObj = javaMapValue(env, entry, keyPreservePitch);
+                if (preservePitchObj != nullptr)
+                    update.set("preservePitch", javaObjectToBool(env, preservePitchObj, true));
+
+                jobject pitchSemitonesObj = javaMapValue(env, entry, keyPitchSemitones);
+                if (pitchSemitonesObj != nullptr)
+                    update.set("pitchSemitones", javaObjectToDouble(env, pitchSemitonesObj, 0.0));
+
+                jobject mutedObj = javaMapValue(env, entry, keyMuted);
+                if (mutedObj != nullptr)
+                    update.set("muted", javaObjectToBool(env, mutedObj));
+
+                updates.add(update);
+
+                if (rowIdObj != nullptr)
+                    env->DeleteLocalRef(rowIdObj);
+                if (startSecObj != nullptr)
+                    env->DeleteLocalRef(startSecObj);
+                if (lengthSecObj != nullptr)
+                    env->DeleteLocalRef(lengthSecObj);
+                if (inFileOffsetSecObj != nullptr)
+                    env->DeleteLocalRef(inFileOffsetSecObj);
+                if (gainObj != nullptr)
+                    env->DeleteLocalRef(gainObj);
+                if (extraGainLinearObj != nullptr)
+                    env->DeleteLocalRef(extraGainLinearObj);
+                if (reversedObj != nullptr)
+                    env->DeleteLocalRef(reversedObj);
+                if (tempoRatioObj != nullptr)
+                    env->DeleteLocalRef(tempoRatioObj);
+                if (preservePitchObj != nullptr)
+                    env->DeleteLocalRef(preservePitchObj);
+                if (pitchSemitonesObj != nullptr)
+                    env->DeleteLocalRef(pitchSemitonesObj);
+                if (mutedObj != nullptr)
+                    env->DeleteLocalRef(mutedObj);
+            }
+
+            if (clipObj != nullptr)
+                env->DeleteLocalRef(clipObj);
+            env->DeleteLocalRef(entry);
+        }
+
+        env->DeleteLocalRef(keyClip);
+        env->DeleteLocalRef(keyRowId);
+        env->DeleteLocalRef(keyStartSec);
+        env->DeleteLocalRef(keyLengthSec);
+        env->DeleteLocalRef(keyInFileOffsetSec);
+        env->DeleteLocalRef(keyGain);
+        env->DeleteLocalRef(keyExtraGainLinear);
+        env->DeleteLocalRef(keyReversed);
+        env->DeleteLocalRef(keyTempoRatio);
+        env->DeleteLocalRef(keyPreservePitch);
+        env->DeleteLocalRef(keyPitchSemitones);
+        env->DeleteLocalRef(keyMuted);
+    }
+
+    int applied = 0;
+    juce::MessageManager::getInstance()->callSync([&updates, &applied]
+                                                  { applied = JuceEngine::get().updateClipTimelineBatch(updates); });
+    return (jint)applied;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_updateClipFadesBatchJNI(JNIEnv *env,
+                                                                        jclass,
+                                                                        jobject updatesList)
+{
+    juce::Array<juce::NamedValueSet> updates;
+    if (updatesList != nullptr)
+    {
+        jclass listClass = env->FindClass("java/util/List");
+        jmethodID sizeMethod = env->GetMethodID(listClass, "size", "()I");
+        jmethodID getMethod = env->GetMethodID(listClass, "get", "(I)Ljava/lang/Object;");
+        jclass mapClass = env->FindClass("java/util/Map");
+        jstring keyClip = env->NewStringUTF("clip");
+        jstring keyFadeInSec = env->NewStringUTF("fadeInSec");
+        jstring keyFadeOutSec = env->NewStringUTF("fadeOutSec");
+        jstring keyFadeCurve = env->NewStringUTF("fadeCurve");
+
+        const jint count = env->CallIntMethod(updatesList, sizeMethod);
+        updates.ensureStorageAllocated((int)count);
+        for (jint i = 0; i < count; ++i)
+        {
+            jobject entry = env->CallObjectMethod(updatesList, getMethod, i);
+            if (entry == nullptr || !env->IsInstanceOf(entry, mapClass))
+            {
+                if (entry != nullptr)
+                    env->DeleteLocalRef(entry);
+                continue;
+            }
+
+            jobject clipObj = javaMapValue(env, entry, keyClip);
+            const int clip = javaObjectToInt(env, clipObj, -1);
+            if (clip >= 0)
+            {
+                jobject fadeInObj = javaMapValue(env, entry, keyFadeInSec);
+                jobject fadeOutObj = javaMapValue(env, entry, keyFadeOutSec);
+                jobject fadeCurveObj = javaMapValue(env, entry, keyFadeCurve);
+
+                juce::NamedValueSet update;
+                update.set("clip", clip);
+                update.set("fadeInSec", javaObjectToDouble(env, fadeInObj, 0.0));
+                update.set("fadeOutSec", javaObjectToDouble(env, fadeOutObj, 0.0));
+                update.set("fadeCurve", javaObjectToInt(env, fadeCurveObj, 0));
+                updates.add(update);
+
+                if (fadeInObj != nullptr)
+                    env->DeleteLocalRef(fadeInObj);
+                if (fadeOutObj != nullptr)
+                    env->DeleteLocalRef(fadeOutObj);
+                if (fadeCurveObj != nullptr)
+                    env->DeleteLocalRef(fadeCurveObj);
+            }
+
+            if (clipObj != nullptr)
+                env->DeleteLocalRef(clipObj);
+            env->DeleteLocalRef(entry);
+        }
+
+        env->DeleteLocalRef(keyClip);
+        env->DeleteLocalRef(keyFadeInSec);
+        env->DeleteLocalRef(keyFadeOutSec);
+        env->DeleteLocalRef(keyFadeCurve);
+    }
+
+    int applied = 0;
+    juce::MessageManager::getInstance()->callSync([&updates, &applied]
+                                                  { applied = JuceEngine::get().updateClipFadesBatch(updates); });
+    return (jint)applied;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_setClipPanJNI(JNIEnv *, jclass, jint clipIndex, jfloat pan)
 {
@@ -1395,9 +1698,12 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_loadMidiClipJNI(JNIEnv *env,
     const auto notes = parseTimelineMidiNotes(env, notesList);
     const auto params = parseNamedValueSet(env, paramsMap);
 
-    std::atomic<bool> ok{false};
-    juce::MessageManager::getInstance()->callSync([&]
-                                                  {
+    if (!JuceEngine::get().prepareMidiClipSampleAssets(id, name, notes))
+        return JNI_FALSE;
+
+    bool ok = false;
+    auto installMidiClip = [&]
+    {
         ok = JuceEngine::get().loadMidiClip(
             (int)clipIndex,
             (int)rowId,
@@ -1408,8 +1714,22 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_loadMidiClipJNI(JNIEnv *env,
             (double)sourceTempoBpm,
             (double)startSec,
             (double)lengthSec,
-            (double)inFileOffsetSec); });
-    return ok.load() ? JNI_TRUE : JNI_FALSE;
+            (double)inFileOffsetSec);
+    };
+
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        if (mm->isThisTheMessageThread())
+            installMidiClip();
+        else
+            mm->callSync(installMidiClip);
+    }
+    else
+    {
+        installMidiClip();
+    }
+
+    return ok ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -1427,17 +1747,34 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_updateMidiClipEventsJNI(JNIEnv *
     const auto notes = parseTimelineMidiNotes(env, notesList);
     const auto params = parseNamedValueSet(env, paramsMap);
 
-    std::atomic<bool> ok{false};
-    juce::MessageManager::getInstance()->callSync([&]
-                                                  {
+    if (!JuceEngine::get().prepareMidiClipSampleAssets(id, name, notes))
+        return JNI_FALSE;
+
+    bool ok = false;
+    auto updateMidiClip = [&]
+    {
         ok = JuceEngine::get().updateMidiClipEvents(
             (int)clipIndex,
             id,
             name,
             notes,
             params,
-            (double)sourceTempoBpm); });
-    return ok.load() ? JNI_TRUE : JNI_FALSE;
+            (double)sourceTempoBpm);
+    };
+
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        if (mm->isThisTheMessageThread())
+            updateMidiClip();
+        else
+            mm->callSync(updateMidiClip);
+    }
+    else
+    {
+        updateMidiClip();
+    }
+
+    return ok ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -1947,8 +2284,12 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_loadVideoAudioJNI(JNIEnv *env, j
     juce::String jucePath = juce::String::fromUTF8(c);
     env->ReleaseStringUTFChars(path, c);
 
-    juce::MessageManager::callAsync([jucePath]
-                                    { JuceEngine::get().loadVideoAudio(juce::File(jucePath)); });
+    auto file = juce::File(jucePath);
+    auto preparedAsset = JuceEngine::get().prepareClipAudioAsset(file);
+    juce::MessageManager::callAsync([jucePath, preparedAsset]
+                                    { JuceEngine::get().loadVideoAudioWithPreparedAudioAsset(
+                                          juce::File(jucePath),
+                                          preparedAsset); });
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -1983,14 +2324,35 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_loadClipJNI(JNIEnv *env,
                                                              jdouble inFileOffsetSec)
 {
     const juce::String jucePath = juceStringFromJString(env, path);
+    juce::File file(jucePath);
+    auto preparedAsset = JuceEngine::get().prepareClipAudioAsset(file);
+    if (preparedAsset == nullptr)
+        return false;
+
     bool ok = false;
-    juce::MessageManager::getInstance()->callSync([&]
-                                                  { ok = JuceEngine::get().loadClip((int)clipIndex,
-                                                                                    (int)rowId,
-                                                                                    juce::File(jucePath),
-                                                                                    (double)startSec,
-                                                                                    (double)lengthSec,
-                                                                                    (double)inFileOffsetSec); });
+    auto installPreparedClip = [&]
+    {
+        ok = JuceEngine::get().loadClipWithPreparedAudioAsset((int)clipIndex,
+                                                              (int)rowId,
+                                                              file,
+                                                              preparedAsset,
+                                                              (double)startSec,
+                                                              (double)lengthSec,
+                                                              (double)inFileOffsetSec);
+    };
+
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        if (mm->isThisTheMessageThread())
+            installPreparedClip();
+        else
+            mm->callSync(installPreparedClip);
+    }
+    else
+    {
+        installPreparedClip();
+    }
+
     return ok;
 }
 
@@ -1999,6 +2361,31 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_unloadClipJNI(JNIEnv *, jclass, 
 {
     juce::MessageManager::getInstance()->callSync([clipIndex]
                                                   { JuceEngine::get().unloadClip((int)clipIndex); });
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_unloadClipsJNI(JNIEnv *env,
+                                                               jclass,
+                                                               jintArray clipIndices)
+{
+    juce::Array<int> clips;
+    if (clipIndices != nullptr)
+    {
+        const jsize count = env->GetArrayLength(clipIndices);
+        clips.ensureStorageAllocated((int)count);
+        jint *values = env->GetIntArrayElements(clipIndices, nullptr);
+        if (values != nullptr)
+        {
+            for (jsize i = 0; i < count; ++i)
+                clips.addIfNotAlreadyThere((int)values[i]);
+            env->ReleaseIntArrayElements(clipIndices, values, JNI_ABORT);
+        }
+    }
+
+    int removed = 0;
+    juce::MessageManager::getInstance()->callSync([&clips, &removed]
+                                                  { removed = JuceEngine::get().unloadClips(clips); });
+    return (jint)removed;
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -2490,6 +2877,38 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMasterPanJNI(JNIEnv *, jclass
 {
     juce::MessageManager::getInstance()->callSync([pan]
                                                   { JuceEngine::get().setMasterPan((float)pan); });
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getEngineDiagnosticsJNI(JNIEnv *env, jclass)
+{
+    juce::NamedValueSet diagnostics;
+    juce::MessageManager::getInstance()->callSync([&diagnostics]
+                                                  { diagnostics = JuceEngine::get().getEngineDiagnostics(); });
+    return namedValueStatsToJavaMap(env, diagnostics);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_resetRealtimePerformanceStatsJNI(JNIEnv *, jclass)
+{
+    juce::MessageManager::getInstance()->callSync([]
+                                                  { JuceEngine::get().resetRealtimePerformanceStats(); });
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_runEngineStressTestJNI(JNIEnv *env,
+                                                                       jclass,
+                                                                       jint clipCount,
+                                                                       jint blockCount,
+                                                                       jint blockSize,
+                                                                       jdouble sampleRate)
+{
+    const auto stats = JuceEngine::get().runTimelineRendererStressTest(
+        (int)clipCount,
+        (int)blockCount,
+        (int)blockSize,
+        (double)sampleRate);
+    return namedValueStatsToJavaMap(env, stats);
 }
 
 extern "C" JNIEXPORT void JNICALL

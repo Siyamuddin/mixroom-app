@@ -56,6 +56,11 @@
 + (void)clearPluginQuarantineObjC:(NSString *)pluginId;
 + (void)clearAllPluginQuarantinesObjC;
 + (NSDictionary<NSString *, id> *)getEngineDiagnosticsObjC;
++ (NSDictionary<NSString *, id> *)runEngineStressTestObjC:(NSInteger)clipCount
+                                               blockCount:(NSInteger)blockCount
+                                                blockSize:(NSInteger)blockSize
+                                               sampleRate:(double)sampleRate;
++ (void)resetRealtimePerformanceStatsObjC;
 + (void)bypassPluginObjC:(NSInteger)trackIndex
              effectIndex:(NSInteger)effectIndex
                   bypass:(BOOL)shouldBypass;
@@ -122,6 +127,7 @@
 + (NSArray<NSDictionary *> *)consumeLiveMidiInputEventsObjC;
 + (NSArray<NSDictionary *> *)getConnectedMidiInputDevicesObjC;
 + (void)unloadClipObjC:(NSInteger)clipIndex;
++ (NSInteger)unloadClipsObjC:(NSArray<NSNumber *> *)clipIndices;
 + (void)setClipGainObjC:(NSInteger)clipIndex gain:(float)gain;
 + (void)setClipExtraGainLinearObjC:(NSInteger)clipIndex gain:(float)gain;
 + (void)muteClipObjC:(NSInteger)clipIndex shouldMute:(BOOL)shouldMute;
@@ -130,6 +136,7 @@
                fadeInSec:(double)fadeInSec
               fadeOutSec:(double)fadeOutSec
                fadeCurve:(NSInteger)fadeCurve;
++ (NSInteger)updateClipFadesBatchObjC:(NSArray<NSDictionary *> *)updates;
 + (void)setClipPitchObjC:(NSInteger)clipIndex semitones:(float)semitones;
 + (void)setClipReversedObjC:(NSInteger)clipIndex reversed:(BOOL)reversed;
 + (void)setClipStretchOptionsObjC:(NSInteger)clipIndex
@@ -140,6 +147,7 @@
                startSec:(double)startSec
               lengthSec:(double)lengthSec
         inFileOffsetSec:(double)inFileOffsetSec;
++ (NSInteger)updateClipTimelineBatchObjC:(NSArray<NSDictionary *> *)updates;
 
 // Row management
 + (NSNumber *)addRowObjC:(NSString *)name iconId:(NSInteger)iconId;

@@ -130,12 +130,12 @@ class JsonAudioProjectPersistence implements AudioProjectPersistence {
   }
 
   Future<Map<String, dynamic>> _readProjectFile(File file) async {
-    final decoded = jsonDecode(await file.readAsString());
-    if (decoded is! Map<String, dynamic>) {
-      throw const FormatException(
-          'Project state must decode to a JSON object.');
-    }
-    return decoded;
+    final encoded = await file.readAsString();
+    return compute<String, Map<String, dynamic>>(
+      _decodeProjectState,
+      encoded,
+      debugLabel: 'project-json-decode',
+    );
   }
 
   Directory _recoveryDir(
@@ -299,4 +299,12 @@ class AutosaveCoordinator {
 
 String _encodeProjectState(Map<String, dynamic> projectState) {
   return jsonEncode(projectState);
+}
+
+Map<String, dynamic> _decodeProjectState(String encoded) {
+  final decoded = jsonDecode(encoded);
+  if (decoded is! Map<String, dynamic>) {
+    throw const FormatException('Project state must decode to a JSON object.');
+  }
+  return decoded;
 }

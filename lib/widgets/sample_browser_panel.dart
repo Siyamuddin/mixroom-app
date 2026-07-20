@@ -23,6 +23,10 @@ class SampleDragData {
   });
 }
 
+typedef SampleBrowserDirectoryReader = Future<List<FileSystemEntity>> Function(
+  String directoryPath,
+);
+
 class SampleBrowserPanelViewState {
   final String? selectedRoot;
   final String? selectedTreePath;
@@ -62,6 +66,7 @@ class SampleBrowserPanel extends StatefulWidget {
   final VoidCallback? onDragOutsidePanel;
   final SampleBrowserPanelViewState? initialViewState;
   final ValueChanged<SampleBrowserPanelViewState>? onViewStateChanged;
+  final SampleBrowserDirectoryReader? directoryReader;
 
   const SampleBrowserPanel({
     super.key,
@@ -85,13 +90,15 @@ class SampleBrowserPanel extends StatefulWidget {
     this.onDragOutsidePanel,
     this.initialViewState,
     this.onViewStateChanged,
+    this.directoryReader,
   });
 
   @override
   State<SampleBrowserPanel> createState() => _SampleBrowserPanelState();
 }
 
-class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
+class _SampleBrowserPanelState extends State<SampleBrowserPanel>
+    with WidgetsBindingObserver {
   static const Color _kPanelText = Color(0xFFF4F4F4);
   static const Color _kPanelMutedText = Color(0xB8F4F4F4);
   static const Color _kPanelBorder = Color.fromRGBO(255, 255, 255, 0.12);
@@ -100,6 +107,10 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   static const Color _kPanelAccent = Color(0xFF78D9FF);
   static const Color _kHelpWarmBorder = Color(0xFFE0B27F);
   static const Duration _kFolderHoldDelay = Duration(milliseconds: 180);
+  static const List<Duration> _kEmptyDirectoryRetryDelays = <Duration>[
+    Duration(milliseconds: 140),
+    Duration(milliseconds: 360),
+  ];
   static const double _kFolderHoldMoveTolerance = 14.0;
   static const int _kPreviewWaveformMobileBars = 128;
   static const int _kPreviewWaveformMaxBars = 640;
@@ -120,6 +131,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
 
   final Set<String> _expandedDirs = <String>{};
   final Set<String> _loadingDirs = <String>{};
+  final Set<String> _reloadAfterCurrentLoad = <String>{};
   final Map<String, List<FileSystemEntity>> _childrenByDir =
       <String, List<FileSystemEntity>>{};
   final Map<String, String> _dirErrors = <String, String>{};
@@ -145,6 +157,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final initialViewState = widget.initialViewState;
     if (initialViewState != null) {
       _selectedRoot = initialViewState.selectedRoot;
@@ -205,11 +218,24 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
   @override
   void dispose() {
     _folderHoldTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     _notifyViewState();
     _treeScrollController.removeListener(_notifyViewState);
     _treeFocusNode.dispose();
     _treeScrollController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    _refreshExpandedDirectories();
+  }
+
+  void _refreshExpandedDirectories() {
+    for (final dirPath in _expandedDirs.toList(growable: false)) {
+      unawaited(_ensureDirectoryLoaded(dirPath, force: true));
+    }
   }
 
   void _notifyViewState() {
@@ -400,36 +426,89 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
         lower.contains('operation not permitted');
   }
 
-  Future<void> _ensureDirectoryLoaded(String dirPath,
-      {bool force = false}) async {
+  Future<List<FileSystemEntity>> _readVisibleDirectoryChildren(
+    String dirPath,
+  ) async {
+    Object? lastError;
+    StackTrace? lastStackTrace;
+    final maxAttempts = _kEmptyDirectoryRetryDelays.length + 1;
+
+    for (int attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        final List<FileSystemEntity> entities;
+        if (widget.directoryReader != null) {
+          entities = await widget.directoryReader!(dirPath);
+        } else {
+          final dir = Directory(dirPath);
+          if (!await dir.exists()) {
+            throw FileSystemException('Folder is unavailable', dirPath);
+          }
+          entities = await dir.list(followLinks: false).toList();
+        }
+        final visible = <FileSystemEntity>[];
+        for (final entity in entities) {
+          final name = p.basename(entity.path);
+          if (name.startsWith('.')) continue;
+          if (entity is Directory || _isAudioFile(entity.path)) {
+            visible.add(entity);
+          }
+        }
+        visible.sort((a, b) {
+          final aDir = a is Directory;
+          final bDir = b is Directory;
+          if (aDir != bDir) return aDir ? -1 : 1;
+          return _displayNameForPath(a.path)
+              .toLowerCase()
+              .compareTo(_displayNameForPath(b.path).toLowerCase());
+        });
+        if (visible.isNotEmpty) {
+          return visible;
+        }
+        if (attempt == maxAttempts - 1) {
+          if (lastError != null && lastStackTrace != null) {
+            Error.throwWithStackTrace(lastError, lastStackTrace);
+          }
+          return const <FileSystemEntity>[];
+        }
+      } catch (error, stackTrace) {
+        lastError = error;
+        lastStackTrace = stackTrace;
+        if (attempt == maxAttempts - 1) {
+          Error.throwWithStackTrace(error, stackTrace);
+        }
+      }
+
+      await Future<void>.delayed(_kEmptyDirectoryRetryDelays[attempt]);
+      if (!mounted) return const <FileSystemEntity>[];
+    }
+
+    return const <FileSystemEntity>[];
+  }
+
+  bool _directoryNeedsRefresh(String dirPath) {
+    final children = _childrenByDir[dirPath];
+    return children == null ||
+        children.isEmpty ||
+        _dirErrors.containsKey(dirPath);
+  }
+
+  Future<void> _ensureDirectoryLoaded(
+    String dirPath, {
+    bool force = false,
+  }) async {
     if (!force && _childrenByDir.containsKey(dirPath)) return;
-    if (_loadingDirs.contains(dirPath)) return;
+    if (_loadingDirs.contains(dirPath)) {
+      if (force) {
+        _reloadAfterCurrentLoad.add(dirPath);
+      }
+      return;
+    }
     setState(() {
       _loadingDirs.add(dirPath);
     });
 
     try {
-      final dir = Directory(dirPath);
-      if (!await dir.exists()) {
-        throw FileSystemException('Folder is unavailable', dirPath);
-      }
-      final entities = await dir.list(followLinks: false).toList();
-      final visible = <FileSystemEntity>[];
-      for (final entity in entities) {
-        final name = p.basename(entity.path);
-        if (name.startsWith('.')) continue;
-        if (entity is Directory || _isAudioFile(entity.path)) {
-          visible.add(entity);
-        }
-      }
-      visible.sort((a, b) {
-        final aDir = a is Directory;
-        final bDir = b is Directory;
-        if (aDir != bDir) return aDir ? -1 : 1;
-        return _displayNameForPath(a.path)
-            .toLowerCase()
-            .compareTo(_displayNameForPath(b.path).toLowerCase());
-      });
+      final visible = await _readVisibleDirectoryChildren(dirPath);
       if (!mounted) return;
       setState(() {
         _childrenByDir[dirPath] = visible;
@@ -439,14 +518,17 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _childrenByDir[dirPath] = const <FileSystemEntity>[];
         _dirErrors[dirPath] = _friendlyDirError(e);
       });
     } finally {
       if (mounted) {
+        final reloadRequested = _reloadAfterCurrentLoad.remove(dirPath);
         setState(() {
           _loadingDirs.remove(dirPath);
         });
+        if (reloadRequested) {
+          unawaited(_ensureDirectoryLoaded(dirPath, force: true));
+        }
       }
     }
   }
@@ -462,7 +544,10 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
     });
     _notifyViewState();
     if (shouldExpand) {
-      _ensureDirectoryLoaded(dirPath);
+      _ensureDirectoryLoaded(
+        dirPath,
+        force: _directoryNeedsRefresh(dirPath),
+      );
     }
   }
 
@@ -474,7 +559,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
     });
     _notifyViewState();
     _requestTreeFocus();
-    _ensureDirectoryLoaded(rootPath);
+    _ensureDirectoryLoaded(rootPath, force: true);
   }
 
   void _setPreviewFocusPath(String filePath) {
@@ -628,7 +713,12 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel> {
           _expandedDirs.add(selectedLine.path);
         });
         _notifyViewState();
-        unawaited(_ensureDirectoryLoaded(selectedLine.path));
+        unawaited(
+          _ensureDirectoryLoaded(
+            selectedLine.path,
+            force: _directoryNeedsRefresh(selectedLine.path),
+          ),
+        );
       } else if (!selectedLine.isDirectory) {
         _selectTreeLine(selectedLine);
         _restartPreviewForFile(selectedLine.path);

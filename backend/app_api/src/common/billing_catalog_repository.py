@@ -148,12 +148,33 @@ class BillingCatalogRepository:
         if not isinstance(payload, dict):
             raise ValueError("One-time product payload must be an object.")
         code = _safe_str(payload.get("code")).lower()
-        name = _safe_str(payload.get("order_name") or payload.get("name"))
-        try: amount = int(payload.get("amount"))
-        except (TypeError, ValueError): amount = 0
+        page_title = _safe_str(payload.get("page_title") or payload.get("order_name") or payload.get("name"))
         if not _ONE_TIME_CODE_RE.fullmatch(code): raise ValueError("code must be a lowercase URL slug.")
-        if not name or len(name) > 100: raise ValueError("order_name is required and must be at most 100 characters.")
-        if amount < 1 or amount > 1_000_000_000: raise ValueError("amount must be a valid KRW amount.")
+        if not page_title or len(page_title) > 100: raise ValueError("page_title is required and must be at most 100 characters.")
+        raw_items = payload.get("items")
+        if raw_items is None:
+            raw_items = [{"code": code, "order_name": payload.get("order_name") or payload.get("name"), "amount": payload.get("amount")}]
+        if not isinstance(raw_items, list) or not 1 <= len(raw_items) <= 20:
+            raise ValueError("items must contain between 1 and 20 payment items.")
+        items = []
+        seen_item_codes = set()
+        for index, raw_item in enumerate(raw_items):
+            if not isinstance(raw_item, dict):
+                raise ValueError("Each payment item must be an object.")
+            item_code = _safe_str(raw_item.get("code") or f"item-{index + 1}").lower()
+            item_name = _safe_str(raw_item.get("order_name") or raw_item.get("name"))
+            try: item_amount = int(raw_item.get("amount"))
+            except (TypeError, ValueError): item_amount = 0
+            if not _ONE_TIME_CODE_RE.fullmatch(item_code):
+                raise ValueError("Each payment item code must be a lowercase slug.")
+            if item_code in seen_item_codes:
+                raise ValueError("Payment item codes must be unique within a link.")
+            if not item_name or len(item_name) > 100:
+                raise ValueError("Each payment item name is required and must be at most 100 characters.")
+            if item_amount < 1 or item_amount > 1_000_000_000:
+                raise ValueError("Each payment item amount must be a valid KRW amount.")
+            seen_item_codes.add(item_code)
+            items.append({"code": item_code, "order_name": item_name, "amount": item_amount, "currency": "KRW"})
         expires_at = _safe_str(payload.get("expires_at"))
         if expires_at:
             try:
@@ -161,19 +182,34 @@ class BillingCatalogRepository:
                 if expiry.tzinfo is None: raise ValueError
                 expires_at = expiry.astimezone(timezone.utc).isoformat()
             except ValueError: raise ValueError("expires_at must be an ISO-8601 timestamp with timezone.")
-        product = {"code": code, "order_name": name, "amount": amount, "currency": "KRW",
+        product = {"code": code, "page_title": page_title, "order_name": page_title,
+                   "amount": items[0]["amount"], "currency": "KRW", "items": items,
                    "enabled": bool(payload.get("enabled")), "expires_at": expires_at}
         now = _utc_now_iso()
         self._table.put_item(Item={"provider_product_key": f"{_ONE_TIME_PRODUCT_PREFIX}{code}", "kind": "one_time_product", "code": code, "payload": product, "updated_at": now, "updated_by_user_id": _safe_str(updated_by_user_id), "updated_by_email": _safe_str(updated_by_email).lower()})
         return product
 
-    def create_one_time_checkout_intent(self, code: str) -> Dict[str, Any]:
+    def create_one_time_checkout_intent(self, code: str, item_code: str = "") -> Dict[str, Any]:
         product = self.get_one_time_product(code, public_only=True)
         if not product: return {}
+        items = product.get("items") if isinstance(product.get("items"), list) else []
+        if not items:
+            items = [{"code": product["code"], "order_name": product["order_name"], "amount": product["amount"], "currency": "KRW"}]
+        requested_item_code = _safe_str(item_code).lower()
+        if requested_item_code:
+            selected = next((item for item in items if _safe_str(item.get("code")).lower() == requested_item_code), None)
+        else:
+            selected = items[0] if len(items) == 1 else None
+        if not selected: return {}
         now = datetime.now(timezone.utc)
         expires_at = now + timedelta(minutes=15)
-        order_id = f"one-time-{product['code']}-{uuid.uuid4().hex}"
-        intent = {"order_id": order_id, "product_code": product["code"], "order_name": product["order_name"], "amount": product["amount"], "currency": "KRW", "expires_at": expires_at.isoformat(), "ttl": int(expires_at.timestamp())}
+        selected_code = _safe_str(selected.get("code")).lower()
+        payment_code = product["code"] if selected_code == product["code"] else f"{product['code']}-{selected_code}"
+        order_id = f"one-{product['code'][:16]}-{selected_code[:12]}-{uuid.uuid4().hex[:24]}"
+        intent = {"order_id": order_id, "page_code": product["code"], "item_code": selected_code,
+                  "product_code": payment_code, "order_name": selected["order_name"],
+                  "amount": selected["amount"], "currency": "KRW",
+                  "expires_at": expires_at.isoformat(), "ttl": int(expires_at.timestamp())}
         self._table.put_item(Item={"provider_product_key": f"{_ONE_TIME_INTENT_PREFIX}{order_id}", "kind": "one_time_checkout_intent", "code": product["code"], "payload": intent, "ttl": intent["ttl"], "updated_at": _utc_now_iso()})
         return intent
 

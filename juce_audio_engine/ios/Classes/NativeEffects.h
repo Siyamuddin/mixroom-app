@@ -10,6 +10,24 @@
 #include <vector>
 
 #define numOutputs 2
+static constexpr int kMixroomEffectRealtimeScratchMaxSamples = 8192;
+
+static inline int mixroomEffectRealtimeScratchCapacity(int requestedSamples) noexcept
+{
+    return juce::jmax(
+        1,
+        juce::jmax(requestedSamples, kMixroomEffectRealtimeScratchMaxSamples));
+}
+
+static inline bool mixroomEffectScratchAvailable(int requiredSamples,
+                                                 int capacitySamples) noexcept
+{
+    if (requiredSamples <= capacitySamples)
+        return true;
+
+    jassertfalse;
+    return false;
+}
 
 namespace mixroom::fx
 {
@@ -60,6 +78,10 @@ inline bool getGlobalTransportPlaying()
 {
     return globalTransportPlaying().load(std::memory_order_relaxed);
 }
+
+inline std::atomic<float> *rawParameterValueForBuiltInEffect(
+    juce::AudioProcessor &processor,
+    const juce::String &parameterId) noexcept;
 } // namespace mixroom::fx
 
 // using namespace juce;
@@ -141,7 +163,7 @@ public:
     void prepare(double inputSampleRate, int maxBlockSize)
     {
         sampleRate = sanitiseEffectSampleRate(inputSampleRate);
-        bufferSize = juce::jmax(1, maxBlockSize);
+        bufferSize = mixroomEffectRealtimeScratchCapacity(maxBlockSize);
         dryBuffer.setSize(numOutputs, bufferSize);
         wetBuffer.setSize(numOutputs, bufferSize);
         lastHpfFreq = -1.0f;
@@ -152,6 +174,14 @@ public:
         lastRoomSize = -1.0f;
         lastDamping = -1.0f;
         prepareProcessChain();
+        reset();
+    }
+
+    void reset()
+    {
+        processChain.reset();
+        dryBuffer.clear();
+        wetBuffer.clear();
     }
 
     void process(juce::AudioBuffer<float> &inputBuffer)
@@ -160,7 +190,9 @@ public:
         if (blockSamples <= 0)
             return;
 
-        ensureCapacity(blockSamples);
+        if (!ensureCapacity(blockSamples))
+            return;
+
         copyToFixedStereoBuffer(inputBuffer, dryBuffer);
         copyToFixedStereoBuffer(inputBuffer, wetBuffer);
         setupDelay();
@@ -190,17 +222,12 @@ private:
         processChain.prepare(spec);
     }
 
-    void ensureCapacity(int requiredSamples)
+    bool ensureCapacity(int requiredSamples) noexcept
     {
         if (requiredSamples <= bufferSize)
-            return;
+            return true;
 
-        bufferSize = requiredSamples;
-        dryBuffer.setSize(numOutputs, bufferSize);
-        wetBuffer.setSize(numOutputs, bufferSize);
-        prepareProcessChain();
-        lastHpfFreq = -1.0f;
-        lastLpfFreq = -1.0f;
+        return mixroomEffectScratchAvailable(requiredSamples, bufferSize);
     }
 
     void setupDelay()
@@ -222,9 +249,9 @@ private:
             return;
 
         *processChain.get<ChainIndex::HPF>().state =
-            *juce::dsp::IIR::Coefficients<float>::makeHighPass(sampleRate, parameters.hpfFreq);
+            juce::dsp::IIR::ArrayCoefficients<float>::makeHighPass(sampleRate, parameters.hpfFreq);
         *processChain.get<ChainIndex::LPF>().state =
-            *juce::dsp::IIR::Coefficients<float>::makeLowPass(sampleRate, parameters.lpfFreq);
+            juce::dsp::IIR::ArrayCoefficients<float>::makeLowPass(sampleRate, parameters.lpfFreq);
         lastHpfFreq = parameters.hpfFreq;
         lastLpfFreq = parameters.lpfFreq;
     }
@@ -313,6 +340,7 @@ class ReverbAudioProcessor : public juce::AudioProcessor
 public:
     ReverbAudioProcessor();
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void reset() override;
 #ifndef JucePlugin_PreferredChannelConfigurations
     bool isBusesLayoutSupported(const BusesLayout &layouts) const override;
 #endif
@@ -411,6 +439,9 @@ public:
     {
         sampleRate = newSampleRate;
         bufferSize = maxBlockSize;
+        hpfInitialised = false;
+        lpfInitialised = false;
+        bandsInitialised = false;
         juce::dsp::ProcessSpec spec;
         spec.sampleRate = newSampleRate;
         spec.maximumBlockSize = maxBlockSize;
@@ -420,10 +451,15 @@ public:
 
     void process(juce::AudioBuffer<float> &inputBuffer)
     {
+        const int channelsToProcess = juce::jmin(numOutputs, inputBuffer.getNumChannels());
+        if (channelsToProcess <= 0)
+            return;
+
         setupHPF();
         setupLPF();
         setupBands();
-        juce::dsp::AudioBlock<float> block(inputBuffer);
+        auto block = juce::dsp::AudioBlock<float>(inputBuffer)
+                         .getSubsetChannelBlock(0, (size_t)channelsToProcess);
         juce::dsp::ProcessContextReplacing<float> context(block);
         processChain.process(context);
     }
@@ -437,57 +473,118 @@ private:
         return juce::jlimit(minHz, maxHz, hz);
     }
 
+    static bool nearlyEqual(float a, float b, float epsilon = 1.0e-4f)
+    {
+        return std::abs(a - b) <= epsilon;
+    }
+
+    static bool bandParametersMatch(const EQParameters &a,
+                                    const EQParameters &b)
+    {
+        return a.band1Bell == b.band1Bell &&
+               a.band4Bell == b.band4Bell &&
+               nearlyEqual(a.band1Freq, b.band1Freq, 0.01f) &&
+               nearlyEqual(a.band1Gain, b.band1Gain, 0.001f) &&
+               nearlyEqual(a.band1Q, b.band1Q, 0.001f) &&
+               nearlyEqual(a.band2Freq, b.band2Freq, 0.01f) &&
+               nearlyEqual(a.band2Gain, b.band2Gain, 0.001f) &&
+               nearlyEqual(a.band2Q, b.band2Q, 0.001f) &&
+               nearlyEqual(a.band3Freq, b.band3Freq, 0.01f) &&
+               nearlyEqual(a.band3Gain, b.band3Gain, 0.001f) &&
+               nearlyEqual(a.band3Q, b.band3Q, 0.001f) &&
+               nearlyEqual(a.band4Freq, b.band4Freq, 0.01f) &&
+               nearlyEqual(a.band4Gain, b.band4Gain, 0.001f) &&
+               nearlyEqual(a.band4Q, b.band4Q, 0.001f);
+    }
+
     void setupHPF()
     {
+        if (parameters.hpfBypass != lastHpfBypass)
+        {
+            processChain.setBypassed<ChainIndex::HPF>(parameters.hpfBypass);
+            lastHpfBypass = parameters.hpfBypass;
+        }
+
         if (parameters.hpfBypass)
-        {
-            processChain.setBypassed<ChainIndex::HPF>(true);
-        }
-        else
-        {
-            processChain.setBypassed<ChainIndex::HPF>(false);
-            *processChain.get<ChainIndex::HPF>().state =
-                *juce::dsp::FilterDesign<float>::designIIRHighpassHighOrderButterworthMethod(
-                    parameters.hpfFreq, sampleRate, 2 * (parameters.hpfSlope + 1))[0];
-        }
+            return;
+
+        if (hpfInitialised &&
+            nearlyEqual(parameters.hpfFreq, lastHpfFreq, 0.01f) &&
+            parameters.hpfSlope == lastHpfSlope)
+            return;
+
+        *processChain.get<ChainIndex::HPF>().state =
+            juce::dsp::IIR::ArrayCoefficients<float>::makeHighPass(
+                sampleRate,
+                parameters.hpfFreq);
+        lastHpfFreq = parameters.hpfFreq;
+        lastHpfSlope = parameters.hpfSlope;
+        hpfInitialised = true;
     }
 
     void setupLPF()
     {
+        if (parameters.lpfBypass != lastLpfBypass)
+        {
+            processChain.setBypassed<ChainIndex::LPF>(parameters.lpfBypass);
+            lastLpfBypass = parameters.lpfBypass;
+        }
+
         if (parameters.lpfBypass)
-        {
-            processChain.setBypassed<ChainIndex::LPF>(true);
-        }
-        else
-        {
-            processChain.setBypassed<ChainIndex::LPF>(false);
-            *processChain.get<ChainIndex::LPF>().state =
-                *juce::dsp::FilterDesign<float>::designIIRLowpassHighOrderButterworthMethod(
-                    parameters.lpfFreq, sampleRate, 2 * (parameters.lpfSlope + 1))[0];
-        }
+            return;
+
+        if (lpfInitialised &&
+            nearlyEqual(parameters.lpfFreq, lastLpfFreq, 0.01f) &&
+            parameters.lpfSlope == lastLpfSlope)
+            return;
+
+        *processChain.get<ChainIndex::LPF>().state =
+            juce::dsp::IIR::ArrayCoefficients<float>::makeLowPass(
+                sampleRate,
+                parameters.lpfFreq);
+        lastLpfFreq = parameters.lpfFreq;
+        lastLpfSlope = parameters.lpfSlope;
+        lpfInitialised = true;
     }
 
     void setupBands()
     {
-        *processChain.get<ChainIndex::Band1>().state = (parameters.band1Bell) ? *juce::dsp::IIR::Coefficients<float>::makePeakFilter(sampleRate, parameters.band1Freq,
-                                                                                                                                     parameters.band1Q, juce::Decibels::decibelsToGain(parameters.band1Gain))
-                                                                              : *juce::dsp::IIR::Coefficients<float>::makeLowShelf(sampleRate, parameters.band1Freq,
-                                                                                                                                   parameters.band1Q, juce::Decibels::decibelsToGain(parameters.band1Gain));
+        if (bandsInitialised && bandParametersMatch(parameters, lastBandParameters))
+            return;
+
+        *processChain.get<ChainIndex::Band1>().state = parameters.band1Bell
+                                                           ? juce::dsp::IIR::ArrayCoefficients<float>::makePeakFilter(sampleRate, parameters.band1Freq,
+                                                                                                                       parameters.band1Q, juce::Decibels::decibelsToGain(parameters.band1Gain))
+                                                           : juce::dsp::IIR::ArrayCoefficients<float>::makeLowShelf(sampleRate, parameters.band1Freq,
+                                                                                                                     parameters.band1Q, juce::Decibels::decibelsToGain(parameters.band1Gain));
         *processChain.get<ChainIndex::Band2>().state =
-            *juce::dsp::IIR::Coefficients<float>::makePeakFilter(sampleRate, parameters.band2Freq,
-                                                                 parameters.band2Q, juce::Decibels::decibelsToGain(parameters.band2Gain));
+            juce::dsp::IIR::ArrayCoefficients<float>::makePeakFilter(sampleRate, parameters.band2Freq,
+                                                                     parameters.band2Q, juce::Decibels::decibelsToGain(parameters.band2Gain));
         *processChain.get<ChainIndex::Band3>().state =
-            *juce::dsp::IIR::Coefficients<float>::makePeakFilter(sampleRate, parameters.band3Freq,
-                                                                 parameters.band3Q, juce::Decibels::decibelsToGain(parameters.band3Gain));
-        *processChain.get<ChainIndex::Band4>().state = (parameters.band4Bell) ? *juce::dsp::IIR::Coefficients<float>::makePeakFilter(sampleRate, parameters.band4Freq,
-                                                                                                                                     parameters.band4Q, juce::Decibels::decibelsToGain(parameters.band4Gain))
-                                                                              : *juce::dsp::IIR::Coefficients<float>::makeHighShelf(sampleRate, parameters.band4Freq,
-                                                                                                                                    parameters.band4Q, juce::Decibels::decibelsToGain(parameters.band4Gain));
+            juce::dsp::IIR::ArrayCoefficients<float>::makePeakFilter(sampleRate, parameters.band3Freq,
+                                                                     parameters.band3Q, juce::Decibels::decibelsToGain(parameters.band3Gain));
+        *processChain.get<ChainIndex::Band4>().state = parameters.band4Bell
+                                                           ? juce::dsp::IIR::ArrayCoefficients<float>::makePeakFilter(sampleRate, parameters.band4Freq,
+                                                                                                                       parameters.band4Q, juce::Decibels::decibelsToGain(parameters.band4Gain))
+                                                           : juce::dsp::IIR::ArrayCoefficients<float>::makeHighShelf(sampleRate, parameters.band4Freq,
+                                                                                                                      parameters.band4Q, juce::Decibels::decibelsToGain(parameters.band4Gain));
+        lastBandParameters = parameters;
+        bandsInitialised = true;
     }
 
     double sampleRate{0.0};
     int bufferSize{0};
     EQParameters parameters;
+    EQParameters lastBandParameters{};
+    float lastHpfFreq{-1.0f};
+    float lastLpfFreq{-1.0f};
+    int lastHpfSlope{-1};
+    int lastLpfSlope{-1};
+    bool lastHpfBypass{false};
+    bool lastLpfBypass{false};
+    bool hpfInitialised{false};
+    bool lpfInitialised{false};
+    bool bandsInitialised{false};
     using StereoFilter = juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>,
                                                         juce::dsp::IIR::Coefficients<float>>;
     juce::dsp::ProcessorChain<StereoFilter, StereoFilter, StereoFilter, StereoFilter,
@@ -594,9 +691,9 @@ public:
     void prepare(double inputSampleRate, int maxBlockSize)
     {
         sampleRate = sanitiseEffectSampleRate(inputSampleRate);
-        bufferSize = maxBlockSize;
-        dryBuffer.setSize(numOutputs, maxBlockSize);
-        wetBuffer.setSize(numOutputs, maxBlockSize);
+        bufferSize = mixroomEffectRealtimeScratchCapacity(maxBlockSize);
+        dryBuffer.setSize(numOutputs, bufferSize);
+        wetBuffer.setSize(numOutputs, bufferSize);
         wetBuffer.clear();
         delayBufferSize = static_cast<int>(2.0 * (bufferSize + sampleRate));
         delayBuffer.setSize(numOutputs, delayBufferSize);
@@ -607,6 +704,8 @@ public:
         spec.numChannels = numOutputs;
         modChain.prepare(spec);
         filterChain.prepare(spec);
+        lastHpfFreq = -1.0f;
+        lastLpfFreq = -1.0f;
     }
 
     void process(juce::AudioBuffer<float> &inputBuffer)
@@ -729,10 +828,21 @@ private:
 
     void applyFilters()
     {
-        *filterChain.get<0>().state = *juce::dsp::FilterDesign<float>::
-                                          designIIRHighpassHighOrderButterworthMethod(parameters.hpfFreq, sampleRate, 2)[0];
-        *filterChain.get<1>().state = *juce::dsp::FilterDesign<float>::
-                                          designIIRLowpassHighOrderButterworthMethod(parameters.lpfFreq, sampleRate, 2)[0];
+        constexpr float kFreqEpsilon = 0.01f;
+        if (std::abs(parameters.hpfFreq - lastHpfFreq) >= kFreqEpsilon ||
+            std::abs(parameters.lpfFreq - lastLpfFreq) >= kFreqEpsilon)
+        {
+            *filterChain.get<0>().state =
+                juce::dsp::IIR::ArrayCoefficients<float>::makeHighPass(
+                    sampleRate,
+                    parameters.hpfFreq);
+            *filterChain.get<1>().state =
+                juce::dsp::IIR::ArrayCoefficients<float>::makeLowPass(
+                    sampleRate,
+                    parameters.lpfFreq);
+            lastHpfFreq = parameters.hpfFreq;
+            lastLpfFreq = parameters.lpfFreq;
+        }
         juce::dsp::AudioBlock<float> filterBlock(wetBuffer);
         auto filterSubBlock = filterBlock.getSubBlock(
             0,
@@ -795,6 +905,8 @@ private:
     int writePosition{0};
     double bpm{0.0};
     DelayParameters parameters;
+    float lastHpfFreq{-1.0f};
+    float lastLpfFreq{-1.0f};
     const std::array<float, 13> subdivisions{0.25f, (0.5f / 3.0f), 0.375f, 0.5f,
                                              (1.0f / 3.0f), 0.75f, 1.0f, (2.0f / 3.0f), 1.5f, 2.0f, (4.0f / 3.0f), 3.0f, 4.0f};
     juce::AudioBuffer<float> dryBuffer, wetBuffer, delayBuffer;
@@ -960,7 +1072,7 @@ public:
         lastLpfFreq = -1.0f;
         lastShapeDb = -1000.0f;
         lastShapeTilt = false;
-        ensureCapacity(maxBlockSize);
+        ensureCapacity(mixroomEffectRealtimeScratchCapacity(maxBlockSize));
     }
 
     void process(const juce::dsp::ProcessContextReplacing<float> &context)
@@ -972,7 +1084,9 @@ public:
         if (juce::jlimit(0.0f, 1.0f, parameters.mix) <= 1.0e-4f)
             return;
 
-        ensureCapacity(inputSamples);
+        if (!ensureCapacity(inputSamples))
+            return;
+
         auto upsampleBlock = oversampler.processSamplesUp(context.getInputBlock());
         dryBuffer.clear();
         bandBuffer.clear();
@@ -1019,7 +1133,7 @@ public:
     }
 
 private:
-    void ensureCapacity(int inputBlockSamples)
+    bool ensureCapacity(int inputBlockSamples)
     {
         const int requiredInputSamples = juce::jmax(1, inputBlockSamples);
         const int up = oversampler.getOversamplingFactor();
@@ -1027,7 +1141,12 @@ private:
 
         if (requiredBufferSamples <= bufferSize &&
             requiredInputSamples <= oversamplerInputBlockSize)
-            return;
+            return true;
+
+        if (bufferSize > 0 || oversamplerInputBlockSize > 0)
+            return mixroomEffectScratchAvailable(
+                requiredInputSamples,
+                oversamplerInputBlockSize);
 
         bufferSize = juce::jmax(bufferSize, requiredBufferSamples);
         oversamplerInputBlockSize = juce::jmax(oversamplerInputBlockSize, requiredInputSamples);
@@ -1042,7 +1161,8 @@ private:
         bandFilterChain.prepare(spec);
         preShapeChain.prepare(spec);
         dcFilter.prepare(spec);
-        *dcFilter.state = *juce::dsp::IIR::Coefficients<float>::makeHighPass(sampleRate, 10.0f);
+        *dcFilter.state =
+            juce::dsp::IIR::ArrayCoefficients<float>::makeHighPass(sampleRate, 10.0f);
         bandFilterChain.reset();
         preShapeChain.reset();
         dcFilter.reset();
@@ -1054,6 +1174,7 @@ private:
         lastLpfFreq = -1.0f;
         lastShapeDb = -1000.0f;
         lastShapeTilt = false;
+        return true;
     }
 
     void applyDriveBandFilters(juce::dsp::AudioBlock<float> &block)
@@ -1063,9 +1184,9 @@ private:
             std::abs(parameters.lpfFreq - lastLpfFreq) >= kFreqEpsilon)
         {
             *bandFilterChain.get<BandFilterIndex::HPF>().state =
-                *juce::dsp::IIR::Coefficients<float>::makeHighPass(sampleRate, parameters.hpfFreq);
+                juce::dsp::IIR::ArrayCoefficients<float>::makeHighPass(sampleRate, parameters.hpfFreq);
             *bandFilterChain.get<BandFilterIndex::LPF>().state =
-                *juce::dsp::IIR::Coefficients<float>::makeLowPass(sampleRate, parameters.lpfFreq);
+                juce::dsp::IIR::ArrayCoefficients<float>::makeLowPass(sampleRate, parameters.lpfFreq);
             lastHpfFreq = parameters.hpfFreq;
             lastLpfFreq = parameters.lpfFreq;
         }
@@ -1079,13 +1200,13 @@ private:
         if (std::abs(parameters.shape - lastShapeDb) >= kShapeEpsilon)
         {
             *preShapeChain.get<ShapeFilterIndex::LowShelf>().state =
-                *juce::dsp::IIR::Coefficients<float>::makeLowShelf(
+                juce::dsp::IIR::ArrayCoefficients<float>::makeLowShelf(
                     sampleRate,
                     900.0f,
                     0.4f,
                     juce::Decibels::decibelsToGain(parameters.shape * -1.0f));
             *preShapeChain.get<ShapeFilterIndex::HighShelf>().state =
-                *juce::dsp::IIR::Coefficients<float>::makeHighShelf(
+                juce::dsp::IIR::ArrayCoefficients<float>::makeHighShelf(
                     sampleRate,
                     900.0f,
                     0.4f,
@@ -1587,7 +1708,7 @@ public:
     void prepare(double newSampleRate, int maxBlockSize)
     {
         sampleRate = sanitiseEffectSampleRate(newSampleRate);
-        bufferSize = juce::jmax(1, maxBlockSize);
+        bufferSize = mixroomEffectRealtimeScratchCapacity(maxBlockSize);
         currentBlockSize = bufferSize;
         lowBuffer.setSize(numOutputs, bufferSize);
         highBuffer.setSize(numOutputs, bufferSize);
@@ -1607,7 +1728,9 @@ public:
         if (blockSamples <= 0)
             return;
 
-        ensureCapacity(blockSamples);
+        if (!ensureCapacity(blockSamples))
+            return;
+
         currentBlockSize = juce::jmin(blockSamples, bufferSize);
         if (currentBlockSize <= 0)
             return;
@@ -1643,23 +1766,12 @@ private:
         highChain.process(highContext);
     }
 
-    void ensureCapacity(int requiredSamples)
+    bool ensureCapacity(int requiredSamples) noexcept
     {
         if (requiredSamples <= bufferSize)
-            return;
+            return true;
 
-        bufferSize = requiredSamples;
-        lowBuffer.setSize(numOutputs, bufferSize);
-        highBuffer.setSize(numOutputs, bufferSize);
-        compressionBuffer.setSize(numOutputs, bufferSize);
-        envelopeBuffer.setSize(numOutputs, bufferSize);
-
-        juce::dsp::ProcessSpec spec;
-        spec.sampleRate = sampleRate;
-        spec.maximumBlockSize = static_cast<juce::uint32>(bufferSize);
-        spec.numChannels = numOutputs;
-        lowChain.prepare(spec);
-        highChain.prepare(spec);
+        return mixroomEffectScratchAvailable(requiredSamples, bufferSize);
     }
 
     void applyHisteresis(float &compLevel, float inputSample)
@@ -1823,7 +1935,7 @@ public:
     void prepare(double newSampleRate, int maxBlockSize)
     {
         sampleRate = sanitiseEffectSampleRate(newSampleRate);
-        bufferSize = juce::jmax(1, maxBlockSize);
+        bufferSize = mixroomEffectRealtimeScratchCapacity(maxBlockSize);
         dryBuffer.setSize(numOutputs, bufferSize);
         wetBuffer.setSize(numOutputs, bufferSize);
         reset();
@@ -1896,7 +2008,9 @@ public:
         if (samples <= 0)
             return;
 
-        ensureCapacity(samples);
+        if (!ensureCapacity(samples))
+            return;
+
         dryBuffer.makeCopyOf(buffer, true);
         wetBuffer.makeCopyOf(buffer, true);
 
@@ -1961,13 +2075,12 @@ private:
         return juce::jlimit(0.0f, 1.0f, lowFade * highFade);
     }
 
-    void ensureCapacity(int requiredSamples)
+    bool ensureCapacity(int requiredSamples) noexcept
     {
         if (requiredSamples <= bufferSize)
-            return;
-        bufferSize = requiredSamples;
-        dryBuffer.setSize(numOutputs, bufferSize);
-        wetBuffer.setSize(numOutputs, bufferSize);
+            return true;
+
+        return mixroomEffectScratchAvailable(requiredSamples, bufferSize);
     }
 
     void updateAnalysisFilters(bool force)
@@ -2296,68 +2409,109 @@ public:
 
     void prepare(double newSampleRate, int maxBlockSize)
     {
-        sampleRate = newSampleRate;
+        juce::ignoreUnused(maxBlockSize);
+        sampleRate = sanitiseEffectSampleRate(newSampleRate);
+        reset();
         updateCoefficients();
-
-        juce::dsp::ProcessSpec spec;
-        spec.sampleRate = sampleRate;
-        spec.maximumBlockSize = (juce::uint32)maxBlockSize;
-        spec.numChannels = numOutputs;
-
-        chain.prepare(spec);
-        chain.reset();
     }
 
     void process(juce::AudioBuffer<float> &buffer)
     {
         updateCoefficients();
 
-        juce::dsp::AudioBlock<float> block(buffer);
-        juce::dsp::ProcessContextReplacing<float> ctx(block);
-        chain.process(ctx);
+        const int channels = juce::jmin(numOutputs, buffer.getNumChannels());
+        const int samples = buffer.getNumSamples();
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            auto *data = buffer.getWritePointer(ch);
+            lowShelfFilters[(size_t)ch].processSamples(data, samples);
+            midPeakFilters[(size_t)ch].processSamples(data, samples);
+            highShelfFilters[(size_t)ch].processSamples(data, samples);
+        }
     }
 
 private:
-    using StereoFilter = juce::dsp::ProcessorDuplicator<
-        juce::dsp::IIR::Filter<float>,
-        juce::dsp::IIR::Coefficients<float>>;
-
-    enum ChainIndex
+    void reset()
     {
-        LowShelf,
-        MidPeak,
-        HighShelf
-    };
+        for (auto &filter : lowShelfFilters)
+            filter.reset();
+        for (auto &filter : midPeakFilters)
+            filter.reset();
+        for (auto &filter : highShelfFilters)
+            filter.reset();
+    }
 
     void updateCoefficients()
     {
-        const auto lowG = juce::Decibels::decibelsToGain(params.lowGainDb);
-        const auto midG = juce::Decibels::decibelsToGain(params.midGainDb);
-        const auto highG = juce::Decibels::decibelsToGain(params.highGainDb);
+        if (coefficientsValid &&
+            nearlyEqual(sampleRate, lastCoefficientSampleRate, 0.01) &&
+            parametersMatch(params, lastParams))
+        {
+            return;
+        }
 
-        setCoefficients(chain.get<LowShelf>().state,
-                        juce::dsp::IIR::Coefficients<float>::makeLowShelf(sampleRate, EQ3_LOW_FC, EQ3_SHELF_Q, lowG));
+        const float lowG = juce::Decibels::decibelsToGain(params.lowGainDb);
+        const float midG = juce::Decibels::decibelsToGain(params.midGainDb);
+        const float highG = juce::Decibels::decibelsToGain(params.highGainDb);
+        const float lowFc =
+            clampFilterFrequencyForSampleRate(EQ3_LOW_FC, sampleRate);
+        const float midFc =
+            clampFilterFrequencyForSampleRate(EQ3_MID_FC, sampleRate);
+        const float highFc =
+            clampFilterFrequencyForSampleRate(EQ3_HIGH_FC, sampleRate);
 
-        setCoefficients(chain.get<MidPeak>().state,
-                        juce::dsp::IIR::Coefficients<float>::makePeakFilter(sampleRate, EQ3_MID_FC, EQ3_MID_Q, midG));
+        const auto lowCoefficients =
+            juce::IIRCoefficients::makeLowShelf(
+                sampleRate, lowFc, EQ3_SHELF_Q, lowG);
+        const auto midCoefficients =
+            juce::IIRCoefficients::makePeakFilter(
+                sampleRate, midFc, EQ3_MID_Q, midG);
+        const auto highCoefficients =
+            juce::IIRCoefficients::makeHighShelf(
+                sampleRate, highFc, EQ3_SHELF_Q, highG);
 
-        setCoefficients(chain.get<HighShelf>().state,
-                        juce::dsp::IIR::Coefficients<float>::makeHighShelf(sampleRate, EQ3_HIGH_FC, EQ3_SHELF_Q, highG));
+        for (auto &filter : lowShelfFilters)
+            filter.setCoefficients(lowCoefficients);
+        for (auto &filter : midPeakFilters)
+            filter.setCoefficients(midCoefficients);
+        for (auto &filter : highShelfFilters)
+            filter.setCoefficients(highCoefficients);
+
+        lastParams = params;
+        lastCoefficientSampleRate = sampleRate;
+        coefficientsValid = true;
     }
 
-    static void setCoefficients(juce::dsp::IIR::Coefficients<float>::Ptr &target,
-                                juce::dsp::IIR::Coefficients<float>::Ptr next)
+    static bool nearlyEqual(double a, double b, double epsilon)
     {
-        if (target == nullptr)
-            target = next;
-        else
-            *target = *next;
+        return std::abs(a - b) <= epsilon;
+    }
+
+    static bool nearlyEqual(float a, float b, float epsilon)
+    {
+        return std::abs(a - b) <= epsilon;
+    }
+
+    static bool parametersMatch(const EQ3Parameters &a,
+                                const EQ3Parameters &b)
+    {
+        return nearlyEqual(a.lowGainDb, b.lowGainDb, 0.001f) &&
+               nearlyEqual(a.midGainDb, b.midGainDb, 0.001f) &&
+               nearlyEqual(a.highGainDb, b.highGainDb, 0.001f);
     }
 
     double sampleRate = 44100.0;
     EQ3Parameters params;
+    EQ3Parameters lastParams{
+        std::numeric_limits<float>::quiet_NaN(),
+        std::numeric_limits<float>::quiet_NaN(),
+        std::numeric_limits<float>::quiet_NaN()};
+    double lastCoefficientSampleRate = 0.0;
+    bool coefficientsValid = false;
 
-    juce::dsp::ProcessorChain<StereoFilter, StereoFilter, StereoFilter> chain;
+    std::array<juce::IIRFilter, numOutputs> lowShelfFilters;
+    std::array<juce::IIRFilter, numOutputs> midPeakFilters;
+    std::array<juce::IIRFilter, numOutputs> highShelfFilters;
 };
 
 class EQ3AudioProcessor : public juce::AudioProcessor
@@ -2428,7 +2582,7 @@ public:
     void prepare(double newSampleRate, int maxBlockSize)
     {
         sampleRate = sanitiseEffectSampleRate(newSampleRate);
-        bufferSize = juce::jmax(1, maxBlockSize);
+        bufferSize = mixroomEffectRealtimeScratchCapacity(maxBlockSize);
         currentBlockSize = bufferSize;
 
         dryBuffer.setSize(numOutputs, bufferSize);
@@ -2487,7 +2641,9 @@ public:
         if (blockSamples <= 0)
             return;
 
-        ensureCapacity(blockSamples);
+        if (!ensureCapacity(blockSamples))
+            return;
+
         currentBlockSize = juce::jmin(blockSamples, bufferSize);
         if (currentBlockSize <= 0)
             return;
@@ -2602,15 +2758,12 @@ private:
                         wetBuffer.getSample(ch, i) * wetMix);
     }
 
-    void ensureCapacity(int requiredSamples)
+    bool ensureCapacity(int requiredSamples) noexcept
     {
         if (requiredSamples <= bufferSize)
-            return;
+            return true;
 
-        bufferSize = requiredSamples;
-        dryBuffer.setSize(numOutputs, bufferSize);
-        wetBuffer.setSize(numOutputs, bufferSize);
-        envelopeBuffer.setSize(numOutputs, bufferSize);
+        return mixroomEffectScratchAvailable(requiredSamples, bufferSize);
     }
 
     double sampleRate = 0.0;
@@ -2735,7 +2888,7 @@ public:
     void prepare(double inputSampleRate, int maxBlockSize)
     {
         sampleRate = sanitiseEffectSampleRate(inputSampleRate);
-        bufferSize = juce::jmax(1, maxBlockSize);
+        bufferSize = mixroomEffectRealtimeScratchCapacity(maxBlockSize);
         currentBlockSize = bufferSize;
         compressionBuffer.setSize(numOutputs, bufferSize);
         envelopeBuffer.setSize(numOutputs, bufferSize);
@@ -2751,7 +2904,9 @@ public:
         if (blockSamples <= 0)
             return;
 
-        ensureCapacity(blockSamples);
+        if (!ensureCapacity(blockSamples))
+            return;
+
         currentBlockSize = juce::jmin(blockSamples, bufferSize);
         if (currentBlockSize <= 0)
             return;
@@ -2845,14 +3000,12 @@ private:
         }
     }
 
-    void ensureCapacity(int requiredSamples)
+    bool ensureCapacity(int requiredSamples) noexcept
     {
         if (requiredSamples <= bufferSize)
-            return;
+            return true;
 
-        bufferSize = requiredSamples;
-        compressionBuffer.setSize(numOutputs, bufferSize);
-        envelopeBuffer.setSize(numOutputs, bufferSize);
+        return mixroomEffectScratchAvailable(requiredSamples, bufferSize);
     }
 
     double sampleRate{0.0};
@@ -3426,7 +3579,9 @@ public:
     void process(juce::AudioBuffer<float> &buffer)
     {
         const int n = buffer.getNumSamples();
-        ensureCapacity(n);
+        if (!ensureCapacity(n))
+            return;
+
         const int channels = juce::jmin(numOutputs, buffer.getNumChannels());
         if (n <= 0 || channels <= 0 || ringSize <= 2)
             return;
@@ -3498,7 +3653,7 @@ public:
     }
 
 private:
-    void ensureCapacity(int blockSize)
+    bool ensureCapacity(int blockSize)
     {
         juce::ignoreUnused(blockSize);
         // Keep the shifter window tied to sample rate rather than callback size
@@ -3509,7 +3664,10 @@ private:
             (int)std::lround(sampleRate * 0.02));
         const int requiredRingSize = minDelay + 2;
         if (requiredRingSize <= ringSize)
-            return;
+            return true;
+
+        if (ringSize > 0)
+            return mixroomEffectScratchAvailable(requiredRingSize, ringSize);
 
         ringSize = requiredRingSize;
         for (int ch = 0; ch < numOutputs; ++ch)
@@ -3518,6 +3676,7 @@ private:
             writePos[ch] = 0;
             phase[ch] = 0.0f;
         }
+        return true;
     }
 
     static float readDelayedSample(const std::vector<float> &ring,
@@ -3684,7 +3843,7 @@ public:
     void prepare(double sampleRate, int maxBlockSize)
     {
         this->sampleRate = sanitiseEffectSampleRate(sampleRate);
-        bufferSize = juce::jmax(1, maxBlockSize);
+        bufferSize = mixroomEffectRealtimeScratchCapacity(maxBlockSize);
         dryBuffer.setSize(numOutputs, bufferSize);
         wetBuffer.setSize(numOutputs, bufferSize);
         prepareChorus();
@@ -3700,7 +3859,9 @@ public:
         if (n <= 0)
             return;
 
-        ensureCapacity(n);
+        if (!ensureCapacity(n))
+            return;
+
         copyToFixedStereoBuffer(buffer, dryBuffer);
         copyToFixedStereoBuffer(buffer, wetBuffer);
 
@@ -3751,19 +3912,12 @@ private:
         chorus.reset();
     }
 
-    void ensureCapacity(int requiredSamples)
+    bool ensureCapacity(int requiredSamples) noexcept
     {
         if (requiredSamples <= bufferSize)
-            return;
+            return true;
 
-        bufferSize = requiredSamples;
-        dryBuffer.setSize(numOutputs, bufferSize);
-        wetBuffer.setSize(numOutputs, bufferSize);
-        prepareChorus();
-        lastRateHz = -1.0f;
-        lastDepth = -1.0f;
-        lastCentreDelayMs = -1.0f;
-        lastFeedback = -2.0f;
+        return mixroomEffectScratchAvailable(requiredSamples, bufferSize);
     }
 
     ChorusParameters params{0.8f, 0.35f, 7.0f, 0.1f, 0.35f};
@@ -3841,7 +3995,7 @@ public:
     void prepare(double sampleRate, int maxBlockSize)
     {
         this->sampleRate = sanitiseEffectSampleRate(sampleRate);
-        bufferSize = juce::jmax(1, maxBlockSize);
+        bufferSize = mixroomEffectRealtimeScratchCapacity(maxBlockSize);
         dryBuffer.setSize(numOutputs, bufferSize);
         wetBuffer.setSize(numOutputs, bufferSize);
         prepareVibrato();
@@ -3856,7 +4010,9 @@ public:
         if (n <= 0)
             return;
 
-        ensureCapacity(n);
+        if (!ensureCapacity(n))
+            return;
+
         copyToFixedStereoBuffer(buffer, dryBuffer);
         copyToFixedStereoBuffer(buffer, wetBuffer);
 
@@ -3905,18 +4061,12 @@ private:
         vibrato.reset();
     }
 
-    void ensureCapacity(int requiredSamples)
+    bool ensureCapacity(int requiredSamples) noexcept
     {
         if (requiredSamples <= bufferSize)
-            return;
+            return true;
 
-        bufferSize = requiredSamples;
-        dryBuffer.setSize(numOutputs, bufferSize);
-        wetBuffer.setSize(numOutputs, bufferSize);
-        prepareVibrato();
-        lastRateHz = -1.0f;
-        lastDepth = -1.0f;
-        lastCentreDelayMs = -1.0f;
+        return mixroomEffectScratchAvailable(requiredSamples, bufferSize);
     }
 
     VibratoParameters params{4.5f, 0.6f, 7.0f, 1.0f};
@@ -4010,7 +4160,7 @@ public:
     void prepare(double inputSampleRate, int maxBlockSize)
     {
         sampleRate = sanitiseEffectSampleRate(inputSampleRate);
-        bufferSize = juce::jmax(1, maxBlockSize);
+        bufferSize = mixroomEffectRealtimeScratchCapacity(maxBlockSize);
         dryBuffer.setSize(numOutputs, bufferSize);
         prepareFilters();
         prepareDecorrelators();
@@ -4037,7 +4187,9 @@ public:
         if (blockSamples <= 0)
             return;
 
-        ensureCapacity(blockSamples);
+        if (!ensureCapacity(blockSamples))
+            return;
+
         copyToFixedStereoBuffer(buffer, dryBuffer);
 
         const float targetWidthAmount =
@@ -4121,15 +4273,12 @@ private:
         resetDecorrelators();
     }
 
-    void ensureCapacity(int requiredSamples)
+    bool ensureCapacity(int requiredSamples) noexcept
     {
         if (requiredSamples <= bufferSize)
-            return;
+            return true;
 
-        bufferSize = requiredSamples;
-        dryBuffer.setSize(numOutputs, bufferSize);
-        prepareFilters();
-        lastLowBypassHz = -1.0f;
+        return mixroomEffectScratchAvailable(requiredSamples, bufferSize);
     }
 
     void updateFilters(float cutoffHz)
@@ -4258,7 +4407,7 @@ private:
         toWet,
     };
 
-    void ensureBypassBufferCapacity(int numSamples);
+    bool ensureBypassBufferCapacity(int numSamples);
     void beginBypassRamp(BypassRampDirection direction);
     void applyBypassRamp(juce::AudioBuffer<float> &output,
                          const juce::AudioBuffer<float> &dry,
@@ -4312,7 +4461,7 @@ public:
     void prepare(double inputSampleRate, int maxBlockSize)
     {
         sampleRate = sanitiseEffectSampleRate(inputSampleRate);
-        bufferSize = juce::jmax(1, maxBlockSize);
+        bufferSize = mixroomEffectRealtimeScratchCapacity(maxBlockSize);
         workBuffer.setSize(numOutputs, bufferSize);
         gainSmoothed.reset(sampleRate, 0.02);
         widthSmoothed.reset(sampleRate, 0.02);
@@ -4336,7 +4485,9 @@ public:
         if (blockSamples <= 0)
             return;
 
-        ensureCapacity(blockSamples);
+        if (!ensureCapacity(blockSamples))
+            return;
+
         copyToFixedStereoBuffer(buffer, workBuffer);
 
         gainSmoothed.setTargetValue(
@@ -4418,13 +4569,12 @@ private:
         return ceiling * std::tanh(sample / ceiling);
     }
 
-    void ensureCapacity(int requiredSamples)
+    bool ensureCapacity(int requiredSamples) noexcept
     {
         if (requiredSamples <= bufferSize)
-            return;
+            return true;
 
-        bufferSize = requiredSamples;
-        workBuffer.setSize(numOutputs, bufferSize);
+        return mixroomEffectScratchAvailable(requiredSamples, bufferSize);
     }
 
     StereoProParameters params{0.0f, 100.0f, 0.0f, 0.0f};
@@ -4483,7 +4633,7 @@ private:
     };
 
     static constexpr int kScopeRingSize = 2048;
-    void ensureBypassBufferCapacity(int numSamples);
+    bool ensureBypassBufferCapacity(int numSamples);
     void beginBypassRamp(BypassRampDirection direction);
     void applyBypassRamp(juce::AudioBuffer<float> &output,
                          const juce::AudioBuffer<float> &dry,
@@ -4575,7 +4725,7 @@ public:
     void prepare(double inputSampleRate, int maxBlockSize)
     {
         sampleRate = sanitiseEffectSampleRate(inputSampleRate);
-        bufferSize = juce::jmax(1, maxBlockSize);
+        bufferSize = mixroomEffectRealtimeScratchCapacity(maxBlockSize);
         dryBuffer.setSize(numOutputs, bufferSize);
         depthSmoothed.reset(sampleRate, 0.02);
         mixSmoothed.reset(sampleRate, 0.02);
@@ -4599,7 +4749,9 @@ public:
         if (blockSamples <= 0)
             return;
 
-        ensureCapacity(blockSamples);
+        if (!ensureCapacity(blockSamples))
+            return;
+
         copyToFixedStereoBuffer(buffer, dryBuffer);
 
         depthSmoothed.setTargetValue(
@@ -4787,13 +4939,12 @@ private:
         return juce::jlimit(0.0f, 1.0f, minGain + (envelope * depth));
     }
 
-    void ensureCapacity(int requiredSamples)
+    bool ensureCapacity(int requiredSamples) noexcept
     {
         if (requiredSamples <= bufferSize)
-            return;
+            return true;
 
-        bufferSize = requiredSamples;
-        dryBuffer.setSize(numOutputs, bufferSize);
+        return mixroomEffectScratchAvailable(requiredSamples, bufferSize);
     }
 
     VolumeShaperParameters params{100.0f, 100.0f, 18.0f, 0.0f, 0.0f, 3, 0};
@@ -4915,7 +5066,7 @@ public:
     void prepare(double inputSampleRate, int maxBlockSize)
     {
         sampleRate = sanitiseEffectSampleRate(inputSampleRate);
-        bufferSize = juce::jmax(1, maxBlockSize);
+        bufferSize = mixroomEffectRealtimeScratchCapacity(maxBlockSize);
         dryBuffer.setSize(numOutputs, bufferSize);
         const double maxWindowSeconds = (8.0 * 60.0) / 30.0;
         ringSize = juce::jmax(
@@ -4947,7 +5098,9 @@ public:
         if (blockSamples <= 0)
             return;
 
-        ensureCapacity(blockSamples);
+        if (!ensureCapacity(blockSamples))
+            return;
+
         copyToFixedStereoBuffer(buffer, dryBuffer);
 
         amountSmoothed.setTargetValue(
@@ -5028,7 +5181,9 @@ public:
         if (blockSamples <= 0)
             return;
 
-        ensureCapacity(blockSamples);
+        if (!ensureCapacity(blockSamples))
+            return;
+
         copyToFixedStereoBuffer(buffer, dryBuffer);
 
         const double bpm = juce::jlimit(30.0, 400.0, mixroom::fx::getGlobalTempoBpm());
@@ -5195,13 +5350,12 @@ private:
         return a + ((b - a) * frac);
     }
 
-    void ensureCapacity(int requiredSamples)
+    bool ensureCapacity(int requiredSamples) noexcept
     {
         if (requiredSamples <= bufferSize)
-            return;
+            return true;
 
-        bufferSize = requiredSamples;
-        dryBuffer.setSize(numOutputs, bufferSize);
+        return mixroomEffectScratchAvailable(requiredSamples, bufferSize);
     }
 
     TimeShaperParameters params{100.0f, 100.0f, 18.0f, 0.0f, 0.0f, 1, 0};
@@ -5264,3 +5418,39 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TimeShaperAudioProcessor)
 };
+
+namespace mixroom::fx
+{
+inline std::atomic<float> *rawParameterValueForBuiltInEffect(
+    juce::AudioProcessor &processor,
+    const juce::String &parameterId) noexcept
+{
+#define MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER(TypeName)        \
+    if (auto *typed = dynamic_cast<TypeName *>(&processor))      \
+        return typed->parameters.getRawParameterValue(parameterId)
+
+    MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER(ReverbAudioProcessor);
+    MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER(EQAudioProcessor);
+    MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER(EQ3AudioProcessor);
+    MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER(DelayAudioProcessor);
+    MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER(DistortionAudioProcessor);
+    MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER(DegradeAudioProcessor);
+    MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER(DeesserAudioProcessor);
+    MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER(CompressorAudioProcessor);
+    MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER(DynamicSoftenerAudioProcessor);
+    MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER(TransientShaperAudioProcessor);
+    MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER(LimiterAudioProcessor);
+    MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER(ClipperAudioProcessor);
+    MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER(PitchShiftAudioProcessor);
+    MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER(PitchCorrectorAudioProcessor);
+    MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER(ChorusAudioProcessor);
+    MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER(VibratoAudioProcessor);
+    MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER(StereoAudioProcessor);
+    MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER(StereoProAudioProcessor);
+    MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER(VolumeShaperAudioProcessor);
+    MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER(TimeShaperAudioProcessor);
+
+#undef MIXROOM_TRY_NATIVE_EFFECT_RAW_PARAMETER
+    return nullptr;
+}
+} // namespace mixroom::fx

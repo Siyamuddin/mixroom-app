@@ -209,6 +209,10 @@ The timeline has five main tools.
 | Cut | Split a clip at the chosen timeline point. With snapping enabled, the cut point follows the selected quantize grid. |
 | Delete | Delete clips by tapping them or dragging across clips. Useful for quick cleanup. |
 
+On phones and tablets, long-press a clip with Select active to begin a multi-selection, then tap the other clips to add them. Drag any selected clip to move the selected group. Tap empty timeline space to clear the group. Long-press and drag empty timeline space to draw a selection box around several clips.
+
+The timeline tool menu also includes **Foreground grid**. When enabled, bar, beat, and quantize lines render over audio and MIDI regions so waveform timing remains visible against the musical grid.
+
 ### Magnet and Quantize
 
 The magnet button controls timeline snapping.
@@ -239,7 +243,7 @@ The timeline also supports:
 
 - horizontal scrolling
 - pinch or wheel zoom, depending on device
-- playhead scrubbing
+- silent timeline navigation with one playhead seek when a touch pan or zoom ends
 - grid display
 - clip selection and multi-selection
 - loop region display
@@ -356,7 +360,7 @@ Users can:
 - copy and duplicate clips
 - delete clips
 
-Multi-selection allows grouped movement and grouped copy/delete actions.
+Multi-selection allows grouped movement and grouped copy/delete actions. On phones and tablets, long-press the first clip, tap the remaining clips, then drag any selected clip or use the group popover actions.
 
 ### Loop Regions
 

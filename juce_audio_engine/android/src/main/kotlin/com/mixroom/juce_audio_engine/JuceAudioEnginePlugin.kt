@@ -729,6 +729,23 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             ),
           )
         }
+        "getEngineDiagnostics" -> {
+          result.success(JuceBridge.getEngineDiagnosticsJNI())
+        }
+        "resetRealtimePerformanceStats" -> {
+          JuceBridge.resetRealtimePerformanceStatsJNI()
+          result.success(null)
+        }
+        "runEngineStressTest" -> {
+          runHeavyTask("runEngineStressTest", result) {
+            JuceBridge.runEngineStressTestJNI(
+              args.intValue("clipCount", 256),
+              args.intValue("blockCount", 1024),
+              args.intValue("blockSize", 512),
+              args.doubleValue("sampleRate", 48000.0),
+            )
+          }
+        }
         "exportMix" -> {
           runHeavyTask("exportMix", result) {
             JuceBridge.exportMixJNI(
@@ -819,8 +836,11 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           result.success("testing blabla success")
         }
         "loadVideoAudio" -> {
-          JuceBridge.loadVideoAudioJNI(args.stringValue("path"))
-          result.success(null)
+          val path = args.stringValue("path")
+          runHeavyTask("loadVideoAudio", result) {
+            JuceBridge.loadVideoAudioJNI(path)
+            null
+          }
         }
         "unloadVideoAudio" -> {
           JuceBridge.unloadVideoAudioJNI()
@@ -849,20 +869,28 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           val clip = args.intValue("clip")
           val rowId = resolveRowId(args, 0)
           val instrumentId = args.stringValue("instrumentId", "mixroom.basic_synth")
-          ensureInstrumentAssetsReadyIfNeeded(instrumentId)
-          val ok = JuceBridge.loadMidiClipJNI(
-            clip,
-            rowId,
-            instrumentId,
-            args.stringValue("instrumentName", "Basic Synth"),
-            midiNotesFrom(args["notes"]),
-            midiParamsFrom(args["params"]),
-            args.doubleValue("sourceTempoBpm", 120.0),
-            args.doubleValue("startSec"),
-            args.doubleValue("lengthSec"),
-            args.doubleValue("inFileOffsetSec"),
-          )
-          result.success(ok)
+          val instrumentName = args.stringValue("instrumentName", "Basic Synth")
+          val notes = midiNotesFrom(args["notes"])
+          val params = midiParamsFrom(args["params"])
+          val sourceTempoBpm = args.doubleValue("sourceTempoBpm", 120.0)
+          val startSec = args.doubleValue("startSec")
+          val lengthSec = args.doubleValue("lengthSec")
+          val inFileOffsetSec = args.doubleValue("inFileOffsetSec")
+          runHeavyTask("loadMidiClip", result) {
+            ensureInstrumentAssetsReadyIfNeeded(instrumentId)
+            JuceBridge.loadMidiClipJNI(
+              clip,
+              rowId,
+              instrumentId,
+              instrumentName,
+              notes,
+              params,
+              sourceTempoBpm,
+              startSec,
+              lengthSec,
+              inFileOffsetSec,
+            )
+          }
         }
         "beginProjectClipLoad", "beginProjectClipLoadTransaction" -> {
           JuceBridge.beginProjectClipLoadTransactionJNI()
@@ -882,16 +910,22 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         "updateMidiClipEvents" -> {
           val instrumentId = args.stringValue("instrumentId", "mixroom.basic_synth")
-          ensureInstrumentAssetsReadyIfNeeded(instrumentId)
-          val ok = JuceBridge.updateMidiClipEventsJNI(
-            args.intValue("clip"),
-            instrumentId,
-            args.stringValue("instrumentName", "Basic Synth"),
-            midiNotesFrom(args["notes"]),
-            midiParamsFrom(args["params"]),
-            args.doubleValue("sourceTempoBpm", 120.0),
-          )
-          result.success(ok)
+          val clip = args.intValue("clip")
+          val instrumentName = args.stringValue("instrumentName", "Basic Synth")
+          val notes = midiNotesFrom(args["notes"])
+          val params = midiParamsFrom(args["params"])
+          val sourceTempoBpm = args.doubleValue("sourceTempoBpm", 120.0)
+          runHeavyTask("updateMidiClipEvents", result) {
+            ensureInstrumentAssetsReadyIfNeeded(instrumentId)
+            JuceBridge.updateMidiClipEventsJNI(
+              clip,
+              instrumentId,
+              instrumentName,
+              notes,
+              params,
+              sourceTempoBpm,
+            )
+          }
         }
         "setLiveMidiInputTargetClip" -> {
           result.success(JuceBridge.setLiveMidiInputTargetClipJNI(args.intValue("clip")))
@@ -916,20 +950,32 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           val clip = args.intValue("clip")
           val rowId = resolveRowId(args, 0)
           val path = args.stringValue("path")
-          val ok = JuceBridge.loadClipJNI(
-            clip,
-            rowId,
-            path,
-            args.doubleValue("startSec"),
-            args.doubleValue("lengthSec"),
-            args.doubleValue("inFileOffsetSec"),
-          )
-          emitPluginLoaded(clip, path, ok)
-          result.success(ok)
+          val startSec = args.doubleValue("startSec")
+          val lengthSec = args.doubleValue("lengthSec")
+          val inFileOffsetSec = args.doubleValue("inFileOffsetSec")
+          runHeavyTask("loadClip", result) {
+            val ok = JuceBridge.loadClipJNI(
+              clip,
+              rowId,
+              path,
+              startSec,
+              lengthSec,
+              inFileOffsetSec,
+            )
+            mainHandler.post { emitPluginLoaded(clip, path, ok) }
+            ok
+          }
         }
         "unloadClip" -> {
           JuceBridge.unloadClipJNI(args.intValue("clip"))
           result.success(null)
+        }
+        "unloadClips" -> {
+          val clips = (args["clips"] as? List<*>)
+            ?.mapNotNull { (it as? Number)?.toInt() }
+            ?.toIntArray()
+            ?: IntArray(0)
+          result.success(JuceBridge.unloadClipsJNI(clips))
         }
         "setClipGain" -> {
           JuceBridge.setClipGainJNI(args.intValue("clip"), args.floatValue("gain"))
@@ -951,6 +997,11 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             args.intValue("fadeCurve"),
           )
           result.success(null)
+        }
+        "updateClipFadesBatch" -> {
+          @Suppress("UNCHECKED_CAST")
+          val updates = args["updates"] as? List<Map<String, Any>> ?: emptyList()
+          result.success(JuceBridge.updateClipFadesBatchJNI(updates))
         }
         "setClipPitch" -> {
           JuceBridge.setClipPitchJNI(args.intValue("clip"), args.floatValue("semitones"))
@@ -987,6 +1038,11 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             args.doubleValue("inFileOffsetSec"),
           )
           result.success(null)
+        }
+        "updateClipTimelineBatch" -> {
+          @Suppress("UNCHECKED_CAST")
+          val updates = args["updates"] as? List<Map<String, Any>> ?: emptyList()
+          result.success(JuceBridge.updateClipTimelineBatchJNI(updates))
         }
         "addRow" -> {
           result.success(

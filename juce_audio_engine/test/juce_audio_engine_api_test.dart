@@ -105,6 +105,71 @@ void main() {
     );
   });
 
+  test('clip mutations stay batched across the platform channel', () async {
+    await JuceAudioEngine.updateClipTimelineBatch(
+      <Map<String, dynamic>>[
+        <String, dynamic>{
+          'clip': 3,
+          'rowId': 9,
+          'startSec': 1.0,
+          'lengthSec': 2.0,
+          'inFileOffsetSec': 0.25,
+          'gain': 1.25,
+          'extraGainLinear': 0.8,
+          'reversed': true,
+          'tempoRatio': 1.1,
+          'preservePitch': false,
+          'pitchSemitones': 2.0,
+          'muted': true,
+        },
+        <String, dynamic>{
+          'clip': 4,
+          'rowId': 10,
+          'startSec': 3.0,
+          'lengthSec': 4.0,
+          'inFileOffsetSec': 0.5,
+        },
+      ],
+    );
+    await JuceAudioEngine.updateClipFadesBatch(
+      <Map<String, dynamic>>[
+        <String, dynamic>{
+          'clip': 3,
+          'fadeInSec': 0.1,
+          'fadeOutSec': 0.2,
+          'fadeCurve': 1,
+        },
+        <String, dynamic>{
+          'clip': 4,
+          'fadeInSec': 0.3,
+          'fadeOutSec': 0.4,
+          'fadeCurve': 2,
+        },
+      ],
+    );
+    await JuceAudioEngine.unloadClips(<int>[3, 4, 4, -1]);
+
+    expect(calls.map((call) => call.method), <String>[
+      'updateClipTimelineBatch',
+      'updateClipFadesBatch',
+      'unloadClips',
+    ]);
+    expect(
+      ((calls[0].arguments as Map)['updates'] as List).first,
+      containsPair('tempoRatio', 1.1),
+    );
+    expect(
+      ((calls[0].arguments as Map)['updates'] as List).first,
+      containsPair('muted', true),
+    );
+    expect(
+      calls[2].arguments,
+      <String, dynamic>{
+        'clips': <int>[3, 4],
+      },
+    );
+  });
+
   test('setAutomationTransport routes to setAutomationTransport', () async {
     await JuceAudioEngine.setAutomationTransport(3.0);
 
