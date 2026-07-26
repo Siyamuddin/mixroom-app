@@ -1108,17 +1108,20 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"addRow"]) {
         NSString *name = args[@"name"] ?: @"Row";
         NSInteger iconId = [args[@"iconId"] integerValue];
-        result([JuceBridge addRowObjC:name iconId:iconId]);
+        NSInteger preferredRowId = args[@"preferredRowId"] == nil ? -1 : [args[@"preferredRowId"] integerValue];
+        result([JuceBridge addRowObjC:name iconId:iconId preferredRowId:preferredRowId]);
     } else if ([call.method isEqualToString:@"insertRowAbove"]) {
         NSInteger referenceRowId = [args[@"referenceRowId"] integerValue];
         NSString *name = args[@"name"] ?: @"Row";
         NSInteger iconId = [args[@"iconId"] integerValue];
-        result([JuceBridge insertRowAboveObjC:referenceRowId name:name iconId:iconId]);
+        NSInteger preferredRowId = args[@"preferredRowId"] == nil ? -1 : [args[@"preferredRowId"] integerValue];
+        result([JuceBridge insertRowAboveObjC:referenceRowId name:name iconId:iconId preferredRowId:preferredRowId]);
     } else if ([call.method isEqualToString:@"insertRowBelow"]) {
         NSInteger referenceRowId = [args[@"referenceRowId"] integerValue];
         NSString *name = args[@"name"] ?: @"Row";
         NSInteger iconId = [args[@"iconId"] integerValue];
-        result([JuceBridge insertRowBelowObjC:referenceRowId name:name iconId:iconId]);
+        NSInteger preferredRowId = args[@"preferredRowId"] == nil ? -1 : [args[@"preferredRowId"] integerValue];
+        result([JuceBridge insertRowBelowObjC:referenceRowId name:name iconId:iconId preferredRowId:preferredRowId]);
     } else if ([call.method isEqualToString:@"deleteRow"] || [call.method isEqualToString:@"removeRow"]) {
         NSInteger rowId = [args[@"rowId"] integerValue];
         if (args[@"row"] != nil) rowId = [args[@"row"] integerValue];

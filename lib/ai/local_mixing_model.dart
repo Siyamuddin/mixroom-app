@@ -275,6 +275,7 @@ class LocalMixingModel {
       intensity: goal.intensity,
       executionProfile: goal.executionProfile,
       audibility: goal.audibility,
+      styleTags: goal.styleTags,
       destructiveOk: goal.destructiveOk,
       referenceTarget: goal.referenceTarget,
       referenceMode: goal.referenceMode,

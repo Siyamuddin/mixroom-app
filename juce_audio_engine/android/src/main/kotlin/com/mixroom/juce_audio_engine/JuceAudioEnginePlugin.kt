@@ -1049,6 +1049,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             JuceBridge.addRowJNI(
               args.stringValue("name", "Row"),
               args.intValue("iconId"),
+              args.intValue("preferredRowId", -1),
             ),
           )
         }
@@ -1058,6 +1059,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
               args.intValue("referenceRowId"),
               args.stringValue("name", "Row"),
               args.intValue("iconId"),
+              args.intValue("preferredRowId", -1),
             ),
           )
         }
@@ -1067,6 +1069,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
               args.intValue("referenceRowId"),
               args.stringValue("name", "Row"),
               args.intValue("iconId"),
+              args.intValue("preferredRowId", -1),
             ),
           )
         }

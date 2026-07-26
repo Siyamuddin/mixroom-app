@@ -2614,6 +2614,8 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 
             if (e.contains("min"))  d[@"min"] = @(static_cast<float>(e["min"]));
             if (e.contains("max"))  d[@"max"] = @(static_cast<float>(e["max"]));
+            if (e.contains("interval"))
+                d[@"interval"] = @(static_cast<float>(e["interval"]));
 
             auto extractVar = ^(const juce::var& v) {
                 if (v.isBool())
@@ -2695,6 +2697,8 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 
             if (e.contains("min"))  d[@"min"] = @(static_cast<float>(e["min"]));
             if (e.contains("max"))  d[@"max"] = @(static_cast<float>(e["max"]));
+            if (e.contains("interval"))
+                d[@"interval"] = @(static_cast<float>(e["interval"]));
 
             auto extractVar = ^(const juce::var& v) {
                 if (v.isBool())
@@ -4216,24 +4220,24 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 
 #pragma mark - Row management
 
-+ (NSNumber *)addRowObjC:(NSString *)name iconId:(NSInteger)iconId
++ (NSNumber *)addRowObjC:(NSString *)name iconId:(NSInteger)iconId preferredRowId:(NSInteger)preferredRowId
 {
     juce::String n = juceStringFromNSString(name);
-    int rowId = JuceEngine::get().addRow(n, (int)iconId);
+    int rowId = JuceEngine::get().addRow(n, (int)iconId, (int)preferredRowId);
     return @(rowId);
 }
 
-+ (NSNumber *)insertRowAboveObjC:(NSInteger)referenceRowId name:(NSString *)name iconId:(NSInteger)iconId
++ (NSNumber *)insertRowAboveObjC:(NSInteger)referenceRowId name:(NSString *)name iconId:(NSInteger)iconId preferredRowId:(NSInteger)preferredRowId
 {
     juce::String n = juceStringFromNSString(name);
-    int rowId = JuceEngine::get().insertRowAbove((int)referenceRowId, n, (int)iconId);
+    int rowId = JuceEngine::get().insertRowAbove((int)referenceRowId, n, (int)iconId, (int)preferredRowId);
     return @(rowId);
 }
 
-+ (NSNumber *)insertRowBelowObjC:(NSInteger)referenceRowId name:(NSString *)name iconId:(NSInteger)iconId
++ (NSNumber *)insertRowBelowObjC:(NSInteger)referenceRowId name:(NSString *)name iconId:(NSInteger)iconId preferredRowId:(NSInteger)preferredRowId
 {
     juce::String n = juceStringFromNSString(name);
-    int rowId = JuceEngine::get().insertRowBelow((int)referenceRowId, n, (int)iconId);
+    int rowId = JuceEngine::get().insertRowBelow((int)referenceRowId, n, (int)iconId, (int)preferredRowId);
     return @(rowId);
 }
 

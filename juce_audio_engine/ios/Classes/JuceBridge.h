@@ -150,9 +150,9 @@
 + (NSInteger)updateClipTimelineBatchObjC:(NSArray<NSDictionary *> *)updates;
 
 // Row management
-+ (NSNumber *)addRowObjC:(NSString *)name iconId:(NSInteger)iconId;
-+ (NSNumber *)insertRowAboveObjC:(NSInteger)referenceRowId name:(NSString *)name iconId:(NSInteger)iconId;
-+ (NSNumber *)insertRowBelowObjC:(NSInteger)referenceRowId name:(NSString *)name iconId:(NSInteger)iconId;
++ (NSNumber *)addRowObjC:(NSString *)name iconId:(NSInteger)iconId preferredRowId:(NSInteger)preferredRowId;
++ (NSNumber *)insertRowAboveObjC:(NSInteger)referenceRowId name:(NSString *)name iconId:(NSInteger)iconId preferredRowId:(NSInteger)preferredRowId;
++ (NSNumber *)insertRowBelowObjC:(NSInteger)referenceRowId name:(NSString *)name iconId:(NSInteger)iconId preferredRowId:(NSInteger)preferredRowId;
 + (BOOL)removeRowObjC:(NSInteger)rowId;
 + (BOOL)moveRowOrderObjC:(NSInteger)fromIndex toIndex:(NSInteger)toIndex;
 + (BOOL)renameRowObjC:(NSInteger)rowId name:(NSString *)name;

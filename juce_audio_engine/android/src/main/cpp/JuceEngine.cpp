@@ -8864,6 +8864,7 @@ juce::Array<juce::NamedValueSet> JuceEngine::getTrackPluginParameterInfo(int row
                 e.set("type", "float");
                 e.set("min", fp->range.start);
                 e.set("max", fp->range.end);
+                e.set("interval", fp->range.interval);
                 e.set("default",
                       fp->range.convertFrom0to1(p->getDefaultValue()));
                 e.set("value", fp->get());
@@ -8957,6 +8958,7 @@ juce::Array<juce::NamedValueSet> JuceEngine::getMasterPluginParameterInfo(int ef
                 e.set("type", "float");
                 e.set("min", fp->range.start);
                 e.set("max", fp->range.end);
+                e.set("interval", fp->range.interval);
                 e.set("default",
                       fp->range.convertFrom0to1(p->getDefaultValue()));
                 e.set("value", fp->get());
@@ -10827,7 +10829,26 @@ std::vector<float> JuceEngine::getMasterTransientShaperVisual(int effectIndex, i
     return std::vector<float>(fallbackSize, 0.0f);
 }
 
-int JuceEngine::addRow(const juce::String &name, int iconId)
+int JuceEngine::allocateRowId(int preferredRowId)
+{
+    if (preferredRowId != -1)
+    {
+        if (preferredRowId <= 0)
+            return -1;
+        if (getRowIndexById(preferredRowId) >= 0)
+            return -1;
+
+        int next = nextRowId.load();
+        while (next <= preferredRowId &&
+               !nextRowId.compare_exchange_weak(next, preferredRowId + 1))
+        {
+        }
+        return preferredRowId;
+    }
+    return nextRowId.fetch_add(1);
+}
+
+int JuceEngine::addRow(const juce::String &name, int iconId, int preferredRowId)
 {
     const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
 
@@ -10835,7 +10856,9 @@ int JuceEngine::addRow(const juce::String &name, int iconId)
         return -1;
 
     RowState r;
-    const int newRowId = nextRowId.fetch_add(1);
+    const int newRowId = allocateRowId(preferredRowId);
+    if (newRowId < 0)
+        return -1;
     r.rowId = newRowId;
     r.name = name.isNotEmpty() ? name : "Row";
     r.iconId = iconId;
@@ -10867,7 +10890,7 @@ bool JuceEngine::renameRow(int rowId, const juce::String &newName)
     return false;
 }
 
-int JuceEngine::insertRowAbove(int referenceRowId, const juce::String &name, int iconId)
+int JuceEngine::insertRowAbove(int referenceRowId, const juce::String &name, int iconId, int preferredRowId)
 {
     const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
 
@@ -10878,7 +10901,9 @@ int JuceEngine::insertRowAbove(int referenceRowId, const juce::String &name, int
     const int insertIdx = juce::jlimit(0, (int)rows.size(), refIdx);
 
     RowState r;
-    const int newRowId = nextRowId.fetch_add(1);
+    const int newRowId = allocateRowId(preferredRowId);
+    if (newRowId < 0)
+        return -1;
     r.rowId = newRowId;
     r.name = name.isNotEmpty() ? name : "Row";
     r.iconId = iconId;
@@ -10897,7 +10922,7 @@ int JuceEngine::insertRowAbove(int referenceRowId, const juce::String &name, int
     return newRowId;
 }
 
-int JuceEngine::insertRowBelow(int referenceRowId, const juce::String &name, int iconId)
+int JuceEngine::insertRowBelow(int referenceRowId, const juce::String &name, int iconId, int preferredRowId)
 {
     const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
 
@@ -10908,7 +10933,9 @@ int JuceEngine::insertRowBelow(int referenceRowId, const juce::String &name, int
     const int insertIdx = juce::jlimit(0, (int)rows.size(), refIdx + 1);
 
     RowState r;
-    const int newRowId = nextRowId.fetch_add(1);
+    const int newRowId = allocateRowId(preferredRowId);
+    if (newRowId < 0)
+        return -1;
     r.rowId = newRowId;
     r.name = name.isNotEmpty() ? name : "Row";
     r.iconId = iconId;

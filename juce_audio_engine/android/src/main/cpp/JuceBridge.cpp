@@ -2445,12 +2445,12 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setAutomationTransportJNI(JNIEnv
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_mixroom_juce_1audio_1engine_JuceBridge_addRowJNI(JNIEnv *env, jclass, jstring name, jint iconId)
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_addRowJNI(JNIEnv *env, jclass, jstring name, jint iconId, jint preferredRowId)
 {
     const juce::String rowName = juceStringFromJString(env, name);
     std::atomic<int> rowId{-1};
     juce::MessageManager::getInstance()->callSync([&]
-                                                  { rowId = JuceEngine::get().addRow(rowName, (int)iconId); });
+                                                  { rowId = JuceEngine::get().addRow(rowName, (int)iconId, (int)preferredRowId); });
     return (jint)rowId.load();
 }
 
@@ -2459,12 +2459,13 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_insertRowAboveJNI(JNIEnv *env,
                                                                    jclass,
                                                                    jint referenceRowId,
                                                                    jstring name,
-                                                                   jint iconId)
+                                                                   jint iconId,
+                                                                   jint preferredRowId)
 {
     const juce::String rowName = juceStringFromJString(env, name);
     std::atomic<int> rowId{-1};
     juce::MessageManager::getInstance()->callSync([&]
-                                                  { rowId = JuceEngine::get().insertRowAbove((int)referenceRowId, rowName, (int)iconId); });
+                                                  { rowId = JuceEngine::get().insertRowAbove((int)referenceRowId, rowName, (int)iconId, (int)preferredRowId); });
     return (jint)rowId.load();
 }
 
@@ -2473,12 +2474,13 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_insertRowBelowJNI(JNIEnv *env,
                                                                    jclass,
                                                                    jint referenceRowId,
                                                                    jstring name,
-                                                                   jint iconId)
+                                                                   jint iconId,
+                                                                   jint preferredRowId)
 {
     const juce::String rowName = juceStringFromJString(env, name);
     std::atomic<int> rowId{-1};
     juce::MessageManager::getInstance()->callSync([&]
-                                                  { rowId = JuceEngine::get().insertRowBelow((int)referenceRowId, rowName, (int)iconId); });
+                                                  { rowId = JuceEngine::get().insertRowBelow((int)referenceRowId, rowName, (int)iconId, (int)preferredRowId); });
     return (jint)rowId.load();
 }
 

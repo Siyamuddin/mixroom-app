@@ -1,0 +1,361 @@
+import 'dart:convert';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:mixroom/ai/v3/ai_v3_context.dart';
+import 'package:mixroom/ai/v3/ai_v3_contract.dart';
+import 'package:mixroom/ai/v3/ai_v3_planner_request.dart';
+import 'package:mixroom/ai/v3/ai_v3_planner_service.dart';
+import 'package:mixroom/ai/v3/ai_v3_adaptive_midi_planner.dart';
+
+AiV3CoreContext _context() => const AiV3CoreContext(
+      profile: AiV3ContextProfile.essential,
+      stateDigest: 'digest-1',
+      data: <String, dynamic>{
+        'schema_version': 'core_context_v3_prototype_1',
+        'project': <String, dynamic>{'bpm': 120},
+        'rows': <Object>[],
+        'clips': <Object>[],
+      },
+    );
+
+Map<String, dynamic> _responseWithArguments(Object arguments) =>
+    <String, dynamic>{
+      'id': 'resp_v3_test',
+      'service_tier': 'default',
+      'output': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'type': 'function_call',
+          'name': 'submit_plan_v3',
+          'arguments': arguments,
+        },
+      ],
+      'usage': <String, dynamic>{
+        'input_tokens': 100,
+        'output_tokens': 20,
+        'output_tokens_details': <String, dynamic>{'reasoning_tokens': 5},
+      },
+    };
+
+Map<String, dynamic> _respondPlan() => <String, dynamic>{
+      'schema_version': aiV3PlanVersion,
+      'outcome': 'respond',
+      'user_message': 'The project is at 120 BPM.',
+      'commands': const <Object>[],
+      'question_options': const <Object>[],
+    };
+
+void main() {
+  test('sends one strict V3 tool and preserves the original request', () async {
+    const request = '현재 BPM이 뭐야? Do not change anything.';
+    late Map<String, dynamic> sent;
+    final client = MockClient((http.Request httpRequest) async {
+      sent = Map<String, dynamic>.from(
+        jsonDecode(httpRequest.body) as Map,
+      );
+      return http.Response(
+        jsonEncode(_responseWithArguments(jsonEncode(_respondPlan()))),
+        200,
+      );
+    });
+    final service = AiV3PlannerService(
+      apiKey: 'test-key',
+      model: 'gpt-5.4-mini',
+      reasoningEffort: 'low',
+      httpClient: client,
+    );
+
+    final result = await service.plan(
+      context: _context(),
+      originalRequest: request,
+      promptTraceId: 'trace-1',
+    );
+
+    expect(result.plan.outcome, 'respond');
+    expect(result.requestBody, sent);
+    expect(sent['max_output_tokens'], 4096);
+    expect(sent['parallel_tool_calls'], isFalse);
+    expect((sent['tools'] as List), hasLength(1));
+    expect((sent['tools'] as List).single['name'], 'submit_plan_v3');
+    final oneShotTool = Map<String, dynamic>.from(
+      (sent['tools'] as List).single as Map,
+    );
+    final adaptiveTool = Map<String, dynamic>.from(
+      (buildAiV3AdaptiveFirstRequestBody(
+        compactCore: const <String, dynamic>{},
+        originalRequest: request,
+        model: 'gpt-5.4-mini',
+        reasoningEffort: 'low',
+      )['tools'] as List)
+          .first as Map,
+    );
+    expect(oneShotTool, adaptiveTool);
+    expect(
+      sent['instructions'],
+      allOf(
+        contains('Never invent a group.'),
+        contains('multiple named ungrouped rows'),
+        contains('Use all_rows only'),
+      ),
+    );
+    expect(jsonEncode(sent['input']), contains(request));
+    expect(jsonEncode(sent), isNot(contains('intent_frame')));
+    expect(jsonEncode(sent), isNot(contains('legacy_action')));
+    expect(
+      sent,
+      buildAiV3PlannerRequestBody(
+        contextData: _context().data,
+        originalRequest: request,
+        model: 'gpt-5.4-mini',
+        reasoningEffort: 'low',
+        promptTraceId: 'trace-1',
+      ),
+    );
+  });
+
+  test('compact planner rejects commands outside its declared surface',
+      () async {
+    final client = MockClient((_) async => http.Response(
+          jsonEncode(_responseWithArguments(jsonEncode(<String, dynamic>{
+            'schema_version': aiV3PlanVersion,
+            'outcome': 'plan',
+            'user_message': 'Transpose.',
+            'commands': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'command_id': 'transpose',
+                'type': 'midi.transpose',
+                'arguments': <String, dynamic>{
+                  'clip_id': 'clip-1',
+                  'semitones': -2,
+                },
+              },
+            ],
+            'question_options': const <Object>[],
+          }))),
+          200,
+        ));
+    final service = AiV3PlannerService(
+      apiKey: 'test-key',
+      model: 'gpt-5.4-mini',
+      commandTypes: aiV3CommonCommandTypes,
+      architecture: 'v3_compact_common_shadow',
+      httpClient: client,
+    );
+
+    await expectLater(
+      service.plan(
+        context: _context(),
+        originalRequest: 'Transpose the clip.',
+      ),
+      throwsA(isA<AiV3PlannerException>().having(
+        (error) => error.detail,
+        'detail',
+        'v3_planner_command_outside_surface',
+      )),
+    );
+  });
+
+  test('rejects missing or malformed tool output without repair', () async {
+    final missingToolClient = MockClient((_) async => http.Response(
+          jsonEncode(<String, dynamic>{'output': const <Object>[]}),
+          200,
+        ));
+    final missingToolService = AiV3PlannerService(
+      apiKey: 'test-key',
+      model: 'gpt-5.4-mini',
+      httpClient: missingToolClient,
+    );
+    await expectLater(
+      missingToolService.plan(
+        context: _context(),
+        originalRequest: 'What is the BPM?',
+      ),
+      throwsA(
+        isA<AiV3PlannerException>().having(
+          (error) => error.code,
+          'code',
+          'v3_planner_tool_call_missing',
+        ),
+      ),
+    );
+
+    final malformedClient = MockClient((_) async => http.Response(
+          jsonEncode(_responseWithArguments('{not-json')),
+          200,
+        ));
+    final malformedService = AiV3PlannerService(
+      apiKey: 'test-key',
+      model: 'gpt-5.4-mini',
+      httpClient: malformedClient,
+    );
+    await expectLater(
+      malformedService.plan(
+        context: _context(),
+        originalRequest: 'What is the BPM?',
+      ),
+      throwsA(
+        isA<AiV3PlannerException>().having(
+          (error) => error.code,
+          'code',
+          'v3_planner_arguments_invalid_json',
+        ),
+      ),
+    );
+  });
+
+  test('rejects multiple or unknown tool calls without choosing one', () async {
+    Future<void> expectRejected(
+      List<Map<String, dynamic>> output,
+      String code,
+    ) async {
+      final client = MockClient((_) async => http.Response(
+            jsonEncode(<String, dynamic>{'output': output}),
+            200,
+          ));
+      final service = AiV3PlannerService(
+        apiKey: 'test-key',
+        model: 'gpt-5.4-mini',
+        httpClient: client,
+      );
+      await expectLater(
+        service.plan(context: _context(), originalRequest: 'What is the BPM?'),
+        throwsA(isA<AiV3PlannerException>().having(
+          (error) => error.code,
+          'code',
+          code,
+        )),
+      );
+    }
+
+    final submit = <String, dynamic>{
+      'type': 'function_call',
+      'name': 'submit_plan_v3',
+      'arguments': jsonEncode(_respondPlan()),
+    };
+    await expectRejected(
+      <Map<String, dynamic>>[submit, Map<String, dynamic>.from(submit)],
+      'v3_planner_tool_call_count_invalid',
+    );
+    await expectRejected(
+      <Map<String, dynamic>>[
+        submit,
+        <String, dynamic>{
+          'type': 'function_call',
+          'name': 'unknown_tool',
+          'arguments': '{}',
+        },
+      ],
+      'v3_planner_tool_call_count_invalid',
+    );
+    await expectRejected(
+      <Map<String, dynamic>>[
+        <String, dynamic>{
+          'type': 'function_call',
+          'name': 'unknown_tool',
+          'arguments': '{}',
+        },
+      ],
+      'v3_planner_tool_call_invalid',
+    );
+  });
+
+  test('retains raw provider output when PlanV3 semantics are invalid',
+      () async {
+    final invalidPlan = _respondPlan()
+      ..['commands'] = <Map<String, dynamic>>[
+        <String, dynamic>{
+          'command_id': 'mute',
+          'type': 'row.set_muted',
+          'arguments': <String, dynamic>{'row_id': 1, 'muted': true},
+        },
+      ];
+    final client = MockClient((_) async => http.Response(
+          jsonEncode(_responseWithArguments(jsonEncode(invalidPlan))),
+          200,
+        ));
+    final service = AiV3PlannerService(
+      apiKey: 'test-key',
+      model: 'gpt-5.4-mini',
+      httpClient: client,
+    );
+
+    await expectLater(
+      service.plan(context: _context(), originalRequest: 'Mute row one.'),
+      throwsA(
+        isA<AiV3PlannerException>()
+            .having(
+              (error) => error.code,
+              'code',
+              'v3_planner_contract_invalid',
+            )
+            .having(
+              (error) => error.detail,
+              'detail',
+              'v3_outcome_command_mismatch',
+            )
+            .having(
+              (error) => error.diagnostic['tool_arguments'],
+              'tool arguments',
+              isNotNull,
+            ),
+      ),
+    );
+  });
+
+  test('reports timeout as a sanitized planner error', () async {
+    final client = MockClient((_) async {
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      return http.Response('{}', 200);
+    });
+    final service = AiV3PlannerService(
+      apiKey: 'test-key',
+      model: 'gpt-5.4-mini',
+      requestTimeout: const Duration(milliseconds: 1),
+      httpClient: client,
+    );
+
+    await expectLater(
+      service.plan(context: _context(), originalRequest: 'Rename the row.'),
+      throwsA(
+        isA<AiV3PlannerException>().having(
+          (error) => error.code,
+          'code',
+          'v3_planner_timeout',
+        ),
+      ),
+    );
+  });
+
+  test('preserves sanitized OpenAI error detail for local diagnosis', () async {
+    final client = MockClient((_) async => http.Response(
+          jsonEncode(<String, dynamic>{
+            'error': <String, dynamic>{
+              'code': 'invalid_function_parameters',
+              'param': 'tools[0].parameters',
+              'message': 'Unsupported keyword near sk-secret-value',
+            },
+          }),
+          400,
+        ));
+    final service = AiV3PlannerService(
+      apiKey: 'test-key',
+      model: 'gpt-5.4-mini',
+      httpClient: client,
+    );
+
+    await expectLater(
+      service.plan(context: _context(), originalRequest: 'Rename the row.'),
+      throwsA(
+        isA<AiV3PlannerException>()
+            .having((error) => error.detail, 'detail', contains('tools[0]'))
+            .having((error) => error.detail, 'detail', contains('[redacted]'))
+            .having(
+              (error) => error.detail,
+              'detail',
+              isNot(contains('sk-secret-value')),
+            ),
+      ),
+    );
+  });
+}

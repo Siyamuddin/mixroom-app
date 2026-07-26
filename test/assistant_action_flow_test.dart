@@ -6,6 +6,13 @@ import 'package:mixroom/ai/cloud_llm_service.dart';
 import 'package:mixroom/ai/instrument_classifier.dart';
 import 'package:mixroom/ai/local_mixing_model.dart';
 import 'package:mixroom/ai/project_state_builder.dart';
+import 'package:mixroom/ai/v3/ai_v3_adaptive_midi_planner.dart';
+import 'package:mixroom/ai/v3/ai_v3_capture.dart';
+import 'package:mixroom/ai/v3/ai_v3_compact_core.dart';
+import 'package:mixroom/ai/v3/ai_v3_context.dart';
+import 'package:mixroom/ai/v3/ai_v3_contract.dart';
+import 'package:mixroom/ai/v3/ai_v3_planner_service.dart';
+import 'package:mixroom/ai/v3/ai_v3_planning_snapshot.dart';
 import 'package:mixroom/models/mixing_result.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/models/project_state.dart';
@@ -72,6 +79,93 @@ class _QueuedFakeCloudLlmService extends CloudLlmService {
     return _results.removeAt(0);
   }
 }
+
+class _FakeAiV3Planner implements AiV3Planner {
+  int callCount = 0;
+  String? seenRequest;
+
+  @override
+  String get model => 'test-v3';
+
+  @override
+  String get reasoningEffort => 'low';
+
+  @override
+  Future<AiV3PlannerResult> plan({
+    required AiV3CoreContext context,
+    required String originalRequest,
+    String? promptTraceId,
+  }) async {
+    callCount += 1;
+    seenRequest = originalRequest;
+    return const AiV3PlannerResult(
+      plan: AiV3Plan(
+        outcome: 'respond',
+        userMessage: 'V3 handled the request.',
+        commands: <AiV3Command>[],
+      ),
+      rawResponse: <String, dynamic>{},
+      meta: <String, dynamic>{'architecture': 'test_v3'},
+    );
+  }
+}
+
+class _FakeAdaptivePlanner implements AiV3AdaptivePlanner {
+  int callCount = 0;
+
+  @override
+  String get model => 'test-adaptive';
+
+  @override
+  String get reasoningEffort => 'low';
+
+  @override
+  Future<AiV3AdaptivePlannerResult> plan({
+    required CompactCoreV3 compactCore,
+    required PlanningSnapshotV3 snapshot,
+    required String originalRequest,
+    String? promptTraceId,
+  }) async {
+    callCount += 1;
+    return const AiV3AdaptivePlannerResult(
+      plan: AiV3Plan(
+        outcome: 'respond',
+        userMessage: 'Detached adaptive result.',
+        commands: <AiV3Command>[],
+      ),
+      firstRawResponse: <String, dynamic>{},
+      secondRawResponse: null,
+      retrievalRequest: null,
+      retrievalResult: null,
+      firstRequestBody: <String, dynamic>{},
+      secondRequestBody: null,
+      meta: <String, dynamic>{},
+    );
+  }
+}
+
+Map<String, dynamic> _v3ClientContext() => <String, dynamic>{
+      'ai_v3_prototype_enabled': true,
+      'ai_v3_row_state': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'row_id': 101,
+          'muted': false,
+          'soloed': false,
+        },
+      ],
+      'ai_v3_clip_timeline_lengths_ms': <String, double>{},
+      'ai_v3_playhead_ms': 0,
+      'ai_v3_transport': <String, dynamic>{
+        'playing': false,
+        'recording': false,
+        'metronome_enabled': false,
+        'loop_enabled': false,
+        'loop_start_ms': 0,
+        'loop_end_ms': 0,
+      },
+      'current_rows': 1,
+      'max_rows': 32,
+    };
 
 class _FakeProjectStateBuilder extends ProjectStateBuilder {
   _FakeProjectStateBuilder({
@@ -227,6 +321,138 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('Assistant Action Pipeline Smoke', () {
+    test('V3-disabled project chat keeps the existing V1 route', () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'informational_response',
+          const <String, dynamic>{'message': 'V1 handled the request.'},
+          text: 'V1 handled the request.',
+        ),
+      );
+      final fakeV3 = _FakeAiV3Planner();
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: fakeV3,
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Tell me about this project.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        clientContext: const <String, dynamic>{
+          'ai_v3_prototype_enabled': false,
+        },
+      );
+
+      expect(fakeLlm.seenUserText, 'Tell me about this project.');
+      expect(fakeV3.callCount, 0);
+      expect(result.hasAiV3Handoff, isFalse);
+      expect(result.message, 'V1 handled the request.');
+    });
+
+    test('V3-enabled project chat uses V3 and does not call V1', () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'informational_response',
+          const <String, dynamic>{'message': 'Unexpected V1 result.'},
+          text: 'Unexpected V1 result.',
+        ),
+      );
+      final fakeV3 = _FakeAiV3Planner();
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: fakeV3,
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Tell me about this project.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        clientContext: _v3ClientContext(),
+      );
+
+      expect(fakeLlm.seenUserText, isNull);
+      expect(fakeV3.callCount, 1, reason: result.toString());
+      expect(fakeV3.seenRequest, 'Tell me about this project.');
+      expect(result.hasAiV3Handoff, isTrue);
+      expect(result.aiV3Handoff?['decision'], 'respond');
+      expect(result.message, 'V3 handled the request.');
+    });
+
+    test('adaptive evaluation stays detached from the visible V3 result',
+        () async {
+      final captureDirectory =
+          await Directory.systemTemp.createTemp('mixroom_v3_routing_');
+      addTearDown(() async {
+        if (await captureDirectory.exists()) {
+          await captureDirectory.delete(recursive: true);
+        }
+      });
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'informational_response',
+          const <String, dynamic>{'message': 'Unexpected V1 result.'},
+          text: 'Unexpected V1 result.',
+        ),
+      );
+      final fakeV3 = _FakeAiV3Planner();
+      final fakeAdaptive = _FakeAdaptivePlanner();
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: fakeV3,
+        aiV3AdaptiveShadowPlanner: fakeAdaptive,
+        aiV3Capture: AiV3Capture(
+          enabled: true,
+          directoryPath: captureDirectory.path,
+        ),
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Tell me about this project.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        promptTraceId: 'routing-shadow-test',
+        clientStateDigest: 'routing-shadow-state',
+        clientContext: _v3ClientContext(),
+      );
+      for (var attempt = 0;
+          attempt < 50 && fakeAdaptive.callCount == 0;
+          attempt += 1) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+
+      expect(fakeLlm.seenUserText, isNull);
+      expect(fakeV3.callCount, 1);
+      expect(fakeAdaptive.callCount, 1);
+      expect(result.message, 'V3 handled the request.');
+      expect(result.aiV3Handoff?['decision'], 'respond');
+      expect(
+        result.aiV3Handoff?['plan']?['user_message'],
+        'V3 handled the request.',
+      );
+    });
+
     test('forwards all added assistant action types via daw_assistant_actions',
         () async {
       final fakeLlm = _FakeCloudLlmService(
