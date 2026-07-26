@@ -5715,6 +5715,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   int? _activeChatFlowId;
   int _assistantActionNoticeCaptureDepth = 0;
   int _assistantActionExecutionMessageCount = 0;
+  List<String>? _deferredAssistantActionNotices;
+  List<String>? _deferredAssistantExecutionNotices;
   bool _chatScrollHintEnabled = false;
   late final MixChangeHighlighter _mixHighlighter = MixChangeHighlighter();
   bool _chatWarm = false;
@@ -59983,6 +59985,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Map<String, dynamic>? metadata,
     bool persist = true,
   }) {
+    final deferredNotices = _deferredAssistantExecutionNotices;
+    if (_assistantActionNoticeCaptureDepth > 0 && deferredNotices != null) {
+      final normalized = text.trim();
+      if (normalized.isNotEmpty && !deferredNotices.contains(normalized)) {
+        deferredNotices.add(normalized);
+      }
+      return;
+    }
     _insertChatTextMessage(
       authorId: 'system',
       text: text,
@@ -60003,6 +60013,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_assistantActionNoticeCaptureDepth <= 0) return;
     final displayText = _centeredSystemChatText(text);
     if (displayText.isEmpty) return;
+    final deferredNotices = _deferredAssistantActionNotices;
+    if (deferredNotices != null) {
+      final normalized = text.trim();
+      if (normalized.isNotEmpty && !deferredNotices.contains(normalized)) {
+        deferredNotices.add(normalized);
+      }
+      return;
+    }
     _insertSystemChatText(
       displayText,
       metadata: const <String, dynamic>{
@@ -60336,7 +60354,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     final expectations = await _captureAiV3Expectations(actions);
     final executionSummariesByCommandId = <String, List<String>>{};
+    final deferredActionNotices = <String>[];
+    final deferredExecutionNotices = <String>[];
     final executionStopwatch = Stopwatch()..start();
+    final previousDeferredNotices = _deferredAssistantActionNotices;
+    final previousDeferredExecutionNotices =
+        _deferredAssistantExecutionNotices;
+    var transactionNoticeCaptureActive = true;
+    _deferredAssistantActionNotices = deferredActionNotices;
+    _deferredAssistantExecutionNotices = deferredExecutionNotices;
+    _assistantActionNoticeCaptureDepth += 1;
+    void releaseTransactionNoticeCapture() {
+      if (!transactionNoticeCaptureActive) return;
+      transactionNoticeCaptureActive = false;
+      _assistantActionNoticeCaptureDepth -= 1;
+      _deferredAssistantActionNotices = previousDeferredNotices;
+      _deferredAssistantExecutionNotices =
+          previousDeferredExecutionNotices;
+    }
+
     try {
       if (chatFlowId != null) _throwIfChatFlowStopped(chatFlowId);
       final transaction = await const AiV3LocalTransaction<EditorUndoAction,
@@ -60370,11 +60406,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           );
         },
       );
+      releaseTransactionNoticeCapture();
       executionStopwatch.stop();
-      final completionMessage = aiV3VerifiedCompletionMessage(
+      final verifiedActionNotices = deferredActionNotices.isNotEmpty
+          ? deferredActionNotices
+          : deferredExecutionNotices;
+      final executionDetails = aiV3VerifiedExecutionDetails(
         bundle,
         executionSummariesByCommandId: executionSummariesByCommandId,
+        actionNotices: verifiedActionNotices,
       );
+      final conversationMessage = aiV3VerifiedConversationMessage(
+        bundle,
+        executionSummariesByCommandId: executionSummariesByCommandId,
+        actionNotices: verifiedActionNotices,
+      );
+      final completionMessage = aiV3VerifiedCompletionMessage(bundle);
       _chatPipeline.recordAiV3Execution(
         handoff: handoff,
         result: <String, dynamic>{
@@ -60388,11 +60435,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           'verification': 'passed',
           'execution_elapsed_ms': executionStopwatch.elapsedMilliseconds,
         },
-        conversationMessage: completionMessage,
+        conversationMessage: conversationMessage,
       );
       final count = (bundle['receipts'] as List?)?.length ?? actions.length;
       final applied =
           count == 1 ? 'Applied 1 change.' : 'Applied $count changes.';
+      for (final detail in executionDetails) {
+        _insertSystemChatText(
+          _centeredSystemChatText(detail),
+          metadata: const <String, dynamic>{
+            'source': 'ai_v3_verified_execution',
+          },
+        );
+      }
       _insertAssistantChatText(
         completionMessage,
         modelAuthored: true,
@@ -60406,6 +60461,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     } on AiV3TransactionFailure<
         Map<String, dynamic>> catch (error, stackTrace) {
+      releaseTransactionNoticeCapture();
       if (executionStopwatch.isRunning) executionStopwatch.stop();
       try {
         await _refreshAiV3ExpectedEffectSnapshots(expectations);
@@ -60434,6 +60490,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             ? 'The changes failed and could not be fully rolled back. Review the project state.'
             : _aiV3RolledBackFailureMessage(error.cause),
       );
+    } finally {
+      releaseTransactionNoticeCapture();
     }
   }
 

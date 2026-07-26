@@ -40,12 +40,26 @@ class _AiV3PreparationFailureResponse {
   final String message;
 }
 
-String aiV3VerifiedCompletionMessage(
+List<String> aiV3VerifiedExecutionDetails(
   Map<String, dynamic> bundle, {
   Map<String, List<String>> executionSummariesByCommandId =
       const <String, List<String>>{},
+  List<String> actionNotices = const <String>[],
 }) {
-  final receiptLabels = <String>[];
+  final executionDetails = <String>[];
+  void addDetail(String rawDetail) {
+    final detail = _normalizeAiV3ExecutionSummary(rawDetail);
+    if (detail.isEmpty || executionDetails.contains(detail)) return;
+    executionDetails.add(detail);
+  }
+
+  for (final notice in actionNotices) {
+    addDetail(notice);
+  }
+  if (executionDetails.isNotEmpty) {
+    return List<String>.unmodifiable(executionDetails);
+  }
+
   final rawReceipts = bundle['receipts'];
   if (rawReceipts is List) {
     for (final rawReceipt in rawReceipts.whereType<Map>()) {
@@ -53,29 +67,41 @@ String aiV3VerifiedCompletionMessage(
       final executionSummaries =
           executionSummariesByCommandId[commandId] ?? const <String>[];
       if (executionSummaries.isNotEmpty) {
-        receiptLabels.addAll(
-          executionSummaries
-              .map(_normalizeAiV3ExecutionSummary)
-              .where((label) => label.isNotEmpty),
-        );
+        for (final summary in executionSummaries) {
+          addDetail(summary);
+        }
         continue;
       }
       final label = rawReceipt['preview_label']?.toString().trim() ?? '';
       if (label.isEmpty) continue;
       final status = rawReceipt['status']?.toString().trim() ?? '';
-      receiptLabels.add(
+      addDetail(
         status == 'already_satisfied' ? '$label (already set)' : label,
       );
     }
   }
-  if (receiptLabels.isEmpty) {
-    return 'Done.';
-  }
+  return List<String>.unmodifiable(executionDetails);
+}
+
+String aiV3VerifiedConversationMessage(
+  Map<String, dynamic> bundle, {
+  Map<String, List<String>> executionSummariesByCommandId =
+      const <String, List<String>>{},
+  List<String> actionNotices = const <String>[],
+}) {
+  final executionDetails = aiV3VerifiedExecutionDetails(
+    bundle,
+    executionSummariesByCommandId: executionSummariesByCommandId,
+    actionNotices: actionNotices,
+  );
+  if (executionDetails.isEmpty) return 'Done.';
   return <String>[
     'Done:',
-    ...receiptLabels.map((label) => '- $label'),
+    ...executionDetails.map((detail) => '- $detail'),
   ].join('\n');
 }
+
+String aiV3VerifiedCompletionMessage(Map<String, dynamic> bundle) => 'Done.';
 
 String _normalizeAiV3ExecutionSummary(String summary) {
   var normalized = summary.trim();

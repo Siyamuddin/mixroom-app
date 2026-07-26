@@ -522,7 +522,7 @@ void main() {
       final bundle = Map<String, dynamic>.from(
         result.aiV3Handoff?['prepared_bundle'] as Map,
       );
-      final completionMessage = aiV3VerifiedCompletionMessage(bundle);
+      final completionMessage = aiV3VerifiedConversationMessage(bundle);
       pipeline.recordAiV3Execution(
         handoff: result.aiV3Handoff!,
         result: const <String, dynamic>{'status': 'succeeded'},
@@ -708,9 +708,10 @@ void main() {
       expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
     });
 
-    test('verified completion reports receipts without repeating the plan', () {
+    test('verified execution details report receipts without repeating plan',
+        () {
       expect(
-        aiV3VerifiedCompletionMessage(
+        aiV3VerifiedExecutionDetails(
           const <String, dynamic>{
             'plan': <String, dynamic>{
               'user_message': 'Ajustando la mezcla.',
@@ -727,16 +728,16 @@ void main() {
             ],
           },
         ),
-        'Done:\n'
-        '- Lower Guitar by 1.5 dB\n'
-        '- Keep Piano unchanged (already set)',
+        <String>[
+          'Lower Guitar by 1.5 dB',
+          'Keep Piano unchanged (already set)',
+        ],
       );
     });
 
-    test('verified completion expands materialized mix execution summaries',
-        () {
+    test('verified execution details expand materialized mix summaries', () {
       expect(
-        aiV3VerifiedCompletionMessage(
+        aiV3VerifiedExecutionDetails(
           const <String, dynamic>{
             'plan': <String, dynamic>{
               'user_message': 'Apply a subtle polish to the master.',
@@ -757,31 +758,59 @@ void main() {
             ],
           },
         ),
-        'Done:\n'
-        '- Added Compressor to Master Bus\n'
-        '- Adjusted Threshold from 0.50 to 0.42 on Compressor (Master Bus)',
+        <String>[
+          'Added Compressor to Master Bus',
+          'Adjusted Threshold from 0.50 to 0.42 on Compressor (Master Bus)',
+        ],
       );
     });
 
-    test('verified completion marks one concise receipt as completed', () {
+    test('verified completion is concise while conversation keeps detail', () {
+      const bundle = <String, dynamic>{
+        'plan': <String, dynamic>{
+          'user_message': 'Delete Track 3.',
+        },
+        'receipts': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'command_id': 'delete-track-3',
+            'type': 'row.delete',
+            'status': 'prepared',
+            'preview_label': 'Delete Track 3',
+          },
+        ],
+      };
       expect(
-        aiV3VerifiedCompletionMessage(
+        aiV3VerifiedCompletionMessage(bundle),
+        'Done.',
+      );
+      expect(
+        aiV3VerifiedConversationMessage(bundle),
+        'Done:\n- Delete Track 3',
+      );
+    });
+
+    test('verified action notices replace fallback summaries and receipts', () {
+      expect(
+        aiV3VerifiedExecutionDetails(
           const <String, dynamic>{
-            'plan': <String, dynamic>{
-              'user_message': 'Delete Track 3.',
-            },
             'receipts': <Map<String, dynamic>>[
               <String, dynamic>{
-                'command_id': 'delete-track-3',
-                'type': 'row.delete',
+                'command_id': 'gain',
                 'status': 'prepared',
-                'preview_label': 'Delete Track 3',
+                'preview_label': 'Adjust Automation Lead by -0.5 dB',
               },
             ],
           },
+          executionSummariesByCommandId: const <String, List<String>>{
+            'gain': <String>['Adjust Automation Lead by -0.5 dB'],
+          },
+          actionNotices: const <String>[
+            '• Adjusted Gain from -1.0 dB to -1.5 dB on Automation Lead •',
+          ],
         ),
-        'Done:\n'
-        '- Delete Track 3',
+        <String>[
+          'Adjusted Gain from -1.0 dB to -1.5 dB on Automation Lead',
+        ],
       );
     });
 
