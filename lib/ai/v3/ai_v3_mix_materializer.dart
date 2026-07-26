@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import '../../models/goal_vector.dart';
 import '../../models/mixing_result.dart';
 import '../../models/project_state.dart';
@@ -47,10 +49,12 @@ class AiV3MixGoalMaterializer {
   const AiV3MixGoalMaterializer({
     required this.mixModel,
     required this.magnitudePredictor,
+    this.refinementTimeout = const Duration(seconds: 12),
   });
 
   final LocalMixingModel mixModel;
   final MixingMagnitudePredictor magnitudePredictor;
+  final Duration refinementTimeout;
 
   Future<AiV3MixMaterializationResult> materialize({
     required AiV3PreparedBundle bundle,
@@ -121,13 +125,29 @@ class AiV3MixGoalMaterializer {
       final refinementStopwatch = Stopwatch();
       if (resolved.isNotEmpty && !bypassLearnedMagnitudes) {
         refinementStopwatch.start();
-        refinement = await magnitudePredictor.refine(
-          project: project,
-          goal: goal,
-          actions: resolved,
-          strict: true,
-          projectId: projectId,
-        );
+        try {
+          refinement = await magnitudePredictor
+              .refine(
+                project: project,
+                goal: goal,
+                actions: resolved,
+                strict: true,
+                projectId: projectId,
+              )
+              .timeout(refinementTimeout);
+        } on TimeoutException {
+          refinement = MagnitudeRefineResult(
+            actions: resolved,
+            fallbackUsed: true,
+            fallbackReason: 'refinement_timeout',
+          );
+        } catch (_) {
+          refinement = MagnitudeRefineResult(
+            actions: resolved,
+            fallbackUsed: true,
+            fallbackReason: 'refinement_failed',
+          );
+        }
         refinementStopwatch.stop();
         resolved = refinement.actions
             .where((candidate) => candidate.type != 'noop')

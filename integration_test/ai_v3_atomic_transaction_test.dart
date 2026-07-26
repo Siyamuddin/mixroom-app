@@ -2397,6 +2397,116 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets(
+      'V3 applies punch compression and master safety as one reversible mix',
+      (tester) async {
+    _ignoreKnownEditorSemanticsAssertion();
+    final fixture = await _openAudioFixture(tester);
+    final controller = fixture.controller;
+    final initialUndoDepth = controller.snapshot()['undo_depth'] as int;
+
+    Map<String, dynamic> rowParam(String name, double value) =>
+        <String, dynamic>{
+          'type': 'adjust_effect_param_by_name',
+          'data': <String, dynamic>{
+            'row': 0,
+            'effect_name_contains': 'Compressor',
+            'param_name_contains_any': <String>[name],
+            'mode': 'set',
+            'value': value,
+            'skip_if_missing_effect': false,
+          },
+        };
+    Map<String, dynamic> masterParam(String name, double value) =>
+        <String, dynamic>{
+          'type': 'adjust_master_effect_param_by_name',
+          'data': <String, dynamic>{
+            'effect_name_contains': 'Limiter',
+            'param_name_contains_any': <String>[name],
+            'mode': 'set',
+            'value': value,
+            'skip_if_missing_effect': false,
+          },
+        };
+
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        <String, dynamic>{
+          'type': 'v3_mix_actions',
+          'data': <String, dynamic>{
+            'command_id': 'punch-and-protect',
+            'actions': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'type': 'ensure_effect',
+                'data': const <String, dynamic>{
+                  'row': 0,
+                  'effect_name_contains': 'Compressor',
+                },
+              },
+              rowParam('Threshold', -17.5),
+              rowParam('Ratio', 4.0),
+              rowParam('Attack', 12.0),
+              rowParam('Release', 90.0),
+              rowParam('Makeup', 1.2),
+              rowParam('Mix', 62.0),
+              <String, dynamic>{
+                'type': 'ensure_master_effect',
+                'data': const <String, dynamic>{
+                  'effect_name_contains': 'Limiter',
+                },
+              },
+              masterParam('Threshold', -3.0),
+              masterParam('Release', 90.0),
+              masterParam('Ceiling', -1.0),
+            ],
+          },
+        },
+      ],
+    ));
+
+    var snapshot = controller.snapshot();
+    final compressor = (_row(snapshot, 0)['effects'] as List)
+        .cast<Map<String, dynamic>>()
+        .singleWhere((effect) => effect['display_name'] == 'Compressor');
+    final limiter = (snapshot['master_effects'] as List)
+        .cast<Map<String, dynamic>>()
+        .singleWhere((effect) => effect['display_name'] == 'Limiter');
+    expect(
+      ((compressor['params'] as Map)['Threshold'] as num).toDouble(),
+      closeTo(-17.5, 0.051),
+    );
+    expect(
+      ((compressor['params'] as Map)['Mix'] as num).toDouble(),
+      closeTo(62.0, 0.501),
+    );
+    expect(
+      ((limiter['params'] as Map)['Ceiling'] as num).toDouble(),
+      closeTo(-1.0, 0.051),
+    );
+    expect(snapshot['undo_depth'], initialUndoDepth + 1);
+
+    await controller.undo();
+    snapshot = controller.snapshot();
+    expect(_effectNames(_row(snapshot, 0)['effects']), isEmpty);
+    expect(_effectNames(snapshot['master_effects']), isEmpty);
+    expect(snapshot['undo_depth'], initialUndoDepth);
+
+    await controller.redo();
+    snapshot = controller.snapshot();
+    expect(
+      _effectNames(_row(snapshot, 0)['effects']),
+      contains(contains('Compressor')),
+    );
+    expect(
+      _effectNames(snapshot['master_effects']),
+      contains(contains('Limiter')),
+    );
+    expect(snapshot['undo_depth'], initialUndoDepth + 1);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('V3 master mix effects persist through undo and redo',
       (tester) async {
     _ignoreKnownEditorSemanticsAssertion();

@@ -1128,6 +1128,28 @@ const List<Map<String, dynamic>> kInstrumentCatalog = [
 
 const String kPreferredPianoInstrumentId = 'sfz.vsco.upright_piano';
 
+const Duration _kAiMixEffectReadyTimeout = Duration(seconds: 3);
+const Duration _kAiMixEffectProbeTimeout = Duration(seconds: 1);
+const Duration _kAiMixEffectProbeInterval = Duration(milliseconds: 50);
+
+class _ResolvedMixEffectParameter {
+  const _ResolvedMixEffectParameter({
+    required this.effectIndex,
+    required this.effectId,
+    required this.effectName,
+    required this.parameter,
+    this.effectInstanceId,
+    this.effectOccurrence = 0,
+  });
+
+  final int effectIndex;
+  final String effectId;
+  final String effectName;
+  final String? effectInstanceId;
+  final int effectOccurrence;
+  final Map<String, dynamic> parameter;
+}
+
 class _AssistantActionApplyException implements Exception {
   const _AssistantActionApplyException({
     required this.actionType,
@@ -14431,6 +14453,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return CompoundUndoAction(
           (command['description'] ?? fallbackDescription).toString(),
           actions,
+          batchGraphMutations:
+              _commandBool(command, 'batchGraphMutations') ?? false,
         );
       case 'clipPresenceAdd':
       case 'clipPresenceDelete':
@@ -14997,6 +15021,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return SetEffectParamAction(
           row: row,
           effectIndex: effectIndex,
+          effectId: (command['effectId'] ?? '').toString().trim(),
+          effectInstanceId:
+              (command['effectInstanceId'] ?? '').toString().trim(),
+          effectOccurrence: _commandInt(command, 'effectOccurrence') ?? 0,
           paramId: paramId,
           oldValue: command['oldValue'],
           newValue: command['newValue'],
@@ -43737,6 +43765,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   isNoOp: false,
                 ),
                 emitActionSummaries: false,
+                stageEffectEnsures: true,
               );
               if (report.attempted != mixActions.length ||
                   report.skippedReasons.isNotEmpty) {
@@ -57946,9 +57975,95 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<MixApplyReport> applyMixingResult(
     MixingResult mix, {
     bool emitActionSummaries = true,
+    bool stageEffectEnsures = false,
+    bool batchUndoGraphMutations = false,
   }) async {
     if (mix.isNoOp || mix.actions.isEmpty) {
       return const MixApplyReport(attempted: 0, applied: 0);
+    }
+
+    if (stageEffectEnsures) {
+      final ensureActions = mix.actions
+          .where(
+            (action) =>
+                action.type == 'ensure_effect' ||
+                action.type == 'ensure_master_effect',
+          )
+          .toList(growable: false);
+      if (ensureActions.isNotEmpty) {
+        final remainingActions = mix.actions
+            .where(
+              (action) =>
+                  action.type != 'ensure_effect' &&
+                  action.type != 'ensure_master_effect',
+            )
+            .toList(growable: false);
+        final canStageEnsures = remainingActions.every(
+          (action) => const <String>{
+            'noop',
+            'set_row_gain',
+            'set_row_pan',
+            'set_master_gain',
+            'set_master_pan',
+            'adjust_effect_param_by_name',
+            'adjust_master_effect_param_by_name',
+          }.contains(action.type),
+        );
+        if (!canStageEnsures) {
+          stageEffectEnsures = false;
+        } else {
+          late final MixApplyReport ensureReport;
+          await JuceAudioEngine.beginGraphMutationBatch();
+          try {
+            ensureReport = await applyMixingResult(
+              MixingResult(
+                actions: ensureActions,
+                summary: mix.summary,
+                isNoOp: false,
+                notes: mix.notes,
+              ),
+              emitActionSummaries: emitActionSummaries,
+              batchUndoGraphMutations: true,
+            );
+          } finally {
+            await JuceAudioEngine.endGraphMutationBatch();
+          }
+          if (remainingActions.isEmpty) {
+            return MixApplyReport(
+              attempted: mix.actions.length,
+              applied: ensureReport.applied,
+              summaries: ensureReport.summaries,
+              skippedReasons: ensureReport.skippedReasons,
+              appliedMutations: ensureReport.appliedMutations,
+            );
+          }
+          final remainingReport = await applyMixingResult(
+            MixingResult(
+              actions: remainingActions,
+              summary: mix.summary,
+              isNoOp: false,
+              notes: mix.notes,
+            ),
+            emitActionSummaries: emitActionSummaries,
+          );
+          return MixApplyReport(
+            attempted: mix.actions.length,
+            applied: ensureReport.applied + remainingReport.applied,
+            summaries: <String>[
+              ...ensureReport.summaries,
+              ...remainingReport.summaries,
+            ],
+            skippedReasons: <String>[
+              ...ensureReport.skippedReasons,
+              ...remainingReport.skippedReasons,
+            ],
+            appliedMutations: <Map<String, dynamic>>[
+              ...ensureReport.appliedMutations,
+              ...remainingReport.appliedMutations,
+            ],
+          );
+        }
+      }
     }
 
     final List<EditorUndoAction> groupedActions = [];
@@ -58677,38 +58792,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
             var adjustedCount = 0;
             for (final row in rowTargets) {
-              final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
-              final effectIds =
-                  await JuceAudioEngine.getTrackEffectIdsForRow(row);
-              final effectInstanceIds =
-                  await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
-              final fxIndex = effects
-                  .indexWhere((e) => e.toLowerCase().contains(effectContains));
-              if (fxIndex == -1 ||
-                  fxIndex >= effectIds.length ||
-                  fxIndex >= effectInstanceIds.length ||
-                  effectInstanceIds[fxIndex].trim().isEmpty) {
-                continue;
-              }
-
-              final paramsRaw =
-                  await JuceAudioEngine.getTrackPluginParameters(row, fxIndex);
-              final params = exposedEffectParameters(
-                effects[fxIndex],
-                paramsRaw.map((e) => Map<String, dynamic>.from(e)).toList(),
-              );
-
               final exactParamName = a.data['param_name'] as String?;
               final containsAny = (a.data['param_name_contains_any'] as List?)
                   ?.map((e) => e.toString())
                   .toList();
 
-              final picked = _pickParam(params,
-                  exactName: exactParamName, containsAny: containsAny);
-              if (picked == null) {
+              final resolved = await _waitForReadyRowMixParameter(
+                row: row,
+                effectNameContains: effectContains,
+                exactParameterName: exactParamName,
+                parameterNameContainsAny: containsAny,
+              );
+              if (resolved == null) {
                 continue;
               }
 
+              final fxIndex = resolved.effectIndex;
+              final picked = resolved.parameter;
               final paramId = (picked['id'] as String?) ??
                   (picked['name'] as String); // robust
               final paramName = (picked['name'] as String?) ?? paramId;
@@ -58796,6 +58896,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               EditorUndoAction finalAct = SetEffectParamAction(
                 row: row,
                 effectIndex: fxIndex,
+                effectId: resolved.effectId,
+                effectInstanceId: resolved.effectInstanceId,
+                effectOccurrence: resolved.effectOccurrence,
                 paramId: paramId,
                 oldValue: current,
                 newValue: next,
@@ -58811,9 +58914,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               groupedActions.add(finalAct);
               final interval =
                   (_toActionDouble(picked['interval']) ?? 0.0).abs();
+              final currentInstanceIds =
+                  await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
+              final currentIndex =
+                  currentInstanceIds.indexOf(resolved.effectInstanceId!);
+              if (currentIndex < 0) {
+                throw StateError('mix_effect_identity_missing');
+              }
               final appliedParameters = exposedEffectParameters(
-                effects[fxIndex],
-                await JuceAudioEngine.getTrackPluginParameters(row, fxIndex),
+                resolved.effectName,
+                await JuceAudioEngine.getTrackPluginParameters(
+                  row,
+                  currentIndex,
+                ),
               );
               final appliedParameter = appliedParameters
                   .where((parameter) => parameter['id'] == paramId)
@@ -58835,9 +58948,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 'kind': 'effect_parameter_value',
                 'row': row,
                 'master': false,
-                'effect_instance_id': effectInstanceIds[fxIndex],
-                'effect_id': effectIds[fxIndex],
-                'effect_name': effects[fxIndex],
+                'effect_instance_id': resolved.effectInstanceId,
+                'effect_id': resolved.effectId,
+                'effect_name': resolved.effectName,
                 'parameter_id': paramId,
                 'param_name': paramName,
                 'value': next,
@@ -58855,13 +58968,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 HaloKey('row:$row'),
                 HaloKey('row:$row:effects_tab'),
                 HaloKey('row:$row:fx_list'),
-                HaloKey('row:$row:fx_index:$fxIndex'),
+                HaloKey('row:$row:fx_index:$currentIndex'),
                 HaloKey(
-                    'row:$row:fx_index:$fxIndex:param:$paramId'), // TODO: put paramName instead of paramId maybe
+                    'row:$row:fx_index:$currentIndex:param:$paramId'), // TODO: put paramName instead of paramId maybe
               ]);
 
               emitActionSummary(
-                '• Adjusted $paramName from ${current.toStringAsFixed(2)} to ${next.toStringAsFixed(2)} on ${effects[fxIndex]} (${targetDisplayNameForRow(row)}) •',
+                '• Adjusted $paramName from ${current.toStringAsFixed(2)} to ${next.toStringAsFixed(2)} on ${resolved.effectName} (${targetDisplayNameForRow(row)}) •',
               );
             }
             if (adjustedCount == 0 && !skipIfMissing) {
@@ -58877,36 +58990,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final skipIfMissing =
                 (a.data['skip_if_missing_effect'] as bool?) ?? true;
 
-            final effects = await JuceAudioEngine.getMasterEffects();
-            final effectIds = await JuceAudioEngine.getMasterEffectIds();
-            final fxIndex = effects
-                .indexWhere((e) => e.toLowerCase().contains(effectContains));
-            if (fxIndex == -1 || fxIndex >= effectIds.length) {
-              if (skipIfMissing) continue;
-              continue;
-            }
-
-            final paramsRaw =
-                await JuceAudioEngine.getMasterPluginParameters(fxIndex);
-            final params = exposedEffectParameters(
-              effects[fxIndex],
-              paramsRaw.map((e) => Map<String, dynamic>.from(e)).toList(),
-            );
-
             final exactParamName = a.data['param_name'] as String?;
             final containsAny = (a.data['param_name_contains_any'] as List?)
                 ?.map((e) => e.toString())
                 .toList();
 
-            final picked = _pickParam(params,
-                exactName: exactParamName, containsAny: containsAny);
-            if (picked == null) {
-              skipAction(
-                'Could not resolve the requested master plugin parameter.',
-              );
+            final resolved = await _waitForReadyMasterMixParameter(
+              effectNameContains: effectContains,
+              exactParameterName: exactParamName,
+              parameterNameContainsAny: containsAny,
+            );
+            if (resolved == null) {
+              if (!skipIfMissing) {
+                skipAction(
+                  'Could not resolve the requested master plugin parameter.',
+                );
+              }
               continue;
             }
 
+            final fxIndex = resolved.effectIndex;
+            final picked = resolved.parameter;
             final paramId =
                 (picked['id'] as String?) ?? (picked['name'] as String);
             final paramName = (picked['name'] as String?) ?? paramId;
@@ -58967,7 +59071,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
             final finalAct = SetMasterEffectParamAction(
               effectIndex: fxIndex,
-              effectId: effectIds[fxIndex],
+              effectId: resolved.effectId,
               paramId: paramId,
               oldValue: current,
               newValue: next,
@@ -58980,9 +59084,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             await _undoManager.executeWithoutAdd(finalAct);
             groupedActions.add(finalAct);
             final interval = (_toActionDouble(picked['interval']) ?? 0.0).abs();
+            final currentEffectIds = await JuceAudioEngine.getMasterEffectIds();
+            final matchingIndexes = <int>[
+              for (var index = 0; index < currentEffectIds.length; index++)
+                if (currentEffectIds[index] == resolved.effectId) index,
+            ];
+            if (matchingIndexes.length != 1) {
+              throw StateError('mix_master_effect_identity_missing');
+            }
+            final currentIndex = matchingIndexes.single;
             final appliedParameters = exposedEffectParameters(
-              effects[fxIndex],
-              await JuceAudioEngine.getMasterPluginParameters(fxIndex),
+              resolved.effectName,
+              await JuceAudioEngine.getMasterPluginParameters(currentIndex),
             );
             final appliedParameter = appliedParameters
                 .where((parameter) => parameter['id'] == paramId)
@@ -59003,9 +59116,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             appliedMutations.add(<String, dynamic>{
               'kind': 'effect_parameter_value',
               'master': true,
-              'effect_index': fxIndex,
-              'effect_id': effectIds[fxIndex],
-              'effect_name': effects[fxIndex],
+              'effect_index': currentIndex,
+              'effect_id': resolved.effectId,
+              'effect_name': resolved.effectName,
               'parameter_id': paramId,
               'param_name': paramName,
               'value': next,
@@ -59019,7 +59132,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             });
 
             emitActionSummary(
-              '• Adjusted $paramName from ${current.toStringAsFixed(2)} to ${next.toStringAsFixed(2)} on ${effects[fxIndex]} (Master Bus) •',
+              '• Adjusted $paramName from ${current.toStringAsFixed(2)} to ${next.toStringAsFixed(2)} on ${resolved.effectName} (Master Bus) •',
             );
             continue;
           }
@@ -59117,7 +59230,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     await _undoManager.addWithoutExecute(
-        CompoundUndoAction('AI mixing adjustments', groupedActions));
+      CompoundUndoAction(
+        'AI mixing adjustments',
+        groupedActions,
+        batchGraphMutations: batchUndoGraphMutations,
+      ),
+    );
     return MixApplyReport(
       attempted: mix.actions.length,
       applied: groupedActions.length,
@@ -59829,6 +59947,119 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return bestScore > 0 ? best : null;
   }
 
+  Future<_ResolvedMixEffectParameter?> _waitForReadyRowMixParameter({
+    required int row,
+    required String effectNameContains,
+    String? exactParameterName,
+    List<String>? parameterNameContainsAny,
+  }) async {
+    final deadline = DateTime.now().add(_kAiMixEffectReadyTimeout);
+    do {
+      try {
+        final values = await Future.wait<dynamic>(<Future<dynamic>>[
+          JuceAudioEngine.getTrackEffectsForRow(row),
+          JuceAudioEngine.getTrackEffectIdsForRow(row),
+          JuceAudioEngine.getTrackEffectInstanceIdsForRow(row),
+        ]).timeout(_kAiMixEffectProbeTimeout);
+        final effects = (values[0] as List).cast<String>();
+        final effectIds = (values[1] as List).cast<String>();
+        final instanceIds = (values[2] as List).cast<String>();
+        final effectIndex = effects.indexWhere(
+          (name) => name.toLowerCase().contains(effectNameContains),
+        );
+        if (effectIndex >= 0 &&
+            effectIndex < effectIds.length &&
+            effectIndex < instanceIds.length &&
+            effectIds[effectIndex].trim().isNotEmpty &&
+            instanceIds[effectIndex].trim().isNotEmpty) {
+          final rawParameters = await JuceAudioEngine.getTrackPluginParameters(
+            row,
+            effectIndex,
+          ).timeout(_kAiMixEffectProbeTimeout);
+          final parameters = exposedEffectParameters(
+            effects[effectIndex],
+            rawParameters,
+          );
+          final parameter = _pickParam(
+            parameters,
+            exactName: exactParameterName,
+            containsAny: parameterNameContainsAny,
+          );
+          if (parameter != null) {
+            return _ResolvedMixEffectParameter(
+              effectIndex: effectIndex,
+              effectId: effectIds[effectIndex],
+              effectName: effects[effectIndex],
+              effectInstanceId: instanceIds[effectIndex],
+              effectOccurrence: effectIds
+                  .take(effectIndex)
+                  .where((id) => id == effectIds[effectIndex])
+                  .length,
+              parameter: parameter,
+            );
+          }
+        }
+      } on TimeoutException {
+        throw StateError('mix_effect_readiness_timeout');
+      }
+      if (DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(_kAiMixEffectProbeInterval);
+      }
+    } while (DateTime.now().isBefore(deadline));
+    return null;
+  }
+
+  Future<_ResolvedMixEffectParameter?> _waitForReadyMasterMixParameter({
+    required String effectNameContains,
+    String? exactParameterName,
+    List<String>? parameterNameContainsAny,
+  }) async {
+    final deadline = DateTime.now().add(_kAiMixEffectReadyTimeout);
+    do {
+      try {
+        final values = await Future.wait<dynamic>(<Future<dynamic>>[
+          JuceAudioEngine.getMasterEffects(),
+          JuceAudioEngine.getMasterEffectIds(),
+        ]).timeout(_kAiMixEffectProbeTimeout);
+        final effects = (values[0] as List).cast<String>();
+        final effectIds = (values[1] as List).cast<String>();
+        final effectIndex = effects.indexWhere(
+          (name) => name.toLowerCase().contains(effectNameContains),
+        );
+        if (effectIndex >= 0 &&
+            effectIndex < effectIds.length &&
+            effectIds[effectIndex].trim().isNotEmpty) {
+          final rawParameters =
+              await JuceAudioEngine.getMasterPluginParameters(effectIndex)
+                  .timeout(_kAiMixEffectProbeTimeout);
+          final parameters = exposedEffectParameters(
+            effects[effectIndex],
+            rawParameters,
+          );
+          final parameter = _pickParam(
+            parameters,
+            exactName: exactParameterName,
+            containsAny: parameterNameContainsAny,
+          );
+          if (parameter != null) {
+            return _ResolvedMixEffectParameter(
+              effectIndex: effectIndex,
+              effectId: effectIds[effectIndex],
+              effectName: effects[effectIndex],
+              parameter: parameter,
+            );
+          }
+        }
+      } on TimeoutException {
+        throw StateError('mix_master_effect_readiness_timeout');
+      }
+      if (DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(_kAiMixEffectProbeInterval);
+      }
+    } while (DateTime.now().isBefore(deadline));
+    return null;
+  }
+
   Future<Map<String, dynamic>> _buildProducerSnapshot() async {
     final maxRows = math.max(_rowCount, 1);
 
@@ -60358,8 +60589,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final deferredExecutionNotices = <String>[];
     final executionStopwatch = Stopwatch()..start();
     final previousDeferredNotices = _deferredAssistantActionNotices;
-    final previousDeferredExecutionNotices =
-        _deferredAssistantExecutionNotices;
+    final previousDeferredExecutionNotices = _deferredAssistantExecutionNotices;
     var transactionNoticeCaptureActive = true;
     _deferredAssistantActionNotices = deferredActionNotices;
     _deferredAssistantExecutionNotices = deferredExecutionNotices;
@@ -60369,8 +60599,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       transactionNoticeCaptureActive = false;
       _assistantActionNoticeCaptureDepth -= 1;
       _deferredAssistantActionNotices = previousDeferredNotices;
-      _deferredAssistantExecutionNotices =
-          previousDeferredExecutionNotices;
+      _deferredAssistantExecutionNotices = previousDeferredExecutionNotices;
     }
 
     try {
@@ -82001,6 +82230,9 @@ class BypassMasterEffectAction extends EditorUndoAction {
 class SetEffectParamAction extends EditorUndoAction {
   final int row;
   final int effectIndex;
+  final String? effectId;
+  String? effectInstanceId;
+  final int effectOccurrence;
   final String paramId;
   final dynamic oldValue;
   final dynamic newValue;
@@ -82009,6 +82241,9 @@ class SetEffectParamAction extends EditorUndoAction {
   SetEffectParamAction({
     required this.row,
     required this.effectIndex,
+    this.effectId,
+    this.effectInstanceId,
+    this.effectOccurrence = 0,
     required this.paramId,
     required this.oldValue,
     required this.newValue,
@@ -82023,20 +82258,50 @@ class SetEffectParamAction extends EditorUndoAction {
         'type': 'rowEffectParam',
         'row': row,
         'effectIndex': effectIndex,
+        if ((effectId ?? '').isNotEmpty) 'effectId': effectId,
+        if ((effectInstanceId ?? '').isNotEmpty)
+          'effectInstanceId': effectInstanceId,
+        'effectOccurrence': effectOccurrence,
         'paramId': paramId,
         'oldValue': oldValue,
         'newValue': newValue,
       };
 
+  Future<int> _currentEffectIndex() async {
+    final expectedInstanceId = effectInstanceId?.trim() ?? '';
+    final expectedEffectId = effectId?.trim() ?? '';
+    if (expectedInstanceId.isEmpty || expectedEffectId.isEmpty) {
+      return effectIndex;
+    }
+    final index = await _resolveExactRowEffectInstance(
+      row: row,
+      instanceId: expectedInstanceId,
+      effectId: expectedEffectId,
+      occurrence: effectOccurrence,
+    );
+    if (index < 0) {
+      throw StateError('row_effect_identity_missing');
+    }
+    final instanceIds =
+        await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
+    if (index >= instanceIds.length || instanceIds[index].trim().isEmpty) {
+      throw StateError('row_effect_identity_missing');
+    }
+    effectInstanceId = instanceIds[index].trim();
+    return index;
+  }
+
   @override
   Future<void> redo() async {
-    await JuceAudioEngine.setTrackEffect(row, effectIndex, paramId, newValue);
+    final index = await _currentEffectIndex();
+    await JuceAudioEngine.setTrackEffect(row, index, paramId, newValue);
     onChange();
   }
 
   @override
   Future<void> undo() async {
-    await JuceAudioEngine.setTrackEffect(row, effectIndex, paramId, oldValue);
+    final index = await _currentEffectIndex();
+    await JuceAudioEngine.setTrackEffect(row, index, paramId, oldValue);
     onChange();
   }
 }
@@ -82362,8 +82627,13 @@ class MuteRowAction extends EditorUndoAction {
 class CompoundUndoAction extends EditorUndoAction {
   final String _description;
   final List<EditorUndoAction> actions;
+  final bool batchGraphMutations;
 
-  CompoundUndoAction(this._description, this.actions);
+  CompoundUndoAction(
+    this._description,
+    this.actions, {
+    this.batchGraphMutations = false,
+  });
 
   @override
   String get description => _description;
@@ -82380,22 +82650,36 @@ class CompoundUndoAction extends EditorUndoAction {
       'type': 'compound',
       'description': _description,
       'actions': commands,
+      if (batchGraphMutations) 'batchGraphMutations': true,
     };
   }
 
-  @override
-  Future<void> redo() async {
-    for (final a in actions) {
-      await a.redo();
+  Future<void> _run(Future<void> Function() operation) async {
+    if (batchGraphMutations) {
+      await JuceAudioEngine.beginGraphMutationBatch();
+    }
+    try {
+      await operation();
+    } finally {
+      if (batchGraphMutations) {
+        await JuceAudioEngine.endGraphMutationBatch();
+      }
     }
   }
 
   @override
-  Future<void> undo() async {
-    for (final a in actions.reversed) {
-      await a.undo();
-    }
-  }
+  Future<void> redo() => _run(() async {
+        for (final a in actions) {
+          await a.redo();
+        }
+      });
+
+  @override
+  Future<void> undo() => _run(() async {
+        for (final a in actions.reversed) {
+          await a.undo();
+        }
+      });
 }
 
 class _RowEffectsAutomationSnapshotAction extends EditorUndoAction {

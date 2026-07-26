@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixroom/ai/local_mixing_model.dart';
 import 'package:mixroom/ai/magnitude_predictor.dart';
@@ -66,6 +68,41 @@ class _RecordingMixModel extends LocalMixingModel {
       isNoOp: true,
     );
   }
+}
+
+class _AsyncPredictor implements MixingMagnitudePredictor {
+  const _AsyncPredictor(this.refineResult);
+
+  final Future<MagnitudeRefineResult> Function(List<MixAction>) refineResult;
+
+  @override
+  bool get isEnabled => true;
+
+  @override
+  bool get isReady => true;
+
+  @override
+  Map<String, dynamic> get observabilityContext =>
+      const <String, dynamic>{'source': 'async-test'};
+
+  @override
+  Future<void> dispose() async {}
+
+  @override
+  Future<void> load() async {}
+
+  @override
+  Future<void> startBackgroundRefresh() async {}
+
+  @override
+  Future<MagnitudeRefineResult> refine({
+    required ProjectState project,
+    required GoalVector goal,
+    required List<MixAction> actions,
+    required bool strict,
+    String? projectId,
+  }) =>
+      refineResult(actions);
 }
 
 RowState _row(int index, int id, double rms, {String groupId = ''}) => RowState(
@@ -347,6 +384,49 @@ void main() {
 
     expect(result.isNoChange, isTrue);
     expect(result.bundle.receipts.single['status'], 'already_satisfied');
+  });
+
+  test('refinement timeout falls back to the factual local mix', () async {
+    final result = await AiV3MixGoalMaterializer(
+      mixModel: LocalMixingModel(),
+      magnitudePredictor: _AsyncPredictor(
+        (_) => Completer<MagnitudeRefineResult>().future,
+      ),
+      refinementTimeout: const Duration(milliseconds: 10),
+    ).materialize(
+      bundle: _bundle(),
+      project: _project(),
+      roleOverrides: const <int, String>{},
+      bypassLearnedMagnitudes: false,
+    );
+
+    expect(result.bundle.actions.single.type, 'v3_mix_actions');
+    final steps =
+        (result.metadata['mix_materialization_steps'] as List).cast<Map>();
+    expect(steps.single['refinement_fallback_used'], isTrue);
+    expect(steps.single['refinement_fallback_reason'], 'refinement_timeout');
+  });
+
+  test('refinement failure falls back to the factual local mix', () async {
+    final result = await AiV3MixGoalMaterializer(
+      mixModel: LocalMixingModel(),
+      magnitudePredictor: _AsyncPredictor(
+        (_) => Future<MagnitudeRefineResult>.error(
+          StateError('refinement unavailable'),
+        ),
+      ),
+    ).materialize(
+      bundle: _bundle(),
+      project: _project(),
+      roleOverrides: const <int, String>{},
+      bypassLearnedMagnitudes: false,
+    );
+
+    expect(result.bundle.actions.single.type, 'v3_mix_actions');
+    final steps =
+        (result.metadata['mix_materialization_steps'] as List).cast<Map>();
+    expect(steps.single['refinement_fallback_used'], isTrue);
+    expect(steps.single['refinement_fallback_reason'], 'refinement_failed');
   });
 
   test('rejects an unsupported action emitted by refinement', () async {
