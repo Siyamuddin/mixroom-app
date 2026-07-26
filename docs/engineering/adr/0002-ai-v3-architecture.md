@@ -58,8 +58,9 @@ uses:
   assumed production composition path;
 - measured latency objectives rather than a fixed architectural timeout.
 
-The current 45-command one-shot prototype remains a comparison system until the
-adaptive path passes its evaluation gates.
+The current 53-command one-shot planner is the authenticated production route
+for updated clients. The adaptive path remains detached and shadow-only until
+it passes its activation gates.
 
 ## Goals
 

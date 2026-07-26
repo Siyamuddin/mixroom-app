@@ -763,7 +763,7 @@ void main() {
       );
     });
 
-    test('verified completion uses one concise receipt directly', () {
+    test('verified completion marks one concise receipt as completed', () {
       expect(
         aiV3VerifiedCompletionMessage(
           const <String, dynamic>{
@@ -780,7 +780,8 @@ void main() {
             ],
           },
         ),
-        'Delete Track 3',
+        'Done:\n'
+        '- Delete Track 3',
       );
     });
 

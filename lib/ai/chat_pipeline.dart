@@ -71,7 +71,6 @@ String aiV3VerifiedCompletionMessage(
   if (receiptLabels.isEmpty) {
     return 'Done.';
   }
-  if (receiptLabels.length == 1) return receiptLabels.single;
   return <String>[
     'Done:',
     ...receiptLabels.map((label) => '- $label'),
@@ -1158,7 +1157,7 @@ class ChatPipeline {
     }
     if (pending == null && (normalized == 'apply' || normalized == 'cancel')) {
       _push('user', userText);
-      const message = 'There is no pending V3 plan to apply or cancel.';
+      const message = 'There is no pending plan to apply or cancel.';
       _push('assistant', message);
       return ChatPipelineResult.v3(
         message,
@@ -1273,7 +1272,7 @@ class ChatPipeline {
       _pendingAiV3PlanId = null;
       _push('user', userText);
       const message =
-          'This project is outside the current V3 prototype context limits. Nothing was changed.';
+          'This project is too large for this request right now. Nothing was changed.';
       _push('assistant', message);
       return ChatPipelineResult.v3(
         message,
@@ -1571,7 +1570,7 @@ class ChatPipeline {
       _pendingAiV3PlanId = null;
       final actionable = _aiV3PreparationFailureResponse(error.code);
       final message = actionable?.message ??
-          'V3 could not prepare every requested change safely. Nothing was changed.';
+          'I could not safely prepare every requested change. Nothing was changed.';
       _push('assistant', message);
       final handoff = <String, dynamic>{
         'schema_version': 'ai_v3_handoff_prototype_1',

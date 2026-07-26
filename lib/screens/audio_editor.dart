@@ -60232,7 +60232,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     int? chatFlowId,
   }) async {
     if (handoff['schema_version'] != 'ai_v3_handoff_prototype_1') {
-      _insertAiFailureSystemText('V3 returned an invalid local handoff.');
+      _insertAiFailureSystemText(
+        'The assistant returned an invalid change request. Nothing was changed.',
+      );
       return;
     }
     final decision = handoff['decision']?.toString().trim() ?? '';
@@ -60245,7 +60247,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           : '';
       final planId = handoff['plan_id']?.toString().trim() ?? '';
       if (preview.isEmpty || planId.isEmpty || executionPolicy != 'confirm') {
-        _insertAiFailureSystemText('V3 could not present this plan.');
+        _insertAiFailureSystemText(
+          'I could not present these changes safely. Nothing was changed.',
+        );
         return;
       }
       _insertAssistantChatText(
@@ -60267,7 +60271,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ? resolvedMessage
           : switch (decision) {
               'stale' =>
-                'The project changed after the V3 plan was prepared. Please run the request again.',
+                'The project changed after the plan was prepared. Please run the request again.',
               'canceled' => 'Canceled. Nothing was changed.',
               _ =>
                 ((handoff['plan'] as Map?)?['user_message'] ?? '').toString(),
@@ -60282,31 +60286,39 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     final rawBundle = handoff['prepared_bundle'];
     if (rawBundle is! Map) {
-      _insertAiFailureSystemText('V3 execution bundle is missing.');
+      _insertAiFailureSystemText(
+        'The prepared changes are unavailable. Nothing was changed.',
+      );
       return;
     }
     final bundle = Map<String, dynamic>.from(rawBundle);
     final executionPolicy = bundle['execution_policy']?.toString().trim() ?? '';
     if (executionPolicy != 'auto_apply' && executionPolicy != 'confirm') {
-      _insertAiFailureSystemText('V3 execution policy is missing.');
+      _insertAiFailureSystemText(
+        'The prepared changes cannot be applied safely. Nothing was changed.',
+      );
       return;
     }
     if (executionPolicy == 'confirm' &&
         handoff['confirmation_granted'] != true) {
-      _insertAiFailureSystemText('V3 confirmation is required.');
+      _insertAiFailureSystemText(
+        'Confirmation is required before these changes can be applied.',
+      );
       return;
     }
     final expectedDigest = bundle['state_digest']?.toString().trim() ?? '';
     if (expectedDigest.isEmpty ||
         expectedDigest != _freshAiV3StateFingerprint()) {
       _insertAiFailureSystemText(
-        'The project changed after the V3 plan was prepared. Please run the request again.',
+        'The project changed after the plan was prepared. Please run the request again.',
       );
       return;
     }
     final rawActions = bundle['actions'];
     if (rawActions is! List || rawActions.isEmpty) {
-      _insertAiFailureSystemText('V3 execution bundle has no actions.');
+      _insertAiFailureSystemText(
+        'The prepared request contains no changes. Nothing was changed.',
+      );
       return;
     }
     final actions = rawActions
@@ -60317,7 +60329,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .where((action) => action.type.isNotEmpty)
         .toList(growable: false);
     if (actions.length != rawActions.length) {
-      _insertAiFailureSystemText('V3 execution bundle is malformed.');
+      _insertAiFailureSystemText(
+        'The prepared changes are invalid. Nothing was changed.',
+      );
       return;
     }
     final expectations = await _captureAiV3Expectations(actions);
@@ -60377,9 +60391,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         conversationMessage: completionMessage,
       );
       final count = (bundle['receipts'] as List?)?.length ?? actions.length;
-      final applied = count == 1
-          ? 'Applied 1 change.'
-          : 'Applied $count changes.';
+      final applied =
+          count == 1 ? 'Applied 1 change.' : 'Applied $count changes.';
       _insertAssistantChatText(
         completionMessage,
         modelAuthored: true,
@@ -60418,7 +60431,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _reportAiChatFailure(error, stackTrace, stage: 'v3_execution');
       _insertAiFailureSystemText(
         error.rollbackIncomplete
-            ? 'V3 failed and could not fully roll back the transaction. Review the project state.'
+            ? 'The changes failed and could not be fully rolled back. Review the project state.'
             : _aiV3RolledBackFailureMessage(error.cause),
       );
     }
@@ -60438,7 +60451,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (code.contains('v3_audio_to_midi_source_unreadable')) {
       return 'I could not read that audio clip for transcription. The project was unchanged. Try another readable audio clip.';
     }
-    return 'V3 could not verify the complete change. The transaction was rolled back.';
+    return 'I could not verify the complete change. The transaction was rolled back.';
   }
 
   Future<List<Map<String, dynamic>>> _captureAiV3Expectations(

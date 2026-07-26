@@ -6,7 +6,7 @@ Last reviewed: 2026-07-21
 
 This is the decision-complete implementation specification for the scalable V3
 planner described by [ADR 0002](adr/0002-ai-v3-architecture.md). The current
-45-command one-shot prototype remains the user-visible baseline. Shared
+53-command one-shot planner is the user-visible production baseline. Shared
 capability slices update both planner surfaces through one canonical contract;
 adaptive activation remains gated by the evaluations in this document.
 
