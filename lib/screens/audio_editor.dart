@@ -60352,7 +60352,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               .toList(growable: false);
           if (persistentActions.isEmpty) return;
           await _undoManager.addWithoutExecute(
-            CompoundUndoAction('AI V3 verified changes', persistentActions),
+            CompoundUndoAction('AI changes', persistentActions),
           );
         },
       );
@@ -60378,8 +60378,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       final count = (bundle['receipts'] as List?)?.length ?? actions.length;
       final applied = count == 1
-          ? 'Applied 1 verified V3 change.'
-          : 'Applied $count verified V3 changes.';
+          ? 'Applied 1 change.'
+          : 'Applied $count changes.';
       _insertAssistantChatText(
         completionMessage,
         modelAuthored: true,
