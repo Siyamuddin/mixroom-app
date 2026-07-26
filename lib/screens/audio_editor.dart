@@ -34433,7 +34433,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                   child: Text(
                                                     L10n.translate(
                                                       context,
-                                                      'This is an experimental feature in development. Output may be unexpected.',
+                                                      'Ask Mixroom to create, edit, or mix your project.',
                                                     ),
                                                     textAlign: TextAlign.center,
                                                     style: const TextStyle(
@@ -43462,6 +43462,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     List<AssistantAction> actions, {
     int? chatFlowId,
     List<Map<String, dynamic>>? v3RuntimeExpectations,
+    Map<String, List<String>>? v3ExecutionSummariesByCommandId,
   }) async {
     _assistantActionNoticeCaptureDepth += 1;
     final executionMessagesBefore = _assistantActionExecutionMessageCount;
@@ -43738,6 +43739,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               if (report.attempted != mixActions.length ||
                   report.skippedReasons.isNotEmpty) {
                 throw StateError('v3_mix_actions_not_fully_applied');
+              }
+              final commandId = data['command_id']?.toString().trim() ?? '';
+              if (commandId.isNotEmpty && report.summaries.isNotEmpty) {
+                v3ExecutionSummariesByCommandId?[commandId] =
+                    List<String>.unmodifiable(report.summaries);
               }
               if (v3RuntimeExpectations != null) {
                 _addAiV3Expectations(
@@ -59929,6 +59935,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _activeChatFlowId = null;
         _isThinking = false;
       });
+      _scrollChatToLatest();
     } else {
       _activeChatFlowId = null;
       _isThinking = false;
@@ -60314,6 +60321,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     final expectations = await _captureAiV3Expectations(actions);
+    final executionSummariesByCommandId = <String, List<String>>{};
     final executionStopwatch = Stopwatch()..start();
     try {
       if (chatFlowId != null) _throwIfChatFlowStopped(chatFlowId);
@@ -60325,6 +60333,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             actions,
             chatFlowId: chatFlowId,
             v3RuntimeExpectations: expectations,
+            v3ExecutionSummariesByCommandId: executionSummariesByCommandId,
           );
           if (!applied) throw StateError('v3_action_not_fully_applied');
         }),
@@ -60348,7 +60357,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         },
       );
       executionStopwatch.stop();
-      final completionMessage = aiV3VerifiedCompletionMessage(bundle);
+      final completionMessage = aiV3VerifiedCompletionMessage(
+        bundle,
+        executionSummariesByCommandId: executionSummariesByCommandId,
+      );
       _chatPipeline.recordAiV3Execution(
         handoff: handoff,
         result: <String, dynamic>{

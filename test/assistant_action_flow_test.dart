@@ -708,8 +708,7 @@ void main() {
       expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
     });
 
-    test('verified completion combines planner language with exact receipts',
-        () {
+    test('verified completion reports receipts without repeating the plan', () {
       expect(
         aiV3VerifiedCompletionMessage(
           const <String, dynamic>{
@@ -728,10 +727,60 @@ void main() {
             ],
           },
         ),
-        'Ajustando la mezcla.\n\n'
         'Done:\n'
         '- Lower Guitar by 1.5 dB\n'
         '- Keep Piano unchanged (already set)',
+      );
+    });
+
+    test('verified completion expands materialized mix execution summaries',
+        () {
+      expect(
+        aiV3VerifiedCompletionMessage(
+          const <String, dynamic>{
+            'plan': <String, dynamic>{
+              'user_message': 'Apply a subtle polish to the master.',
+            },
+            'receipts': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'command_id': 'mix-master',
+                'type': 'mix.apply_goal',
+                'status': 'prepared',
+                'preview_label': 'Mix Master Bus',
+              },
+            ],
+          },
+          executionSummariesByCommandId: const <String, List<String>>{
+            'mix-master': <String>[
+              '• Added Compressor to Master Bus •',
+              '• Adjusted Threshold from 0.50 to 0.42 on Compressor (Master Bus) •',
+            ],
+          },
+        ),
+        'Done:\n'
+        '- Added Compressor to Master Bus\n'
+        '- Adjusted Threshold from 0.50 to 0.42 on Compressor (Master Bus)',
+      );
+    });
+
+    test('verified completion uses one concise receipt directly', () {
+      expect(
+        aiV3VerifiedCompletionMessage(
+          const <String, dynamic>{
+            'plan': <String, dynamic>{
+              'user_message': 'Delete Track 3.',
+            },
+            'receipts': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'command_id': 'delete-track-3',
+                'type': 'row.delete',
+                'status': 'prepared',
+                'preview_label': 'Delete Track 3',
+              },
+            ],
+          },
+        ),
+        'Delete Track 3',
       );
     });
 

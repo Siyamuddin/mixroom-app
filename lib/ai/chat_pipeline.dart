@@ -40,13 +40,26 @@ class _AiV3PreparationFailureResponse {
   final String message;
 }
 
-String aiV3VerifiedCompletionMessage(Map<String, dynamic> bundle) {
-  final plan = bundle['plan'];
-  final lead = plan is Map ? plan['user_message']?.toString().trim() ?? '' : '';
+String aiV3VerifiedCompletionMessage(
+  Map<String, dynamic> bundle, {
+  Map<String, List<String>> executionSummariesByCommandId =
+      const <String, List<String>>{},
+}) {
   final receiptLabels = <String>[];
   final rawReceipts = bundle['receipts'];
   if (rawReceipts is List) {
     for (final rawReceipt in rawReceipts.whereType<Map>()) {
+      final commandId = rawReceipt['command_id']?.toString().trim() ?? '';
+      final executionSummaries =
+          executionSummariesByCommandId[commandId] ?? const <String>[];
+      if (executionSummaries.isNotEmpty) {
+        receiptLabels.addAll(
+          executionSummaries
+              .map(_normalizeAiV3ExecutionSummary)
+              .where((label) => label.isNotEmpty),
+        );
+        continue;
+      }
       final label = rawReceipt['preview_label']?.toString().trim() ?? '';
       if (label.isEmpty) continue;
       final status = rawReceipt['status']?.toString().trim() ?? '';
@@ -56,14 +69,24 @@ String aiV3VerifiedCompletionMessage(Map<String, dynamic> bundle) {
     }
   }
   if (receiptLabels.isEmpty) {
-    return lead.isEmpty ? 'Done.' : lead;
+    return 'Done.';
   }
+  if (receiptLabels.length == 1) return receiptLabels.single;
   return <String>[
-    if (lead.isNotEmpty) lead,
-    if (lead.isNotEmpty) '',
     'Done:',
     ...receiptLabels.map((label) => '- $label'),
   ].join('\n');
+}
+
+String _normalizeAiV3ExecutionSummary(String summary) {
+  var normalized = summary.trim();
+  if (normalized.startsWith('•')) {
+    normalized = normalized.substring(1).trimLeft();
+  }
+  if (normalized.endsWith('•')) {
+    normalized = normalized.substring(0, normalized.length - 1).trimRight();
+  }
+  return normalized;
 }
 
 class _AiWorkflowCaptureContext {
