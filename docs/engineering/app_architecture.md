@@ -74,6 +74,7 @@ Entry points:
 
 - `lib/ai/chat_pipeline.dart`
 - `lib/ai/cloud_llm_service.dart`
+- `lib/ai/v3/ai_v3_planner_service.dart`
 - `lib/ai/project_state_builder.dart`
 - `lib/ai/assistant_action_timeline_reducer.dart`
 - `backend/llm_proxy/src/handlers/api_responses.py`
@@ -81,6 +82,10 @@ Entry points:
 
 The Flutter app builds project context and action requests. The backend proxy
 owns provider selection, prompt/runtime policy, and server-side model calls.
+Updated clients route one-shot V3 through the authenticated
+`/v1/llm/v3/responses` endpoint; older clients continue using
+`/v1/llm/responses`. Adaptive V3 remains a detached evaluation path and cannot
+replace or execute the visible plan.
 
 ## Backend Areas
 
@@ -105,4 +110,3 @@ Put UI state near the screen, workflow state in helpers/services, persistent
 shape in models, and low-latency audio behavior in the engine. If a change needs
 the Flutter app and the engine to agree on behavior, document the method-channel
 contract in [Flutter/native bridge](flutter_native_bridge.md).
-

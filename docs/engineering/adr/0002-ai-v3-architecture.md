@@ -1,6 +1,7 @@
 # 0002: AI V3 Uses One Semantic Planner And A Transactional Executor
 
-Status: Accepted for prototype; production activation is gated
+Status: Accepted; authenticated one-shot production routing implemented,
+deployment gated
 
 Date: 2026-07-17
 
@@ -122,9 +123,11 @@ Flutter transactional executor
         `-- targeted verification and receipts
 ```
 
-The backend may authenticate requests, proxy model calls, record usage, and
-store captures. It must not independently compile PlanV3 into editor actions or
-duplicate Flutter execution semantics.
+The backend authenticates production requests, enforces the V3 model and
+reasoning configuration, proxies model calls, and records usage. It must not
+independently compile PlanV3 into editor actions or duplicate Flutter execution
+semantics. Updated clients use `/v1/llm/v3/responses`; older clients keep the
+unchanged `/v1/llm/responses` V1 route. Direct OpenAI V3 is debug-only.
 
 ## Frozen architecture rules
 
@@ -542,8 +545,10 @@ shadow
 -> broader rollout
 ```
 
-V1 remains the production default until V3 meets the activation gate. V2 stays
-frozen as a reference and parts donor.
+The clean V3 branch selects authenticated one-shot V3 for updated clients.
+Older released clients retain V1, and a build-time V3 switch can produce a V1
+client without removing either implementation. There is no silent per-request
+V3-to-V1 retry. Adaptive V3 remains detached shadow-only.
 
 ## Evaluation plan
 

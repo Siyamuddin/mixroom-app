@@ -579,6 +579,10 @@ then-current 21-command planner, with four one-call common cases and eight two-c
 MIDI cases. No project mutation, third call, invented target, or preparation
 failure occurred. Activation was not performed.
 
+Production routing does not change this boundary. Updated clients may use the
+authenticated one-shot V3 endpoint, but adaptive V3 remains explicitly
+disabled, detached, and incapable of supplying or executing the visible plan.
+
 Phase E1 shared audio-pitch slice (2026-07-21): one-shot and adaptive V3 now
 share `clip.set_pitch_semitones` and `clip.adjust_pitch_semitones`. Adaptive
 loads them through immutable `clip_advanced` retrieval; preparation converts

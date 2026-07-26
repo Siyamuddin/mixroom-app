@@ -152,6 +152,8 @@ class AiLimitsTests(unittest.TestCase):
     def test_validate_feature_accepts_legacy_aliases(self) -> None:
         self.assertEqual(ai_limits.validate_feature("assistant_chat"), "ai_chat")
         self.assertEqual(ai_limits.validate_feature("one_button_mix"), "ai_chat")
+        self.assertEqual(ai_limits.validate_feature("v3"), "ai_chat_v3")
+        self.assertEqual(ai_limits.validate_feature("ai_chat_v3"), "ai_chat_v3")
         self.assertEqual(ai_limits.validate_feature("stem_separate"), "stem_separation")
         self.assertEqual(ai_limits.validate_feature("video_editor"), "video_editor_chat")
 

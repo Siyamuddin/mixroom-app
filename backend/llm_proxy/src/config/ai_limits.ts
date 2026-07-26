@@ -50,6 +50,7 @@ export const AI_LIMITS = {
   },
   "feature_costs": {
     "ai_chat": 1, // this is the only one used now basically
+    "ai_chat_v3": 1,
     "video_editor_chat": 1,
     "ai_project_analysis": 5,
     "ai_mastering": 10,

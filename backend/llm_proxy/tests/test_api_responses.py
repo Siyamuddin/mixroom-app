@@ -373,6 +373,204 @@ class ApiResponsesTests(unittest.TestCase):
             {"role": "user", "content": "Make the vocals clearer."},
         )
 
+    def test_v3_endpoint_preserves_typed_planner_contract_and_forces_runtime(
+        self,
+    ) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp-v3",
+                "model": "gpt-5.6-luna",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "submit_plan_v3",
+                        "arguments": json.dumps(
+                            {
+                                "schema_version": "plan_v3_prototype_1",
+                                "outcome": "respond",
+                                "user_message": "No changes.",
+                                "commands": [],
+                                "question_options": [],
+                            }
+                        ),
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 100,
+                    "output_tokens": 20,
+                    "total_tokens": 120,
+                },
+            }
+        )
+        request_body = {
+            "model": "untrusted-client-model",
+            "instructions": "V3 planner instructions",
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": "ORIGINAL_REQUEST_VERBATIM:\nDo nothing.",
+                        }
+                    ],
+                }
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "submit_plan_v3",
+                    "parameters": {"type": "object"},
+                }
+            ],
+            "tool_choice": {"type": "function", "name": "submit_plan_v3"},
+            "parallel_tool_calls": False,
+            "max_output_tokens": 9999,
+            "reasoning": {"effort": "high"},
+            "store": False,
+            "ai_feature": "ai_chat",
+            "client_context": {"app_version": "3.0.0"},
+        }
+        event = _authed_event(
+            json.dumps(request_body),
+            path="/v1/llm/v3/responses",
+        )
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AI_V3_ENABLED": "true",
+                "AI_V3_MODEL": "gpt-5.6-luna",
+                "AI_V3_REASONING_EFFORT": "low",
+                "LLM_MODEL": "legacy-model",
+            },
+            clear=False,
+        ), mock.patch.object(
+            api_responses,
+            "_load_api_key",
+            return_value="sk-test",
+        ), mock.patch.object(
+            api_responses,
+            "get_provider",
+            return_value=provider,
+        ):
+            result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        assert provider.request_body is not None
+        self.assertEqual(provider.request_body["model"], "gpt-5.6-luna")
+        self.assertEqual(provider.request_body["reasoning"], {"effort": "low"})
+        self.assertEqual(provider.request_body["max_output_tokens"], 4096)
+        self.assertFalse(provider.request_body["parallel_tool_calls"])
+        self.assertFalse(provider.request_body["store"])
+        self.assertEqual(
+            provider.request_body["tools"][0]["name"],
+            "submit_plan_v3",
+        )
+        self.assertIsInstance(
+            provider.request_body["messages"][0]["content"],
+            list,
+        )
+        self.assertEqual(
+            self.fake_usage_repo.reserve_calls[0]["reserved_prompts"],
+            1,
+        )
+        self.assertEqual(
+            self.fake_usage_repo.log_calls[-1]["feature"],
+            "ai_chat_v3",
+        )
+
+    def test_v3_endpoint_kill_switch_blocks_before_provider_usage(self) -> None:
+        event = _authed_event(
+            json.dumps(
+                {
+                    "input": [{"role": "user", "content": "test"}],
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "submit_plan_v3",
+                            "parameters": {"type": "object"},
+                        }
+                    ],
+                    "tool_choice": {
+                        "type": "function",
+                        "name": "submit_plan_v3",
+                    },
+                    "parallel_tool_calls": False,
+                    "store": False,
+                }
+            ),
+            path="/v1/llm/v3/responses",
+        )
+
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "false"},
+            clear=False,
+        ):
+            result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 503)
+        self.assertIn("v3_disabled", result["body"])
+        self.assertEqual(self.fake_usage_repo.reserve_calls, [])
+
+    def test_v3_endpoint_rejects_legacy_or_arbitrary_tool_shapes(self) -> None:
+        event = _authed_event(
+            json.dumps(
+                {
+                    "conversation": [],
+                    "user_text": "Mute drums.",
+                    "tools": [{"type": "function", "name": "other_tool"}],
+                }
+            ),
+            path="/v1/llm/v3/responses",
+        )
+
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "true"},
+            clear=False,
+        ):
+            result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 400)
+        self.assertIn("OpenAI-compatible planner request", result["body"])
+        self.assertEqual(self.fake_usage_repo.reserve_calls, [])
+
+    def test_v3_endpoint_rejects_non_function_submit_tool(self) -> None:
+        event = _authed_event(
+            json.dumps(
+                {
+                    "input": [{"role": "user", "content": "test"}],
+                    "tools": [
+                        {
+                            "type": "custom",
+                            "name": "submit_plan_v3",
+                            "parameters": {"type": "object"},
+                        }
+                    ],
+                    "tool_choice": {
+                        "type": "function",
+                        "name": "submit_plan_v3",
+                    },
+                    "parallel_tool_calls": False,
+                    "store": False,
+                }
+            ),
+            path="/v1/llm/v3/responses",
+        )
+
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "true"},
+            clear=False,
+        ):
+            result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 400)
+        self.assertIn("submit_plan_v3 tool", result["body"])
+        self.assertEqual(self.fake_usage_repo.reserve_calls, [])
+
     def test_handler_includes_client_entitlement_policy_in_prompt(self) -> None:
         provider = _FakeProvider()
         event = _authed_event(

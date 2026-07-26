@@ -8803,13 +8803,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       projectBuilder: ProjectStateBuilder(classifier: _classifier),
       mixModel: LocalMixingModel(),
       magnitudePredictor: _magnitudePredictor,
-      aiV3Planner: LlmConfig.effectiveAiV3PrototypeEnabled
+      aiV3Planner: LlmConfig.effectiveAiV3Enabled
           ? AiV3PlannerService(
-              apiKey: LlmConfig.openAiApiKey,
+              apiKey: LlmConfig.effectiveAiV3PrototypeEnabled
+                  ? LlmConfig.openAiApiKey
+                  : '',
               model: LlmConfig.aiV3Model,
               reasoningEffort: LlmConfig.aiV3ReasoningEffort,
               requestTimeout:
                   Duration(seconds: LlmConfig.requestTimeoutSeconds),
+              proxyApiBaseUrl: LlmConfig.effectiveAiV3ProxyEnabled &&
+                      !LlmConfig.effectiveAiV3PrototypeEnabled
+                  ? LlmConfig.effectiveProxyApiBaseUrl
+                  : '',
+              proxyPath: LlmConfig.aiV3ProxyPath,
+              authTokenProvider: authService.getIdTokenOrNull,
+              refreshAuthTokenProvider: authService.refreshIdTokenOrNull,
             )
           : null,
       aiV3CompactShadowPlanner: LlmConfig.aiV3CompactShadowEvaluationEnabled &&
@@ -28122,14 +28131,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       'daw.row_mix',
       'daw.automation_edit',
       'daw.clean_content_rows',
-      if (LlmConfig.effectiveAiV3PrototypeEnabled) ...<String>{
+      if (LlmConfig.effectiveAiV3Enabled) ...<String>{
         'ai_v3.one_shot.prototype',
         'daw.stem_separate',
         'daw.audio_enhance',
         'daw.midi_compose.audio_to_midi',
       },
     }.toList(growable: false);
-    final v3LibraryAssets = LlmConfig.effectiveAiV3PrototypeEnabled
+    final v3LibraryAssets = LlmConfig.effectiveAiV3Enabled
         ? (_aiLibrarySamplePathIndex.keys.toList()..sort()).map((logicalPath) {
             final roles = AssistantActionUtils.sampleRoleHintsFromText(
               logicalPath,
@@ -28149,7 +28158,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         : const <Map<String, dynamic>>[];
     return <String, dynamic>{
       'ai_capabilities': aiCapabilities,
-      'ai_v3_prototype_enabled': LlmConfig.effectiveAiV3PrototypeEnabled,
+      'ai_v3_prototype_enabled': LlmConfig.effectiveAiV3Enabled,
       if (LlmConfig.normalizedContextPackingMode != 'full')
         'ai_context_packing_mode': LlmConfig.normalizedContextPackingMode,
       if (LlmConfig.normalizedToolRoutingMode != 'full')
@@ -28159,7 +28168,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       'current_rows': _rowCount,
       'allowed_builtin_effects': allowedEffects,
       'allowed_instrument_ids': allowedInstruments,
-      if (LlmConfig.effectiveAiV3PrototypeEnabled) ...<String, dynamic>{
+      if (LlmConfig.effectiveAiV3Enabled) ...<String, dynamic>{
         'ai_v3_playhead_ms': _globalAudioClock.inMilliseconds,
         'ai_v3_transport': <String, dynamic>{
           'playing': _isPlaying,

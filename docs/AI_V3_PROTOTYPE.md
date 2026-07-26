@@ -1,4 +1,4 @@
-# AI V3 one-shot prototype
+# AI V3 one-shot planner
 
 > Implementation snapshot only. The canonical complete architecture and
 > delivery plan is [ADR 0002](engineering/adr/0002-ai-v3-architecture.md). The
@@ -6,7 +6,8 @@
 > [AI V3 Capability Matrix](engineering/ai_v3_capability_matrix.md). If this
 > prototype note conflicts with the ADR, the ADR wins.
 
-V3 is an isolated debug experiment:
+V3 uses the same compact one-planner architecture in local evaluation and
+updated production clients:
 
 ```text
 original request + deterministic CoreContextV3
@@ -17,8 +18,8 @@ original request + deterministic CoreContextV3
 
 The active one-shot path has no Intent LLM, selector, semantic validator,
 repair call, Python compiler, or silent V1 fallback. Flutter is the only
-preparation and execution authority. The existing V1 route remains the active
-control.
+preparation and execution authority. Updated clients use authenticated one-shot
+V3; released older clients continue using the unchanged V1 endpoint.
 
 The initial `PlanV3` deliberately has no model-authored preservation or
 negative-policy map. The original request remains authoritative, and each typed
@@ -26,10 +27,19 @@ command changes only its operation-specific target and state. Flutter rejects
 unknown targets, unavailable resources, stale state, malformed payloads, and
 failed readback, but it does not reinterpret the request or add semantic vetoes.
 
-## Enable locally
+## Production and compatibility routing
 
-V3 is off by default and cannot become active in a release build. It also
-requires direct OpenAI debug configuration.
+Updated clients default to one-shot V3 through the authenticated
+`/v1/llm/v3/responses` proxy route. The backend owns the Luna model, low
+reasoning effort, output ceiling, usage accounting, and server kill switch.
+OpenAI credentials never ship in the app.
+
+Set `AI_V3_PRIMARY_ENABLED=false` at build time to produce a V1-compatible
+client. This is an explicit route selection, not a silent per-request fallback.
+Older released clients remain unchanged because they continue calling
+`/v1/llm/responses`.
+
+Direct OpenAI V3 remains available only for explicit local debug evaluation:
 
 ```text
 AI_V3_PROTOTYPE_ENABLED=true
@@ -38,6 +48,14 @@ AI_V3_REASONING_EFFORT=low
 AI_V3_CONTEXT_PROFILE=essential
 AI_V3_CAPTURE_ENABLED=true
 AI_V3_CAPTURE_DIR=tool/ai_v3_captures.local
+```
+
+Production backend settings are:
+
+```text
+AI_V3_ENABLED=true
+AI_V3_MODEL=gpt-5.6-luna
+AI_V3_REASONING_EFFORT=low
 ```
 
 Use `enriched` and `rich` for the deterministic context-profile experiment.
@@ -76,7 +94,7 @@ ignored, and must never be committed.
 - Built-in effect configuration uses exposed parameter IDs; existing row
   effect removal and bypass use exact native instance IDs.
 - No external jobs, fuzzy target matching, or repair. Local staged Spleeter
-  and Basic Pitch operations complete before their editor mutations. Adaptive V3
-  supports one bounded factual retrieval round in detached shadow mode; active
-  one-shot V3 remains a single planner call.
+  and Basic Pitch operations complete before their editor mutations. Adaptive
+  V3 supports one bounded factual retrieval round in detached shadow mode;
+  active one-shot V3 remains a single planner call.
 - Captures are observational and never affect the visible result.

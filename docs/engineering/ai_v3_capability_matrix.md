@@ -2,7 +2,7 @@
 
 Owner: AI Engineering
 Status: Complete source audit; execution evidence remains capability-specific
-Last reviewed: 2026-07-20
+Last reviewed: 2026-07-26
 
 The machine-readable authority is
 [`tool/ai_v3_eval/v3_capabilities.yaml`](../../tool/ai_v3_eval/v3_capabilities.yaml).
@@ -54,6 +54,10 @@ Status meanings:
 
 No capability is marked `verified` merely because its schema parses or a mock
 test passes. No entry remains `not_audited`.
+
+Routing status is independent of capability coverage. Updated clients select
+authenticated one-shot V3, older clients remain on V1, and adaptive V3 remains
+detached shadow-only. This routing change adds no command or capability claim.
 
 ## V1 architecture
 

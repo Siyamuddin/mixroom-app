@@ -410,6 +410,50 @@ def _configured_model() -> str:
     return _env_value("LLM_MODEL", "OPENAI_MODEL")
 
 
+def _is_v3_responses_path(path: str) -> bool:
+    return str(path or "").rstrip("/").endswith("/v1/llm/v3/responses")
+
+
+def _v3_enabled() -> bool:
+    return _env_value("AI_V3_ENABLED", default="true").lower() == "true"
+
+
+def _configured_v3_model() -> str:
+    return _env_value("AI_V3_MODEL", default="gpt-5.6-luna")
+
+
+def _configured_v3_reasoning_effort() -> str:
+    normalized = _env_value("AI_V3_REASONING_EFFORT", default="low").lower()
+    supported = {"none", "minimal", "low", "medium", "high", "xhigh"}
+    return normalized if normalized in supported else "low"
+
+
+def _validate_v3_request_body(body: Dict[str, Any]) -> None:
+    if any(key in body for key in _STRUCTURED_MIXROOM_FIELDS):
+        raise ValueError("V3 requires an OpenAI-compatible planner request.")
+    tools = body.get("tools")
+    if not isinstance(tools, list) or len(tools) != 1:
+        raise ValueError("V3 requires exactly one planner tool.")
+    tool = tools[0]
+    if (
+        not isinstance(tool, dict)
+        or str(tool.get("type") or "").strip() != "function"
+        or str(tool.get("name") or "").strip() != "submit_plan_v3"
+    ):
+        raise ValueError("V3 requires the submit_plan_v3 tool.")
+    tool_choice = body.get("tool_choice")
+    if (
+        not isinstance(tool_choice, dict)
+        or str(tool_choice.get("type") or "").strip() != "function"
+        or str(tool_choice.get("name") or "").strip() != "submit_plan_v3"
+    ):
+        raise ValueError("V3 requires submit_plan_v3 tool choice.")
+    if body.get("parallel_tool_calls") is not False:
+        raise ValueError("V3 parallel tool calls must be disabled.")
+    if body.get("store") is not False:
+        raise ValueError("V3 provider storage must be disabled.")
+
+
 def _provider_name() -> str:
     return _env_value("LLM_PROVIDER", default=DEFAULT_PROVIDER).lower()
 
@@ -2902,6 +2946,29 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             error="invalid_body_type",
         )
 
+    is_v3_request = _is_v3_responses_path(request_path)
+    if is_v3_request and not _v3_enabled():
+        return _finalize(
+            json_response(
+                503,
+                {
+                    "error": {
+                        "code": "v3_disabled",
+                        "message": "AI V3 is temporarily disabled.",
+                    }
+                },
+            ),
+            error="v3_disabled",
+        )
+    if is_v3_request:
+        try:
+            _validate_v3_request_body(body)
+        except ValueError as error:
+            return _finalize(
+                json_response(400, {"error": str(error)}),
+                error="invalid_v3_request",
+            )
+
     if http_method == "POST" and request_path.endswith("/v1/llm/conversation-events"):
         try:
             return _finalize(_handle_conversation_event(body=body, user_id=user_id))
@@ -2923,7 +2990,11 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     analytics_enabled = analytics_enabled_from_body(body)
     client_context = client_context_from_body(body)
     client_capabilities = _client_capabilities_from_context(client_context)
-    raw_ai_feature = str(body.get("ai_feature") or "ai_chat").strip() or "ai_chat"
+    raw_ai_feature = (
+        "ai_chat_v3"
+        if is_v3_request
+        else str(body.get("ai_feature") or "ai_chat").strip() or "ai_chat"
+    )
     try:
         ai_feature = validate_feature(raw_ai_feature)
     except ValueError as error:
@@ -2945,7 +3016,9 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             error="invalid_provider",
         )
 
-    configured_model = _configured_model()
+    configured_model = (
+        _configured_v3_model() if is_v3_request else _configured_model()
+    )
     default_model = configured_model or DEFAULT_MODEL
     runtime_config = get_ai_feature_runtime(ai_feature, fallback_model=default_model)
     is_structured_request = any(key in body for key in _STRUCTURED_MIXROOM_FIELDS)
@@ -2989,6 +3062,17 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         runtime_config=runtime_config,
         is_structured_request=is_structured_request,
     )
+    if is_v3_request:
+        request_body["model"] = configured_model or "gpt-5.6-luna"
+        request_body["reasoning"] = {
+            "effort": _configured_v3_reasoning_effort(),
+        }
+        request_body["max_output_tokens"] = min(
+            int(request_body.get("max_output_tokens") or 4096),
+            4096,
+        )
+        request_body["parallel_tool_calls"] = False
+        request_body["store"] = False
 
     apply_server_output_token_cap(request_body)
     _update_request_log_context_with_cache_request(request_log_context, request_body)

@@ -9,6 +9,7 @@ This package is the minimal beta-safe backend for Mixroom chat. Its job is to:
 ## Current scope
 
 - `POST /v1/llm/responses`
+- `POST /v1/llm/v3/responses`
 - Accepts either:
   - a Mixroom app payload (`conversation`, `user_text`, `project_snapshot`, etc.), or
   - a sanitized OpenAI-compatible payload during migration
@@ -19,6 +20,10 @@ This package is the minimal beta-safe backend for Mixroom chat. Its job is to:
 - Returns an OpenAI Responses-compatible JSON body to the app
 
 This is the beta target architecture. The app should send context only; Lambda owns the server prompt, tools, and default model.
+
+The dedicated V3 route accepts the strict one-shot `submit_plan_v3` request,
+pins the configured V3 model and reasoning effort server-side, and can be
+disabled with `AI_V3_ENABLED=false`. Existing clients remain on the V1 route.
 
 ## AWS services
 
@@ -76,6 +81,9 @@ sam deploy --guided
 - `ENTITLEMENTS_TABLE`
 - `LLM_MAX_OUTPUT_TOKENS`
 - `LLM_UPSTREAM_NETWORK_RETRY_ATTEMPTS`
+- `AI_V3_ENABLED`
+- `AI_V3_MODEL`
+- `AI_V3_REASONING_EFFORT`
 
 ## Secrets
 
@@ -121,6 +129,10 @@ Run the app with:
 flutter run \
   --dart-define=LLM_PROXY_API_BASE_URL=https://YOUR_API_ID.execute-api.YOUR_REGION.amazonaws.com/YOUR_STAGE
 ```
+
+Updated clients default to authenticated one-shot V3. Build with
+`--dart-define=AI_V3_PRIMARY_ENABLED=false` to retain V1 as the visible route.
+Direct V3 provider access remains debug-only.
 
 To verify deployed auth behavior with a real native-auth account, run:
 

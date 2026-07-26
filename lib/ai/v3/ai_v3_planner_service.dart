@@ -51,12 +51,16 @@ abstract interface class AiV3Planner {
 
 class AiV3PlannerService implements AiV3Planner {
   AiV3PlannerService({
-    required this.apiKey,
+    this.apiKey = '',
     required this.model,
     this.reasoningEffort = 'low',
     this.requestTimeout = const Duration(seconds: 40),
     Set<String> commandTypes = aiV3CommandTypes,
     this.architecture = 'v3_one_shot_prototype',
+    this.proxyApiBaseUrl = '',
+    this.proxyPath = '/v1/llm/v3/responses',
+    this.authTokenProvider,
+    this.refreshAuthTokenProvider,
     http.Client? httpClient,
   })  : assert(commandTypes.isNotEmpty),
         commandTypes = Set<String>.unmodifiable(commandTypes),
@@ -72,7 +76,13 @@ class AiV3PlannerService implements AiV3Planner {
   final Duration requestTimeout;
   final Set<String> commandTypes;
   final String architecture;
+  final String proxyApiBaseUrl;
+  final String proxyPath;
+  final Future<String?> Function()? authTokenProvider;
+  final Future<String?> Function()? refreshAuthTokenProvider;
   final http.Client _httpClient;
+
+  bool get _usesProxy => proxyApiBaseUrl.trim().isNotEmpty;
 
   @override
   Future<AiV3PlannerResult> plan({
@@ -80,7 +90,9 @@ class AiV3PlannerService implements AiV3Planner {
     required String originalRequest,
     String? promptTraceId,
   }) async {
-    if (apiKey.trim().isEmpty || model.trim().isEmpty) {
+    if (model.trim().isEmpty ||
+        (!_usesProxy && apiKey.trim().isEmpty) ||
+        (_usesProxy && authTokenProvider == null)) {
       throw const AiV3PlannerException('v3_openai_configuration_missing');
     }
     final body = buildAiV3PlannerRequestBody(
@@ -95,16 +107,9 @@ class AiV3PlannerService implements AiV3Planner {
     final stopwatch = Stopwatch()..start();
     late http.Response response;
     try {
-      response = await _httpClient
-          .post(
-            Uri.parse(_apiUrl),
-            headers: <String, String>{
-              'Authorization': 'Bearer ${apiKey.trim()}',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode(body),
-          )
-          .timeout(requestTimeout);
+      response = _usesProxy
+          ? await _postProxy(body, promptTraceId: promptTraceId)
+          : await _postDirect(body);
     } on TimeoutException {
       throw const AiV3PlannerException('v3_planner_timeout');
     } finally {
@@ -184,8 +189,11 @@ class AiV3PlannerService implements AiV3Planner {
       rawResponse: decoded,
       meta: <String, dynamic>{
         'architecture': architecture,
-        'model': model,
+        'model': decoded['model']?.toString().trim().isNotEmpty == true
+            ? decoded['model'].toString().trim()
+            : model,
         'reasoning_effort': reasoningEffort,
+        'llm_route': _usesProxy ? 'authenticated_proxy' : 'direct_openai_debug',
         'context_profile': context.profileName,
         'context_approximate_tokens': context.approximateTokens,
         'model_call_elapsed_ms': stopwatch.elapsedMilliseconds,
@@ -201,6 +209,96 @@ class AiV3PlannerService implements AiV3Planner {
       },
       requestBody: body,
     );
+  }
+
+  Future<http.Response> _postDirect(Map<String, dynamic> body) {
+    return _httpClient
+        .post(
+          Uri.parse(_apiUrl),
+          headers: <String, String>{
+            'Authorization': 'Bearer ${apiKey.trim()}',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode(body),
+        )
+        .timeout(requestTimeout);
+  }
+
+  Future<http.Response> _postProxy(
+    Map<String, dynamic> body, {
+    String? promptTraceId,
+  }) async {
+    var token = await _resolveProxyAuthToken();
+    if (token == null) {
+      throw const AiV3PlannerException('v3_proxy_auth_token_missing');
+    }
+    var response = await _postProxyWithToken(
+      body,
+      token: token,
+      promptTraceId: promptTraceId,
+    );
+    if ((response.statusCode == 401 || response.statusCode == 403) &&
+        refreshAuthTokenProvider != null) {
+      token = await _resolveProxyAuthToken(forceRefresh: true);
+      if (token == null) {
+        throw const AiV3PlannerException('v3_proxy_auth_token_missing');
+      }
+      response = await _postProxyWithToken(
+        body,
+        token: token,
+        promptTraceId: promptTraceId,
+      );
+    }
+    return response;
+  }
+
+  Future<http.Response> _postProxyWithToken(
+    Map<String, dynamic> body, {
+    required String token,
+    String? promptTraceId,
+  }) {
+    final normalizedTraceId = (promptTraceId ?? '').trim();
+    final proxyBody = <String, dynamic>{
+      ...body,
+      'ai_feature': 'ai_chat_v3',
+      'client_context': <String, dynamic>{
+        'ai_architecture': architecture,
+      },
+      if (normalizedTraceId.isNotEmpty) 'prompt_trace_id': normalizedTraceId,
+    };
+    return _httpClient
+        .post(
+          _proxyUri(),
+          headers: <String, String>{
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode(proxyBody),
+        )
+        .timeout(requestTimeout);
+  }
+
+  Future<String?> _resolveProxyAuthToken({bool forceRefresh = false}) async {
+    final provider =
+        forceRefresh ? refreshAuthTokenProvider : authTokenProvider;
+    final token = (await provider?.call())?.trim() ?? '';
+    if (token.isNotEmpty) return token;
+    if (!forceRefresh && refreshAuthTokenProvider != null) {
+      final refreshed = (await refreshAuthTokenProvider!.call())?.trim() ?? '';
+      if (refreshed.isNotEmpty) return refreshed;
+    }
+    return null;
+  }
+
+  Uri _proxyUri() {
+    final base = proxyApiBaseUrl.trim().replaceFirst(RegExp(r'/$'), '');
+    final configuredPath = proxyPath.trim();
+    final path = configuredPath.isEmpty
+        ? '/v1/llm/v3/responses'
+        : (configuredPath.startsWith('/')
+            ? configuredPath
+            : '/$configuredPath');
+    return Uri.parse('$base$path');
   }
 }
 

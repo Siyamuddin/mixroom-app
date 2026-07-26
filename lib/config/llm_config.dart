@@ -16,6 +16,11 @@ class LlmConfig {
     defaultValue: '/v1/llm/responses',
   );
 
+  static const String aiV3ProxyPath = String.fromEnvironment(
+    'AI_V3_PROXY_PATH',
+    defaultValue: '/v1/llm/v3/responses',
+  );
+
   static const String _legacyMixResolvePath = String.fromEnvironment(
     'LLM_MIX_RESOLVE_PATH',
     defaultValue: '',
@@ -71,8 +76,15 @@ class LlmConfig {
     defaultValue: false,
   );
 
-  /// Local debug-only one-shot V3 prototype. Release builds intentionally
-  /// ignore this switch so V3 cannot bypass the authenticated proxy.
+  /// Primary route for updated clients. Set false at build time to retain V1
+  /// as the visible planner without removing either implementation.
+  static const bool aiV3PrimaryEnabled = bool.fromEnvironment(
+    'AI_V3_PRIMARY_ENABLED',
+    defaultValue: true,
+  );
+
+  /// Local debug-only direct-OpenAI V3 route. Release builds always use the
+  /// authenticated proxy when V3 is enabled.
   static const bool aiV3PrototypeEnabled = bool.fromEnvironment(
     'AI_V3_PROTOTYPE_ENABLED',
     defaultValue: false,
@@ -131,6 +143,12 @@ class LlmConfig {
 
   static bool get effectiveAiV3PrototypeEnabled =>
       kDebugMode && aiV3PrototypeEnabled && canUseDirectOpenAi;
+
+  static bool get effectiveAiV3ProxyEnabled =>
+      aiV3PrimaryEnabled && hasProxyApiBaseUrl;
+
+  static bool get effectiveAiV3Enabled =>
+      effectiveAiV3ProxyEnabled || effectiveAiV3PrototypeEnabled;
 
   static String get effectiveProxyApiBaseUrl {
     if (kDebugMode && disableProxyInDebug) {

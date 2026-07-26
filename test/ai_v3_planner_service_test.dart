@@ -114,6 +114,113 @@ void main() {
     );
   });
 
+  test('authenticated proxy preserves the V3 request and hides API keys',
+      () async {
+    late http.Request sentRequest;
+    late Map<String, dynamic> sentBody;
+    final client = MockClient((request) async {
+      sentRequest = request;
+      sentBody = Map<String, dynamic>.from(
+        jsonDecode(request.body) as Map,
+      );
+      return http.Response(
+        jsonEncode(<String, dynamic>{
+          ..._responseWithArguments(jsonEncode(_respondPlan())),
+          'model': 'gpt-5.6-luna',
+        }),
+        200,
+      );
+    });
+    final service = AiV3PlannerService(
+      model: 'gpt-5.6-luna',
+      reasoningEffort: 'low',
+      proxyApiBaseUrl: 'https://proxy.example/',
+      proxyPath: 'v1/llm/v3/responses',
+      authTokenProvider: () async => 'app-session-token',
+      httpClient: client,
+    );
+
+    final result = await service.plan(
+      context: _context(),
+      originalRequest: 'Keep everything unchanged.',
+      promptTraceId: 'trace-proxy',
+    );
+
+    expect(sentRequest.url.toString(),
+        'https://proxy.example/v1/llm/v3/responses');
+    expect(sentRequest.headers['authorization'], 'Bearer app-session-token');
+    expect(sentBody['ai_feature'], 'ai_chat_v3');
+    expect(sentBody['prompt_trace_id'], 'trace-proxy');
+    expect(
+      sentBody['client_context'],
+      <String, dynamic>{'ai_architecture': 'v3_one_shot_prototype'},
+    );
+    expect(sentBody['store'], isFalse);
+    expect(jsonEncode(sentBody), isNot(contains('sk-')));
+    expect(result.requestBody.containsKey('ai_feature'), isFalse);
+    expect(result.meta['llm_route'], 'authenticated_proxy');
+    expect(result.meta['model'], 'gpt-5.6-luna');
+  });
+
+  test('authenticated proxy refreshes rejected app auth exactly once',
+      () async {
+    var calls = 0;
+    final authorizations = <String>[];
+    final client = MockClient((request) async {
+      calls += 1;
+      authorizations.add(request.headers['authorization'] ?? '');
+      if (calls == 1) {
+        return http.Response('{"error":"expired"}', 401);
+      }
+      return http.Response(
+        jsonEncode(_responseWithArguments(jsonEncode(_respondPlan()))),
+        200,
+      );
+    });
+    final service = AiV3PlannerService(
+      model: 'gpt-5.6-luna',
+      proxyApiBaseUrl: 'https://proxy.example',
+      authTokenProvider: () async => 'expired-token',
+      refreshAuthTokenProvider: () async => 'refreshed-token',
+      httpClient: client,
+    );
+
+    await service.plan(
+      context: _context(),
+      originalRequest: 'What is the BPM?',
+    );
+
+    expect(calls, 2);
+    expect(
+      authorizations,
+      <String>['Bearer expired-token', 'Bearer refreshed-token'],
+    );
+  });
+
+  test('authenticated proxy fails safely when app auth is unavailable',
+      () async {
+    final service = AiV3PlannerService(
+      model: 'gpt-5.6-luna',
+      proxyApiBaseUrl: 'https://proxy.example',
+      authTokenProvider: () async => null,
+      httpClient: MockClient((_) async {
+        fail('HTTP must not run without app authentication.');
+      }),
+    );
+
+    await expectLater(
+      service.plan(
+        context: _context(),
+        originalRequest: 'What is the BPM?',
+      ),
+      throwsA(isA<AiV3PlannerException>().having(
+        (error) => error.code,
+        'code',
+        'v3_proxy_auth_token_missing',
+      )),
+    );
+  });
+
   test('compact planner rejects commands outside its declared surface',
       () async {
     final client = MockClient((_) async => http.Response(

@@ -43,9 +43,14 @@ dart run tool/check_docs_freshness.dart --base origin/main
 Backend tests live under:
 
 - `backend/app_api/tests/`
+- `backend/llm_proxy/tests/`
 
 Use targeted tests while iterating and the wider suite before deploy. Start with
 tests matching the handler or common module you changed.
+
+For authenticated V3 routing changes, cover the dedicated V3 endpoint, its
+server kill switch, the unchanged V1 endpoint, client token refresh, and the
+client build switch before running the wider Flutter V3 suite.
 
 ## Useful Debug Entry Points
 

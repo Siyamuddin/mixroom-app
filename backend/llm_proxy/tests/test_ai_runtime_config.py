@@ -110,6 +110,27 @@ class AiRuntimeConfigTests(unittest.TestCase):
 
         self.assertEqual(runtime["reasoning"], {"effort": "low"})
 
+    def test_v3_runtime_is_server_owned_luna_with_low_reasoning(self) -> None:
+        with mock.patch.object(
+            ai_runtime_config.config,
+            "AI_V3_MODEL",
+            "gpt-5.6-luna",
+        ), mock.patch.object(
+            ai_runtime_config.config,
+            "AI_V3_REASONING_EFFORT",
+            "low",
+        ):
+            runtime = ai_runtime_config.get_ai_feature_runtime(
+                "ai_chat_v3",
+                fallback_model="legacy-model",
+            )
+
+        self.assertEqual(runtime["feature"], "ai_chat_v3")
+        self.assertEqual(runtime["model"], "gpt-5.6-luna")
+        self.assertEqual(runtime["reasoning"], {"effort": "low"})
+        self.assertEqual(runtime["max_output_tokens"], 4096)
+        self.assertEqual(runtime["system_prompt"], "")
+
 
 if __name__ == "__main__":
     unittest.main()
