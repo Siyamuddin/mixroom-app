@@ -25,6 +25,25 @@ Map<String, dynamic> _command(
       'arguments': arguments,
     };
 
+AiV3Plan _allRowsMixPlan() => AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
+      _command('mix-all', 'mix.apply_goal', <String, dynamic>{
+        'target': <String, dynamic>{'scope': 'all_rows'},
+        'intents': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'kind': 'balance',
+            'direction': null,
+            'descriptor': null,
+          },
+        ],
+        'intensity': 0.5,
+        'execution_profile': 'producer_safe',
+        'audibility': 'noticeable',
+        'style_tags': const <String>[],
+        'reset_fx': false,
+        'reference': null,
+      }),
+    ]));
+
 AiV3CoreContext _context() => AiV3CoreContext(
       profile: AiV3ContextProfile.essential,
       stateDigest: 'state-1',
@@ -64,6 +83,7 @@ AiV3CoreContext _context() => AiV3CoreContext(
             'muted': false,
             'soloed': false,
             'color': 'none',
+            'mix_processing_supported': true,
             'has_analyzable_audio': true,
             'automation_targets': <Map<String, dynamic>>[
               <String, dynamic>{
@@ -125,6 +145,7 @@ AiV3CoreContext _context() => AiV3CoreContext(
             'muted': true,
             'soloed': false,
             'color': 'blue',
+            'mix_processing_supported': true,
             'has_analyzable_audio': false,
             'automation_targets': <Map<String, dynamic>>[
               <String, dynamic>{
@@ -1841,6 +1862,59 @@ void main() {
   });
 
   group('V3 factual preparation', () {
+    test('allows all-row mixing for playable MIDI without analyzed audio', () {
+      final data =
+          jsonDecode(jsonEncode(_context().data)) as Map<String, dynamic>;
+      final rows = (data['rows'] as List).cast<Map>();
+      rows[0]['mix_processing_supported'] = false;
+      rows[0]['has_usable_signal'] = false;
+      rows[1]['mix_processing_supported'] = true;
+      rows[1]['has_usable_signal'] = false;
+      final context = AiV3CoreContext(
+        profile: AiV3ContextProfile.essential,
+        stateDigest: 'midi-only-mix',
+        data: data,
+      );
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: _allRowsMixPlan(),
+        context: context,
+      );
+
+      expect(prepared.actions.single.type, 'v3_mix_goal');
+      expect(prepared.actions.single.data['target'], <String, dynamic>{
+        'scope': 'all_rows',
+      });
+    });
+
+    test('rejects all-row mixing when no row can produce playback', () {
+      final data =
+          jsonDecode(jsonEncode(_context().data)) as Map<String, dynamic>;
+      final rows = (data['rows'] as List).cast<Map>();
+      for (final row in rows) {
+        row['mix_processing_supported'] = false;
+      }
+      final context = AiV3CoreContext(
+        profile: AiV3ContextProfile.essential,
+        stateDigest: 'empty-mix',
+        data: data,
+      );
+
+      expect(
+        () => const AiV3CommandPreparer().prepare(
+          plan: _allRowsMixPlan(),
+          context: context,
+        ),
+        throwsA(
+          isA<AiV3PreparationException>().having(
+            (error) => error.code,
+            'code',
+            'v3_mix_audio_missing',
+          ),
+        ),
+      );
+    });
+
     test('prepares a stable-id mix goal without exposing concrete MixActions',
         () {
       final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
@@ -2104,7 +2178,8 @@ void main() {
       );
     });
 
-    test('rejects exact standalone and embedded MIDI row duplication', () {
+    test('canonicalizes exact standalone and embedded MIDI row duplication',
+        () {
       Map<String, dynamic> createRow(String id) =>
           _command(id, 'row.create', <String, dynamic>{
             'name': 'House Drums',
@@ -2139,23 +2214,23 @@ void main() {
         <Map<String, dynamic>>[createClip('clip'), createRow('row')],
       ]) {
         final plan = AiV3Plan.fromJson(_plan(commands));
+        final prepared = const AiV3CommandPreparer().prepare(
+          plan: plan,
+          context: _context(),
+        );
         expect(
-          () => const AiV3CommandPreparer().prepare(
-            plan: plan,
-            context: _context(),
-          ),
-          throwsA(
-            isA<AiV3PreparationException>().having(
-              (error) => error.code,
-              'code',
-              'v3_embedded_destination_row_conflict',
-            ),
-          ),
+          prepared.plan.commands.map((command) => command.commandId),
+          <String>['clip'],
+        );
+        expect(
+          prepared.actions.map((action) => action.type),
+          <String>['row_create', 'midi_compose'],
         );
       }
     });
 
-    test('rejects exact sample and repeated embedded row duplication', () {
+    test('canonicalizes exact standalone and embedded sample row duplication',
+        () {
       final sample = _command('sample', 'sample.place', <String, dynamic>{
         'destination': <String, dynamic>{
           'new_row': <String, dynamic>{'name': 'Percussion'},
@@ -2172,29 +2247,86 @@ void main() {
 
       for (final commands in <List<Map<String, dynamic>>>[
         <Map<String, dynamic>>[row, sample],
-        <Map<String, dynamic>>[
-          sample,
-          <String, dynamic>{
-            ...sample,
-            'command_id': 'sample-2',
-          },
-        ],
+        <Map<String, dynamic>>[sample, row],
       ]) {
         final plan = AiV3Plan.fromJson(_plan(commands));
+        final prepared = const AiV3CommandPreparer().prepare(
+          plan: plan,
+          context: _context(),
+        );
         expect(
-          () => const AiV3CommandPreparer().prepare(
-            plan: plan,
-            context: _context(),
-          ),
-          throwsA(
-            isA<AiV3PreparationException>().having(
-              (error) => error.code,
-              'code',
-              'v3_embedded_destination_row_conflict',
-            ),
-          ),
+          prepared.plan.commands.map((command) => command.commandId),
+          <String>['sample'],
+        );
+        expect(
+          prepared.actions.map((action) => action.type),
+          <String>['row_create', 'sample_insert'],
         );
       }
+    });
+
+    test('rejects ambiguous repeated embedded destination rows', () {
+      final sample = _command('sample', 'sample.place', <String, dynamic>{
+        'destination': <String, dynamic>{
+          'new_row': <String, dynamic>{'name': 'Percussion'},
+        },
+        'placements': <Map<String, dynamic>>[
+          <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+        ],
+      });
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
+        sample,
+        <String, dynamic>{...sample, 'command_id': 'sample-2'},
+      ]));
+
+      expect(
+        () => const AiV3CommandPreparer().prepare(
+          plan: plan,
+          context: _context(),
+        ),
+        throwsA(
+          isA<AiV3PreparationException>().having(
+            (error) => error.code,
+            'code',
+            'v3_embedded_destination_row_conflict',
+          ),
+        ),
+      );
+    });
+
+    test('rejects multiple standalone rows matching one embedded destination',
+        () {
+      Map<String, dynamic> row(String id) =>
+          _command(id, 'row.create', <String, dynamic>{
+            'name': 'Percussion',
+            'lane': <String, dynamic>{'kind': 'audio'},
+            'position': <String, dynamic>{'kind': 'end'},
+          });
+      final sample = _command('sample', 'sample.place', <String, dynamic>{
+        'destination': <String, dynamic>{
+          'new_row': <String, dynamic>{'name': 'Percussion'},
+        },
+        'placements': <Map<String, dynamic>>[
+          <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+        ],
+      });
+      final plan = AiV3Plan.fromJson(
+        _plan(<Map<String, dynamic>>[row('row-1'), row('row-2'), sample]),
+      );
+
+      expect(
+        () => const AiV3CommandPreparer().prepare(
+          plan: plan,
+          context: _context(),
+        ),
+        throwsA(
+          isA<AiV3PreparationException>().having(
+            (error) => error.code,
+            'code',
+            'v3_embedded_destination_row_conflict',
+          ),
+        ),
+      );
     });
 
     test('allows factually distinct standalone and embedded rows', () {

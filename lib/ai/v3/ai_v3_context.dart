@@ -223,6 +223,8 @@ class AiV3CoreContextBuilder {
           ? Map<Object?, Object?>.from(source['audio_analysis'] as Map)
           : const <Object?, Object?>{};
       final audioFacts = AiV3AudioFacts.fromAnalysis(
+        mixProcessingSupported: source['has_audio'] == true ||
+            (clipIdsByRow[rowId]?.isNotEmpty ?? false),
         hasAudio: source['has_audio'] == true,
         approxRms: (source['approx_rms'] as num?)?.toDouble() ?? 0.0,
         audioStatistics: audioAnalysis,
@@ -237,6 +239,7 @@ class AiV3CoreContextBuilder {
           'role_override': source['role_override'].toString().trim(),
         if ((source['group_id']?.toString().trim() ?? '').isNotEmpty)
           'group_id': source['group_id'].toString().trim(),
+        'mix_processing_supported': audioFacts.mixProcessingSupported,
         'has_usable_signal': audioFacts.hasUsableSignal,
         'analysis_available': audioFacts.analysisAvailable,
         'has_analyzable_audio': audioFacts.referenceSuitable,

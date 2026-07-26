@@ -536,6 +536,52 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('V3 row deletion rollback restores exact row and clip identities',
+      (tester) async {
+    _ignoreKnownEditorSemanticsAssertion();
+    final fixture = await _openAudioFixture(tester);
+    final controller = fixture.controller;
+    final before = controller.snapshot();
+    final rows = (before['rows'] as List).cast<Map<String, dynamic>>();
+    final clips = (before['clips'] as List).cast<Map<String, dynamic>>();
+    expect(rows.length, greaterThanOrEqualTo(2));
+    final initialRowIds =
+        rows.map((row) => row['row_id'] as int).toList(growable: false);
+    final initialClipOwners = <String, int>{
+      for (final clip in clips)
+        clip['clip_id'] as String: clip['row_id'] as int,
+    };
+    final initialUndoDepth = before['undo_depth'] as int;
+
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _deleteRowAction(1, initialRowIds[1]),
+        _renameAction(0, initialRowIds[0], ''),
+      ],
+    ));
+
+    final after = controller.snapshot();
+    expect(
+      (after['rows'] as List)
+          .cast<Map<String, dynamic>>()
+          .map((row) => row['row_id'])
+          .toList(growable: false),
+      initialRowIds,
+    );
+    expect(
+      <String, int>{
+        for (final clip
+            in (after['clips'] as List).cast<Map<String, dynamic>>())
+          clip['clip_id'] as String: clip['row_id'] as int,
+      },
+      initialClipOwners,
+    );
+    expect(after['undo_depth'], initialUndoDepth);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('V3 populated row deletion restores contents and selection',
       (tester) async {
     _ignoreKnownEditorSemanticsAssertion();

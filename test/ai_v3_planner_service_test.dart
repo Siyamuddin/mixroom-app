@@ -155,7 +155,7 @@ void main() {
       sentBody['client_context'],
       <String, dynamic>{'ai_architecture': 'v3_one_shot_prototype'},
     );
-    expect(sentBody['store'], isFalse);
+    expect(sentBody['store'], isTrue);
     expect(jsonEncode(sentBody), isNot(contains('sk-')));
     expect(result.requestBody.containsKey('ai_feature'), isFalse);
     expect(result.meta['llm_route'], 'authenticated_proxy');

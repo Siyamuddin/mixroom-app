@@ -71751,8 +71751,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (snapshot.wasOnlyRow) {
       if (_rowCount == 0) {
-        restoredRowId = await JuceAudioEngine.addRow(snapshot.row.name,
-            iconId: snapshot.row.iconId);
+        restoredRowId = await JuceAudioEngine.addRow(
+          snapshot.row.name,
+          iconId: snapshot.row.iconId,
+          preferredRowId: snapshot.row.rowId,
+        );
         if (restoredRowId < 0) return snapshot.row.rowId;
         _restoreDeletedRowGroups(snapshot, restoredRowId);
         await _applyRowsToEditorState(
@@ -71779,14 +71782,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     } else {
       final desiredIndex = snapshot.originalIndex.clamp(0, _rowCount);
       if (_rowCount == 0) {
-        restoredRowId = await JuceAudioEngine.addRow(snapshot.row.name,
-            iconId: snapshot.row.iconId);
+        restoredRowId = await JuceAudioEngine.addRow(
+          snapshot.row.name,
+          iconId: snapshot.row.iconId,
+          preferredRowId: snapshot.row.rowId,
+        );
         restoredRowIndex = 0;
       } else if (desiredIndex >= _rowCount) {
         restoredRowId = await JuceAudioEngine.insertRowBelow(
           _rowIdAt(_rowCount - 1),
           snapshot.row.name,
           iconId: snapshot.row.iconId,
+          preferredRowId: snapshot.row.rowId,
         );
         restoredRowIndex = _rowCount;
       } else {
@@ -71794,10 +71801,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _rowIdAt(desiredIndex),
           snapshot.row.name,
           iconId: snapshot.row.iconId,
+          preferredRowId: snapshot.row.rowId,
         );
         restoredRowIndex = desiredIndex;
       }
-      if (restoredRowId < 0) return snapshot.row.rowId;
+      if (restoredRowId != snapshot.row.rowId) {
+        throw StateError('row_restore_identity_mismatch');
+      }
 
       await JuceAudioEngine.renameRow(restoredRowId, snapshot.row.name);
       await JuceAudioEngine.setRowIcon(restoredRowId, snapshot.row.iconId);
@@ -71922,12 +71932,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final clipPayloads = _commandClipPayloads(snapshot['clips']);
 
     var restoredRowIndex = originalIndex;
-    var restoredRowId = _valueInt(rowMap['rowId']) ?? -1;
+    final originalRowId = _valueInt(rowMap['rowId']) ?? -1;
+    final preferredRowId = originalRowId > 0 ? originalRowId : null;
+    var restoredRowId = originalRowId;
 
     if (wasOnlyRow) {
       if (_rowCount == 0) {
-        restoredRowId =
-            await JuceAudioEngine.addRow(rowName, iconId: rowIconId);
+        restoredRowId = await JuceAudioEngine.addRow(
+          rowName,
+          iconId: rowIconId,
+          preferredRowId: preferredRowId,
+        );
         if (restoredRowId < 0) return _valueInt(rowMap['rowId']) ?? -1;
       } else {
         restoredRowIndex = 0;
@@ -71945,14 +71960,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     } else {
       final desiredIndex = originalIndex.clamp(0, _rowCount);
       if (_rowCount == 0) {
-        restoredRowId =
-            await JuceAudioEngine.addRow(rowName, iconId: rowIconId);
+        restoredRowId = await JuceAudioEngine.addRow(
+          rowName,
+          iconId: rowIconId,
+          preferredRowId: preferredRowId,
+        );
         restoredRowIndex = 0;
       } else if (desiredIndex >= _rowCount) {
         restoredRowId = await JuceAudioEngine.insertRowBelow(
           _rowIdAt(_rowCount - 1),
           rowName,
           iconId: rowIconId,
+          preferredRowId: preferredRowId,
         );
         restoredRowIndex = _rowCount;
       } else {
@@ -71960,10 +71979,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _rowIdAt(desiredIndex),
           rowName,
           iconId: rowIconId,
+          preferredRowId: preferredRowId,
         );
         restoredRowIndex = desiredIndex;
       }
-      if (restoredRowId < 0) return _valueInt(rowMap['rowId']) ?? -1;
+      if (preferredRowId != null && restoredRowId != preferredRowId) {
+        throw StateError('row_restore_identity_mismatch');
+      }
+      if (restoredRowId < 0) {
+        throw StateError('row_restore_failed');
+      }
 
       final nextRows = List<TimelineRow>.from(_rows)
         ..insert(

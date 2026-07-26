@@ -198,6 +198,7 @@ void main() {
     expect(row['pan_signed'], 0.0);
     expect(row['color'], 'blue');
     expect(row['role_override'], 'synth');
+    expect(row['mix_processing_supported'], isTrue);
     expect(row['has_usable_signal'], isFalse);
     expect(row['analysis_available'], isTrue);
     expect(row['has_analyzable_audio'], isFalse);

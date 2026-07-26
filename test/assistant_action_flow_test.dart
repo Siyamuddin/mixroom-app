@@ -140,6 +140,27 @@ class _StaticAiV3Planner implements AiV3Planner {
   }
 }
 
+class _FailingAiV3Planner implements AiV3Planner {
+  const _FailingAiV3Planner(this.code);
+
+  final String code;
+
+  @override
+  String get model => 'test-v3';
+
+  @override
+  String get reasoningEffort => 'low';
+
+  @override
+  Future<AiV3PlannerResult> plan({
+    required AiV3CoreContext context,
+    required String originalRequest,
+    String? promptTraceId,
+  }) {
+    throw AiV3PlannerException(code);
+  }
+}
+
 class _ConfirmingAiV3Preparer extends AiV3CommandPreparer {
   const _ConfirmingAiV3Preparer();
 
@@ -467,6 +488,46 @@ void main() {
       expect(result.message, 'V3 handled the request.');
     });
 
+    test('invalid V3 planner output returns an actionable safe result',
+        () async {
+      final pipeline = ChatPipeline(
+        llm: _FakeCloudLlmService(
+          LlmResult.text('Unexpected V1 result.', null),
+        ),
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: const _FailingAiV3Planner('v3_planner_contract_invalid'),
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Replace this instrument and add more musical parts.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Epic Melody', iconId: 1),
+        ],
+        clientContext: _v3ClientContext(),
+      );
+
+      expect(result.hasAiV3Handoff, isTrue);
+      expect(result.aiV3Handoff?['decision'], 'blocked');
+      expect(
+        result.aiV3Handoff?['error_code'],
+        'v3_planner_contract_invalid',
+      );
+      expect(
+        result.message,
+        'I could not turn the AI response into safe DAW changes. '
+        'Nothing was changed. Rephrase the request or split it into '
+        'smaller steps.',
+      );
+      expect(result.message, isNot(contains('AI request failed')));
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+    });
+
     test(
         'clear mutating V3 request executes immediately without a pending plan',
         () async {
@@ -550,6 +611,57 @@ void main() {
             ),
         isTrue,
       );
+    });
+
+    test('already-satisfied plan returns an honest no-change response',
+        () async {
+      final planner = _StaticAiV3Planner(
+        const AiV3Plan(
+          outcome: 'plan',
+          userMessage: 'I will keep Audio 1 unmuted.',
+          commands: <AiV3Command>[
+            AiV3Command(
+              commandId: 'mute',
+              type: 'row.set_muted',
+              arguments: <String, dynamic>{
+                'row_id': 101,
+                'muted': false,
+              },
+            ),
+          ],
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: _FakeCloudLlmService(
+          LlmResult.text('Unexpected V1 result.', null),
+        ),
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: planner,
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Keep Audio 1 unmuted.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        clientStateDigest: 'no-op-state',
+        clientContext: _v3ClientContext(),
+      );
+
+      expect(result.aiV3Handoff?['decision'], 'respond');
+      expect(result.aiV3Handoff?['reason'], 'already_satisfied');
+      expect(
+        result.message,
+        'No changes were needed:\n- Unmute Audio 1 (already set)',
+      );
+      expect(result.message, isNot(contains('I will')));
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
     });
 
     test('clarification options survive the V3 handoff exactly', () async {
@@ -686,6 +798,69 @@ void main() {
       expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
     });
 
+    test('empty-project mixing failure explains the missing material',
+        () async {
+      final planner = _StaticAiV3Planner(
+        const AiV3Plan(
+          outcome: 'plan',
+          userMessage: 'Mixing the complete project.',
+          commands: <AiV3Command>[
+            AiV3Command(
+              commandId: 'mix',
+              type: 'mix.apply_goal',
+              arguments: <String, dynamic>{
+                'target': <String, dynamic>{'scope': 'all_rows'},
+                'intents': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'kind': 'balance',
+                    'direction': null,
+                    'descriptor': null,
+                  },
+                ],
+                'intensity': 0.5,
+                'execution_profile': 'producer_safe',
+                'audibility': 'noticeable',
+                'style_tags': <String>[],
+                'reset_fx': false,
+                'reference': null,
+              },
+            ),
+          ],
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: _FakeCloudLlmService(
+          LlmResult.text('Unexpected V1 result.', null),
+        ),
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: planner,
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Mix the complete project.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        clientStateDigest: 'empty-mix-state',
+        clientContext: _v3ClientContext(),
+      );
+
+      expect(result.aiV3Handoff?['decision'], 'blocked');
+      expect(result.aiV3Handoff?['error_code'], 'v3_mix_audio_missing');
+      expect(
+        result.message,
+        'There is no playable audio or MIDI material to mix. '
+        'Add material to the project, then try again.',
+      );
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+    });
+
     test('future confirmation policy preserves Apply and Cancel handoff',
         () async {
       final planner = _StaticAiV3Planner(
@@ -775,6 +950,27 @@ void main() {
           'Lower Guitar by 1.5 dB',
           'Keep Piano unchanged (already set)',
         ],
+      );
+    });
+
+    test('already-satisfied completion is factual rather than future tense',
+        () {
+      expect(
+        aiV3AlreadySatisfiedConversationMessage(
+          const <String, dynamic>{
+            'plan': <String, dynamic>{
+              'user_message': 'I will make Piano blue.',
+            },
+            'receipts': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'status': 'already_satisfied',
+                'preview_label': 'Set Piano color to blue',
+              },
+            ],
+          },
+        ),
+        'No changes were needed:\n'
+        '- Set Piano color to blue (already set)',
       );
     });
 

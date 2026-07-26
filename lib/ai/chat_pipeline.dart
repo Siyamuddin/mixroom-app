@@ -101,6 +101,28 @@ String aiV3VerifiedConversationMessage(
   ].join('\n');
 }
 
+String aiV3AlreadySatisfiedConversationMessage(Map<String, dynamic> bundle) {
+  final details = <String>[];
+  final rawReceipts = bundle['receipts'];
+  if (rawReceipts is List) {
+    for (final rawReceipt in rawReceipts.whereType<Map>()) {
+      if (rawReceipt['status']?.toString().trim() != 'already_satisfied') {
+        continue;
+      }
+      final label = _normalizeAiV3ExecutionSummary(
+        rawReceipt['preview_label']?.toString() ?? '',
+      );
+      if (label.isEmpty || details.contains(label)) continue;
+      details.add(label);
+    }
+  }
+  if (details.isEmpty) return 'No changes were needed.';
+  return <String>[
+    'No changes were needed:',
+    ...details.map((detail) => '- $detail (already set)'),
+  ].join('\n');
+}
+
 String aiV3VerifiedCompletionMessage(Map<String, dynamic> bundle) => 'Done.';
 
 String _aiV3ClarificationMessage(
@@ -203,6 +225,11 @@ _AiV3PreparationFailureResponse? _aiV3PreparationFailureResponse(
           message:
               'Reference matching is not available for the master target yet. Choose a row or group target instead.',
         ),
+      'v3_mix_audio_missing' => const _AiV3PreparationFailureResponse(
+          decision: 'blocked',
+          message:
+              'There is no playable audio or MIDI material to mix. Add material to the project, then try again.',
+        ),
       'v3_clip_stretch_global_conflict' =>
         const _AiV3PreparationFailureResponse(
           decision: 'clarify',
@@ -281,6 +308,48 @@ _AiV3PreparationFailureResponse? _aiV3PreparationFailureResponse(
               'Phone-recording cleanup and another effect or mix change target the same row. Apply the cleanup first, then make the other sound change.',
         ),
       _ => null,
+    };
+
+_AiV3PreparationFailureResponse _aiV3PlannerFailureResponse(String code) =>
+    switch (code) {
+      'v3_planner_timeout' => const _AiV3PreparationFailureResponse(
+          decision: 'blocked',
+          message:
+              'The AI took too long to finish this request. Nothing was changed. Try again, or split a very large request into smaller parts.',
+        ),
+      'v3_proxy_auth_token_missing' => const _AiV3PreparationFailureResponse(
+          decision: 'blocked',
+          message:
+              'Your session could not be verified for AI editing. Nothing was changed. Sign in again, then retry the request.',
+        ),
+      'v3_openai_configuration_missing' =>
+        const _AiV3PreparationFailureResponse(
+          decision: 'unsupported',
+          message:
+              'AI editing is not available in this build. Nothing was changed.',
+        ),
+      'v3_planner_contract_invalid' ||
+      'v3_planner_tool_call_missing' ||
+      'v3_planner_tool_call_count_invalid' ||
+      'v3_planner_tool_call_invalid' ||
+      'v3_planner_arguments_invalid_json' =>
+        const _AiV3PreparationFailureResponse(
+          decision: 'blocked',
+          message:
+              'I could not turn the AI response into safe DAW changes. Nothing was changed. Rephrase the request or split it into smaller steps.',
+        ),
+      'v3_planner_http_error' ||
+      'v3_planner_response_invalid_json' =>
+        const _AiV3PreparationFailureResponse(
+          decision: 'blocked',
+          message:
+              'The AI service returned an unusable response. Nothing was changed. Try again in a moment.',
+        ),
+      _ => const _AiV3PreparationFailureResponse(
+          decision: 'blocked',
+          message:
+              'I could not safely complete this AI request. Nothing was changed.',
+        ),
     };
 
 class ChatPipeline {
@@ -1488,7 +1557,27 @@ class ChatPipeline {
           comparisons: comparisonRuns(),
         ));
       }
-      rethrow;
+      final code =
+          error is AiV3PlannerException ? error.code : 'v3_planner_unexpected';
+      final response = _aiV3PlannerFailureResponse(code);
+      _pendingAiV3Bundle = null;
+      _pendingAiV3PlanId = null;
+      _push('user', userText);
+      _push('assistant', response.message);
+      final handoff = <String, dynamic>{
+        'schema_version': 'ai_v3_handoff_prototype_1',
+        'decision': response.decision,
+        'error_code': code,
+        'message': response.message,
+      };
+      return ChatPipelineResult.v3(
+        response.message,
+        handoff,
+        meta: <String, dynamic>{
+          'tool': 'ai_v3_planner',
+          'error_code': code,
+        },
+      );
     }
     final plan = result.plan;
     var preparationElapsedMs = 0;
@@ -1643,10 +1732,12 @@ class ChatPipeline {
     }
     preparationStopwatch.stop();
     preparationElapsedMs = preparationStopwatch.elapsedMilliseconds;
-    if (mixMaterialization.isNoChange) {
+    if (prepared.actions.isEmpty) {
       _pendingAiV3Bundle = null;
       _pendingAiV3PlanId = null;
-      final message = mixMaterialization.noChangeMessage ?? plan.userMessage;
+      final message = aiV3AlreadySatisfiedConversationMessage(
+        prepared.toJson(),
+      );
       _push('assistant', message);
       final handoff = <String, dynamic>{
         'schema_version': 'ai_v3_handoff_prototype_1',
@@ -2585,6 +2676,7 @@ class ChatPipeline {
       final roleEntries = row.roleProbs.entries.toList()
         ..sort((left, right) => right.value.compareTo(left.value));
       final audioFacts = AiV3AudioFacts.fromAnalysis(
+        mixProcessingSupported: row.hasAudio || clips.isNotEmpty,
         hasAudio: row.hasAudio,
         approxRms: row.approxRms,
         audioStatistics: row.audioStats,

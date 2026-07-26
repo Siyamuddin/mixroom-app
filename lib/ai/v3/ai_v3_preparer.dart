@@ -73,7 +73,7 @@ class AiV3CommandPreparer {
     if (!plan.isMutating) {
       throw const AiV3PreparationException('v3_non_mutating_plan');
     }
-    _rejectDuplicateEmbeddedDestinationRows(plan);
+    final preparedPlan = _canonicalizeEmbeddedDestinationRows(plan);
     final rows = (context.data['rows'] as List? ?? const <Object>[])
         .whereType<Map>()
         .map((value) => Map<String, dynamic>.from(value))
@@ -177,13 +177,13 @@ class AiV3CommandPreparer {
       }
       effectChainByRowId[rowId] = chain;
     }
-    final cleanupRowIds = plan.commands
+    final cleanupRowIds = preparedPlan.commands
         .where((command) => command.type == 'row.apply_phone_mic_cleanup')
         .map((command) => command.arguments['row_id'])
         .whereType<int>()
         .toSet();
     if (cleanupRowIds.isNotEmpty) {
-      for (final command in plan.commands) {
+      for (final command in preparedPlan.commands) {
         int? effectMutationRowId;
         if (command.type == 'effect.ensure_configured') {
           effectMutationRowId = command.arguments['row_id'] as int?;
@@ -402,7 +402,7 @@ class AiV3CommandPreparer {
       );
     }
 
-    for (final command in plan.commands) {
+    for (final command in preparedPlan.commands) {
       final args = command.arguments;
       final commandActions = <AssistantAction>[];
       String label;
@@ -2162,7 +2162,7 @@ class AiV3CommandPreparer {
               if (!rows.any((row) =>
                   row['row_id'] is int &&
                   !deletedRowIds.contains(row['row_id']) &&
-                  row['has_usable_signal'] == true)) {
+                  row['mix_processing_supported'] == true)) {
                 throw const AiV3PreparationException('v3_mix_audio_missing');
               }
               break;
@@ -2256,15 +2256,15 @@ class AiV3CommandPreparer {
       }
     }
     return AiV3PreparedBundle(
-      plan: plan,
+      plan: preparedPlan,
       stateDigest: context.stateDigest,
       actions: List<AssistantAction>.unmodifiable(actions),
       receipts: List<Map<String, dynamic>>.unmodifiable(receipts),
       executionPolicy: aiV3ExecutionPolicyForCommandTypes(
-        plan.commands.map((command) => command.type),
+        preparedPlan.commands.map((command) => command.type),
       ),
       preview: <String>[
-        plan.userMessage,
+        preparedPlan.userMessage,
         'Planned changes:',
         ...previewLines,
       ].join('\n'),
@@ -2286,49 +2286,45 @@ String _boundedMidiConversionLabel(String sourceName) {
   return normalized.substring(0, 80).trimRight();
 }
 
-void _rejectDuplicateEmbeddedDestinationRows(AiV3Plan plan) {
-  final rowIntents = <({
-    String laneKind,
-    String name,
-    String instrumentId,
-    String position,
-  }),
-      bool>{};
+typedef _AiV3RowDestinationDescriptor = ({
+  String laneKind,
+  String name,
+  String instrumentId,
+  String position,
+});
 
-  void addIntent({
+AiV3Plan _canonicalizeEmbeddedDestinationRows(AiV3Plan plan) {
+  final embeddedCounts = <_AiV3RowDestinationDescriptor, int>{};
+  final standaloneCounts = <_AiV3RowDestinationDescriptor, int>{};
+  final standaloneDescriptorByCommandId =
+      <String, _AiV3RowDestinationDescriptor>{};
+
+  _AiV3RowDestinationDescriptor descriptor({
     required String laneKind,
     required String name,
     required String instrumentId,
     required String position,
-    required bool embedded,
-  }) {
-    final descriptor = (
-      laneKind: laneKind,
-      name: name.trim(),
-      instrumentId: instrumentId.trim(),
-      position: position,
-    );
-    final priorEmbedded = rowIntents[descriptor];
-    if (priorEmbedded != null && (priorEmbedded || embedded)) {
-      throw const AiV3PreparationException(
-        'v3_embedded_destination_row_conflict',
+  }) =>
+      (
+        laneKind: laneKind,
+        name: name.trim(),
+        instrumentId: instrumentId.trim(),
+        position: position,
       );
-    }
-    rowIntents[descriptor] = embedded;
-  }
 
   for (final command in plan.commands) {
     final arguments = command.arguments;
     if (command.type == 'row.create') {
       final lane = Map<String, dynamic>.from(arguments['lane'] as Map);
       final position = Map<String, dynamic>.from(arguments['position'] as Map);
-      addIntent(
+      final value = descriptor(
         laneKind: lane['kind'] as String,
         name: arguments['name'] as String,
         instrumentId: lane['instrument_id']?.toString() ?? '',
         position: position['kind'] as String,
-        embedded: false,
       );
+      standaloneDescriptorByCommandId[command.commandId] = value;
+      standaloneCounts[value] = (standaloneCounts[value] ?? 0) + 1;
       continue;
     }
     if (command.type != 'midi.create_clip' && command.type != 'sample.place') {
@@ -2339,14 +2335,40 @@ void _rejectDuplicateEmbeddedDestinationRows(AiV3Plan plan) {
     final rawNewRow = destination['new_row'];
     if (rawNewRow is! Map) continue;
     final newRow = Map<String, dynamic>.from(rawNewRow);
-    addIntent(
+    final value = descriptor(
       laneKind: command.type == 'midi.create_clip' ? 'midi' : 'audio',
       name: newRow['name'] as String,
       instrumentId: newRow['instrument_id']?.toString() ?? '',
       position: 'end',
-      embedded: true,
     );
+    embeddedCounts[value] = (embeddedCounts[value] ?? 0) + 1;
   }
+
+  for (final entry in embeddedCounts.entries) {
+    final standaloneCount = standaloneCounts[entry.key] ?? 0;
+    if (entry.value > 1 || standaloneCount > 1) {
+      throw const AiV3PreparationException(
+        'v3_embedded_destination_row_conflict',
+      );
+    }
+  }
+
+  final redundantStandaloneIds = standaloneDescriptorByCommandId.entries
+      .where((entry) => embeddedCounts[entry.value] == 1)
+      .map((entry) => entry.key)
+      .toSet();
+  if (redundantStandaloneIds.isEmpty) return plan;
+
+  return AiV3Plan(
+    outcome: plan.outcome,
+    userMessage: plan.userMessage,
+    commands: List<AiV3Command>.unmodifiable(
+      plan.commands.where(
+        (command) => !redundantStandaloneIds.contains(command.commandId),
+      ),
+    ),
+    questionOptions: plan.questionOptions,
+  );
 }
 
 String? _canonicalEffectParameterId(

@@ -89,7 +89,7 @@ Map<String, dynamic> buildAiV3PlannerRequestBody({
     'parallel_tool_calls': false,
     'max_output_tokens': 4096,
     'reasoning': <String, dynamic>{'effort': reasoningEffort},
-    'store': false,
+    'store': true,
     if (normalizedTraceId.isNotEmpty)
       'metadata': <String, String>{
         'prompt_trace_id': normalizedTraceId.substring(

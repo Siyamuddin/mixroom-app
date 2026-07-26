@@ -2131,6 +2131,8 @@ class AiV3MixContextRetriever {
     final audioFacts = _stringMap(row['audio_facts']);
     return <String, dynamic>{
       'row_id': row['row_id'],
+      'mix_processing_supported':
+          audioFacts['mix_processing_supported'] == true,
       'has_usable_signal': audioFacts['has_usable_signal'] == true,
       'analysis_available': audioFacts['analysis_available'] == true,
       'approx_rms': analysis['approx_rms'],

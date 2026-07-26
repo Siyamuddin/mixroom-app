@@ -3169,6 +3169,7 @@ void main() {
     final mix = result.results.single as AiV3MixRetrievalResult;
     expect(mix.matchedRowIds, const <int>[20]);
     expect(mix.matchedGroupIds, const <String>['group-keys']);
+    expect(mix.rowAnalysis.single['mix_processing_supported'], isTrue);
     expect(mix.rowAnalysis.single['has_usable_signal'], isTrue);
     expect(mix.rowAnalysis.single['analysis_available'], isTrue);
     expect(mix.referenceAnalysis.single['reference_suitable'], isTrue);
@@ -3193,6 +3194,7 @@ void main() {
       request: AiV3ContextRequest.fromJson(_mixQuery()),
     );
     final mix = result.results.single as AiV3MixRetrievalResult;
+    expect(mix.rowAnalysis.single['mix_processing_supported'], isTrue);
     expect(mix.rowAnalysis.single['has_usable_signal'], isFalse);
     expect(mix.rowAnalysis.single['analysis_available'], isTrue);
     expect(mix.referenceAnalysis.single['reference_suitable'], isFalse);

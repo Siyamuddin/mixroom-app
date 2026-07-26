@@ -378,6 +378,8 @@ class AiV3PlanningSnapshotBuilder {
         };
       }).toList(growable: false);
       final audioFacts = AiV3AudioFacts.fromAnalysis(
+        mixProcessingSupported:
+            row.hasAudio || (clipIdsByRow[row.rowId]?.isNotEmpty ?? false),
         hasAudio: row.hasAudio,
         approxRms: row.approxRms,
         audioStatistics: row.audioStats,
