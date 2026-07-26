@@ -591,6 +591,49 @@ void main() {
       expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
     });
 
+    test('clarification does not repeat options already shown in its message',
+        () async {
+      const message = 'The clips are on different rows. Which should I do?\n\n'
+          '1. Move one clip, then glue them\n'
+          '2. Keep them separate';
+      final planner = _StaticAiV3Planner(
+        const AiV3Plan(
+          outcome: 'clarify',
+          userMessage: message,
+          commands: <AiV3Command>[],
+          questionOptions: <String>[
+            'Move one clip, then glue them',
+            'Keep the clips separate',
+          ],
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: _FakeCloudLlmService(
+          LlmResult.text('Unexpected V1 result.', null),
+        ),
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: planner,
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Glue these clips.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        clientContext: _v3ClientContext(),
+      );
+
+      expect(result.message, message);
+      expect(result.aiV3Handoff?['message'], message);
+      expect(result.message, isNot(contains('Options:')));
+    });
+
     test('factual preparation block explains the prerequisite without preview',
         () async {
       final planner = _StaticAiV3Planner(

@@ -103,6 +103,26 @@ String aiV3VerifiedConversationMessage(
 
 String aiV3VerifiedCompletionMessage(Map<String, dynamic> bundle) => 'Done.';
 
+String _aiV3ClarificationMessage(
+  String question,
+  List<String> options,
+) {
+  if (options.isEmpty) return question;
+  String normalize(String value) =>
+      value.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+  final normalizedQuestion = normalize(question);
+  final numberedOptionCount =
+      RegExp(r'^\s*\d+[.)]\s+\S', multiLine: true).allMatches(question).length;
+  final optionsAlreadyShown = options.every((option) {
+    final normalizedOption = normalize(option);
+    return normalizedOption.isNotEmpty &&
+        normalizedQuestion.contains(normalizedOption);
+  });
+  return optionsAlreadyShown || numberedOptionCount >= options.length
+      ? question
+      : '$question\n\nOptions: ${options.join(' / ')}';
+}
+
 String _normalizeAiV3ExecutionSummary(String summary) {
   var normalized = summary.trim();
   if (normalized.startsWith('•')) {
@@ -1513,9 +1533,11 @@ class ChatPipeline {
     if (!plan.isMutating) {
       _pendingAiV3Bundle = null;
       _pendingAiV3PlanId = null;
-      final message = plan.outcome == 'clarify' &&
-              plan.questionOptions.isNotEmpty
-          ? '${plan.userMessage}\n\nOptions: ${plan.questionOptions.join(' / ')}'
+      final message = plan.outcome == 'clarify'
+          ? _aiV3ClarificationMessage(
+              plan.userMessage,
+              plan.questionOptions,
+            )
           : plan.userMessage;
       _push('assistant', message);
       final handoff = <String, dynamic>{
