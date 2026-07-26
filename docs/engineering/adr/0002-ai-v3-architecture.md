@@ -334,8 +334,10 @@ Examples include reversible/local, destructive/local, and
 asynchronous/external. User and product policy decide which categories require
 confirmation. Exact thresholds are empirical product choices.
 
-The prototype may confirm every mutation. That conservative prototype choice
-is not a permanent architectural requirement.
+Every command must have an explicit deterministic execution policy. The
+current reversible command surface is classified `auto_apply`; `confirm` is
+reserved for future irreversible or external side effects. An unclassified
+command fails safely, and a compound plan uses its strictest contained policy.
 
 ### 8. Local execution
 
@@ -344,8 +346,9 @@ Execution follows this order:
 1. Strictly parse PlanV3.
 2. Prepare every command against one state digest.
 3. Reject the complete plan if any command cannot be prepared.
-4. Show the deterministic preview when confirmation is required.
-5. Recheck the state digest on Apply.
+4. Auto-apply the current reversible commands, or show the deterministic
+   preview when an explicit future `confirm` policy requires it.
+5. Recheck the state digest immediately before execution.
 6. Apply the complete bundle through one undo transaction.
 7. Read back every affected property.
 8. Compare expected and observed state.

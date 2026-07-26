@@ -232,6 +232,7 @@ class AiV3MixGoalMaterializer {
       stateDigest: bundle.stateDigest,
       actions: List<AssistantAction>.unmodifiable(actions),
       receipts: List<Map<String, dynamic>>.unmodifiable(receipts),
+      executionPolicy: bundle.executionPolicy,
       preview: visibleLabels.isEmpty
           ? bundle.plan.userMessage
           : <String>[

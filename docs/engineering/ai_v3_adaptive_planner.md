@@ -445,8 +445,9 @@ The existing V3 boundary remains authoritative:
 2. Recheck the original snapshot digest against fresh Flutter state.
 3. Prepare every command using operation-local factual handlers.
 4. Reject the whole local bundle if any command cannot prepare.
-5. Show confirmation according to product risk policy; the prototype continues
-   confirming every mutation.
+5. Apply the deterministic command policy: the current reversible commands
+   execute immediately, while an explicit future `confirm` command uses the
+   pending confirmation path.
 6. Execute local work as one transaction.
 7. Read back every affected property and compare expected state.
 8. Roll back the complete bundle after any failure or mismatch.

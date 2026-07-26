@@ -4518,8 +4518,13 @@ Map<String, dynamic> _handoff({
       'schema_version': 'ai_v3_handoff_prototype_1',
       'decision': 'execute_now',
       'plan_id': 'atomic-transaction-test',
+      'execution_policy': 'auto_apply',
       'prepared_bundle': <String, dynamic>{
         'state_digest': digest,
+        'execution_policy': 'auto_apply',
+        'plan': const <String, dynamic>{
+          'user_message': 'Applying verified test changes.',
+        },
         'actions': actions,
         'receipts': <Map<String, dynamic>>[
           for (var index = 0; index < actions.length; index++)
@@ -4527,6 +4532,7 @@ Map<String, dynamic> _handoff({
               'command_id': 'test-$index',
               'type': actions[index]['type'],
               'status': 'prepared',
+              'preview_label': 'Apply ${actions[index]['type']}',
             },
         ],
       },

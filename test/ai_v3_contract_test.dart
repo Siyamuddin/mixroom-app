@@ -368,6 +368,45 @@ AiV3CoreContext _contextWithMidiNotes(
 }
 
 void main() {
+  group('V3 execution policy', () {
+    test('explicitly covers every current command as auto apply', () {
+      expect(
+        aiV3ExecutionPolicyByCommandType.keys.toSet(),
+        aiV3CommandTypes,
+      );
+      expect(
+        aiV3ExecutionPolicyByCommandType.values,
+        everyElement(AiV3ExecutionPolicy.autoApply),
+      );
+    });
+
+    test('fails closed for missing policy and uses strictest compound policy',
+        () {
+      expect(
+        () => aiV3ExecutionPolicyForCommandTypes(
+          const <String>['future.command'],
+        ),
+        throwsA(
+          isA<AiV3ContractException>().having(
+            (error) => error.code,
+            'code',
+            'v3_execution_policy_missing',
+          ),
+        ),
+      );
+      expect(
+        aiV3ExecutionPolicyForCommandTypes(
+          const <String>['safe', 'future_external'],
+          policies: const <String, AiV3ExecutionPolicy>{
+            'safe': AiV3ExecutionPolicy.autoApply,
+            'future_external': AiV3ExecutionPolicy.confirm,
+          },
+        ),
+        AiV3ExecutionPolicy.confirm,
+      );
+    });
+  });
+
   test('strict tool describes relative and absolute row mixing distinctly', () {
     final tool = aiV3SubmitPlanTool();
     final properties = (tool['parameters'] as Map)['properties'] as Map;

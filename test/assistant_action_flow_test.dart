@@ -13,6 +13,7 @@ import 'package:mixroom/ai/v3/ai_v3_context.dart';
 import 'package:mixroom/ai/v3/ai_v3_contract.dart';
 import 'package:mixroom/ai/v3/ai_v3_planner_service.dart';
 import 'package:mixroom/ai/v3/ai_v3_planning_snapshot.dart';
+import 'package:mixroom/ai/v3/ai_v3_preparer.dart';
 import 'package:mixroom/models/mixing_result.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/models/project_state.dart';
@@ -107,6 +108,80 @@ class _FakeAiV3Planner implements AiV3Planner {
       rawResponse: <String, dynamic>{},
       meta: <String, dynamic>{'architecture': 'test_v3'},
     );
+  }
+}
+
+class _StaticAiV3Planner implements AiV3Planner {
+  _StaticAiV3Planner(this.nextPlan);
+
+  final AiV3Plan nextPlan;
+  int callCount = 0;
+  final List<AiV3CoreContext> seenContexts = <AiV3CoreContext>[];
+
+  @override
+  String get model => 'test-v3';
+
+  @override
+  String get reasoningEffort => 'low';
+
+  @override
+  Future<AiV3PlannerResult> plan({
+    required AiV3CoreContext context,
+    required String originalRequest,
+    String? promptTraceId,
+  }) async {
+    callCount += 1;
+    seenContexts.add(context);
+    return AiV3PlannerResult(
+      plan: nextPlan,
+      rawResponse: const <String, dynamic>{},
+      meta: const <String, dynamic>{'architecture': 'test_v3'},
+    );
+  }
+}
+
+class _ConfirmingAiV3Preparer extends AiV3CommandPreparer {
+  const _ConfirmingAiV3Preparer();
+
+  @override
+  AiV3PreparedBundle prepare({
+    required AiV3Plan plan,
+    required AiV3CoreContext context,
+    Map<String, double> detectedTempoByClipId = const <String, double>{},
+    Map<String, AiV3ClipBoundaryAnalysis> boundaryAnalysisByClipId =
+        const <String, AiV3ClipBoundaryAnalysis>{},
+  }) {
+    final prepared = super.prepare(
+      plan: plan,
+      context: context,
+      detectedTempoByClipId: detectedTempoByClipId,
+      boundaryAnalysisByClipId: boundaryAnalysisByClipId,
+    );
+    return AiV3PreparedBundle(
+      plan: prepared.plan,
+      stateDigest: prepared.stateDigest,
+      actions: prepared.actions,
+      receipts: prepared.receipts,
+      preview: prepared.preview,
+      executionPolicy: AiV3ExecutionPolicy.confirm,
+    );
+  }
+}
+
+class _FailingAiV3Preparer extends AiV3CommandPreparer {
+  const _FailingAiV3Preparer(this.code);
+
+  final String code;
+
+  @override
+  AiV3PreparedBundle prepare({
+    required AiV3Plan plan,
+    required AiV3CoreContext context,
+    Map<String, double> detectedTempoByClipId = const <String, double>{},
+    Map<String, AiV3ClipBoundaryAnalysis> boundaryAnalysisByClipId =
+        const <String, AiV3ClipBoundaryAnalysis>{},
+  }) {
+    throw AiV3PreparationException(code);
   }
 }
 
@@ -390,6 +465,274 @@ void main() {
       expect(result.hasAiV3Handoff, isTrue);
       expect(result.aiV3Handoff?['decision'], 'respond');
       expect(result.message, 'V3 handled the request.');
+    });
+
+    test(
+        'clear mutating V3 request executes immediately without a pending plan',
+        () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.text('Unexpected V1 result.', null),
+      );
+      final planner = _StaticAiV3Planner(
+        const AiV3Plan(
+          outcome: 'plan',
+          userMessage: 'Lowering Audio 1 by 2 dB.',
+          commands: <AiV3Command>[
+            AiV3Command(
+              commandId: 'gain',
+              type: 'row.adjust_gain_db',
+              arguments: <String, dynamic>{
+                'row_id': 101,
+                'delta_db': -2,
+              },
+            ),
+          ],
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: planner,
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Lower Audio 1 by 2 dB.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        clientContext: _v3ClientContext(),
+      );
+
+      expect(result.aiV3Handoff?['decision'], 'execute_now');
+      expect(result.aiV3Handoff?['execution_policy'], 'auto_apply');
+      expect(
+        (result.aiV3Handoff?['prepared_bundle'] as Map)['execution_policy'],
+        'auto_apply',
+      );
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+      expect(result.message, isEmpty);
+      expect(fakeLlm.seenUserText, isNull);
+
+      final bundle = Map<String, dynamic>.from(
+        result.aiV3Handoff?['prepared_bundle'] as Map,
+      );
+      final completionMessage = aiV3VerifiedCompletionMessage(bundle);
+      pipeline.recordAiV3Execution(
+        handoff: result.aiV3Handoff!,
+        result: const <String, dynamic>{'status': 'succeeded'},
+        conversationMessage: completionMessage,
+      );
+      await pipeline.handleUserText(
+        text: 'What did you change?',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        clientContext: _v3ClientContext(),
+      );
+      final secondConversation =
+          planner.seenContexts.last.data['conversation'] as List;
+      expect(
+        secondConversation.whereType<Map>().any(
+              (entry) =>
+                  entry['role'] == 'assistant' &&
+                  entry['content'] == completionMessage,
+            ),
+        isTrue,
+      );
+    });
+
+    test('clarification options survive the V3 handoff exactly', () async {
+      final planner = _StaticAiV3Planner(
+        const AiV3Plan(
+          outcome: 'clarify',
+          userMessage: 'Which vocal row should I change?',
+          commands: <AiV3Command>[],
+          questionOptions: <String>['Lead Vocal', 'Backing Vocal'],
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: _FakeCloudLlmService(
+          LlmResult.text('Unexpected V1 result.', null),
+        ),
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: planner,
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Make the vocal louder.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        clientContext: _v3ClientContext(),
+      );
+
+      const expected =
+          'Which vocal row should I change?\n\nOptions: Lead Vocal / Backing Vocal';
+      expect(result.message, expected);
+      expect(result.aiV3Handoff?['decision'], 'clarify');
+      expect(result.aiV3Handoff?['message'], expected);
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+    });
+
+    test('factual preparation block explains the prerequisite without preview',
+        () async {
+      final planner = _StaticAiV3Planner(
+        const AiV3Plan(
+          outcome: 'plan',
+          userMessage: 'Creating another row.',
+          commands: <AiV3Command>[
+            AiV3Command(
+              commandId: 'create',
+              type: 'row.create',
+              arguments: <String, dynamic>{
+                'name': 'Audio 2',
+                'lane': <String, dynamic>{'kind': 'audio'},
+                'position': <String, dynamic>{'kind': 'end'},
+              },
+            ),
+          ],
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: _FakeCloudLlmService(
+          LlmResult.text('Unexpected V1 result.', null),
+        ),
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: planner,
+        aiV3Preparer: const _FailingAiV3Preparer('v3_row_capacity_exceeded'),
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Create another audio row.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        clientContext: _v3ClientContext(),
+      );
+
+      expect(result.aiV3Handoff?['decision'], 'blocked');
+      expect(
+        result.aiV3Handoff?['message'],
+        'This project has reached its row limit. '
+        'Delete an existing row before creating another one.',
+      );
+      expect(result.message, result.aiV3Handoff?['message']);
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+    });
+
+    test('future confirmation policy preserves Apply and Cancel handoff',
+        () async {
+      final planner = _StaticAiV3Planner(
+        const AiV3Plan(
+          outcome: 'plan',
+          userMessage: 'Preparing the requested change.',
+          commands: <AiV3Command>[
+            AiV3Command(
+              commandId: 'gain',
+              type: 'row.adjust_gain_db',
+              arguments: <String, dynamic>{
+                'row_id': 101,
+                'delta_db': -2,
+              },
+            ),
+          ],
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: _FakeCloudLlmService(
+          LlmResult.text('Unexpected V1 result.', null),
+        ),
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: planner,
+        aiV3Preparer: const _ConfirmingAiV3Preparer(),
+      );
+      final timelineRows = <TimelineRow>[
+        TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+      ];
+
+      final preview = await pipeline.handleUserText(
+        text: 'Run the future external operation.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: timelineRows,
+        clientStateDigest: 'future-confirm-state',
+        clientContext: _v3ClientContext(),
+      );
+      expect(preview.aiV3Handoff?['decision'], 'ask_confirmation');
+      expect(pipeline.hasActiveAiV3PendingPlan(), isTrue);
+
+      final apply = await pipeline.handleUserText(
+        text: 'apply',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: timelineRows,
+        clientStateDigest: 'future-confirm-state',
+        clientContext: _v3ClientContext(),
+      );
+      expect(apply.aiV3Handoff?['decision'], 'execute_now');
+      expect(apply.aiV3Handoff?['confirmation_granted'], isTrue);
+      expect(
+        (apply.aiV3Handoff?['prepared_bundle'] as Map)['execution_policy'],
+        'confirm',
+      );
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+    });
+
+    test('verified completion combines planner language with exact receipts',
+        () {
+      expect(
+        aiV3VerifiedCompletionMessage(
+          const <String, dynamic>{
+            'plan': <String, dynamic>{
+              'user_message': 'Ajustando la mezcla.',
+            },
+            'receipts': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'status': 'prepared',
+                'preview_label': 'Lower Guitar by 1.5 dB',
+              },
+              <String, dynamic>{
+                'status': 'already_satisfied',
+                'preview_label': 'Keep Piano unchanged',
+              },
+            ],
+          },
+        ),
+        'Ajustando la mezcla.\n\n'
+        'Done:\n'
+        '- Lower Guitar by 1.5 dB\n'
+        '- Keep Piano unchanged (already set)',
+      );
     });
 
     test('adaptive evaluation stays detached from the visible V3 result',

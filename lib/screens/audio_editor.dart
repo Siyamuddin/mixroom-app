@@ -60233,8 +60233,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final bundle = handoff['prepared_bundle'];
       final preview =
           bundle is Map ? bundle['preview']?.toString().trim() ?? '' : '';
+      final executionPolicy = bundle is Map
+          ? bundle['execution_policy']?.toString().trim() ?? ''
+          : '';
       final planId = handoff['plan_id']?.toString().trim() ?? '';
-      if (preview.isEmpty || planId.isEmpty) {
+      if (preview.isEmpty || planId.isEmpty || executionPolicy != 'confirm') {
         _insertAiFailureSystemText('V3 could not present this plan.');
         return;
       }
@@ -60252,12 +60255,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     if (decision != 'execute_now') {
-      final message = switch (decision) {
-        'stale' =>
-          'The project changed after the V3 plan was prepared. Please run the request again.',
-        'canceled' => 'Canceled. Nothing was changed.',
-        _ => ((handoff['plan'] as Map?)?['user_message'] ?? '').toString(),
-      };
+      final resolvedMessage = handoff['message']?.toString().trim() ?? '';
+      final message = resolvedMessage.isNotEmpty
+          ? resolvedMessage
+          : switch (decision) {
+              'stale' =>
+                'The project changed after the V3 plan was prepared. Please run the request again.',
+              'canceled' => 'Canceled. Nothing was changed.',
+              _ =>
+                ((handoff['plan'] as Map?)?['user_message'] ?? '').toString(),
+            };
       if (message.trim().isNotEmpty) {
         _insertAssistantChatText(message.trim(), modelAuthored: true);
       }
@@ -60272,6 +60279,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     final bundle = Map<String, dynamic>.from(rawBundle);
+    final executionPolicy = bundle['execution_policy']?.toString().trim() ?? '';
+    if (executionPolicy != 'auto_apply' && executionPolicy != 'confirm') {
+      _insertAiFailureSystemText('V3 execution policy is missing.');
+      return;
+    }
+    if (executionPolicy == 'confirm' &&
+        handoff['confirmation_granted'] != true) {
+      _insertAiFailureSystemText('V3 confirmation is required.');
+      return;
+    }
     final expectedDigest = bundle['state_digest']?.toString().trim() ?? '';
     if (expectedDigest.isEmpty ||
         expectedDigest != _freshAiV3StateFingerprint()) {
@@ -60331,6 +60348,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         },
       );
       executionStopwatch.stop();
+      final completionMessage = aiV3VerifiedCompletionMessage(bundle);
       _chatPipeline.recordAiV3Execution(
         handoff: handoff,
         result: <String, dynamic>{
@@ -60344,12 +60362,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           'verification': 'passed',
           'execution_elapsed_ms': executionStopwatch.elapsedMilliseconds,
         },
+        conversationMessage: completionMessage,
       );
       final count = (bundle['receipts'] as List?)?.length ?? actions.length;
       final applied = count == 1
           ? 'Applied 1 verified V3 change.'
           : 'Applied $count verified V3 changes.';
-      _insertSystemChatText(_centeredSystemChatText(applied));
+      _insertAssistantChatText(
+        completionMessage,
+        modelAuthored: true,
+        metadata: const <String, dynamic>{
+          'source': 'ai_v3_verified_completion',
+        },
+      );
       _showSmallNotice(applied);
       if (LlmConfig.aiLiveEvaluationEnabled) {
         await _performAutosaveWrite();

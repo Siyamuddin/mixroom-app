@@ -66,6 +66,10 @@ serialized key.
 - Schema or migration changes need tests or a manual migration check using an
   older project.
 
+Action-first V3 execution does not introduce a project schema. Verified local
+changes enter the existing compound Undo history and persistence path; failed
+or rolled-back work must not be saved as a successful assistant completion.
+
 ## Export Interaction
 
 Export is both an engine concern and a project/file concern. The engine renders.
@@ -78,4 +82,3 @@ share behavior, or recovery behavior after a failed export.
 Cloud sync and collaboration must treat local project files and cloud object
 storage as separate responsibilities. Keep identity, access control, and object
 paths documented when those flows change.
-

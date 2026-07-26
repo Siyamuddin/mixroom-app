@@ -46,6 +46,11 @@ Flutter owns:
 - deciding when to call engine methods
 - saving restored project state after native operations
 
+V3 action-first chat changes do not bypass this boundary. Prepared AI actions
+still use the same Flutter-owned transaction, native synchronization, exact
+readback, and rollback paths. Slow local rendering or analysis may show
+progress, but chat cannot report success until native verification completes.
+
 ## Export Path
 
 The public Dart API exposes `exportMix`, `exportTrack`, and export progress

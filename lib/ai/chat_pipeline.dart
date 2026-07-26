@@ -40,6 +40,32 @@ class _AiV3PreparationFailureResponse {
   final String message;
 }
 
+String aiV3VerifiedCompletionMessage(Map<String, dynamic> bundle) {
+  final plan = bundle['plan'];
+  final lead = plan is Map ? plan['user_message']?.toString().trim() ?? '' : '';
+  final receiptLabels = <String>[];
+  final rawReceipts = bundle['receipts'];
+  if (rawReceipts is List) {
+    for (final rawReceipt in rawReceipts.whereType<Map>()) {
+      final label = rawReceipt['preview_label']?.toString().trim() ?? '';
+      if (label.isEmpty) continue;
+      final status = rawReceipt['status']?.toString().trim() ?? '';
+      receiptLabels.add(
+        status == 'already_satisfied' ? '$label (already set)' : label,
+      );
+    }
+  }
+  if (receiptLabels.isEmpty) {
+    return lead.isEmpty ? 'Done.' : lead;
+  }
+  return <String>[
+    if (lead.isNotEmpty) lead,
+    if (lead.isNotEmpty) '',
+    'Done:',
+    ...receiptLabels.map((label) => '- $label'),
+  ].join('\n');
+}
+
 class _AiWorkflowCaptureContext {
   const _AiWorkflowCaptureContext({
     required this.captureId,
@@ -134,7 +160,7 @@ _AiV3PreparationFailureResponse? _aiV3PreparationFailureResponse(
               'That first sound cannot reach the requested position without moving the clip before the project start. Choose a later position or trim the leading silence first.',
         ),
       'v3_row_capacity_exceeded' => const _AiV3PreparationFailureResponse(
-          decision: 'clarify',
+          decision: 'blocked',
           message:
               'This project has reached its row limit. Delete an existing row before creating another one.',
         ),
@@ -145,7 +171,7 @@ _AiV3PreparationFailureResponse? _aiV3PreparationFailureResponse(
         ),
       'v3_embedded_destination_row_conflict' =>
         const _AiV3PreparationFailureResponse(
-          decision: 'clarify',
+          decision: 'blocked',
           message:
               'The plan tries to create the same destination row more than once. Use one MIDI or sample command to create that destination row.',
         ),
@@ -156,7 +182,7 @@ _AiV3PreparationFailureResponse? _aiV3PreparationFailureResponse(
         ),
       'v3_group_members_already_grouped' =>
         const _AiV3PreparationFailureResponse(
-          decision: 'clarify',
+          decision: 'blocked',
           message:
               'Those rows already form a group. Ask to change that existing group instead of creating another group from the same rows.',
         ),
@@ -166,7 +192,7 @@ _AiV3PreparationFailureResponse? _aiV3PreparationFailureResponse(
               'That row is not currently a member of the specified group. Choose a current group member.',
         ),
       'v3_transport_recording_active' => const _AiV3PreparationFailureResponse(
-          decision: 'clarify',
+          decision: 'blocked',
           message:
               'Playback controls cannot be changed while recording. Stop recording first, then try again.',
         ),
@@ -182,7 +208,7 @@ _AiV3PreparationFailureResponse? _aiV3PreparationFailureResponse(
         ),
       'v3_phone_cleanup_effect_conflict' =>
         const _AiV3PreparationFailureResponse(
-          decision: 'clarify',
+          decision: 'blocked',
           message:
               'Phone-recording cleanup and another effect or mix change target the same row. Apply the cleanup first, then make the other sound change.',
         ),
@@ -1013,7 +1039,12 @@ class ChatPipeline {
   void recordAiV3Execution({
     required Map<String, dynamic> handoff,
     required Map<String, dynamic> result,
+    String conversationMessage = '',
   }) {
+    final completedMessage = conversationMessage.trim();
+    if (result['status'] == 'succeeded' && completedMessage.isNotEmpty) {
+      _push('assistant', completedMessage);
+    }
     final planId = handoff['plan_id']?.toString().trim() ?? '';
     if (!aiV3Capture.isEnabled || planId.isEmpty) return;
     unawaited(aiV3Capture.captureExecution(
@@ -1065,6 +1096,7 @@ class ChatPipeline {
             'decision': 'stale',
             'plan_id': pendingPlanId,
             'error_code': 'v3_execution_state_changed',
+            'message': message,
           },
           meta: const <String, dynamic>{'tool': 'ai_v3_execution'},
         );
@@ -1078,6 +1110,8 @@ class ChatPipeline {
           'decision': 'execute_now',
           'plan_id': pendingPlanId,
           'prepared_bundle': pending.toJson(),
+          'execution_policy': pending.executionPolicy.wireName,
+          'confirmation_granted': true,
         },
         meta: const <String, dynamic>{'tool': 'ai_v3_execution'},
       );
@@ -1094,6 +1128,7 @@ class ChatPipeline {
           'schema_version': 'ai_v3_handoff_prototype_1',
           'decision': 'canceled',
           'plan_id': pendingPlanId,
+          'message': message,
         },
         meta: const <String, dynamic>{'tool': 'ai_v3_execution'},
       );
@@ -1108,6 +1143,7 @@ class ChatPipeline {
           'schema_version': 'ai_v3_handoff_prototype_1',
           'decision': 'no_pending_plan',
           'error_code': 'v3_pending_plan_missing',
+          'message': message,
         },
         meta: const <String, dynamic>{'tool': 'ai_v3_execution'},
       );
@@ -1438,6 +1474,7 @@ class ChatPipeline {
         'schema_version': 'ai_v3_handoff_prototype_1',
         'decision': plan.outcome,
         'plan': plan.toJson(),
+        'message': message,
       };
       capturePlannerResult(handoff);
       return ChatPipelineResult.v3(
@@ -1518,6 +1555,7 @@ class ChatPipeline {
         'decision': actionable?.decision ?? 'blocked',
         'plan': plan.toJson(),
         'error_code': error.code,
+        'message': message,
       };
       capturePlannerResult(
         handoff,
@@ -1546,6 +1584,7 @@ class ChatPipeline {
         'plan': plan.toJson(),
         'prepared_bundle': prepared.toJson(),
         'reason': 'already_satisfied',
+        'message': message,
       };
       capturePlannerResult(handoff);
       return ChatPipelineResult.v3(
@@ -1562,18 +1601,27 @@ class ChatPipeline {
         '${promptTraceId ?? ''}:${context.stateDigest}:${jsonEncode(plan.toJson())}';
     final planId =
         crypto.sha256.convert(utf8.encode(idSeed)).toString().substring(0, 24);
-    _pendingAiV3Bundle = prepared;
-    _pendingAiV3PlanId = planId;
-    _push('assistant', prepared.preview);
+    final executionPolicy = prepared.executionPolicy;
     final handoff = <String, dynamic>{
       'schema_version': 'ai_v3_handoff_prototype_1',
-      'decision': 'ask_confirmation',
+      'decision': executionPolicy == AiV3ExecutionPolicy.autoApply
+          ? 'execute_now'
+          : 'ask_confirmation',
       'plan_id': planId,
       'prepared_bundle': prepared.toJson(),
+      'execution_policy': executionPolicy.wireName,
     };
+    if (executionPolicy == AiV3ExecutionPolicy.confirm) {
+      _pendingAiV3Bundle = prepared;
+      _pendingAiV3PlanId = planId;
+      _push('assistant', prepared.preview);
+    } else {
+      _pendingAiV3Bundle = null;
+      _pendingAiV3PlanId = null;
+    }
     capturePlannerResult(handoff);
     return ChatPipelineResult.v3(
-      prepared.preview,
+      executionPolicy == AiV3ExecutionPolicy.confirm ? prepared.preview : '',
       handoff,
       meta: <String, dynamic>{
         'tool': 'submit_plan_v3',

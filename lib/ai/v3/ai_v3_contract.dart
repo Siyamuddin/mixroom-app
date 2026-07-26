@@ -76,6 +76,88 @@ const Set<String> aiV3CommandTypes = <String>{
   'mix.apply_goal',
 };
 
+enum AiV3ExecutionPolicy {
+  autoApply('auto_apply'),
+  confirm('confirm');
+
+  const AiV3ExecutionPolicy(this.wireName);
+  final String wireName;
+}
+
+const Map<String, AiV3ExecutionPolicy> aiV3ExecutionPolicyByCommandType =
+    <String, AiV3ExecutionPolicy>{
+  'project.set_tempo': AiV3ExecutionPolicy.autoApply,
+  'transport.set_playing': AiV3ExecutionPolicy.autoApply,
+  'transport.restart': AiV3ExecutionPolicy.autoApply,
+  'transport.set_metronome_enabled': AiV3ExecutionPolicy.autoApply,
+  'transport.set_loop_enabled': AiV3ExecutionPolicy.autoApply,
+  'row.adjust_gain_db': AiV3ExecutionPolicy.autoApply,
+  'row.set_gain_db': AiV3ExecutionPolicy.autoApply,
+  'row.adjust_pan': AiV3ExecutionPolicy.autoApply,
+  'row.set_pan': AiV3ExecutionPolicy.autoApply,
+  'row.set_muted': AiV3ExecutionPolicy.autoApply,
+  'row.set_soloed': AiV3ExecutionPolicy.autoApply,
+  'row.rename': AiV3ExecutionPolicy.autoApply,
+  'row.set_role_override': AiV3ExecutionPolicy.autoApply,
+  'row.apply_phone_mic_cleanup': AiV3ExecutionPolicy.autoApply,
+  'row.select': AiV3ExecutionPolicy.autoApply,
+  'row.set_color': AiV3ExecutionPolicy.autoApply,
+  'row.create': AiV3ExecutionPolicy.autoApply,
+  'row.delete': AiV3ExecutionPolicy.autoApply,
+  'group.create': AiV3ExecutionPolicy.autoApply,
+  'group.remove_row': AiV3ExecutionPolicy.autoApply,
+  'group.set_collapsed': AiV3ExecutionPolicy.autoApply,
+  'clip.move_by_beats': AiV3ExecutionPolicy.autoApply,
+  'clip.trim_to_range': AiV3ExecutionPolicy.autoApply,
+  'clip.split_at': AiV3ExecutionPolicy.autoApply,
+  'clip.duplicate_to': AiV3ExecutionPolicy.autoApply,
+  'clip.delete': AiV3ExecutionPolicy.autoApply,
+  'clip.glue': AiV3ExecutionPolicy.autoApply,
+  'clip.separate_stems': AiV3ExecutionPolicy.autoApply,
+  'clip.convert_to_midi': AiV3ExecutionPolicy.autoApply,
+  'clip.set_pitch_semitones': AiV3ExecutionPolicy.autoApply,
+  'clip.adjust_pitch_semitones': AiV3ExecutionPolicy.autoApply,
+  'clip.set_timeline_length_beats': AiV3ExecutionPolicy.autoApply,
+  'clip.scale_timeline_length': AiV3ExecutionPolicy.autoApply,
+  'clip.set_source_tempo_bpm': AiV3ExecutionPolicy.autoApply,
+  'clip.set_tempo_follow_mode': AiV3ExecutionPolicy.autoApply,
+  'clip.align_tempo_to_project': AiV3ExecutionPolicy.autoApply,
+  'project.set_tempo_from_clip': AiV3ExecutionPolicy.autoApply,
+  'clip.trim_silence': AiV3ExecutionPolicy.autoApply,
+  'clip.align_first_sound': AiV3ExecutionPolicy.autoApply,
+  'midi.transpose': AiV3ExecutionPolicy.autoApply,
+  'midi.create_clip': AiV3ExecutionPolicy.autoApply,
+  'midi.replace_notes': AiV3ExecutionPolicy.autoApply,
+  'midi.append_notes': AiV3ExecutionPolicy.autoApply,
+  'midi.chop_notes': AiV3ExecutionPolicy.autoApply,
+  'effect.ensure_configured': AiV3ExecutionPolicy.autoApply,
+  'effect.remove': AiV3ExecutionPolicy.autoApply,
+  'effect.set_bypassed': AiV3ExecutionPolicy.autoApply,
+  'automation.gain_fade': AiV3ExecutionPolicy.autoApply,
+  'automation.set_points': AiV3ExecutionPolicy.autoApply,
+  'automation.clear': AiV3ExecutionPolicy.autoApply,
+  'sample.place': AiV3ExecutionPolicy.autoApply,
+  'sample.replace': AiV3ExecutionPolicy.autoApply,
+  'mix.apply_goal': AiV3ExecutionPolicy.autoApply,
+};
+
+AiV3ExecutionPolicy aiV3ExecutionPolicyForCommandTypes(
+  Iterable<String> commandTypes, {
+  Map<String, AiV3ExecutionPolicy> policies = aiV3ExecutionPolicyByCommandType,
+}) {
+  var result = AiV3ExecutionPolicy.autoApply;
+  for (final type in commandTypes) {
+    final policy = policies[type];
+    if (policy == null) {
+      throw const AiV3ContractException('v3_execution_policy_missing');
+    }
+    if (policy == AiV3ExecutionPolicy.confirm) {
+      result = AiV3ExecutionPolicy.confirm;
+    }
+  }
+  return result;
+}
+
 const Set<String> aiV3CommonCommandTypes = <String>{
   'project.set_tempo',
   'transport.set_playing',

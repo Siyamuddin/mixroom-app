@@ -13,7 +13,7 @@ updated production clients:
 original request + deterministic CoreContextV3
                     -> one GPT planner
                     -> strict PlanV3
-                    -> Flutter preparation, confirmation, transaction, readback
+                    -> Flutter preparation, policy, transaction, readback
 ```
 
 The active one-shot path has no Intent LLM, selector, semantic validator,
@@ -63,13 +63,15 @@ Projects above 32 rows, 128 clips, 512 MIDI notes, or 250 indexed assets return
 specific `prototype_context_*_limit` errors instead of truncating or falling
 back.
 
-Every mutating plan is previewed. Apply and Cancel are local; Modify sends the
-fresh state, pending plan, original modification request, and fixed context to
-the same one-shot planner, which must return a complete replacement plan. The
-planner receives current and maximum row capacity, and preparation rejects row
-creation beyond that limit. Apply rejects a changed state digest. Local actions
-run in one undo transaction and are read back; any failed action or mismatch is
-rolled back in reverse order.
+Every current V3 command is explicitly classified as reversible `auto_apply`.
+After factual preparation, the app rechecks the state digest, executes the
+complete plan immediately in one undo transaction, reads back the result, and
+only then shows a concise verified completion receipt with Undo available.
+Clarifications, unsupported requests, blocked prerequisites, no-ops, and
+failures never execute. The pending Apply/Cancel path remains available for a
+future command explicitly classified as `confirm`, such as an irreversible
+external side effect. Any failed action or mismatch is rolled back in reverse
+order.
 
 Detached comparison planners run only when their explicit debug flags are
 enabled and a local capture is active. Those are additional paid API calls and

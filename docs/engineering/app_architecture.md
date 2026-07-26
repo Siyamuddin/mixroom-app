@@ -87,6 +87,12 @@ Updated clients route one-shot V3 through the authenticated
 `/v1/llm/responses`. Adaptive V3 remains a detached evaluation path and cannot
 replace or execute the visible plan.
 
+Current V3 commands are reversible and explicitly classified for immediate
+local execution. The client prepares the complete plan, rechecks its state
+digest, executes one atomic transaction, verifies exact readback, and only then
+adds the completion receipt to chat. The existing pending-plan UI remains
+available for a future command explicitly classified as requiring confirmation.
+
 ## Backend Areas
 
 ### App API

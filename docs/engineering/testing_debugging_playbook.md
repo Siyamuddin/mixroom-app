@@ -52,6 +52,14 @@ For authenticated V3 routing changes, cover the dedicated V3 endpoint, its
 server kill switch, the unchanged V1 endpoint, client token refresh, and the
 client build switch before running the wider Flutter V3 suite.
 
+For V3 execution-policy changes, verify the canonical policy table covers every
+command, clear plans return `execute_now`, no success message appears before
+readback, and synthetic future `confirm` commands retain Apply/Cancel. Run the
+V3 unit suites plus focused macOS atomic commit, rollback, and slow local-action
+integration cases. The combined macOS runner can occasionally disconnect; when
+it does, rerun the interrupted case in isolation and report the harness failure
+separately.
+
 ## Useful Debug Entry Points
 
 - Analytics: `docs/ANALYTICS.md`

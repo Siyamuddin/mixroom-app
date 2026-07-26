@@ -21,6 +21,7 @@ class AiV3PreparedBundle {
     required this.actions,
     required this.receipts,
     required this.preview,
+    this.executionPolicy = AiV3ExecutionPolicy.autoApply,
   });
 
   final AiV3Plan plan;
@@ -28,6 +29,7 @@ class AiV3PreparedBundle {
   final List<AssistantAction> actions;
   final List<Map<String, dynamic>> receipts;
   final String preview;
+  final AiV3ExecutionPolicy executionPolicy;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'schema_version': 'prepared_bundle_v3_prototype_1',
@@ -36,6 +38,7 @@ class AiV3PreparedBundle {
         'actions': actions.map((action) => action.toJson()).toList(),
         'receipts': receipts,
         'preview': preview,
+        'execution_policy': executionPolicy.wireName,
       };
 }
 
@@ -2257,6 +2260,9 @@ class AiV3CommandPreparer {
       stateDigest: context.stateDigest,
       actions: List<AssistantAction>.unmodifiable(actions),
       receipts: List<Map<String, dynamic>>.unmodifiable(receipts),
+      executionPolicy: aiV3ExecutionPolicyForCommandTypes(
+        plan.commands.map((command) => command.type),
+      ),
       preview: <String>[
         plan.userMessage,
         'Planned changes:',

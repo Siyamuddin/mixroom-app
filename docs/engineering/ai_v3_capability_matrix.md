@@ -223,7 +223,7 @@ capability.
 | Target resolution | V1 supports IDs, indexes, names, roles, and selection; contradictions can drift across layers | Stable ID is authority; preparation rejects contradictions |
 | Duplicate names | Resolved through additional hints/selection where possible | Full identity index; clarify only when identity remains ambiguous |
 | Capability/platform gating | Proxy, Dart, and runtime all participate | Flutter-owned authoritative capabilities exposed to planner |
-| Proposal/Apply/Cancel/Modify | Implemented with heterogeneous per-action policy | Prepared bundle tied to state digest; mutation always previewed in prototype |
+| Proposal/Apply/Cancel/Modify | Implemented with heterogeneous per-action policy | Explicit command policy; current reversible commands auto-apply after preparation and digest recheck, while future irreversible/external commands may require confirmation |
 | Compound ordering | Implemented, including create-then-insert and edit-then-mix | One local transaction with transaction-local IDs |
 | Asynchronous/file work | Handler-specific and only partially atomic | Staged jobs with explicit state and compensating cleanup |
 | Undo/rollback/readback | Exists per handler but is not universal in V1 | Required for every local V3 command slice |
