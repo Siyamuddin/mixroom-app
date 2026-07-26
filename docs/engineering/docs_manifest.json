@@ -168,6 +168,54 @@
       ]
     },
     {
+      "doc": "docs/engineering/adr/0002-ai-v3-architecture.md",
+      "owner": "AI Engineering",
+      "update_trigger": "The V3 planner boundary, context model, PlanV3 schema, capability inventory, command-handler ownership, retrieval protocol, transaction semantics, or evaluation gates change.",
+      "watch_paths": [
+        "lib/ai/v3/",
+        "lib/ai/chat_pipeline.dart",
+        "lib/config/llm_config.dart",
+        "lib/screens/audio_editor.dart",
+        "test/ai_v3_",
+        "test/assistant_action_flow_test.dart",
+        "integration_test/ai_v3_",
+        "tool/ai_v3_eval/",
+        "docs/AI_V3_PROTOTYPE.md",
+        "docs/engineering/ai_v3_capability_matrix.md"
+      ]
+    },
+    {
+      "doc": "docs/engineering/ai_v3_adaptive_planner.md",
+      "owner": "AI Engineering",
+      "update_trigger": "The adaptive V3 compact core, common command surface, immutable planning snapshot, capability domains, retrieval protocol, planner continuation, music provider boundary, performance targets, or migration phases change.",
+      "watch_paths": [
+        "lib/ai/v3/",
+        "lib/ai/chat_pipeline.dart",
+        "lib/config/llm_config.dart",
+        "lib/screens/audio_editor.dart",
+        "test/ai_v3_",
+        "integration_test/ai_v3_",
+        "tool/ai_v3_eval/",
+        "docs/engineering/adr/0002-ai-v3-architecture.md",
+        "docs/engineering/ai_v3_capability_matrix.md"
+      ]
+    },
+    {
+      "doc": "docs/engineering/ai_v3_capability_matrix.md",
+      "owner": "AI Engineering",
+      "update_trigger": "A V3 command, non-mutating outcome, retrieval type, staged job, editor expansion, capability status, limit, or evidence claim changes.",
+      "watch_paths": [
+        "lib/ai/v3/ai_v3_contract.dart",
+        "lib/ai/v3/ai_v3_context.dart",
+        "lib/ai/v3/ai_v3_preparer.dart",
+        "lib/ai/v3/ai_v3_transaction.dart",
+        "lib/screens/audio_editor.dart",
+        "test/ai_v3_",
+        "test/assistant_action_flow_test.dart",
+        "tool/ai_v3_eval/v3_capabilities.yaml"
+      ]
+    },
+    {
       "doc": "docs/engineering/how_to_add_a_feature.md",
       "owner": "Engineering",
       "update_trigger": "Feature development workflow, review expectations, test strategy, release gates, or code ownership changes.",

@@ -1,7 +1,7 @@
 schema_version: ai_v3_capability_inventory_v2
 status: v1_audit_complete
 last_reviewed: "2026-07-24"
-canonical_action_contract: tool/ai_contract/ai_action_contract_v1.json
+canonical_action_contract: backend/llm_proxy/src/common/llm_contract.py
 human_readable_matrix: docs/engineering/ai_v3_capability_matrix.md
 v3_architecture: docs/engineering/adr/0002-ai-v3-architecture.md
 v3_adaptive_specification: docs/engineering/ai_v3_adaptive_planner.md
@@ -25,7 +25,7 @@ inventory_rules:
 
 authoritative_sources:
   llm_contract: [lib/ai/debug_system_prompt.dart, lib/ai/cloud_llm_service.dart, backend/llm_proxy/src/common/llm_contract.py]
-  canonical_actions: [tool/ai_contract/ai_action_contract_v1.json, lib/ai/ai_action_contract.dart, backend/llm_proxy/src/common/ai_action_contract.py]
+  canonical_actions: [lib/ai/debug_system_prompt.dart, lib/ai/cloud_llm_service.dart, backend/llm_proxy/src/common/llm_contract.py, backend/llm_proxy/src/handlers/api_responses.py]
   proxy_normalization: [backend/llm_proxy/src/handlers/api_responses.py]
   flutter_routing: [lib/ai/chat_pipeline.dart, lib/ai/cloud_llm_service.dart, lib/ai/assistant_action_timeline_reducer.dart]
   editor_execution: [lib/screens/audio_editor.dart]
@@ -151,7 +151,7 @@ direct_action_families:
     implementation: {llm: legacy action schema, proxy: accepted legacy family, dart: routed action family, flutter: tutorial handler, executor: none}
     execution: {kind: non_mutating, confirmation: none, undo_or_rollback: not_applicable, readback: none}
     dependencies: [tutorial content]
-    evidence: [tool/ai_contract/ai_action_contract_v1.json, test/assistant_action_flow_test.dart]
+    evidence: [test/cloud_llm_service_test.dart, test/assistant_action_flow_test.dart]
     status: non_mutating
     gaps: []
     v3: {disposition: respond_only, phase: informational_surface, dependency: none}
@@ -168,7 +168,7 @@ direct_action_families:
     implementation: {llm: legacy action schema, proxy: accepted legacy family, dart: routed action family, flutter: clarification handler, executor: none}
     execution: {kind: non_mutating, confirmation: none, undo_or_rollback: not_applicable, readback: none}
     dependencies: [conversation continuation]
-    evidence: [tool/ai_contract/ai_action_contract_v1.json, test/assistant_action_flow_test.dart]
+    evidence: [test/cloud_llm_service_test.dart, test/assistant_action_flow_test.dart]
     status: non_mutating
     gaps: []
     v3: {disposition: respond_only, phase: prototype, dependency: none}
@@ -571,7 +571,7 @@ reference_mixing:
   implementation: {llm: mix_model_request, proxy: api_responses.py, dart: goal_vector.dart, flutter: chat_pipeline.dart, executor: LocalMixingModel reference resolver}
   execution: {kind: protected_reference_mix_resolution, confirmation: propose_or_execute, undo_or_rollback: editor undo snapshot, readback: processing target only}
   dependencies: [analyzable reference material]
-  evidence: [test/local_mixing_model_reference_test.dart, test/assistant_action_flow_test.dart, backend/llm_proxy/tests/test_ai_context_packer.py]
+  evidence: [test/local_mixing_model_reference_test.dart, test/assistant_action_flow_test.dart]
   status: implemented_unverified
   gaps: [reference suitability and sonic quality require audio-level evaluation]
   v3: {disposition: prototype_supported, command: mix.apply_goal, adaptive_retrieval: shadow_supported, phase: mixing_vertical_slice, dependency: none}
@@ -628,7 +628,7 @@ mix_engines:
     implementation: {llm: none, proxy: none, dart: lib/ai/magnitude_predictor.dart, flutter: lib/ai/chat_pipeline.dart, executor: none}
     execution: {kind: no_op_refinement, confirmation: upstream, undo_or_rollback: not_applicable, readback: fallback reason disabled or producer_capture_mode}
     dependencies: [MIXROOM_USE_LEARNED_MAGNITUDES flag or capture bypass]
-    evidence: [lib/ai/magnitude_predictor.dart, lib/ai/chat_pipeline.dart, test/ai_workflow_capture_test.dart]
+    evidence: [lib/ai/magnitude_predictor.dart, lib/ai/chat_pipeline.dart, test/ai_v3_mix_materializer_test.dart]
     status: implemented_unverified
     gaps: []
     v3: {disposition: prototype_supported, command: mix.apply_goal, adaptive_retrieval: shadow_supported, phase: mixing_vertical_slice, dependency: none}
@@ -851,10 +851,10 @@ cross_cutting_capabilities:
     inputs: [LLM metadata, model observability, apply report]
     target_semantics: request and affected project
     context: request/capture identifiers and project digest
-    implementation: {llm: usage metadata, proxy: analytics fields, dart: chat pipeline and ai_workflow_capture.dart, flutter: audio editor analytics, executor: capture/analytics sinks}
+    implementation: {llm: usage metadata, proxy: analytics fields, dart: chat pipeline and ai_v3_capture.dart, flutter: audio editor analytics, executor: capture/analytics sinks}
     execution: {kind: non_mutating_observability, confirmation: none, undo_or_rollback: not_applicable, readback: capture and analytics records}
     dependencies: [capture/analytics flags]
-    evidence: [lib/ai/ai_workflow_capture.dart, lib/core/analytics/analytics_events.dart, test/ai_workflow_capture_test.dart]
+    evidence: [lib/ai/v3/ai_v3_capture.dart, lib/core/analytics/analytics_events.dart, test/ai_v3_capture_test.dart]
     status: implemented_unverified
     gaps: [capture evidence is diagnostic and does not itself prove correct mutation]
     v3: {disposition: prototype_supported, phase: prototype, dependency: capture mode}

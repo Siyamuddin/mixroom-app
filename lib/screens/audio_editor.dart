@@ -28122,7 +28122,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       'daw.row_mix',
       'daw.automation_edit',
       'daw.clean_content_rows',
-      if (LlmConfig.effectiveAiV3PrototypeEnabled) 'ai_v3.one_shot.prototype',
+      if (LlmConfig.effectiveAiV3PrototypeEnabled) ...<String>{
+        'ai_v3.one_shot.prototype',
+        'daw.stem_separate',
+        'daw.audio_enhance',
+        'daw.midi_compose.audio_to_midi',
+      },
     }.toList(growable: false);
     final v3LibraryAssets = LlmConfig.effectiveAiV3PrototypeEnabled
         ? (_aiLibrarySamplePathIndex.keys.toList()..sort()).map((logicalPath) {

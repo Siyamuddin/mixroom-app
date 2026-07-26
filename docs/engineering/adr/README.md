@@ -20,4 +20,4 @@ code review. Keep each ADR short.
 ## Records
 
 - [0001: Keep engineering docs in the repo](0001-repo-native-engineering-docs.md)
-
+- [0002: AI V3 uses one semantic planner and a transactional executor](0002-ai-v3-architecture.md)
