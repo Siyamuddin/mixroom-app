@@ -128,6 +128,9 @@ kotlin {
 
 dependencies {
     implementation("androidx.activity:activity-ktx:1.9.0")
+    // The native DataStore shared-counter library in 1.2.0 is 16 KB page-size aligned.
+    // Pin it so every transitive Android plugin resolves to the compatible artifact.
+    implementation("androidx.datastore:datastore-core-android:1.2.0")
     // implementation(project(":ffmpeg_kit_flutter_full_gpl"))
     // ... your other deps
     implementation("com.arthenica:smart-exception-java:0.2.1")

@@ -5720,6 +5720,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   String _assistantConversationSessionId = '';
   final ScrollController _chatListScrollController = ScrollController();
   double? _desktopChatHistoryHeight;
+  // Keep controller operations atomic. ChatAnimatedList is backed by a
+  // SliverAnimatedList, which cannot safely reconcile overlapping insert,
+  // remove, and replace operations.
+  final List<Message> _pendingChatInsertions = <Message>[];
+  Future<void> _chatMutationQueue = Future<void>.value();
+  bool _chatInsertionFlushScheduled = false;
+  bool _chatMutationDisposed = false;
+  int _chatScrollRequest = 0;
   bool _chatHistoryPruneScheduled = false;
   bool _chatHistoryPruneInFlight = false;
   Timer? _copiedChatMessageTimer;
@@ -11109,6 +11117,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _dawTutorialChatPromptLocked = false;
       _dawTutorialAwaitingChatReply = false;
     });
+    _chatScrollRequest++;
     _setDawPanelVisible('chat_panel', false);
     _setDawPanelVisible('chat_input', false);
     _chatFocusNode.unfocus();
@@ -11125,6 +11134,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _chatInputActive = false;
       _chatScrollHintEnabled = false;
     });
+    _chatScrollRequest++;
     _setDawPanelVisible('chat_panel', false);
     _setDawPanelVisible('chat_input', false);
   }
@@ -12013,6 +12023,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   @override
   void dispose() {
+    _chatMutationDisposed = true;
+    _chatScrollRequest++;
+    _pendingChatInsertions.clear();
     widget.evaluationController?._detach();
     if (PlatformCapabilities.current.isDesktop) {
       HardwareKeyboard.instance.removeHandler(_handleMacEditorKeyEvent);
@@ -12047,6 +12060,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _chatTextController.dispose();
     _chatFocusNode.dispose();
     _tabletAudioClipNameFocusNode.dispose();
+    _chatController.dispose();
     _chatListScrollController.dispose();
     _cloudAutoSyncTimer?.cancel();
     _cloudAutoSyncTimer = null;
@@ -60428,12 +60442,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Map<String, dynamic>? metadata,
     bool persist = true,
   }) {
+    if (!mounted || _chatMutationDisposed) return;
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
     final cappedText = _truncateChatMessageText(trimmed);
     if (cappedText.isEmpty) return;
 
-    final existingMessages = _chatController.messages;
+    final existingMessages = <Message>[
+      ..._chatController.messages,
+      ..._pendingChatInsertions,
+    ];
     if (existingMessages.isNotEmpty) {
       final lastMessage = existingMessages.last;
       if (lastMessage is TextMessage &&
@@ -60443,7 +60461,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     }
 
-    _chatController.insertMessage(
+    _pendingChatInsertions.add(
       TextMessage(
         id: const Uuid().v4(),
         authorId: authorId,
@@ -60453,7 +60471,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       ),
     );
 
-    _scheduleChatHistoryPrune();
+    _scheduleChatInsertionFlush();
     if (!persist) return;
     _scheduleChatHistoryPersist();
     if (authorId == 'user' || authorId == 'assistant' || authorId == 'system') {
@@ -63723,34 +63741,45 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_chatScrollHintEnabled) {
       _setChatScrollHintEnabled(false);
     }
+    final request = ++_chatScrollRequest;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) return;
+      if (!mounted ||
+          _chatMutationDisposed ||
+          !_chatExpanded ||
+          request != _chatScrollRequest) {
+        return;
+      }
       final controller = _chatController;
       if (controller is! ScrollToMessageMixin) return;
       final total = controller.messages.length;
       if (total <= 0) return;
-      await (controller as ScrollToMessageMixin).scrollToIndex(
-        total - 1,
-        duration: jump ? Duration.zero : const Duration(milliseconds: 180),
-        curve: Curves.easeOutCubic,
-        alignment: 1.0,
-      );
-      if (!mounted || !_chatListScrollController.hasClients) return;
-      final position = _chatListScrollController.position;
-      if (!position.hasContentDimensions) return;
-      final target = position.maxScrollExtent;
-      final distance = (target - position.pixels).abs();
-      if (distance <= 1) return;
-      if (jump) {
-        _chatListScrollController.jumpTo(target);
-        return;
-      }
       try {
-        await _chatListScrollController.animateTo(
-          target,
-          duration: const Duration(milliseconds: 180),
+        await (controller as ScrollToMessageMixin).scrollToIndex(
+          total - 1,
+          duration: jump ? Duration.zero : const Duration(milliseconds: 180),
           curve: Curves.easeOutCubic,
+          alignment: 1.0,
         );
+        if (!mounted ||
+            _chatMutationDisposed ||
+            !_chatExpanded ||
+            request != _chatScrollRequest ||
+            !_chatListScrollController.hasClients) {
+          return;
+        }
+        final position = _chatListScrollController.position;
+        if (!position.hasContentDimensions) return;
+        final target = position.maxScrollExtent;
+        if ((target - position.pixels).abs() <= 1) return;
+        if (jump) {
+          _chatListScrollController.jumpTo(target);
+        } else {
+          await _chatListScrollController.animateTo(
+            target,
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+          );
+        }
       } catch (_) {
         // Ignore interrupted scroll animations during rapid chat updates.
       }
@@ -63825,26 +63854,68 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
   }
 
+  void _scheduleChatInsertionFlush() {
+    if (_chatInsertionFlushScheduled) return;
+    _chatInsertionFlushScheduled = true;
+    Future<void>.microtask(() {
+      _chatInsertionFlushScheduled = false;
+      if (!mounted || _chatMutationDisposed || _pendingChatInsertions.isEmpty) {
+        return;
+      }
+      final messages = List<Message>.from(_pendingChatInsertions);
+      _pendingChatInsertions.clear();
+      unawaited(
+        _enqueueChatMutation(() async {
+          final controller = _chatController;
+          if (controller is InMemoryChatController) {
+            await controller.insertAllMessages(messages, animated: false);
+          } else {
+            await controller.insertAllMessages(messages);
+          }
+        }).whenComplete(_scheduleChatHistoryPrune),
+      );
+    });
+  }
+
+  Future<void> _enqueueChatMutation(Future<void> Function() operation) {
+    final Future<void> result = _chatMutationQueue.then<void>((_) async {
+      if (!mounted || _chatMutationDisposed) return;
+      await operation();
+    });
+    _chatMutationQueue = result.catchError((Object error, StackTrace stack) {
+      debugPrint('Chat mutation failed: $error');
+      return Future<void>.value();
+    });
+    return result;
+  }
+
   Future<void> _setChatMessages(
     List<Message> messages, {
     bool animated = true,
   }) {
-    final controller = _chatController;
-    if (controller is InMemoryChatController) {
-      return controller.setMessages(messages, animated: animated);
-    }
-    return controller.setMessages(messages);
+    _pendingChatInsertions.clear();
+    return _enqueueChatMutation(() async {
+      final controller = _chatController;
+      if (controller is InMemoryChatController) {
+        await controller.setMessages(messages, animated: animated);
+      } else {
+        await controller.setMessages(messages);
+      }
+    });
   }
 
   Future<void> _removeChatMessage(
     Message message, {
     bool animated = true,
   }) {
-    final controller = _chatController;
-    if (controller is InMemoryChatController) {
-      return controller.removeMessage(message, animated: animated);
-    }
-    return controller.removeMessage(message);
+    return _enqueueChatMutation(() async {
+      final controller = _chatController;
+      if (controller is InMemoryChatController) {
+        await controller.removeMessage(message, animated: animated);
+      } else {
+        await controller.removeMessage(message);
+      }
+    });
   }
 
   bool _chatHistoryNeedsPruning() {
