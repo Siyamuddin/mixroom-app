@@ -123,7 +123,13 @@ String aiV3AlreadySatisfiedConversationMessage(Map<String, dynamic> bundle) {
   ].join('\n');
 }
 
-String aiV3VerifiedCompletionMessage(Map<String, dynamic> bundle) => 'Done.';
+String aiV3VerifiedCompletionMessage(Map<String, dynamic> bundle) {
+  final plan = bundle['plan'];
+  final message = plan is Map
+      ? plan['user_message']?.toString().trim() ?? ''
+      : '';
+  return message.isEmpty ? 'Done.' : message;
+}
 
 String _aiV3ClarificationMessage(
   String question,

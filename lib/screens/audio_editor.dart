@@ -5738,8 +5738,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   int? _activeChatFlowId;
   int _assistantActionNoticeCaptureDepth = 0;
   int _assistantActionExecutionMessageCount = 0;
+  int _assistantActionExecutionBatchDepth = 0;
+  final List<String> _assistantActionExecutionBatch = <String>[];
   List<String>? _deferredAssistantActionNotices;
   List<String>? _deferredAssistantExecutionNotices;
+  final Set<String> _expandedChatDetailMessageIds = <String>{};
   bool _chatScrollHintEnabled = false;
   late final MixChangeHighlighter _mixHighlighter = MixChangeHighlighter();
   bool _chatWarm = false;
@@ -34639,40 +34642,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               }) {
                                                 if (message.authorId ==
                                                     'system') {
-                                                  return GestureDetector(
-                                                    behavior:
-                                                        HitTestBehavior.opaque,
-                                                    onSecondaryTapDown: (_) {
-                                                      unawaited(
-                                                        _copyChatMessageToClipboard(
-                                                          message,
-                                                        ),
-                                                      );
-                                                    },
-                                                    child: Padding(
-                                                      padding: const EdgeInsets
-                                                          .symmetric(
-                                                        vertical: 10,
-                                                      ),
-                                                      child: Center(
-                                                        child: Text(
-                                                          message.text,
-                                                          textAlign:
-                                                              TextAlign.center,
-                                                          style:
-                                                              const TextStyle(
-                                                            fontFamily:
-                                                                'Pretendard',
-                                                            fontSize: 13,
-                                                            fontWeight:
-                                                                FontWeight.w600,
-                                                            letterSpacing: 0.4,
-                                                            color:
-                                                                Colors.white70,
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    ),
+                                                  return _buildSystemChatMessage(
+                                                    message,
                                                   );
                                                 }
                                                 final isCopied =
@@ -43633,6 +43604,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Map<String, List<String>>? v3ExecutionSummariesByCommandId,
   }) async {
     _assistantActionNoticeCaptureDepth += 1;
+    final batchExecutionNotices =
+        v3RuntimeExpectations == null &&
+            _deferredAssistantExecutionNotices == null;
+    if (batchExecutionNotices) {
+      _assistantActionExecutionBatchDepth += 1;
+    }
     final executionMessagesBefore = _assistantActionExecutionMessageCount;
     try {
       var hadFailure = false;
@@ -44001,6 +43978,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _assistantActionExecutionMessageCount == executionMessagesBefore;
     } finally {
       _assistantActionNoticeCaptureDepth -= 1;
+      if (batchExecutionNotices) {
+        _assistantActionExecutionBatchDepth -= 1;
+        if (_assistantActionExecutionBatchDepth <= 0) {
+          _assistantActionExecutionBatchDepth = 0;
+          _flushAssistantActionExecutionBatch();
+        }
+      }
     }
   }
 
@@ -58210,13 +58194,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final appliedMutations = <Map<String, dynamic>>[];
     void emitActionSummary(String text) {
       reportSummaries.add(text);
-      if (!emitActionSummaries) return;
-      _insertSystemChatText(text);
     }
 
     void skipAction(String reason) {
       if (reason.trim().isEmpty) return;
       skippedReasons.add(reason.trim());
+    }
+
+    void flushActionSummaries() {
+      if (!emitActionSummaries || reportSummaries.isEmpty) return;
+      _insertExecutionDetailSystemText(
+        source: 'mix_action_execution',
+        collapsedTitle: 'Applied ${reportSummaries.length} mix changes',
+        detailLines: reportSummaries,
+      );
     }
 
     bool isGroupScopedAction(Map<String, dynamic> data) {
@@ -59358,6 +59349,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     }
     if (groupedActions.isEmpty) {
+      flushActionSummaries();
       return MixApplyReport(
         attempted: mix.actions.length,
         applied: 0,
@@ -59374,6 +59366,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         batchGraphMutations: batchUndoGraphMutations,
       ),
     );
+    flushActionSummaries();
     return MixApplyReport(
       attempted: mix.actions.length,
       applied: groupedActions.length,
@@ -60329,6 +60322,139 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  Widget _buildSystemChatMessage(TextMessage message) {
+    final metadata = message.metadata;
+    final detailLines = _chatExecutionDetailLines(metadata);
+    if (detailLines.isEmpty) {
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onSecondaryTapDown: (_) {
+          unawaited(_copyChatMessageToClipboard(message));
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Center(
+            child: Text(
+              message.text,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontFamily: 'Pretendard',
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.4,
+                color: Colors.white70,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    final collapsedByDefault = metadata?['collapsed_by_default'] == true;
+    final isExpanded = !collapsedByDefault ||
+        _expandedChatDetailMessageIds.contains(message.id);
+    final title = _plainSystemDetailText(
+      '${metadata?['collapsed_title'] ?? message.text}',
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.07),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+            ),
+            child: Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () {
+                  setState(() {
+                    if (_expandedChatDetailMessageIds.contains(message.id)) {
+                      _expandedChatDetailMessageIds.remove(message.id);
+                    } else {
+                      _expandedChatDetailMessageIds.add(message.id);
+                    }
+                  });
+                },
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 12, 8),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            isExpanded
+                                ? Icons.keyboard_arrow_down_rounded
+                                : Icons.keyboard_arrow_right_rounded,
+                            size: 18,
+                            color: Colors.white70,
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              title.isEmpty
+                                  ? 'Applied ${detailLines.length} changes'
+                                  : title,
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                height: 1.2,
+                                letterSpacing: 0.1,
+                                color: Color(0xC7FFFFFF),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (isExpanded) ...[
+                        const SizedBox(height: 7),
+                        for (final line in detailLines)
+                          Padding(
+                            padding: const EdgeInsets.only(
+                              left: 22,
+                              bottom: 5,
+                            ),
+                            child: Text(
+                              line,
+                              style: TextStyle(
+                                fontFamily: 'Pretendard',
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                height: 1.25,
+                                color: Colors.white.withValues(alpha: 0.72),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<String> _chatExecutionDetailLines(Map<String, dynamic>? metadata) {
+    final raw = metadata?['detail_lines'];
+    if (raw is! Iterable) return const <String>[];
+    return raw
+        .map((line) => _plainSystemDetailText('$line'))
+        .where((line) => line.isNotEmpty)
+        .toList(growable: false);
+  }
+
   void _insertUserChatText(String text) {
     _insertChatTextMessage(authorId: 'user', text: text);
   }
@@ -60378,6 +60504,64 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         : '• $trimmed •';
   }
 
+  String _plainSystemDetailText(String text) {
+    var trimmed = text.trim();
+    if (trimmed.startsWith('•')) {
+      trimmed = trimmed.substring(1).trimLeft();
+    }
+    if (trimmed.endsWith('•')) {
+      trimmed = trimmed.substring(0, trimmed.length - 1).trimRight();
+    }
+    return trimmed;
+  }
+
+  static const int _kChatExecutionDetailCollapseThreshold = 3;
+
+  void _insertExecutionDetailSystemText({
+    required String source,
+    required String collapsedTitle,
+    required List<String> detailLines,
+  }) {
+    final lines = detailLines
+        .map(_plainSystemDetailText)
+        .where((line) => line.isNotEmpty)
+        .toList(growable: false);
+    if (lines.isEmpty) return;
+    if (lines.length < _kChatExecutionDetailCollapseThreshold) {
+      for (final line in lines) {
+        _insertSystemChatText(
+          _centeredSystemChatText(line),
+          metadata: <String, dynamic>{'source': source},
+        );
+      }
+      return;
+    }
+
+    final title = collapsedTitle.trim().isEmpty
+        ? 'Applied ${lines.length} changes'
+        : collapsedTitle.trim();
+    _insertSystemChatText(
+      _centeredSystemChatText(title),
+      metadata: <String, dynamic>{
+        'source': source,
+        'detail_lines': lines,
+        'collapsed_title': title,
+        'collapsed_by_default': true,
+      },
+    );
+  }
+
+  void _flushAssistantActionExecutionBatch() {
+    if (_assistantActionExecutionBatch.isEmpty) return;
+    final lines = List<String>.from(_assistantActionExecutionBatch);
+    _assistantActionExecutionBatch.clear();
+    _insertExecutionDetailSystemText(
+      source: 'daw_assistant_action_execution',
+      collapsedTitle: 'Applied ${lines.length} DAW actions',
+      detailLines: lines,
+    );
+  }
+
   void _insertAssistantActionNoticeSystemText(String text) {
     if (_assistantActionNoticeCaptureDepth <= 0) return;
     final displayText = _centeredSystemChatText(text);
@@ -60402,6 +60586,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final displayText = _centeredSystemChatText(text);
     if (displayText.isEmpty) return;
     _assistantActionExecutionMessageCount += 1;
+    if (_deferredAssistantExecutionNotices == null &&
+        _assistantActionExecutionBatchDepth > 0) {
+      _assistantActionExecutionBatch.add(displayText);
+      return;
+    }
     _insertSystemChatText(
       displayText,
       metadata: const <String, dynamic>{
@@ -60807,14 +60996,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final count = (bundle['receipts'] as List?)?.length ?? actions.length;
       final applied =
           count == 1 ? 'Applied 1 change.' : 'Applied $count changes.';
-      for (final detail in executionDetails) {
-        _insertSystemChatText(
-          _centeredSystemChatText(detail),
-          metadata: const <String, dynamic>{
-            'source': 'ai_v3_verified_execution',
-          },
-        );
-      }
+      _insertExecutionDetailSystemText(
+        source: 'ai_v3_verified_execution',
+        collapsedTitle: 'Applied ${executionDetails.length} verified changes',
+        detailLines: executionDetails,
+      );
       _insertAssistantChatText(
         completionMessage,
         modelAuthored: true,
