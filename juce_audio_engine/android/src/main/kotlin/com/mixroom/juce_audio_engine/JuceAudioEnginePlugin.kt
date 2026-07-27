@@ -1487,22 +1487,16 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           result.success(null)
         }
         "decodeAudioMono16k" -> {
-          try {
-            result.success(JuceBridge.decodeAudioMono16kJNI(args.stringValue("path")).toList())
-          } catch (t: Throwable) {
-            result.error("decode_audio_mono_16k_failed", t.message, null)
+          val path = args.stringValue("path")
+          runHeavyTask("decodeAudioMono16k", result) {
+            JuceBridge.decodeAudioMono16kJNI(path).toList()
           }
         }
         "decodeAudioMono16kForAnalysis" -> {
-          try {
-            result.success(
-              JuceBridge.decodeAudioMono16kForAnalysisJNI(
-                args.stringValue("path"),
-                args.intValue("maxOutputSamples"),
-              ).toList(),
-            )
-          } catch (t: Throwable) {
-            result.error("decode_audio_mono_16k_analysis_failed", t.message, null)
+          val path = args.stringValue("path")
+          val maxOutputSamples = args.intValue("maxOutputSamples")
+          runHeavyTask("decodeAudioMono16kForAnalysis", result) {
+            JuceBridge.decodeAudioMono16kForAnalysisJNI(path, maxOutputSamples).toList()
           }
         }
         "analyzeAudioStereo16k" -> {

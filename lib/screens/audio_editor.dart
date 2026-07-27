@@ -5612,6 +5612,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   int _timeSignatureDenominator = 4;
   bool _tempoStretchEnabled = false;
   bool _tempoStretchPreservePitchDefault = false;
+  bool _projectTempoDetectionInFlight = false;
   Timer? _tempoUndoCommitTimer;
   _ProjectTempoSnapshot? _pendingTempoUndoBefore;
   bool _isExportSheetOpen = false;
@@ -25740,6 +25741,113 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _setProjectTempoFromUi(parsed);
   }
 
+  Future<void> _detectAndSetProjectTempo() async {
+    if (_projectTempoDetectionInFlight) return;
+    final audioClips = _audioTracks.where((clip) => !clip.isMidi).toList();
+    if (audioClips.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              L10n.translate(
+                context,
+                'Add an audio clip before detecting project BPM.',
+              ),
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    setState(() => _projectTempoDetectionInFlight = true);
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(L10n.translate(context, 'Detecting project BPM...')),
+        ),
+      );
+
+      final detections = <MapEntry<double, double>>[];
+      for (var index = 0;
+          index < audioClips.length && index < 48 && detections.length < 24;
+          index++) {
+        final clip = audioClips[index];
+        final bpm = _detectTempoFromClipWaveform(clip);
+        if (bpm != null && bpm.isFinite) {
+          final durationWeight = (clip.audioDuration.inMilliseconds / 1000.0)
+              .clamp(2.0, 16.0)
+              .toDouble();
+          detections.add(MapEntry(_clampTempo(bpm), durationWeight));
+        }
+        // Let the editor paint and receive input between waveform analyses.
+        if (index.isOdd) await Future<void>.delayed(Duration.zero);
+      }
+
+      // Projects imported without waveform data get a bounded fallback: at
+      // most three short decodes, all performed by the native background
+      // worker. We never decode every clip in a large project.
+      if (detections.isEmpty) {
+        for (final clip in audioClips.take(3)) {
+          final bpm = await _detectClipTempoBpm(
+            clip,
+            maxAnalysisSamples: 192000,
+          );
+          if (bpm != null && bpm.isFinite) {
+            detections.add(MapEntry(_clampTempo(bpm), 1.0));
+          }
+        }
+      }
+
+      double? detected;
+      double bestScore = -1.0;
+      for (final center in detections) {
+        var weightedTotal = 0.0;
+        var weight = 0.0;
+        for (final candidate in detections) {
+          var comparable = candidate.key;
+          while (comparable < center.key * 0.75) {
+            comparable *= 2.0;
+          }
+          while (comparable > center.key * 1.5) {
+            comparable /= 2.0;
+          }
+          if ((comparable - center.key).abs() > 3.0) continue;
+          weightedTotal += comparable * candidate.value;
+          weight += candidate.value;
+        }
+        if (weight > bestScore) {
+          bestScore = weight;
+          detected = weightedTotal / weight;
+        }
+      }
+      if (!mounted) return;
+      if (detected == null || !detected.isFinite) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              L10n.translate(context, 'Could not detect project BPM.'),
+            ),
+          ),
+        );
+        return;
+      }
+
+      final projectBpm = _clampTempo(detected).roundToDouble();
+      await _applyProjectTempoChange(projectBpm, recordUndo: true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${L10n.translate(context, 'Project BPM detected and set to')} ${_formatTempoBpm(projectBpm)} BPM.',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _projectTempoDetectionInFlight = false);
+    }
+  }
+
   Future<void> _showTempoModeInfoDialog() async {
     await showDialog<void>(
       context: context,
@@ -41989,6 +42097,36 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   );
                                 },
                                 childCount: 980,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            height: 38,
+                            child: OutlinedButton.icon(
+                              onPressed: _projectTempoDetectionInFlight
+                                  ? null
+                                  : _detectAndSetProjectTempo,
+                              icon: const Icon(
+                                Icons.auto_fix_high_rounded,
+                                size: 16,
+                              ),
+                              label: Text(
+                                L10n.translate(
+                                  context,
+                                  'Auto Detect Project BPM',
+                                ),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFFF4F4F4),
+                                side: BorderSide(
+                                  color: Colors.white.withValues(alpha: 0.18),
+                                ),
+                                textStyle: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                             ),
                           ),
@@ -68548,13 +68686,44 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .toList(growable: false);
   }
 
-  Future<double?> _detectClipTempoBpm(AudioTrack clip) async {
+  double? _detectTempoFromClipWaveform(AudioTrack clip) {
+    final waveform = clip.normWaveformData;
+    if (waveform.length < 64 || clip.audioDuration.inMilliseconds <= 0) {
+      return null;
+    }
+    final totalMs = clip.audioDuration.inMilliseconds.toDouble();
+    final start = ((clip.trimStart.inMilliseconds / totalMs) * waveform.length)
+        .floor()
+        .clamp(0, waveform.length)
+        .toInt();
+    final end = ((clip.trimEnd.inMilliseconds / totalMs) * waveform.length)
+        .ceil()
+        .clamp(start, waveform.length)
+        .toInt();
+    final subset = end > start && end - start >= 64
+        ? waveform.sublist(start, end)
+        : waveform;
+    final envelopeHz = waveform.length / (totalMs / 1000.0);
+    return _detectTempoFromOnsetEnvelope(
+      subset,
+      envelopeHz,
+      durationSec: subset.length / envelopeHz,
+    );
+  }
+
+  Future<double?> _detectClipTempoBpm(
+    AudioTrack clip, {
+    int maxAnalysisSamples = 480000,
+  }) async {
     if (clip.isMidi) return null;
 
     const int sampleRate = 16000;
     Float32List decoded = Float32List(0);
     try {
-      decoded = await JuceAudioEngine.decodeAudioMono16k(clip.file.path);
+      decoded = await JuceAudioEngine.decodeAudioMono16kForAnalysis(
+        clip.file.path,
+        maxOutputSamples: maxAnalysisSamples,
+      );
     } catch (_) {
       decoded = Float32List(0);
     }
@@ -68583,27 +68752,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     }
 
-    final wf = clip.normWaveformData;
-    if (wf.length >= 64 && clip.audioDuration.inMilliseconds > 0) {
-      final totalMs = clip.audioDuration.inMilliseconds.toDouble();
-      final startIdx =
-          ((clip.trimStart.inMilliseconds / totalMs) * wf.length).floor();
-      final endIdx = ((clip.trimEnd.inMilliseconds / totalMs) * wf.length)
-          .ceil()
-          .clamp(0, wf.length);
-      final s = startIdx.clamp(0, wf.length);
-      final e = endIdx.clamp(s, wf.length);
-      final subset = (e > s && (e - s) >= 64) ? wf.sublist(s, e) : wf;
-      final envHz = wf.length / (totalMs / 1000.0);
-      final subsetDurationSec = subset.length / envHz;
-      return _detectTempoFromOnsetEnvelope(
-        subset,
-        envHz,
-        durationSec: subsetDurationSec,
-      );
-    }
-
-    return null;
+    return _detectTempoFromClipWaveform(clip);
   }
 
   Future<void> _setClipTempoFollowMode(

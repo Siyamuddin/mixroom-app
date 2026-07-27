@@ -74,10 +74,7 @@ class AiPromptBankStatus {
   }
 
   Map<String, dynamic> toJson() {
-    return {
-      'remaining': remaining,
-      'consumed_first': consumedFirst,
-    };
+    return {'remaining': remaining, 'consumed_first': consumedFirst};
   }
 }
 
@@ -163,22 +160,20 @@ class LlmResult {
     String text,
     Map<String, dynamic>? toolArgs, {
     Map<String, dynamic>? meta,
-  }) =>
-      LlmResult(
-        text: text,
-        toolName: 'informational_response',
-        toolArgs: toolArgs,
-        meta: meta,
-      );
+  }) => LlmResult(
+    text: text,
+    toolName: 'informational_response',
+    toolArgs: toolArgs,
+    meta: meta,
+  );
 
-  factory LlmResult.tool(String toolName, Map<String, dynamic> toolArgs,
-          {String? text, Map<String, dynamic>? meta}) =>
-      LlmResult(
-        text: text,
-        toolName: toolName,
-        toolArgs: toolArgs,
-        meta: meta,
-      );
+  factory LlmResult.tool(
+    String toolName,
+    Map<String, dynamic> toolArgs, {
+    String? text,
+    Map<String, dynamic>? meta,
+  }) =>
+      LlmResult(text: text, toolName: toolName, toolArgs: toolArgs, meta: meta);
 }
 
 class CloudLlmService {
@@ -237,8 +232,9 @@ class CloudLlmService {
     String aiFeature, {
     String? capabilitySignature,
   }) {
-    final normalizedFeature =
-        aiFeature.trim().isEmpty ? 'ai_chat' : aiFeature.trim();
+    final normalizedFeature = aiFeature.trim().isEmpty
+        ? 'ai_chat'
+        : aiFeature.trim();
     final normalizedCapabilities = (capabilitySignature ?? '').trim().isEmpty
         ? 'legacy'
         : capabilitySignature!.trim();
@@ -251,8 +247,8 @@ class CloudLlmService {
 
   String get _promptCacheRetention =>
       _extendedPromptCacheRetentionModels.contains(model.trim().toLowerCase())
-          ? '24h'
-          : _defaultPromptCacheRetention;
+      ? '24h'
+      : _defaultPromptCacheRetention;
   bool get _canUseDirectOpenAi =>
       apiKey.trim().isNotEmpty && model.trim().isNotEmpty;
   bool get _isProxyEnabled => proxyApiBaseUrl.trim().isNotEmpty;
@@ -322,11 +318,8 @@ class CloudLlmService {
     final requestContext = AnalyticsService.instance.buildRequestContext();
     final analyticsClientContext =
         (requestContext['client_context'] as Map?)?.cast<String, dynamic>() ??
-            <String, dynamic>{};
-    return <String, dynamic>{
-      ...analyticsClientContext,
-      ...clientContext,
-    };
+        <String, dynamic>{};
+    return <String, dynamic>{...analyticsClientContext, ...clientContext};
   }
 
   Set<String> _readClientCapabilities(Map<String, dynamic> clientContext) {
@@ -335,13 +328,16 @@ class CloudLlmService {
     return rawCapabilities
         .whereType<String>()
         .map((value) => value.trim())
-        .where((value) =>
-            value.isNotEmpty && _knownClientCapabilities.contains(value))
+        .where(
+          (value) =>
+              value.isNotEmpty && _knownClientCapabilities.contains(value),
+        )
         .toSet();
   }
 
   String _readContextPackingMode(Map<String, dynamic> clientContext) {
-    final normalized = clientContext['ai_context_packing_mode']
+    final normalized =
+        clientContext['ai_context_packing_mode']
             ?.toString()
             .trim()
             .toLowerCase() ??
@@ -356,7 +352,8 @@ class CloudLlmService {
   }
 
   String _readToolRoutingMode(Map<String, dynamic> clientContext) {
-    final normalized = clientContext['ai_tool_routing_mode']
+    final normalized =
+        clientContext['ai_tool_routing_mode']
             ?.toString()
             .trim()
             .toLowerCase() ??
@@ -436,10 +433,7 @@ class CloudLlmService {
     final trackNumber = int.tryParse(match.group(1) ?? '') ?? 1;
     final rowIndex = math.max(0, trackNumber - 1);
     final rest = match.group(2) ?? '';
-    final fields = <String>[
-      'row_index=$rowIndex',
-      'track_number=$trackNumber',
-    ];
+    final fields = <String>['row_index=$rowIndex', 'track_number=$trackNumber'];
     for (final key in const <String>[
       'row_name',
       'lane_kind',
@@ -559,8 +553,10 @@ class CloudLlmService {
       final line = raw.trim();
       if (line.isEmpty) continue;
       if (line.startsWith('selected_row_context{') && line.endsWith('}')) {
-        final inner =
-            line.substring('selected_row_context{'.length, line.length - 1);
+        final inner = line.substring(
+          'selected_row_context{'.length,
+          line.length - 1,
+        );
         final compact = _compactSelectedRowContext(inner);
         if (compact.isNotEmpty) lines.add(compact);
         continue;
@@ -630,8 +626,9 @@ class CloudLlmService {
         final role = entry.substring(0, equalsIndex).trim();
         final value = entry.substring(equalsIndex + 1).trim();
         if (role.isEmpty || value.isEmpty) continue;
-        final roleName =
-            role.startsWith('role:') ? role.substring('role:'.length) : role;
+        final roleName = role.startsWith('role:')
+            ? role.substring('role:'.length)
+            : role;
         final alias = role.startsWith('role:') ? role : 'role:$roleName';
         lines.add('- $roleName: alias=$alias examples=$value');
         roleHintCount++;
@@ -645,8 +642,9 @@ class CloudLlmService {
         final equalsIndex = entry.indexOf('=');
         final family =
             (equalsIndex <= 0 ? entry : entry.substring(0, equalsIndex)).trim();
-        final value =
-            equalsIndex <= 0 ? '' : entry.substring(equalsIndex + 1).trim();
+        final value = equalsIndex <= 0
+            ? ''
+            : entry.substring(equalsIndex + 1).trim();
         if (family.isEmpty) continue;
         lines.add(value.isEmpty ? '- $family' : '- $family: $value');
         instrumentCount++;
@@ -660,8 +658,9 @@ class CloudLlmService {
         final equalsIndex = entry.indexOf('=');
         final folder =
             (equalsIndex <= 0 ? entry : entry.substring(0, equalsIndex)).trim();
-        final value =
-            equalsIndex <= 0 ? '' : entry.substring(equalsIndex + 1).trim();
+        final value = equalsIndex <= 0
+            ? ''
+            : entry.substring(equalsIndex + 1).trim();
         if (folder.isEmpty) continue;
         lines.add(value.isEmpty ? '- $folder' : '- $folder: $value');
         sampleFolderCount++;
@@ -699,16 +698,20 @@ class CloudLlmService {
         continue;
       }
       if (line.startsWith('library_role_hints{') && line.endsWith('}')) {
-        final inner =
-            line.substring('library_role_hints{'.length, line.length - 1);
+        final inner = line.substring(
+          'library_role_hints{'.length,
+          line.length - 1,
+        );
         appendRoleHintEntries(inner);
         continue;
       }
       if (line.startsWith('instrument_hints{') && line.endsWith('}')) {
         ensureSection('built_in_instruments');
         final ids = <String>[];
-        final inner =
-            line.substring('instrument_hints{'.length, line.length - 1);
+        final inner = line.substring(
+          'instrument_hints{'.length,
+          line.length - 1,
+        );
         for (final entry in splitInlineEntries(inner)) {
           final equalsIndex = entry.indexOf('=');
           final instrumentId =
@@ -770,18 +773,18 @@ class CloudLlmService {
     return _PackedContextSnapshots(
       projectSnapshot:
           normalizedProject.startsWith('COMPACT_PROJECT_SNAPSHOT_V1')
-              ? projectSnapshot
-              : _compactProjectSnapshot(projectSnapshot),
+          ? projectSnapshot
+          : _compactProjectSnapshot(projectSnapshot),
       selectionSnapshot: normalizedSelection.isEmpty
           ? ''
           : normalizedSelection.startsWith('COMPACT_SELECTION_SNAPSHOT_V1')
-              ? selectionSnapshot
-              : _compactSelectionSnapshot(selectionSnapshot),
+          ? selectionSnapshot
+          : _compactSelectionSnapshot(selectionSnapshot),
       librarySnapshot: normalizedLibrary.isEmpty
           ? ''
           : normalizedLibrary.startsWith('COMPACT_LIBRARY_SNAPSHOT_V1')
-              ? librarySnapshot
-              : _compactLibrarySnapshot(librarySnapshot),
+          ? librarySnapshot
+          : _compactLibrarySnapshot(librarySnapshot),
     );
   }
 
@@ -795,8 +798,9 @@ class CloudLlmService {
       final value = clientContext[key];
       if (value is String && value.trim().isNotEmpty) {
         final trimmed = value.trim();
-        policy[key] =
-            trimmed.length > 500 ? trimmed.substring(0, 500) : trimmed;
+        policy[key] = trimmed.length > 500
+            ? trimmed.substring(0, 500)
+            : trimmed;
       }
     }
 
@@ -805,14 +809,16 @@ class CloudLlmService {
       if (parsed != null) policy[key] = parsed;
     }
 
-    final allowedEffects =
-        _readStringList(clientContext['allowed_builtin_effects']);
+    final allowedEffects = _readStringList(
+      clientContext['allowed_builtin_effects'],
+    );
     if (allowedEffects.isNotEmpty) {
       policy['allowed_builtin_effects'] = allowedEffects;
     }
 
-    final allowedInstruments =
-        _readStringList(clientContext['allowed_instrument_ids']);
+    final allowedInstruments = _readStringList(
+      clientContext['allowed_instrument_ids'],
+    );
     if (allowedInstruments.isNotEmpty) {
       policy['allowed_instrument_ids'] = allowedInstruments;
     }
@@ -993,19 +999,14 @@ class CloudLlmService {
     return [
       {'role': 'user', 'content': 'PROJECT_SNAPSHOT:\n$projectSnapshot'},
       if (selectionSnapshot.trim().isNotEmpty)
-        {
-          'role': 'user',
-          'content': 'SELECTION_SNAPSHOT:\n$selectionSnapshot',
-        },
+        {'role': 'user', 'content': 'SELECTION_SNAPSHOT:\n$selectionSnapshot'},
       if (librarySnapshot.trim().isNotEmpty)
-        {
-          'role': 'user',
-          'content': 'LIBRARY_SNAPSHOT:\n$librarySnapshot',
-        },
+        {'role': 'user', 'content': 'LIBRARY_SNAPSHOT:\n$librarySnapshot'},
       if (pendingMix != null)
         {
           'role': 'user',
-          'content': '''
+          'content':
+              '''
               PENDING_MIX_PROPOSAL:
               ${jsonEncode(pendingMix.toJson())}
 
@@ -1019,9 +1020,7 @@ class CloudLlmService {
     ];
   }
 
-  Map<String, dynamic> _dawTargetSchema({
-    bool allowMasterScope = false,
-  }) {
+  Map<String, dynamic> _dawTargetSchema({bool allowMasterScope = false}) {
     final scopeValues = <String>[
       'selected',
       'all_audio',
@@ -1034,26 +1033,14 @@ class CloudLlmService {
       'description':
           'Target reference for the DAW action. Use existing project context and selection to fill what you already know. Resolve relative references like top/bottom/first/last row or line into an explicit row_index when the intended row is clear, preferring occupied-row context over empty rows. Resolve natural identity references using labels, filenames, instrument names or IDs, clip kind, and row/source cues from the snapshots. Use prefer_selected only for explicit selection references such as "this one", "that one", "here", or "selected".',
       'properties': <String, dynamic>{
-        'clip_index': {
-          'type': 'integer',
-          'minimum': 0,
-        },
+        'clip_index': {'type': 'integer', 'minimum': 0},
         'clip_indices': {
           'type': 'array',
-          'items': {
-            'type': 'integer',
-            'minimum': 0,
-          },
+          'items': {'type': 'integer', 'minimum': 0},
           'minItems': 1,
         },
-        'row_index': {
-          'type': 'integer',
-          'minimum': 0,
-        },
-        'scope': {
-          'type': 'string',
-          'enum': scopeValues,
-        },
+        'row_index': {'type': 'integer', 'minimum': 0},
+        'scope': {'type': 'string', 'enum': scopeValues},
         'group_id': {'type': 'string'},
         'group_name': {'type': 'string'},
         'prefer_selected': {
@@ -1087,10 +1074,7 @@ class CloudLlmService {
         'automation_target_id': {'type': 'string'},
         'target_id': {'type': 'string'},
         'lane_id': {'type': 'string'},
-        'effect_index': {
-          'type': 'integer',
-          'minimum': 0,
-        },
+        'effect_index': {'type': 'integer', 'minimum': 0},
         'effect_name': {'type': 'string'},
         'plugin_name': {'type': 'string'},
         'effect_name_contains': {'type': 'string'},
@@ -1102,1377 +1086,1284 @@ class CloudLlmService {
   }
 
   Map<String, dynamic> _midiNoteSchema() => <String, dynamic>{
+    'type': 'object',
+    'properties': <String, dynamic>{
+      'pitch': {
+        'type': 'integer',
+        'minimum': 0,
+        'maximum': 127,
+        'description':
+            'MIDI note number, for example 60 for middle C. Do not use note names like C4.',
+      },
+      'start_beat': {
+        'type': 'number',
+        'description':
+            'Zero-based start beat in the clip. Measure 1 beat 1 is start_beat 0.',
+      },
+      'length_beats': {
+        'type': 'number',
+        'exclusiveMinimum': 0,
+        'description': 'Note length in beats.',
+      },
+      'velocity': {
+        'type': 'number',
+        'minimum': 0,
+        'maximum': 1,
+        'description':
+            'Normalized velocity from 0 to 1. Do not use 1 to 127 velocity values.',
+      },
+    },
+    'required': ['pitch', 'start_beat', 'length_beats'],
+    'additionalProperties': true,
+  };
+
+  List<Map<String, dynamic>>
+  _directOpenAiToolSchemas() => <Map<String, dynamic>>[
+    <String, dynamic>{
+      'type': 'function',
+      'name': 'informational_response',
+      'strict': false,
+      'description':
+          'Use for explanations, summaries, unsupported or unimplemented requests, empty-project replies, and any case where no valid executable action can be formed. Also use this when the user\'s main request depends on unsupported features and a nearby supported tool would be misleading.',
+      'parameters': <String, dynamic>{
         'type': 'object',
         'properties': <String, dynamic>{
-          'pitch': {
-            'type': 'integer',
-            'minimum': 0,
-            'maximum': 127,
+          'message': {
+            'type': 'string',
             'description':
-                'MIDI note number, for example 60 for middle C. Do not use note names like C4.',
+                'Short user-facing response. Also use this for unsupported or not-yet-implemented features.',
           },
-          'start_beat': {
-            'type': 'number',
+          'cancels_pending': {
+            'type': 'boolean',
             'description':
-                'Zero-based start beat in the clip. Measure 1 beat 1 is start_beat 0.',
-          },
-          'length_beats': {
-            'type': 'number',
-            'exclusiveMinimum': 0,
-            'description': 'Note length in beats.',
-          },
-          'velocity': {
-            'type': 'number',
-            'minimum': 0,
-            'maximum': 1,
-            'description':
-                'Normalized velocity from 0 to 1. Do not use 1 to 127 velocity values.',
+                'True only when the user clearly cancels or rejects a pending mix proposal.',
           },
         },
-        'required': ['pitch', 'start_beat', 'length_beats'],
-        'additionalProperties': true,
-      };
-
-  List<Map<String, dynamic>> _directOpenAiToolSchemas() =>
-      <Map<String, dynamic>>[
-        <String, dynamic>{
-          'type': 'function',
-          'name': 'informational_response',
-          'strict': false,
-          'description':
-              'Use for explanations, summaries, unsupported or unimplemented requests, empty-project replies, and any case where no valid executable action can be formed. Also use this when the user\'s main request depends on unsupported features and a nearby supported tool would be misleading.',
-          'parameters': <String, dynamic>{
-            'type': 'object',
-            'properties': <String, dynamic>{
-              'message': {
-                'type': 'string',
-                'description':
-                    'Short user-facing response. Also use this for unsupported or not-yet-implemented features.',
-              },
-              'cancels_pending': {
-                'type': 'boolean',
-                'description':
-                    'True only when the user clearly cancels or rejects a pending mix proposal.',
-              },
-            },
-            'required': ['message', 'cancels_pending'],
-            'additionalProperties': false,
+        'required': ['message', 'cancels_pending'],
+        'additionalProperties': false,
+      },
+    },
+    <String, dynamic>{
+      'type': 'function',
+      'name': 'daw_assistant_actions',
+      'strict': false,
+      'description':
+          'Use for tutorials, project edits like BPM changes, row-group creation/folding, row color changes, library sample insertion or replacement, clip arrangement/editing, plugin CRUD, automation edits such as sidechain-like ducking, auto-pan, stereo movement, or filter sweeps, MIDI composition/editing, stem separation, and role override. For audio clip or stem pitch/key changes, use clip_edit pitch_shift with semitones or delta_semitones, not a Pitch Shift effect or automation, unless the user explicitly asks for an effect or automation. For group bus plugin or mix requests, target the existing group with scope=group plus group_id or group_name so the app edits the group bus, not each child row. Use row_group_edit only for creating, removing from, or folding/unfolding row groups. Use clip_edit glue for merge/consolidate/bounce-clip requests. For autotune, auto-tune, pitch correction, or Melodyne-style vocal tuning, add the built-in Pitch Corrector effect. For drum or beat-building requests using packaged samples, prefer action over explanation: choose semantically matching library files or advertised role aliases like role:kick, arrange them with musical spacing, and keep core roles like kick/snare/hats on separate rows when helpful. sample_insert creates audio clips; if selection is an instrument lane, target/create a nearby audio row instead of refusing. For 8+ bar starter grooves or build-ups, prefer a workable scaffold with repetition plus light variation or fills instead of one identical bar copied forever. If the user wants a placed sample swapped out, prefer replacing the targeted clips while preserving timing. Inspect existing plugin chains and selected MIDI note state when available: prefer modifying, unbypassing, extending, or reshaping what is already there when it is close, and remove conflicting effects or rewrite notes only when the current state clearly fights the user goal. Never use for pure sonic mix changes. Only emit actions the app can actually execute.',
+      'parameters': <String, dynamic>{
+        'type': 'object',
+        'properties': <String, dynamic>{
+          'assistant_message': {
+            'type': 'string',
+            'description':
+                'Short user-facing message in the user language. Must match the emitted action type, must not be a placeholder, and must not switch languages unless the user did.',
           },
-        },
-        <String, dynamic>{
-          'type': 'function',
-          'name': 'daw_assistant_actions',
-          'strict': false,
-          'description':
-              'Use for tutorials, project edits like BPM changes, row-group creation/folding, row color changes, library sample insertion or replacement, clip arrangement/editing, plugin CRUD, automation edits such as sidechain-like ducking, auto-pan, stereo movement, or filter sweeps, MIDI composition/editing, stem separation, and role override. For audio clip or stem pitch/key changes, use clip_edit pitch_shift with semitones or delta_semitones, not a Pitch Shift effect or automation, unless the user explicitly asks for an effect or automation. For group bus plugin or mix requests, target the existing group with scope=group plus group_id or group_name so the app edits the group bus, not each child row. Use row_group_edit only for creating, removing from, or folding/unfolding row groups. Use clip_edit glue for merge/consolidate/bounce-clip requests. For autotune, auto-tune, pitch correction, or Melodyne-style vocal tuning, add the built-in Pitch Corrector effect. For drum or beat-building requests using packaged samples, prefer action over explanation: choose semantically matching library files or advertised role aliases like role:kick, arrange them with musical spacing, and keep core roles like kick/snare/hats on separate rows when helpful. sample_insert creates audio clips; if selection is an instrument lane, target/create a nearby audio row instead of refusing. For 8+ bar starter grooves or build-ups, prefer a workable scaffold with repetition plus light variation or fills instead of one identical bar copied forever. If the user wants a placed sample swapped out, prefer replacing the targeted clips while preserving timing. Inspect existing plugin chains and selected MIDI note state when available: prefer modifying, unbypassing, extending, or reshaping what is already there when it is close, and remove conflicting effects or rewrite notes only when the current state clearly fights the user goal. Never use for pure sonic mix changes. Only emit actions the app can actually execute.',
-          'parameters': <String, dynamic>{
-            'type': 'object',
-            'properties': <String, dynamic>{
-              'assistant_message': {
-                'type': 'string',
-                'description':
-                    'Short user-facing message in the user language. Must match the emitted action type, must not be a placeholder, and must not switch languages unless the user did.',
-              },
-              'actions': {
-                'type': 'array',
-                'minItems': 1,
-                'items': {
-                  'oneOf': [
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['project_edit'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'operation': {
-                              'type': 'string',
-                              'enum': ['set_tempo'],
-                            },
-                            'tempo_bpm': {
-                              'type': 'number',
-                              'minimum': 20,
-                              'maximum': 999,
-                            },
-                            'bpm': {
-                              'type': 'number',
-                              'minimum': 20,
-                              'maximum': 999,
-                            },
-                            'time_stretch_audio': {
-                              'type': 'boolean',
-                              'description':
-                                  'True when the user asks to make the song/audio faster or slower. False for grid/metronome-only BPM edits.',
-                            },
-                            'preserve_pitch': {
-                              'type': 'boolean',
-                              'description':
-                                  'Use true by default for song-speed changes so pitch stays stable.',
-                            },
-                          },
-                          'required': ['operation'],
-                          'anyOf': [
-                            {
-                              'required': ['tempo_bpm'],
-                            },
-                            {
-                              'required': ['bpm'],
-                            },
-                          ],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['row_mix'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'operation': {
-                              'type': 'string',
-                              'enum': [
-                                'set_gain',
-                                'adjust_gain',
-                                'set_pan',
-                                'adjust_pan',
-                              ],
-                            },
-                            'target': _dawTargetSchema(),
-                            'row_index': {'type': 'integer', 'minimum': 0},
-                            'row_number': {'type': 'integer', 'minimum': 1},
-                            'track_number': {'type': 'integer', 'minimum': 1},
-                            'value': {'type': 'number'},
-                            'gain': {'type': 'number'},
-                            'gain_db': {'type': 'number'},
-                            'db': {'type': 'number'},
-                            'delta': {'type': 'number'},
-                            'delta_db': {'type': 'number'},
-                            'pan01': {
-                              'type': 'number',
-                              'minimum': 0,
-                              'maximum': 1,
-                            },
-                            'pan_signed': {
-                              'type': 'number',
-                              'minimum': -1,
-                              'maximum': 1,
-                            },
-                            'direction': {
-                              'type': 'string',
-                              'enum': [
-                                'up',
-                                'down',
-                                'left',
-                                'right',
-                                'center',
-                                'hard_left',
-                                'hard_right',
-                              ],
-                            },
-                          },
-                          'required': ['operation'],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['transport_control'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'operation': {
-                              'type': 'string',
-                              'enum': [
-                                'play',
-                                'pause',
-                                'stop',
-                                'restart',
-                                'toggle_play_pause',
-                                'start_recording',
-                                'stop_recording',
-                                'toggle_recording',
-                                'undo',
-                                'redo',
-                                'enable_metronome',
-                                'disable_metronome',
-                                'toggle_metronome',
-                                'enable_loop',
-                                'disable_loop',
-                                'toggle_loop',
-                              ],
-                            },
-                          },
-                          'required': ['operation'],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['row_create'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'operation': {
-                              'type': 'string',
-                              'enum': ['create'],
-                            },
-                            'position': {
-                              'type': 'string',
-                              'enum': ['end', 'above', 'below'],
-                            },
-                            'target': _dawTargetSchema(),
-                            'row_index': {'type': 'integer', 'minimum': 0},
-                            'row_number': {'type': 'integer', 'minimum': 1},
-                            'track_number': {'type': 'integer', 'minimum': 1},
-                            'name': {
-                              'type': 'string',
-                              'minLength': 1,
-                              'maxLength': 80,
-                            },
-                            'new_name': {
-                              'type': 'string',
-                              'minLength': 1,
-                              'maxLength': 80,
-                            },
-                          },
-                          'required': ['operation'],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['row_delete'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'operation': {
-                              'type': 'string',
-                              'enum': ['delete'],
-                            },
-                            'target': _dawTargetSchema(),
-                            'row_index': {'type': 'integer', 'minimum': 0},
-                            'row_indices': {
-                              'type': 'array',
-                              'items': {'type': 'integer', 'minimum': 0},
-                              'minItems': 1,
-                            },
-                            'track_indices': {
-                              'type': 'array',
-                              'items': {'type': 'integer', 'minimum': 0},
-                              'minItems': 1,
-                            },
-                          },
-                          'required': ['operation'],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['row_rename'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'operation': {
-                              'type': 'string',
-                              'enum': ['rename'],
-                            },
-                            'target': _dawTargetSchema(),
-                            'row_index': {'type': 'integer', 'minimum': 0},
-                            'name': {
-                              'type': 'string',
-                              'minLength': 1,
-                              'maxLength': 80,
-                            },
-                            'new_name': {
-                              'type': 'string',
-                              'minLength': 1,
-                              'maxLength': 80,
-                            },
-                          },
-                          'required': ['operation'],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['row_mute'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'operation': {
-                              'type': 'string',
-                              'enum': ['mute', 'unmute', 'toggle'],
-                            },
-                            'target': _dawTargetSchema(),
-                            'row_index': {'type': 'integer', 'minimum': 0},
-                            'row_indices': {
-                              'type': 'array',
-                              'items': {'type': 'integer', 'minimum': 0},
-                              'minItems': 1,
-                            },
-                            'track_indices': {
-                              'type': 'array',
-                              'items': {'type': 'integer', 'minimum': 0},
-                              'minItems': 1,
-                            },
-                            'group_id': {'type': 'string'},
-                            'group_name': {'type': 'string'},
-                          },
-                          'required': ['operation'],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['row_solo'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'operation': {
-                              'type': 'string',
-                              'enum': ['solo', 'unsolo', 'toggle'],
-                            },
-                            'target': _dawTargetSchema(),
-                            'row_index': {'type': 'integer', 'minimum': 0},
-                            'row_indices': {
-                              'type': 'array',
-                              'items': {'type': 'integer', 'minimum': 0},
-                              'minItems': 1,
-                            },
-                            'track_indices': {
-                              'type': 'array',
-                              'items': {'type': 'integer', 'minimum': 0},
-                              'minItems': 1,
-                            },
-                            'group_id': {'type': 'string'},
-                            'group_name': {'type': 'string'},
-                          },
-                          'required': ['operation'],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['row_select'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'operation': {
-                              'type': 'string',
-                              'enum': ['select'],
-                            },
-                            'target': _dawTargetSchema(),
-                            'row_index': {'type': 'integer', 'minimum': 0},
-                            'row_indices': {
-                              'type': 'array',
-                              'items': {'type': 'integer', 'minimum': 0},
-                              'minItems': 1,
-                            },
-                            'track_indices': {
-                              'type': 'array',
-                              'items': {'type': 'integer', 'minimum': 0},
-                              'minItems': 1,
-                            },
-                          },
-                          'required': ['operation'],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['row_color_edit'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'operation': {
-                              'type': 'string',
-                              'enum': ['set', 'clear'],
-                            },
-                            'target': _dawTargetSchema(),
-                            'row_indices': {
-                              'type': 'array',
-                              'items': {
-                                'type': 'integer',
-                                'minimum': 0,
-                              },
-                              'minItems': 1,
-                            },
-                            'track_indices': {
-                              'type': 'array',
-                              'items': {
-                                'type': 'integer',
-                                'minimum': 0,
-                              },
-                              'minItems': 1,
-                            },
-                            'color': {
-                              'type': 'integer',
-                              'minimum': 0,
-                            },
-                            'argb': {
-                              'type': 'integer',
-                              'minimum': 0,
-                            },
-                            'color_name': {'type': 'string'},
-                            'group_id': {'type': 'string'},
-                            'group_name': {'type': 'string'},
-                          },
-                          'required': ['operation'],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['row_group_edit'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'operation': {
-                              'type': 'string',
-                              'enum': [
-                                'create',
-                                'remove_row',
-                                'toggle_collapsed',
-                              ],
-                            },
-                            'target': _dawTargetSchema(),
-                            'row_indices': {
-                              'type': 'array',
-                              'items': {
-                                'type': 'integer',
-                                'minimum': 0,
-                              },
-                              'minItems': 1,
-                            },
-                            'track_indices': {
-                              'type': 'array',
-                              'items': {
-                                'type': 'integer',
-                                'minimum': 0,
-                              },
-                              'minItems': 1,
-                            },
-                            'rows': {
-                              'type': 'array',
-                              'items': {
-                                'type': 'integer',
-                                'minimum': 0,
-                              },
-                              'minItems': 1,
-                            },
-                            'group_id': {'type': 'string'},
-                            'group_name': {'type': 'string'},
-                            'name': {'type': 'string'},
-                            'color': {
-                              'type': 'integer',
-                              'minimum': 0,
-                            },
-                          },
-                          'required': ['operation'],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['audio_enhance'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'operation': {
-                              'type': 'string',
-                              'enum': ['phone_mic_cleanup'],
-                            },
-                            'target': _dawTargetSchema(),
-                          },
-                          'required': ['operation', 'target'],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['sample_insert'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'operation': {
-                              'type': 'string',
-                              'enum': [
-                                'insert_audio_clips',
-                                'replace_audio_clips',
-                              ],
-                            },
-                            'items': {
-                              'type': 'array',
-                              'minItems': 1,
-                              'items': {
-                                'type': 'object',
-                                'properties': {
-                                  'library_path': {'type': 'string'},
-                                  'target': _dawTargetSchema(),
-                                  'row_index': {
-                                    'type': 'integer',
-                                    'minimum': 0,
-                                  },
-                                  'start_ms': {'type': 'number'},
-                                  'start_measure': {'type': 'number'},
-                                  'start_beat': {'type': 'number'},
-                                  'repeat_count': {
-                                    'type': 'integer',
-                                    'minimum': 1,
-                                  },
-                                  'length_ms': {'type': 'number'},
-                                  'length_measures': {'type': 'number'},
-                                  'length_beats': {'type': 'number'},
-                                  'until_ms': {'type': 'number'},
-                                  'until_measure': {'type': 'number'},
-                                  'until_beat': {'type': 'number'},
-                                  'step_ms': {'type': 'number'},
-                                  'step_measures': {'type': 'number'},
-                                  'step_beats': {'type': 'number'},
-                                  'delta_rows': {
-                                    'type': 'integer',
-                                  },
-                                },
-                                'required': ['library_path'],
-                                'additionalProperties': true,
-                              },
-                            },
-                          },
-                          'required': ['operation', 'items'],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['tutorial'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'topic': {'type': 'string'},
-                            'steps': {
-                              'type': 'array',
-                              'minItems': 1,
-                              'items': {
-                                'type': 'object',
-                                'properties': {
-                                  'text': {'type': 'string'},
-                                  'target_id': {'type': 'string'},
-                                },
-                                'required': ['text'],
-                                'additionalProperties': true,
-                              },
-                            },
-                          },
-                          'anyOf': [
-                            {
-                              'required': ['topic'],
-                            },
-                            {
-                              'required': ['steps'],
-                            },
-                          ],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['clarify'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'question': {'type': 'string'},
-                            'options': {
-                              'type': 'array',
-                              'items': {'type': 'string'},
-                              'minItems': 2,
-                            },
-                          },
-                          'required': ['question', 'options'],
-                          'additionalProperties': false,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['clip_edit'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'operation': {
-                              'type': 'string',
-                              'enum': [
-                                'trim',
-                                'auto_trim',
-                                'cut',
-                                'stretch',
-                                'pitch_shift',
-                                'glue',
-                                'move',
-                                'tempo_follow',
-                                'auto_bpm_align',
-                                'align_first_sound',
-                                'tempo_detect_set_project',
-                                'duplicate',
-                                'delete',
-                                'dialog_cleanup',
-                                'dialog_remove_range',
-                                'dialog_tighten_pauses',
-                                'dialog_lift_quiet',
-                              ],
-                            },
-                            'target': _dawTargetSchema(),
-                            'trim_side': {
-                              'type': 'string',
-                              'enum': ['start', 'end'],
-                            },
-                            'new_start_ms': {'type': 'number'},
-                            'target_ms': {'type': 'number'},
-                            'align_to_ms': {'type': 'number'},
-                            'first_sound_target_ms': {'type': 'number'},
-                            'align_to': {
-                              'type': 'string',
-                              'enum': [
-                                'playhead',
-                                'nearest_beat',
-                                'nearest_bar',
-                                'bar',
-                                'beat',
-                                'project_start',
-                                'clip_start',
-                              ],
-                            },
-                            'bar_index': {'type': 'number'},
-                            'beat_index': {'type': 'number'},
-                            'paste_start_ms': {'type': 'number'},
-                            'delta_ms': {'type': 'number'},
-                            'new_start_measure': {'type': 'number'},
-                            'paste_start_measure': {'type': 'number'},
-                            'delta_measures': {'type': 'number'},
-                            'step_ms': {'type': 'number'},
-                            'step_measures': {'type': 'number'},
-                            'step_beats': {'type': 'number'},
-                            'repeat_count': {
-                              'type': 'integer',
-                              'minimum': 1,
-                            },
-                            'length_ms': {'type': 'number'},
-                            'length_measures': {'type': 'number'},
-                            'length_beats': {'type': 'number'},
-                            'semitones': {'type': 'number'},
-                            'delta_semitones': {'type': 'number'},
-                            'pitch_semitones': {'type': 'number'},
-                            'new_pitch_semitones': {'type': 'number'},
-                            'mode': {
-                              'type': 'string',
-                              'enum': ['set', 'delta'],
-                            },
-                            'until_ms': {'type': 'number'},
-                            'until_measure': {'type': 'number'},
-                            'until_beat': {'type': 'number'},
-                            'direction': {
-                              'type': 'string',
-                              'enum': ['left', 'right', 'up', 'down'],
-                            },
-                            'new_row_index': {
-                              'type': 'integer',
-                              'minimum': 0,
-                            },
-                            'timeline_duration_ms': {'type': 'number'},
-                            'duration_ms': {'type': 'number'},
-                            'beats_per_bar': {'type': 'number'},
-                            'from_ms': {'type': 'number'},
-                            'to_ms': {'type': 'number'},
-                            'ranges': {
-                              'type': 'array',
-                              'items': {
-                                'type': 'object',
-                                'properties': {
-                                  'from_ms': {'type': 'number'},
-                                  'to_ms': {'type': 'number'},
-                                },
-                                'required': ['from_ms', 'to_ms'],
-                                'additionalProperties': false,
-                              },
-                            },
-                            'max_edits': {
-                              'type': 'integer',
-                              'minimum': 1,
-                            },
-                            'boost_db': {'type': 'number'},
-                            'max_gain': {'type': 'number'},
-                            'min_quiet_ms': {'type': 'number'},
-                            'min_pause_ms': {'type': 'number'},
-                            'keep_pause_ms': {'type': 'number'},
-                          },
-                          'required': ['operation', 'target'],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['effect_edit'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'operation': {
-                              'type': 'string',
-                              'enum': [
-                                'add',
-                                'remove',
-                                'bypass',
-                                'unbypass',
-                                'toggle_bypass',
-                              ],
-                            },
-                            'target': _dawTargetSchema(allowMasterScope: true),
-                          },
-                          'required': ['operation', 'target'],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['automation_edit'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'operation': {
-                              'type': 'string',
-                              'enum': [
-                                'set_points',
-                                'add_ramp',
-                                'clear',
-                                'apply_template',
-                              ],
-                            },
-                            'target': _dawTargetSchema(),
-                            'template': {'type': 'string'},
-                            'points': {
-                              'type': 'array',
-                              'minItems': 1,
-                              'items': {
-                                'type': 'object',
-                                'properties': {
-                                  'time_ms': {'type': 'number'},
-                                  'value': {'type': 'number'},
-                                },
-                                'required': ['time_ms', 'value'],
-                                'additionalProperties': true,
-                              },
-                            },
-                            'start_ms': {'type': 'number'},
-                            'length_ms': {'type': 'number'},
-                            'delta_ms': {'type': 'number'},
-                            'source_clip_index': {
-                              'type': 'integer',
-                              'minimum': 0,
-                            },
-                            'source_row_index': {
-                              'type': 'integer',
-                              'minimum': 0,
-                            },
-                            'source_role': {'type': 'string'},
-                            'min_spacing_ms': {'type': 'number'},
-                            'duck_value': {'type': 'number'},
-                            'recover_value': {'type': 'number'},
-                            'direction': {
-                              'type': 'string',
-                              'enum': ['left', 'right'],
-                            },
-                            'from_ms': {'type': 'number'},
-                            'to_ms': {'type': 'number'},
-                            'start_value': {'type': 'number'},
-                            'end_value': {'type': 'number'},
-                            'value_mode': {
-                              'type': 'string',
-                              'enum': ['normalized', 'real'],
-                            },
-                          },
-                          'required': ['operation', 'target'],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['midi_compose'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'operation': {
-                              'type': 'string',
-                              'enum': [
-                                'create_clip',
-                                'compose_bassline',
-                                'compose_pattern',
-                                'replace_notes',
-                                'append_notes',
-                                'transpose_notes',
-                                'convert_audio_to_midi',
-                              ],
-                            },
-                            'target': _dawTargetSchema(),
-                            'notes': {
-                              'type': 'array',
-                              'minItems': 1,
-                              'items': _midiNoteSchema(),
-                            },
-                            'progression': {
-                              'oneOf': [
-                                {
-                                  'type': 'array',
-                                  'items': {'type': 'string'},
-                                  'minItems': 1,
-                                },
-                                {
-                                  'type': 'string',
-                                },
-                              ],
-                            },
-                            'beats_per_chord': {'type': 'number'},
-                            'notes_per_chord': {
-                              'type': 'integer',
-                              'minimum': 1
-                            },
-                            'octave': {'type': 'integer'},
-                            'semitones': {'type': 'number'},
-                            'octaves': {'type': 'number'},
-                            'instrument_id': {
-                              'type': 'string',
-                              'description':
-                                  'Built-in instrument id from LIBRARY_SNAPSHOT, for example mixroom.sub_bass or mixroom.air_pluck. Use this when creating a new MIDI clip on a packaged instrument. For generic harmony, chord, or piano MIDI requests with no specified instrument, prefer sfz.vsco.upright_piano when it is available in LIBRARY_SNAPSHOT.',
-                            },
-                            'instrument_name': {'type': 'string'},
-                            'start_ms': {'type': 'number'},
-                            'create_new_clip': {'type': 'boolean'},
-                            'preserve_existing_notes': {'type': 'boolean'},
-                          },
-                          'required': ['operation', 'target'],
-                          'anyOf': [
-                            {
-                              'required': ['notes'],
-                            },
-                            {
-                              'required': ['progression'],
-                            },
-                            {
-                              'properties': {
-                                'operation': {'const': 'transpose_notes'},
-                              },
-                              'required': ['semitones'],
-                            },
-                            {
-                              'properties': {
-                                'operation': {'const': 'transpose_notes'},
-                              },
-                              'required': ['octaves'],
-                            },
-                            {
-                              'properties': {
-                                'operation': {
-                                  'const': 'convert_audio_to_midi',
-                                },
-                              },
-                            },
-                            {
-                              'properties': {
-                                'operation': {
-                                  'enum': ['replace_notes', 'append_notes'],
-                                },
-                                'preserve_existing_notes': {'const': true},
-                              },
-                              'anyOf': [
-                                {
-                                  'required': ['length_measures'],
-                                },
-                                {
-                                  'required': ['length_beats'],
-                                },
-                              ],
-                            },
-                          ],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['midi_compose'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'operation': {
-                              'type': 'string',
-                              'enum': ['chop_notes'],
-                            },
-                            'target': _dawTargetSchema(),
-                            'subdivision': {
-                              'type': 'integer',
-                              'minimum': 1,
-                            },
-                            'velocity_decay_per_slice': {
-                              'type': 'number',
-                            },
-                            'velocity_jitter': {
-                              'type': 'number',
-                            },
-                            'velocity_floor': {
-                              'type': 'number',
-                            },
-                          },
-                          'required': ['operation', 'target', 'subdivision'],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['stem_separate'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'operation': {
-                              'type': 'string',
-                              'enum': ['vocal_instrumental'],
-                            },
-                            'target': _dawTargetSchema(),
-                          },
-                          'required': ['operation', 'target'],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['role_override'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'operation': {
-                              'type': 'string',
-                              'enum': ['set'],
-                            },
-                            'target': _dawTargetSchema(),
-                            'role': {
-                              'type': 'string',
-                              'enum': [
-                                'vocals',
-                                'drums',
-                                'bass',
-                                'guitar',
-                                'synth',
-                                'other',
-                              ],
-                            },
-                          },
-                          'required': ['operation', 'target', 'role'],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                    {
-                      'type': 'object',
-                      'properties': {
-                        'type': {
-                          'type': 'string',
-                          'enum': ['role_override'],
-                        },
-                        'data': {
-                          'type': 'object',
-                          'properties': {
-                            'operation': {
-                              'type': 'string',
-                              'enum': ['clear'],
-                            },
-                            'target': _dawTargetSchema(),
-                          },
-                          'required': ['operation', 'target'],
-                          'additionalProperties': true,
-                        },
-                      },
-                      'required': ['type', 'data'],
-                      'additionalProperties': false,
-                    },
-                  ],
-                },
-              },
-            },
-            'required': ['assistant_message', 'actions'],
-            'additionalProperties': false,
-          },
-        },
-        <String, dynamic>{
-          'type': 'function',
-          'name': 'mix_model_request',
-          'strict': false,
-          'description':
-              'Use only for sonic mix changes on existing project material. Never use for clip movement, plugin CRUD, automation edits, MIDI writing, tutorials, stem separation, or unsupported features. Use reset_fx only for true reset/remix cases or when the current chain clearly conflicts with the requested broad vibe.',
-          'parameters': <String, dynamic>{
-            'type': 'object',
-            'properties': <String, dynamic>{
-              'mode': {
-                'type': 'string',
-                'enum': ['execute', 'propose'],
-                'description':
-                    'Use execute for clear actionable mix changes. Use propose only for alternative approaches that need approval.',
-              },
-              'assistant_message': {
-                'type': 'string',
-                'description':
-                    'Single short user-facing message describing the overall mix action in the user language.',
-              },
-              'asks_permission': {
-                'type': 'boolean',
-              },
-              'actions': {
-                'type': 'array',
-                'minItems': 1,
-                'description': 'One or more mix actions to apply.',
-                'items': {
+          'actions': {
+            'type': 'array',
+            'minItems': 1,
+            'items': {
+              'oneOf': [
+                {
                   'type': 'object',
                   'properties': {
-                    'goal': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['project_edit'],
+                    },
+                    'data': {
                       'type': 'object',
                       'properties': {
-                        'type': {
+                        'operation': {
                           'type': 'string',
-                          'enum': ['mix_request'],
-                          'description':
-                              'Always mix_request. Put the sonic intent in intents[].kind.',
+                          'enum': ['set_tempo'],
                         },
-                        'intents': {
+                        'tempo_bpm': {
+                          'type': 'number',
+                          'minimum': 20,
+                          'maximum': 999,
+                        },
+                        'bpm': {
+                          'type': 'number',
+                          'minimum': 20,
+                          'maximum': 999,
+                        },
+                        'time_stretch_audio': {
+                          'type': 'boolean',
+                          'description':
+                              'True when the user asks to make the song/audio faster or slower. False for grid/metronome-only BPM edits.',
+                        },
+                        'preserve_pitch': {
+                          'type': 'boolean',
+                          'description':
+                              'Use true by default for song-speed changes so pitch stays stable.',
+                        },
+                      },
+                      'required': ['operation'],
+                      'anyOf': [
+                        {
+                          'required': ['tempo_bpm'],
+                        },
+                        {
+                          'required': ['bpm'],
+                        },
+                      ],
+                      'additionalProperties': true,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['row_mix'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'operation': {
+                          'type': 'string',
+                          'enum': [
+                            'set_gain',
+                            'adjust_gain',
+                            'set_pan',
+                            'adjust_pan',
+                          ],
+                        },
+                        'target': _dawTargetSchema(),
+                        'row_index': {'type': 'integer', 'minimum': 0},
+                        'row_number': {'type': 'integer', 'minimum': 1},
+                        'track_number': {'type': 'integer', 'minimum': 1},
+                        'value': {'type': 'number'},
+                        'gain': {'type': 'number'},
+                        'gain_db': {'type': 'number'},
+                        'db': {'type': 'number'},
+                        'delta': {'type': 'number'},
+                        'delta_db': {'type': 'number'},
+                        'pan01': {'type': 'number', 'minimum': 0, 'maximum': 1},
+                        'pan_signed': {
+                          'type': 'number',
+                          'minimum': -1,
+                          'maximum': 1,
+                        },
+                        'direction': {
+                          'type': 'string',
+                          'enum': [
+                            'up',
+                            'down',
+                            'left',
+                            'right',
+                            'center',
+                            'hard_left',
+                            'hard_right',
+                          ],
+                        },
+                      },
+                      'required': ['operation'],
+                      'additionalProperties': true,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['transport_control'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'operation': {
+                          'type': 'string',
+                          'enum': [
+                            'play',
+                            'pause',
+                            'stop',
+                            'restart',
+                            'toggle_play_pause',
+                            'start_recording',
+                            'stop_recording',
+                            'toggle_recording',
+                            'undo',
+                            'redo',
+                            'enable_metronome',
+                            'disable_metronome',
+                            'toggle_metronome',
+                            'enable_loop',
+                            'disable_loop',
+                            'toggle_loop',
+                          ],
+                        },
+                      },
+                      'required': ['operation'],
+                      'additionalProperties': true,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['row_create'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'operation': {
+                          'type': 'string',
+                          'enum': ['create'],
+                        },
+                        'position': {
+                          'type': 'string',
+                          'enum': ['end', 'above', 'below'],
+                        },
+                        'target': _dawTargetSchema(),
+                        'row_index': {'type': 'integer', 'minimum': 0},
+                        'row_number': {'type': 'integer', 'minimum': 1},
+                        'track_number': {'type': 'integer', 'minimum': 1},
+                        'name': {
+                          'type': 'string',
+                          'minLength': 1,
+                          'maxLength': 80,
+                        },
+                        'new_name': {
+                          'type': 'string',
+                          'minLength': 1,
+                          'maxLength': 80,
+                        },
+                      },
+                      'required': ['operation'],
+                      'additionalProperties': true,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['row_delete'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'operation': {
+                          'type': 'string',
+                          'enum': ['delete'],
+                        },
+                        'target': _dawTargetSchema(),
+                        'row_index': {'type': 'integer', 'minimum': 0},
+                        'row_indices': {
+                          'type': 'array',
+                          'items': {'type': 'integer', 'minimum': 0},
+                          'minItems': 1,
+                        },
+                        'track_indices': {
+                          'type': 'array',
+                          'items': {'type': 'integer', 'minimum': 0},
+                          'minItems': 1,
+                        },
+                      },
+                      'required': ['operation'],
+                      'additionalProperties': true,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['row_rename'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'operation': {
+                          'type': 'string',
+                          'enum': ['rename'],
+                        },
+                        'target': _dawTargetSchema(),
+                        'row_index': {'type': 'integer', 'minimum': 0},
+                        'name': {
+                          'type': 'string',
+                          'minLength': 1,
+                          'maxLength': 80,
+                        },
+                        'new_name': {
+                          'type': 'string',
+                          'minLength': 1,
+                          'maxLength': 80,
+                        },
+                      },
+                      'required': ['operation'],
+                      'additionalProperties': true,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['row_mute'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'operation': {
+                          'type': 'string',
+                          'enum': ['mute', 'unmute', 'toggle'],
+                        },
+                        'target': _dawTargetSchema(),
+                        'row_index': {'type': 'integer', 'minimum': 0},
+                        'row_indices': {
+                          'type': 'array',
+                          'items': {'type': 'integer', 'minimum': 0},
+                          'minItems': 1,
+                        },
+                        'track_indices': {
+                          'type': 'array',
+                          'items': {'type': 'integer', 'minimum': 0},
+                          'minItems': 1,
+                        },
+                        'group_id': {'type': 'string'},
+                        'group_name': {'type': 'string'},
+                      },
+                      'required': ['operation'],
+                      'additionalProperties': true,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['row_solo'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'operation': {
+                          'type': 'string',
+                          'enum': ['solo', 'unsolo', 'toggle'],
+                        },
+                        'target': _dawTargetSchema(),
+                        'row_index': {'type': 'integer', 'minimum': 0},
+                        'row_indices': {
+                          'type': 'array',
+                          'items': {'type': 'integer', 'minimum': 0},
+                          'minItems': 1,
+                        },
+                        'track_indices': {
+                          'type': 'array',
+                          'items': {'type': 'integer', 'minimum': 0},
+                          'minItems': 1,
+                        },
+                        'group_id': {'type': 'string'},
+                        'group_name': {'type': 'string'},
+                      },
+                      'required': ['operation'],
+                      'additionalProperties': true,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['row_select'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'operation': {
+                          'type': 'string',
+                          'enum': ['select'],
+                        },
+                        'target': _dawTargetSchema(),
+                        'row_index': {'type': 'integer', 'minimum': 0},
+                        'row_indices': {
+                          'type': 'array',
+                          'items': {'type': 'integer', 'minimum': 0},
+                          'minItems': 1,
+                        },
+                        'track_indices': {
+                          'type': 'array',
+                          'items': {'type': 'integer', 'minimum': 0},
+                          'minItems': 1,
+                        },
+                      },
+                      'required': ['operation'],
+                      'additionalProperties': true,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['row_color_edit'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'operation': {
+                          'type': 'string',
+                          'enum': ['set', 'clear'],
+                        },
+                        'target': _dawTargetSchema(),
+                        'row_indices': {
+                          'type': 'array',
+                          'items': {'type': 'integer', 'minimum': 0},
+                          'minItems': 1,
+                        },
+                        'track_indices': {
+                          'type': 'array',
+                          'items': {'type': 'integer', 'minimum': 0},
+                          'minItems': 1,
+                        },
+                        'color': {'type': 'integer', 'minimum': 0},
+                        'argb': {'type': 'integer', 'minimum': 0},
+                        'color_name': {'type': 'string'},
+                        'group_id': {'type': 'string'},
+                        'group_name': {'type': 'string'},
+                      },
+                      'required': ['operation'],
+                      'additionalProperties': true,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['row_group_edit'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'operation': {
+                          'type': 'string',
+                          'enum': ['create', 'remove_row', 'toggle_collapsed'],
+                        },
+                        'target': _dawTargetSchema(),
+                        'row_indices': {
+                          'type': 'array',
+                          'items': {'type': 'integer', 'minimum': 0},
+                          'minItems': 1,
+                        },
+                        'track_indices': {
+                          'type': 'array',
+                          'items': {'type': 'integer', 'minimum': 0},
+                          'minItems': 1,
+                        },
+                        'rows': {
+                          'type': 'array',
+                          'items': {'type': 'integer', 'minimum': 0},
+                          'minItems': 1,
+                        },
+                        'group_id': {'type': 'string'},
+                        'group_name': {'type': 'string'},
+                        'name': {'type': 'string'},
+                        'color': {'type': 'integer', 'minimum': 0},
+                      },
+                      'required': ['operation'],
+                      'additionalProperties': true,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['audio_enhance'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'operation': {
+                          'type': 'string',
+                          'enum': ['phone_mic_cleanup'],
+                        },
+                        'target': _dawTargetSchema(),
+                      },
+                      'required': ['operation', 'target'],
+                      'additionalProperties': true,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['sample_insert'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'operation': {
+                          'type': 'string',
+                          'enum': ['insert_audio_clips', 'replace_audio_clips'],
+                        },
+                        'items': {
                           'type': 'array',
                           'minItems': 1,
                           'items': {
                             'type': 'object',
                             'properties': {
-                              'kind': {
-                                'type': 'string',
-                                'enum': [
-                                  'gain',
-                                  'pan',
-                                  'eq',
-                                  'reverb',
-                                  'delay',
-                                  'distortion',
-                                  'deesser',
-                                  'compressor',
-                                  'limiter',
-                                  'clipper',
-                                  'balance',
-                                ],
-                              },
-                              'direction': {
-                                'type': 'string',
-                                'enum': [
-                                  'up',
-                                  'down',
-                                  'left',
-                                  'right',
-                                  'center',
-                                  'widen',
-                                  'narrow',
-                                  'remove',
-                                  'null'
-                                ],
-                              },
-                              'descriptor': {
-                                'type': 'string',
-                                'enum': [
-                                  'mud_cut',
-                                  'box_cut',
-                                  'boom_cut',
-                                  'harsh_cut',
-                                  'presence_boost',
-                                  'air_boost',
-                                  'warmth_boost',
-                                  'thin_fix',
-                                  'dull_fix',
-                                  'low_cut',
-                                  'high_cut',
-                                  'null',
-                                ],
-                              },
-                              'confidence': {'type': 'number'},
+                              'library_path': {'type': 'string'},
+                              'target': _dawTargetSchema(),
+                              'row_index': {'type': 'integer', 'minimum': 0},
+                              'start_ms': {'type': 'number'},
+                              'start_measure': {'type': 'number'},
+                              'start_beat': {'type': 'number'},
+                              'repeat_count': {'type': 'integer', 'minimum': 1},
+                              'length_ms': {'type': 'number'},
+                              'length_measures': {'type': 'number'},
+                              'length_beats': {'type': 'number'},
+                              'until_ms': {'type': 'number'},
+                              'until_measure': {'type': 'number'},
+                              'until_beat': {'type': 'number'},
+                              'step_ms': {'type': 'number'},
+                              'step_measures': {'type': 'number'},
+                              'step_beats': {'type': 'number'},
+                              'delta_rows': {'type': 'integer'},
                             },
-                            'required': ['kind', 'confidence'],
+                            'required': ['library_path'],
+                            'additionalProperties': true,
                           },
                         },
-                        'target': {
-                          'type': 'object',
-                          'oneOf': [
-                            {
-                              'properties': {
-                                'scope': {
-                                  'type': 'string',
-                                  'enum': ['master']
-                                },
-                                'confidence': {'type': 'number'},
-                              },
-                              'required': ['scope', 'confidence'],
-                              'additionalProperties': false,
-                            },
-                            {
-                              'properties': {
-                                'role': {'type': 'string'},
-                                'row_index': {
-                                  'type': 'integer',
-                                  'minimum': 0,
-                                },
-                                'group_id': {'type': 'string'},
-                                'group_name': {'type': 'string'},
-                                'scope': {
-                                  'type': 'string',
-                                  'enum': ['auto', 'row', 'group']
-                                },
-                                'confidence': {'type': 'number'},
-                              },
-                              'required': ['scope', 'confidence'],
-                              'additionalProperties': false,
-                            },
-                          ],
-                        },
-                        'intensity': {'type': 'number'},
-                        'execution_profile': {
-                          'type': 'string',
-                          'enum': [
-                            'producer_safe',
-                            'creative_bold',
-                            'experimental_extreme',
-                          ],
-                          'description':
-                              'How conservative or stylized the mix lane should be. producer_safe = tasteful standard mix decisions, creative_bold = obvious/stylized but still musical, experimental_extreme = intentionally exaggerated or destructive.',
-                        },
-                        'audibility': {
-                          'type': 'string',
-                          'enum': [
-                            'subtle',
-                            'noticeable',
-                            'obvious',
-                            'extreme',
-                          ],
-                          'description':
-                              'How audible the result should feel to the user, independent of the intent kind.',
-                        },
-                        'reference_target': {
-                          'type': 'object',
-                          'oneOf': [
-                            {
-                              'properties': {
-                                'row_index': {
-                                  'type': 'integer',
-                                  'minimum': 0,
-                                },
-                                'confidence': {'type': 'number'},
-                              },
-                              'required': ['row_index', 'confidence'],
-                              'additionalProperties': false,
-                            },
-                            {
-                              'properties': {
-                                'prefer_selected': {
-                                  'type': 'boolean',
-                                  'enum': [true]
-                                },
-                                'confidence': {'type': 'number'},
-                              },
-                              'required': ['prefer_selected', 'confidence'],
-                              'additionalProperties': false,
-                            },
-                          ],
-                          'description':
-                              'Optional in-project reference row for mix matching. Use row_index when clear from PROJECT_SNAPSHOT, especially when labels, filenames, coverage, source_type, or reference cues make one row obviously reference-like. Use prefer_selected when the reference track is currently selected.',
-                        },
-                        'reference_mode': {
-                          'type': 'string',
-                          'enum': [
-                            'tone',
-                            'loudness',
-                            'width',
-                            'glue',
-                            'full_mix',
-                          ],
-                          'description':
-                              'Which dimensions of the in-project reference to match. full_mix means broad tone+loudness+width+glue matching.',
-                        },
-                        'reference_closeness': {
-                          'type': 'string',
-                          'enum': ['loose', 'balanced', 'close'],
-                          'description':
-                              'How tightly to chase the in-project reference profile.',
-                        },
-                        'reset_fx': {
-                          'type': 'boolean',
-                          'description':
-                              'Set true only when a reset/remix or clean rebuild is clearly preferable to tweaking the current chain. Leave false for ordinary incremental mix moves.',
-                        },
                       },
-                      'required': [
-                        'type',
-                        'intents',
-                        'target',
-                        'intensity',
-                        'execution_profile',
-                        'audibility',
-                      ],
+                      'required': ['operation', 'items'],
+                      'additionalProperties': true,
                     },
                   },
-                  'required': ['goal'],
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
                 },
-              },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['tutorial'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'topic': {'type': 'string'},
+                        'steps': {
+                          'type': 'array',
+                          'minItems': 1,
+                          'items': {
+                            'type': 'object',
+                            'properties': {
+                              'text': {'type': 'string'},
+                              'target_id': {'type': 'string'},
+                            },
+                            'required': ['text'],
+                            'additionalProperties': true,
+                          },
+                        },
+                      },
+                      'anyOf': [
+                        {
+                          'required': ['topic'],
+                        },
+                        {
+                          'required': ['steps'],
+                        },
+                      ],
+                      'additionalProperties': true,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['clarify'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'question': {'type': 'string'},
+                        'options': {
+                          'type': 'array',
+                          'items': {'type': 'string'},
+                          'minItems': 2,
+                        },
+                      },
+                      'required': ['question', 'options'],
+                      'additionalProperties': false,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['clip_edit'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'operation': {
+                          'type': 'string',
+                          'enum': [
+                            'trim',
+                            'auto_trim',
+                            'cut',
+                            'stretch',
+                            'pitch_shift',
+                            'glue',
+                            'move',
+                            'tempo_follow',
+                            'auto_bpm_align',
+                            'align_first_sound',
+                            'tempo_detect_set_project',
+                            'duplicate',
+                            'delete',
+                            'dialog_cleanup',
+                            'dialog_remove_range',
+                            'dialog_tighten_pauses',
+                            'dialog_lift_quiet',
+                          ],
+                        },
+                        'target': _dawTargetSchema(),
+                        'trim_side': {
+                          'type': 'string',
+                          'enum': ['start', 'end'],
+                        },
+                        'new_start_ms': {'type': 'number'},
+                        'target_ms': {'type': 'number'},
+                        'align_to_ms': {'type': 'number'},
+                        'first_sound_target_ms': {'type': 'number'},
+                        'align_to': {
+                          'type': 'string',
+                          'enum': [
+                            'playhead',
+                            'nearest_beat',
+                            'nearest_bar',
+                            'bar',
+                            'beat',
+                            'project_start',
+                            'clip_start',
+                          ],
+                        },
+                        'bar_index': {'type': 'number'},
+                        'beat_index': {'type': 'number'},
+                        'paste_start_ms': {'type': 'number'},
+                        'delta_ms': {'type': 'number'},
+                        'new_start_measure': {'type': 'number'},
+                        'paste_start_measure': {'type': 'number'},
+                        'delta_measures': {'type': 'number'},
+                        'step_ms': {'type': 'number'},
+                        'step_measures': {'type': 'number'},
+                        'step_beats': {'type': 'number'},
+                        'repeat_count': {'type': 'integer', 'minimum': 1},
+                        'length_ms': {'type': 'number'},
+                        'length_measures': {'type': 'number'},
+                        'length_beats': {'type': 'number'},
+                        'semitones': {'type': 'number'},
+                        'delta_semitones': {'type': 'number'},
+                        'pitch_semitones': {'type': 'number'},
+                        'new_pitch_semitones': {'type': 'number'},
+                        'mode': {
+                          'type': 'string',
+                          'enum': ['set', 'delta'],
+                        },
+                        'until_ms': {'type': 'number'},
+                        'until_measure': {'type': 'number'},
+                        'until_beat': {'type': 'number'},
+                        'direction': {
+                          'type': 'string',
+                          'enum': ['left', 'right', 'up', 'down'],
+                        },
+                        'new_row_index': {'type': 'integer', 'minimum': 0},
+                        'timeline_duration_ms': {'type': 'number'},
+                        'duration_ms': {'type': 'number'},
+                        'beats_per_bar': {'type': 'number'},
+                        'from_ms': {'type': 'number'},
+                        'to_ms': {'type': 'number'},
+                        'ranges': {
+                          'type': 'array',
+                          'items': {
+                            'type': 'object',
+                            'properties': {
+                              'from_ms': {'type': 'number'},
+                              'to_ms': {'type': 'number'},
+                            },
+                            'required': ['from_ms', 'to_ms'],
+                            'additionalProperties': false,
+                          },
+                        },
+                        'max_edits': {'type': 'integer', 'minimum': 1},
+                        'boost_db': {'type': 'number'},
+                        'max_gain': {'type': 'number'},
+                        'min_quiet_ms': {'type': 'number'},
+                        'min_pause_ms': {'type': 'number'},
+                        'keep_pause_ms': {'type': 'number'},
+                      },
+                      'required': ['operation', 'target'],
+                      'additionalProperties': true,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['effect_edit'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'operation': {
+                          'type': 'string',
+                          'enum': [
+                            'add',
+                            'remove',
+                            'bypass',
+                            'unbypass',
+                            'toggle_bypass',
+                          ],
+                        },
+                        'target': _dawTargetSchema(allowMasterScope: true),
+                      },
+                      'required': ['operation', 'target'],
+                      'additionalProperties': true,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['automation_edit'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'operation': {
+                          'type': 'string',
+                          'enum': [
+                            'set_points',
+                            'add_ramp',
+                            'clear',
+                            'apply_template',
+                          ],
+                        },
+                        'target': _dawTargetSchema(),
+                        'template': {'type': 'string'},
+                        'points': {
+                          'type': 'array',
+                          'minItems': 1,
+                          'items': {
+                            'type': 'object',
+                            'properties': {
+                              'time_ms': {'type': 'number'},
+                              'value': {'type': 'number'},
+                            },
+                            'required': ['time_ms', 'value'],
+                            'additionalProperties': true,
+                          },
+                        },
+                        'start_ms': {'type': 'number'},
+                        'length_ms': {'type': 'number'},
+                        'delta_ms': {'type': 'number'},
+                        'source_clip_index': {'type': 'integer', 'minimum': 0},
+                        'source_row_index': {'type': 'integer', 'minimum': 0},
+                        'source_role': {'type': 'string'},
+                        'min_spacing_ms': {'type': 'number'},
+                        'duck_value': {'type': 'number'},
+                        'recover_value': {'type': 'number'},
+                        'direction': {
+                          'type': 'string',
+                          'enum': ['left', 'right'],
+                        },
+                        'from_ms': {'type': 'number'},
+                        'to_ms': {'type': 'number'},
+                        'start_value': {'type': 'number'},
+                        'end_value': {'type': 'number'},
+                        'value_mode': {
+                          'type': 'string',
+                          'enum': ['normalized', 'real'],
+                        },
+                      },
+                      'required': ['operation', 'target'],
+                      'additionalProperties': true,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['midi_compose'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'operation': {
+                          'type': 'string',
+                          'enum': [
+                            'create_clip',
+                            'compose_bassline',
+                            'compose_pattern',
+                            'replace_notes',
+                            'append_notes',
+                            'transpose_notes',
+                            'convert_audio_to_midi',
+                          ],
+                        },
+                        'target': _dawTargetSchema(),
+                        'notes': {
+                          'type': 'array',
+                          'minItems': 1,
+                          'items': _midiNoteSchema(),
+                        },
+                        'progression': {
+                          'oneOf': [
+                            {
+                              'type': 'array',
+                              'items': {'type': 'string'},
+                              'minItems': 1,
+                            },
+                            {'type': 'string'},
+                          ],
+                        },
+                        'beats_per_chord': {'type': 'number'},
+                        'notes_per_chord': {'type': 'integer', 'minimum': 1},
+                        'octave': {'type': 'integer'},
+                        'semitones': {'type': 'number'},
+                        'octaves': {'type': 'number'},
+                        'instrument_id': {
+                          'type': 'string',
+                          'description':
+                              'Built-in instrument id from LIBRARY_SNAPSHOT, for example mixroom.sub_bass or mixroom.air_pluck. Use this when creating a new MIDI clip on a packaged instrument. For generic harmony, chord, or piano MIDI requests with no specified instrument, prefer sfz.vsco.upright_piano when it is available in LIBRARY_SNAPSHOT.',
+                        },
+                        'instrument_name': {'type': 'string'},
+                        'start_ms': {'type': 'number'},
+                        'create_new_clip': {'type': 'boolean'},
+                        'preserve_existing_notes': {'type': 'boolean'},
+                      },
+                      'required': ['operation', 'target'],
+                      'anyOf': [
+                        {
+                          'required': ['notes'],
+                        },
+                        {
+                          'required': ['progression'],
+                        },
+                        {
+                          'properties': {
+                            'operation': {'const': 'transpose_notes'},
+                          },
+                          'required': ['semitones'],
+                        },
+                        {
+                          'properties': {
+                            'operation': {'const': 'transpose_notes'},
+                          },
+                          'required': ['octaves'],
+                        },
+                        {
+                          'properties': {
+                            'operation': {'const': 'convert_audio_to_midi'},
+                          },
+                        },
+                        {
+                          'properties': {
+                            'operation': {
+                              'enum': ['replace_notes', 'append_notes'],
+                            },
+                            'preserve_existing_notes': {'const': true},
+                          },
+                          'anyOf': [
+                            {
+                              'required': ['length_measures'],
+                            },
+                            {
+                              'required': ['length_beats'],
+                            },
+                          ],
+                        },
+                      ],
+                      'additionalProperties': true,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['midi_compose'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'operation': {
+                          'type': 'string',
+                          'enum': ['chop_notes'],
+                        },
+                        'target': _dawTargetSchema(),
+                        'subdivision': {'type': 'integer', 'minimum': 1},
+                        'velocity_decay_per_slice': {'type': 'number'},
+                        'velocity_jitter': {'type': 'number'},
+                        'velocity_floor': {'type': 'number'},
+                      },
+                      'required': ['operation', 'target', 'subdivision'],
+                      'additionalProperties': true,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['stem_separate'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'operation': {
+                          'type': 'string',
+                          'enum': ['vocal_instrumental'],
+                        },
+                        'target': _dawTargetSchema(),
+                      },
+                      'required': ['operation', 'target'],
+                      'additionalProperties': true,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['role_override'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'operation': {
+                          'type': 'string',
+                          'enum': ['set'],
+                        },
+                        'target': _dawTargetSchema(),
+                        'role': {
+                          'type': 'string',
+                          'enum': [
+                            'vocals',
+                            'drums',
+                            'bass',
+                            'guitar',
+                            'synth',
+                            'other',
+                          ],
+                        },
+                      },
+                      'required': ['operation', 'target', 'role'],
+                      'additionalProperties': true,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+                {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['role_override'],
+                    },
+                    'data': {
+                      'type': 'object',
+                      'properties': {
+                        'operation': {
+                          'type': 'string',
+                          'enum': ['clear'],
+                        },
+                        'target': _dawTargetSchema(),
+                      },
+                      'required': ['operation', 'target'],
+                      'additionalProperties': true,
+                    },
+                  },
+                  'required': ['type', 'data'],
+                  'additionalProperties': false,
+                },
+              ],
             },
-            'required': ['mode', 'assistant_message', 'actions'],
-            'additionalProperties': false,
           },
         },
-      ];
+        'required': ['assistant_message', 'actions'],
+        'additionalProperties': false,
+      },
+    },
+    <String, dynamic>{
+      'type': 'function',
+      'name': 'mix_model_request',
+      'strict': false,
+      'description':
+          'Use only for sonic mix changes on existing project material. Never use for clip movement, plugin CRUD, automation edits, MIDI writing, tutorials, stem separation, or unsupported features. Use reset_fx only for true reset/remix cases or when the current chain clearly conflicts with the requested broad vibe.',
+      'parameters': <String, dynamic>{
+        'type': 'object',
+        'properties': <String, dynamic>{
+          'mode': {
+            'type': 'string',
+            'enum': ['execute', 'propose'],
+            'description':
+                'Use execute for clear actionable mix changes. Use propose only for alternative approaches that need approval.',
+          },
+          'assistant_message': {
+            'type': 'string',
+            'description':
+                'Single short user-facing message describing the overall mix action in the user language.',
+          },
+          'asks_permission': {'type': 'boolean'},
+          'actions': {
+            'type': 'array',
+            'minItems': 1,
+            'description': 'One or more mix actions to apply.',
+            'items': {
+              'type': 'object',
+              'properties': {
+                'goal': {
+                  'type': 'object',
+                  'properties': {
+                    'type': {
+                      'type': 'string',
+                      'enum': ['mix_request'],
+                      'description':
+                          'Always mix_request. Put the sonic intent in intents[].kind.',
+                    },
+                    'intents': {
+                      'type': 'array',
+                      'minItems': 1,
+                      'items': {
+                        'type': 'object',
+                        'properties': {
+                          'kind': {
+                            'type': 'string',
+                            'enum': [
+                              'gain',
+                              'pan',
+                              'eq',
+                              'reverb',
+                              'delay',
+                              'distortion',
+                              'deesser',
+                              'compressor',
+                              'limiter',
+                              'clipper',
+                              'balance',
+                            ],
+                          },
+                          'direction': {
+                            'type': 'string',
+                            'enum': [
+                              'up',
+                              'down',
+                              'left',
+                              'right',
+                              'center',
+                              'widen',
+                              'narrow',
+                              'remove',
+                              'null',
+                            ],
+                          },
+                          'descriptor': {
+                            'type': 'string',
+                            'enum': [
+                              'mud_cut',
+                              'box_cut',
+                              'boom_cut',
+                              'harsh_cut',
+                              'presence_boost',
+                              'air_boost',
+                              'warmth_boost',
+                              'thin_fix',
+                              'dull_fix',
+                              'low_cut',
+                              'high_cut',
+                              'null',
+                            ],
+                          },
+                          'confidence': {'type': 'number'},
+                        },
+                        'required': ['kind', 'confidence'],
+                      },
+                    },
+                    'target': {
+                      'type': 'object',
+                      'oneOf': [
+                        {
+                          'properties': {
+                            'scope': {
+                              'type': 'string',
+                              'enum': ['master'],
+                            },
+                            'confidence': {'type': 'number'},
+                          },
+                          'required': ['scope', 'confidence'],
+                          'additionalProperties': false,
+                        },
+                        {
+                          'properties': {
+                            'role': {'type': 'string'},
+                            'row_index': {'type': 'integer', 'minimum': 0},
+                            'group_id': {'type': 'string'},
+                            'group_name': {'type': 'string'},
+                            'scope': {
+                              'type': 'string',
+                              'enum': ['auto', 'row', 'group'],
+                            },
+                            'confidence': {'type': 'number'},
+                          },
+                          'required': ['scope', 'confidence'],
+                          'additionalProperties': false,
+                        },
+                      ],
+                    },
+                    'intensity': {'type': 'number'},
+                    'execution_profile': {
+                      'type': 'string',
+                      'enum': [
+                        'producer_safe',
+                        'creative_bold',
+                        'experimental_extreme',
+                      ],
+                      'description':
+                          'How conservative or stylized the mix lane should be. producer_safe = tasteful standard mix decisions, creative_bold = obvious/stylized but still musical, experimental_extreme = intentionally exaggerated or destructive.',
+                    },
+                    'audibility': {
+                      'type': 'string',
+                      'enum': ['subtle', 'noticeable', 'obvious', 'extreme'],
+                      'description':
+                          'How audible the result should feel to the user, independent of the intent kind.',
+                    },
+                    'reference_target': {
+                      'type': 'object',
+                      'oneOf': [
+                        {
+                          'properties': {
+                            'row_index': {'type': 'integer', 'minimum': 0},
+                            'confidence': {'type': 'number'},
+                          },
+                          'required': ['row_index', 'confidence'],
+                          'additionalProperties': false,
+                        },
+                        {
+                          'properties': {
+                            'prefer_selected': {
+                              'type': 'boolean',
+                              'enum': [true],
+                            },
+                            'confidence': {'type': 'number'},
+                          },
+                          'required': ['prefer_selected', 'confidence'],
+                          'additionalProperties': false,
+                        },
+                      ],
+                      'description':
+                          'Optional in-project reference row for mix matching. Use row_index when clear from PROJECT_SNAPSHOT, especially when labels, filenames, coverage, source_type, or reference cues make one row obviously reference-like. Use prefer_selected when the reference track is currently selected.',
+                    },
+                    'reference_mode': {
+                      'type': 'string',
+                      'enum': ['tone', 'loudness', 'width', 'glue', 'full_mix'],
+                      'description':
+                          'Which dimensions of the in-project reference to match. full_mix means broad tone+loudness+width+glue matching.',
+                    },
+                    'reference_closeness': {
+                      'type': 'string',
+                      'enum': ['loose', 'balanced', 'close'],
+                      'description':
+                          'How tightly to chase the in-project reference profile.',
+                    },
+                    'reset_fx': {
+                      'type': 'boolean',
+                      'description':
+                          'Set true only when a reset/remix or clean rebuild is clearly preferable to tweaking the current chain. Leave false for ordinary incremental mix moves.',
+                    },
+                  },
+                  'required': [
+                    'type',
+                    'intents',
+                    'target',
+                    'intensity',
+                    'execution_profile',
+                    'audibility',
+                  ],
+                },
+              },
+              'required': ['goal'],
+            },
+          },
+        },
+        'required': ['mode', 'assistant_message', 'actions'],
+        'additionalProperties': false,
+      },
+    },
+  ];
 
   Set<String> _intentToolNames(String userText, String toolRoutingMode) {
     if (toolRoutingMode != 'intent_scoped') {
@@ -2483,11 +2374,14 @@ class CloudLlmService {
       };
     }
     final text = userText.trim().toLowerCase();
-    final starterCreation = RegExp(r'\b(lofi|lo-fi)\b').hasMatch(text) &&
-        RegExp(r'\b(make|create|generate|write|compose|build)\b')
-            .hasMatch(text) &&
-        RegExp(r'\b(song|beat|track|instrumental|starter|idea|loop)\b')
-            .hasMatch(text) &&
+    final starterCreation =
+        RegExp(r'\b(lofi|lo-fi)\b').hasMatch(text) &&
+        RegExp(
+          r'\b(make|create|generate|write|compose|build)\b',
+        ).hasMatch(text) &&
+        RegExp(
+          r'\b(song|beat|track|instrumental|starter|idea|loop)\b',
+        ).hasMatch(text) &&
         !text.contains('remix');
     if (starterCreation) {
       return <String>{'informational_response', 'daw_assistant_actions'};
@@ -2495,8 +2389,13 @@ class CloudLlmService {
     var hasMix = _mixIntentRe.hasMatch(text);
     var hasDaw = _dawIntentRe.hasMatch(text);
     final wantsInfo = _questionIntentRe.hasMatch(text);
-    if (const <String>['remix', 'lofi', 'lo-fi', 'vibe', 'style']
-        .any(text.contains)) {
+    if (const <String>[
+      'remix',
+      'lofi',
+      'lo-fi',
+      'vibe',
+      'style',
+    ].any(text.contains)) {
       hasMix = true;
       hasDaw = true;
     }
@@ -2560,13 +2459,14 @@ class CloudLlmService {
       addIfAllowed(<String>['clip_edit', 'row_delete']);
     }
     if (RegExp(
-            r'\b(play|pause|stop|restart|beginning|record|undo|redo|metronome|click|loop)\b')
-        .hasMatch(text)) {
+      r'\b(play|pause|stop|restart|beginning|record|undo|redo|metronome|click|loop)\b',
+    ).hasMatch(text)) {
       addIfAllowed(<String>['transport_control']);
     }
     if (!negatesStem &&
-        RegExp(r'\b(split|stem|stems|separate|vocal|instrumental)\b')
-            .hasMatch(text)) {
+        RegExp(
+          r'\b(split|stem|stems|separate|vocal|instrumental)\b',
+        ).hasMatch(text)) {
       addIfAllowed(<String>['stem_separate']);
     }
     if (RegExp(r'\b(pitch|transpose|semitone|octave)\b').hasMatch(text)) {
@@ -2577,12 +2477,14 @@ class CloudLlmService {
     }
     const levelTargetPattern =
         r'(?:vocal|voice|track|row|stem|pad|pads|bass|808|sub|drum|drums|kick|snare|hat|hats|guitar|piano|keys|synth|lead|instrumental)';
-    final pitchDirectionRequest =
-        RegExp(r'\b(pitch|transpose|octave|semitone|semitones|key)\b')
-            .hasMatch(text);
-    final concreteLevelChangeRequest = !pitchDirectionRequest &&
-        (RegExp(r'\b(volume|gain|level|fader|db|louder|quieter|turn up|turn down)\b')
-                .hasMatch(text) ||
+    final pitchDirectionRequest = RegExp(
+      r'\b(pitch|transpose|octave|semitone|semitones|key)\b',
+    ).hasMatch(text);
+    final concreteLevelChangeRequest =
+        !pitchDirectionRequest &&
+        (RegExp(
+              r'\b(volume|gain|level|fader|db|louder|quieter|turn up|turn down)\b',
+            ).hasMatch(text) ||
             RegExp(
               r'\b(turn|bring|pull|push|take|make)\b[^.?!]{0,64}\b' +
                   levelTargetPattern +
@@ -2609,32 +2511,34 @@ class CloudLlmService {
       addIfAllowed(<String>['row_mix']);
     }
     if (concreteLevelChangeRequest &&
-        RegExp(r'\b(hook|chorus|verse|bridge|during|whenever|when|over time)\b')
-            .hasMatch(text)) {
+        RegExp(
+          r'\b(hook|chorus|verse|bridge|during|whenever|when|over time)\b',
+        ).hasMatch(text)) {
       addIfAllowed(<String>['automation_edit', 'row_mix']);
     }
     if (RegExp(
-            r'\b(remove|delete|take out|bypass|unbypass|toggle)\b[^.?!]{0,64}\b(effect|plugin|fx|distortion|compressor|compress|eq|reverb|delay|limiter|pitch corrector)\b')
-        .hasMatch(text)) {
+      r'\b(remove|delete|take out|bypass|unbypass|toggle)\b[^.?!]{0,64}\b(effect|plugin|fx|distortion|compressor|compress|eq|reverb|delay|limiter|pitch corrector)\b',
+    ).hasMatch(text)) {
       addIfAllowed(<String>['effect_edit']);
     }
     if (RegExp(
-            r'\b(effect|plugin|fx|distortion|compressor|compress|eq|reverb|delay|limiter|pitch corrector)\b')
-        .hasMatch(text)) {
+      r'\b(effect|plugin|fx|distortion|compressor|compress|eq|reverb|delay|limiter|pitch corrector)\b',
+    ).hasMatch(text)) {
       addIfAllowed(<String>['effect_edit']);
     }
     if (RegExp(
-            r'\b(automation|duck|ducking|sidechain|pump|pumping|sweep|fade)\b')
-        .hasMatch(text)) {
+      r'\b(automation|duck|ducking|sidechain|pump|pumping|sweep|fade)\b',
+    ).hasMatch(text)) {
       addIfAllowed(<String>['automation_edit']);
     }
-    if (RegExp(r'\b(move|copy|duplicate|trim|cut|glue|adlib|chorus clip)\b')
-        .hasMatch(text)) {
+    if (RegExp(
+      r'\b(move|copy|duplicate|trim|cut|glue|adlib|chorus clip)\b',
+    ).hasMatch(text)) {
       addIfAllowed(<String>['clip_edit']);
     }
     if (RegExp(
-            r'\b(clean|cleanup|noise|quiet noise|dialog cleanup|phone mic)\b')
-        .hasMatch(text)) {
+      r'\b(clean|cleanup|noise|quiet noise|dialog cleanup|phone mic)\b',
+    ).hasMatch(text)) {
       addIfAllowed(<String>['audio_enhance', 'clip_edit']);
     }
     if (RegExp(r'\b(color)\b').hasMatch(text)) {
@@ -2646,8 +2550,13 @@ class CloudLlmService {
     if (RegExp(r'\b(role)\b').hasMatch(text)) {
       addIfAllowed(<String>['role_override']);
     }
-    if (const <String>['remix', 'lofi', 'lo-fi', 'vibe', 'style']
-        .any(text.contains)) {
+    if (const <String>[
+      'remix',
+      'lofi',
+      'lo-fi',
+      'vibe',
+      'style',
+    ].any(text.contains)) {
       addIfAllowed(<String>[
         'sample_insert',
         'midi_compose',
@@ -2911,8 +2820,9 @@ class CloudLlmService {
 
     if (negatesStem &&
         RegExp(r'\b(only|just)\b').hasMatch(text) &&
-        RegExp(r'\b(bright|brighter|brighten|clear|clearer|presence|air)\b')
-            .hasMatch(text) &&
+        RegExp(
+          r'\b(bright|brighter|brighten|clear|clearer|presence|air)\b',
+        ).hasMatch(text) &&
         RegExp(r'\b(vocal|vocals|voice)\b').hasMatch(text)) {
       lines
         ..add(
@@ -2924,14 +2834,16 @@ class CloudLlmService {
     }
 
     if (enableCompoundTargetHints) {
-      final compoundStemPitchRequest = RegExp(
+      final compoundStemPitchRequest =
+          RegExp(
             r'\b(remove|split|separate|isolate|take out)\b[^.?!]{0,80}\b(vocal|vocals|voice)\b',
           ).hasMatch(text) &&
           RegExp(
             r'\b(lower|raise|change|shift|transpose|pitch|key|semitone|semitones)\b',
           ).hasMatch(text) &&
-          RegExp(r'\b(background|backing|instrumental|music|song|track)\b')
-              .hasMatch(text) &&
+          RegExp(
+            r'\b(background|backing|instrumental|music|song|track)\b',
+          ).hasMatch(text) &&
           !negatesStem;
       if (compoundStemPitchRequest) {
         lines
@@ -2952,23 +2864,26 @@ class CloudLlmService {
     }
 
     final asksNewDrums =
-        RegExp(r'\b(add|insert|put|place|make|create|generate|write)\b')
-                .hasMatch(text) &&
-            RegExp(r'\b(drum|drums|kick|snare|hat|hats|loop)\b')
-                .hasMatch(text) &&
-            !RegExp(r"\b(do\s+not|don't|dont)\s+add\b").hasMatch(text);
+        RegExp(
+          r'\b(add|insert|put|place|make|create|generate|write)\b',
+        ).hasMatch(text) &&
+        RegExp(r'\b(drum|drums|kick|snare|hat|hats|loop)\b').hasMatch(text) &&
+        !RegExp(r"\b(do\s+not|don't|dont)\s+add\b").hasMatch(text);
     if (asksNewDrums) {
       lines.add(
         '- Latest user asks to add drum/sample material. If LIBRARY_SNAPSHOT contains matching role aliases or paths, use sample_insert rather than an unsupported explanation.',
       );
     }
 
-    final asksLofiStarter = enableStarterHints &&
+    final asksLofiStarter =
+        enableStarterHints &&
         RegExp(r'\b(lofi|lo-fi)\b').hasMatch(text) &&
-        RegExp(r'\b(make|create|generate|write|compose|build)\b')
-            .hasMatch(text) &&
-        RegExp(r'\b(song|beat|track|instrumental|starter|idea|loop)\b')
-            .hasMatch(text) &&
+        RegExp(
+          r'\b(make|create|generate|write|compose|build)\b',
+        ).hasMatch(text) &&
+        RegExp(
+          r'\b(song|beat|track|instrumental|starter|idea|loop)\b',
+        ).hasMatch(text) &&
         !text.contains('remix');
     if (asksLofiStarter) {
       lines
@@ -3000,12 +2915,14 @@ class CloudLlmService {
 
     const levelTargetPattern =
         r'(?:vocal|voice|track|row|stem|pad|pads|bass|808|sub|drum|drums|kick|snare|hat|hats|guitar|piano|keys|synth|lead|instrumental)';
-    final pitchDirectionRequest =
-        RegExp(r'\b(pitch|transpose|octave|semitone|semitones|key)\b')
-            .hasMatch(text);
-    final concreteLevelChangeRequest = !pitchDirectionRequest &&
-        (RegExp(r'\b(volume|gain|level|fader|db|louder|quieter|turn up|turn down)\b')
-                .hasMatch(text) ||
+    final pitchDirectionRequest = RegExp(
+      r'\b(pitch|transpose|octave|semitone|semitones|key)\b',
+    ).hasMatch(text);
+    final concreteLevelChangeRequest =
+        !pitchDirectionRequest &&
+        (RegExp(
+              r'\b(volume|gain|level|fader|db|louder|quieter|turn up|turn down)\b',
+            ).hasMatch(text) ||
             RegExp(
               r'\b(turn|bring|pull|push|take|make)\b[^.?!]{0,64}\b' +
                   levelTargetPattern +
@@ -3025,15 +2942,17 @@ class CloudLlmService {
           '- Latest user asks for explicit plugin/effect CRUD. Use daw_assistant_actions effect_edit for the named plugin/effect; do not convert this into mix_model_request.',
         );
       }
-      if (RegExp(r'\b(duck|ducking|sidechain|pump|pumping|fade|sweep)\b')
-          .hasMatch(text)) {
+      if (RegExp(
+        r'\b(duck|ducking|sidechain|pump|pumping|fade|sweep)\b',
+      ).hasMatch(text)) {
         lines.add(
           '- Latest user asks for time-varying movement/ducking. Use daw_assistant_actions automation_edit on the named row/track; do not answer that automation is unavailable when automation_edit is exposed.',
         );
       }
       if (RegExp(r'\b(pan|left|right|center)\b').hasMatch(text) &&
-          RegExp(r'\b(row|track|pad|pads|vocal|bass|drum|instrumental|stem)\b')
-              .hasMatch(text)) {
+          RegExp(
+            r'\b(row|track|pad|pads|vocal|bass|drum|instrumental|stem)\b',
+          ).hasMatch(text)) {
         lines.add(
           '- Latest user asks for a concrete pan move. Use daw_assistant_actions row_mix set_pan/adjust_pan on the target row; do not use generic mix pan or refuse.',
         );
@@ -3041,16 +2960,19 @@ class CloudLlmService {
     }
 
     if (enableDropAndSectionHints) {
-      final asksDropContent = !concreteLevelChangeRequest &&
-          (RegExp(r'\b(808|bass\s+drop|sub\s+drop|bass|sub)\b')
-                  .hasMatch(text) ||
+      final asksDropContent =
+          !concreteLevelChangeRequest &&
+          (RegExp(
+                r'\b(808|bass\s+drop|sub\s+drop|bass|sub)\b',
+              ).hasMatch(text) ||
               (RegExp(r'\bdrop\b').hasMatch(text) &&
                   RegExp(
                     r'\b(add|insert|put|place|make|create|write|compose|hit|impact|fill|before|right before|hook)\b',
                   ).hasMatch(text)));
       if (concreteLevelChangeRequest &&
-          RegExp(r'\b(down|lower|reduc|quieter|tuck|drop|too loud|swallowing)\b')
-              .hasMatch(text)) {
+          RegExp(
+            r'\b(down|lower|reduc|quieter|tuck|drop|too loud|swallowing)\b',
+          ).hasMatch(text)) {
         lines.add(
           '- Volume drop routing: treat turn/bring/pull/take/make + named-row + down/lower/quieter language as row_mix for static level changes, or automation_edit when the prompt names a time range such as hook, chorus, verse, during, or whenever. Do not interpret 808/bass/sub wording as musical drop content when the user is changing level.',
         );
@@ -3060,8 +2982,9 @@ class CloudLlmService {
           '- Drop source selection: use an 808/sub/bass sample only when the user asks for 808, sub, bass, or bass drop. For generic drop/fill/hit/impact wording, prefer the best matching FX or drum source; compose MIDI bass only when the request is musically bass/sub oriented.',
         );
       }
-      if (RegExp(r'\b(not an 808|not 808|no 808|without 808)\b')
-          .hasMatch(text)) {
+      if (RegExp(
+        r'\b(not an 808|not 808|no 808|without 808)\b',
+      ).hasMatch(text)) {
         lines.add(
           '- Negative source constraint: the user rejected 808. Do not use an 808 sample path; for a bass/sub drop, compose MIDI with a visible bass/sub instrument or choose a non-808 bass source.',
         );
@@ -3334,17 +3257,14 @@ class CloudLlmService {
     final requestContext = AnalyticsService.instance.buildRequestContext();
     final analyticsClientContext =
         (requestContext['client_context'] as Map?)?.cast<String, dynamic>() ??
-            <String, dynamic>{};
+        <String, dynamic>{};
     requestContext['client_context'] = <String, dynamic>{
       ...analyticsClientContext,
       ...clientContext,
     };
     return {
       'conversation': conversation
-          .map((m) => {
-                'role': m['role'],
-                'content': m['content'],
-              })
+          .map((m) => {'role': m['role'], 'content': m['content']})
           .toList(),
       'user_text': userText,
       'project_snapshot': packedContext.projectSnapshot,
@@ -3390,8 +3310,9 @@ class CloudLlmService {
   }
 
   Future<String?> _resolveProxyAuthToken({bool forceRefresh = false}) async {
-    final primaryProvider =
-        forceRefresh ? refreshAuthTokenProvider : authTokenProvider;
+    final primaryProvider = forceRefresh
+        ? refreshAuthTokenProvider
+        : authTokenProvider;
     final primaryToken = await primaryProvider?.call();
     final safePrimaryToken = primaryToken?.trim() ?? '';
     if (safePrimaryToken.isNotEmpty) return safePrimaryToken;
@@ -3455,11 +3376,7 @@ class CloudLlmService {
     Duration? timeoutOverride,
   }) {
     return _httpClient
-        .post(
-          uri,
-          headers: headers,
-          body: jsonEncode(body),
-        )
+        .post(uri, headers: headers, body: jsonEncode(body))
         .timeout(timeoutOverride ?? requestTimeout);
   }
 
@@ -3527,9 +3444,7 @@ class CloudLlmService {
     return null;
   }
 
-  Map<String, dynamic> _buildResponseMeta(
-    Map<String, dynamic>? payload,
-  ) {
+  Map<String, dynamic> _buildResponseMeta(Map<String, dynamic>? payload) {
     if (payload == null) return const <String, dynamic>{};
     final status = _parsePromptRateLimitStatus(payload['prompt_rate_limit']);
     final meta = <String, dynamic>{};
@@ -3582,9 +3497,7 @@ class CloudLlmService {
     Map<String, dynamic>? meta,
     Map<String, dynamic> localObservability,
   ) {
-    final merged = <String, dynamic>{
-      if (meta != null) ...meta,
-    };
+    final merged = <String, dynamic>{if (meta != null) ...meta};
     final existingObservability = merged['observability'];
     final observability = <String, dynamic>{
       if (existingObservability is Map<String, dynamic>)
@@ -3634,8 +3547,9 @@ class CloudLlmService {
 
   String _rateLimitMessage(AiPromptRateLimitStatus? status, String fallback) {
     if (status == null) return fallback;
-    final limitLabel =
-        status.blockedBy == 'weekly_prompts' ? 'weekly' : 'daily';
+    final limitLabel = status.blockedBy == 'weekly_prompts'
+        ? 'weekly'
+        : 'daily';
     final wait = _formatResetCountdown(status.blockedResetAt);
     if (wait.isEmpty) {
       return 'You have reached the $limitLabel prompt limit. Please try again later.';
@@ -3666,14 +3580,10 @@ class CloudLlmService {
           'usage_refunded': true,
         },
     };
-    return LlmResult.text(
-      message,
-      {
-        'message': message,
-        'cancels_pending': false,
-      },
-      meta: mergedMeta,
-    );
+    return LlmResult.text(message, {
+      'message': message,
+      'cancels_pending': false,
+    }, meta: mergedMeta);
   }
 
   Future<AiPromptRateLimitStatus?> fetchPromptRateLimitStatus() async {
@@ -4190,8 +4100,9 @@ class CloudLlmService {
       'shift_bars',
     ];
     for (final key in numericKeys) {
-      final value =
-          _parseActionDouble(data[key] ?? _actionTargetMap(data)[key]);
+      final value = _parseActionDouble(
+        data[key] ?? _actionTargetMap(data)[key],
+      );
       if (value != null && value.abs() > 1e-9) return true;
     }
 
@@ -4245,14 +4156,16 @@ class CloudLlmService {
   bool _hasMidiLengthPayload(Map<String, dynamic> data) {
     final target = _actionTargetMap(data);
     final lengthMeasures = _parseActionDouble(
-        data['length_measures'] ?? target['length_measures']);
+      data['length_measures'] ?? target['length_measures'],
+    );
     if (lengthMeasures != null &&
         lengthMeasures.isFinite &&
         lengthMeasures > 0.0) {
       return true;
     }
-    final lengthBeats =
-        _parseActionDouble(data['length_beats'] ?? target['length_beats']);
+    final lengthBeats = _parseActionDouble(
+      data['length_beats'] ?? target['length_beats'],
+    );
     return lengthBeats != null && lengthBeats.isFinite && lengthBeats > 0.0;
   }
 
@@ -4359,11 +4272,11 @@ class CloudLlmService {
     final target = rawTarget is Map<String, dynamic>
         ? rawTarget
         : (rawTarget is Map
-            ? Map<String, dynamic>.from(rawTarget)
-            : const <String, dynamic>{});
+              ? Map<String, dynamic>.from(rawTarget)
+              : const <String, dynamic>{});
     final libraryPath =
         (item['library_path'] ?? target['library_path'])?.toString().trim() ??
-            '';
+        '';
     if (!_looksLikePackagedLibraryReference(libraryPath)) {
       return false;
     }
@@ -4383,8 +4296,9 @@ class CloudLlmService {
 
   String _normalizeTutorialTargetId(Object? raw) {
     final targetId = raw?.toString().trim() ?? '';
-    final match = RegExp(r'^(row:\d+:)fx_index:([^:]+)(:param:.+)?$')
-        .firstMatch(targetId);
+    final match = RegExp(
+      r'^(row:\d+:)fx_index:([^:]+)(:param:.+)?$',
+    ).firstMatch(targetId);
     if (match == null) return targetId;
     final effectRef = (match.group(2) ?? '').trim();
     if (RegExp(r'^\d+$').hasMatch(effectRef)) return targetId;
@@ -4426,8 +4340,9 @@ class CloudLlmService {
       note['length_beats'] = lengthBeats;
     }
 
-    final velocity =
-        AssistantActionUtils.normalizeMidiVelocity(note['velocity']);
+    final velocity = AssistantActionUtils.normalizeMidiVelocity(
+      note['velocity'],
+    );
     if (velocity != null) {
       note['velocity'] = velocity;
     }
@@ -4461,8 +4376,9 @@ class CloudLlmService {
       if (startBeat == null || !startBeat.isFinite || startBeat <= 0.0) {
         return false;
       }
-      minStartBeat =
-          minStartBeat == null ? startBeat : math.min(minStartBeat, startBeat);
+      minStartBeat = minStartBeat == null
+          ? startBeat
+          : math.min(minStartBeat, startBeat);
       if ((startBeat - 1.0).abs() < 1e-6) {
         sawExactOne = true;
       }
@@ -4496,10 +4412,11 @@ class CloudLlmService {
       return null;
     }
 
-    return pick(
-          const ['row_index', 'track_index', 'target_row_index'],
-          oneBased: false,
-        ) ??
+    return pick(const [
+          'row_index',
+          'track_index',
+          'target_row_index',
+        ], oneBased: false) ??
         pick(const ['row', 'target_row'], oneBased: true) ??
         pick(const ['row_number', 'track_number', 'track'], oneBased: true);
   }
@@ -4512,8 +4429,8 @@ class CloudLlmService {
     final target = rawTarget is Map<String, dynamic>
         ? Map<String, dynamic>.from(rawTarget)
         : (rawTarget is Map
-            ? Map<String, dynamic>.from(rawTarget)
-            : <String, dynamic>{});
+              ? Map<String, dynamic>.from(rawTarget)
+              : <String, dynamic>{});
     final rowIndex = _extractNormalizedRowIndex(item, target);
     if (rowIndex != null) {
       item['row_index'] = rowIndex;
@@ -4527,12 +4444,14 @@ class CloudLlmService {
     List<Map<String, dynamic>> actions,
   ) {
     final normalized = actions
-        .map((action) => <String, dynamic>{
-              'type': action['type'],
-              'data': Map<String, dynamic>.from(
-                action['data'] as Map<String, dynamic>,
-              ),
-            })
+        .map(
+          (action) => <String, dynamic>{
+            'type': action['type'],
+            'data': Map<String, dynamic>.from(
+              action['data'] as Map<String, dynamic>,
+            ),
+          },
+        )
         .toList(growable: false);
     final tempoBpm = _normalizedProjectTempoBpm(normalized);
     for (final action in normalized) {
@@ -4572,8 +4491,8 @@ class CloudLlmService {
     final target = rawTarget is Map<String, dynamic>
         ? Map<String, dynamic>.from(rawTarget)
         : (rawTarget is Map
-            ? Map<String, dynamic>.from(rawTarget)
-            : <String, dynamic>{});
+              ? Map<String, dynamic>.from(rawTarget)
+              : <String, dynamic>{});
     item['row_index'] = rowIndex;
     target['row_index'] = rowIndex;
     item['target'] = target;
@@ -4611,7 +4530,7 @@ class CloudLlmService {
       final target = _actionTargetMap(item);
       final libraryPath =
           (item['library_path'] ?? target['library_path'])?.toString().trim() ??
-              '';
+          '';
       final bucket = _drumSampleRowBucket(
         AssistantActionUtils.primarySampleRoleFromText(libraryPath),
       );
@@ -4631,8 +4550,9 @@ class CloudLlmService {
       return ai.compareTo(bi);
     });
 
-    final baseRow =
-        existingRows.isEmpty ? 0 : existingRows.reduce((a, b) => a < b ? a : b);
+    final baseRow = existingRows.isEmpty
+        ? 0
+        : existingRows.reduce((a, b) => a < b ? a : b);
     final rowByBucket = <String, int>{
       for (int i = 0; i < orderedBuckets.length; i++)
         orderedBuckets[i]: baseRow + i,
@@ -4689,7 +4609,8 @@ class CloudLlmService {
 
   bool _isRepeatedSampleScaffold(Map<String, dynamic> item) {
     final target = _actionTargetMap(item);
-    final repeatCount = _parseActionInt(
+    final repeatCount =
+        _parseActionInt(
           item['repeat_count'] ??
               target['repeat_count'] ??
               item['copies'] ??
@@ -4740,7 +4661,7 @@ class CloudLlmService {
       final target = _actionTargetMap(item);
       final libraryPath =
           (item['library_path'] ?? target['library_path'])?.toString().trim() ??
-              '';
+          '';
       final role = AssistantActionUtils.primarySampleRoleFromText(libraryPath);
       if (role == 'kick') {
         kickItems.add(item);
@@ -4772,7 +4693,8 @@ class CloudLlmService {
             item['spacing_beats'] ??
             target['spacing_beats'],
       );
-      final hasMeasureStep = _parseActionDouble(
+      final hasMeasureStep =
+          _parseActionDouble(
             item['step_measures'] ??
                 target['step_measures'] ??
                 item['spacing_measures'] ??
@@ -4795,7 +4717,8 @@ class CloudLlmService {
         continue;
       }
 
-      final wantsHalfTimeBackbeat = tempoBpm != null && tempoBpm >= 135.0 ||
+      final wantsHalfTimeBackbeat =
+          tempoBpm != null && tempoBpm >= 135.0 ||
           kickItems.any((kick) {
             final kickStart = _sampleInsertItemStartBeat(kick);
             return kickStart != null && (kickStart - 3.0).abs() < 1e-6;
@@ -4841,15 +4764,18 @@ class CloudLlmService {
     final data = Map<String, dynamic>.from(rawData);
     final target = _actionTargetMap(data);
 
-    final scopeValue =
-        (data['scope'] ?? target['scope'])?.toString().trim().toLowerCase();
+    final scopeValue = (data['scope'] ?? target['scope'])
+        ?.toString()
+        .trim()
+        .toLowerCase();
     if (scopeValue != null && scopeValue.isNotEmpty) {
       data['scope'] = scopeValue;
       target['scope'] = scopeValue;
     }
 
     final rowIndex = _extractNormalizedRowIndex(data, target);
-    final isMasterScope = (target['scope']?.toString().trim().toLowerCase() ??
+    final isMasterScope =
+        (target['scope']?.toString().trim().toLowerCase() ??
             data['scope']?.toString().trim().toLowerCase()) ==
         'master';
     if (!isMasterScope && rowIndex != null) {
@@ -4870,14 +4796,16 @@ class CloudLlmService {
     if (actionType == 'tutorial') {
       final steps = data['steps'];
       if (steps is List) {
-        data['steps'] = steps.map((step) {
-          if (step is! Map) return step;
-          final repaired = Map<String, dynamic>.from(step);
-          repaired['target_id'] = _normalizeTutorialTargetId(
-            repaired['target_id'],
-          );
-          return repaired;
-        }).toList(growable: false);
+        data['steps'] = steps
+            .map((step) {
+              if (step is! Map) return step;
+              final repaired = Map<String, dynamic>.from(step);
+              repaired['target_id'] = _normalizeTutorialTargetId(
+                repaired['target_id'],
+              );
+              return repaired;
+            })
+            .toList(growable: false);
       }
     }
 
@@ -4895,9 +4823,10 @@ class CloudLlmService {
       if (rawItems is List && rawItems.isNotEmpty) {
         data['items'] = rawItems
             .whereType<Map>()
-            .map((raw) => _normalizeSampleInsertItem(
-                  Map<String, dynamic>.from(raw),
-                ))
+            .map(
+              (raw) =>
+                  _normalizeSampleInsertItem(Map<String, dynamic>.from(raw)),
+            )
             .toList(growable: false);
       } else if ((data['library_path']?.toString().trim().isNotEmpty ??
               false) ||
@@ -4912,24 +4841,26 @@ class CloudLlmService {
       final operation =
           data['operation']?.toString().trim().toLowerCase() ?? '';
       if (operation == 'pitch_shift' &&
-          _parseActionDouble(data['semitones'] ??
-                  target['semitones'] ??
-                  data['delta_semitones'] ??
-                  target['delta_semitones'] ??
-                  data['pitch_semitones'] ??
-                  target['pitch_semitones'] ??
-                  data['new_pitch_semitones'] ??
-                  target['new_pitch_semitones']) ==
+          _parseActionDouble(
+                data['semitones'] ??
+                    target['semitones'] ??
+                    data['delta_semitones'] ??
+                    target['delta_semitones'] ??
+                    data['pitch_semitones'] ??
+                    target['pitch_semitones'] ??
+                    data['new_pitch_semitones'] ??
+                    target['new_pitch_semitones'],
+              ) ==
               null) {
         final text = userText.toLowerCase();
-        final oneKey =
-            RegExp(r'\b(?:one|1|a)\s+(?:key|semitone|half[- ]step)\b')
-                .hasMatch(text);
+        final oneKey = RegExp(
+          r'\b(?:one|1|a)\s+(?:key|semitone|half[- ]step)\b',
+        ).hasMatch(text);
         if (oneKey) {
           final direction =
               RegExp(r'\b(lower|down|decrease|drop)\b').hasMatch(text)
-                  ? -1.0
-                  : 1.0;
+              ? -1.0
+              : 1.0;
           data['delta_semitones'] = direction;
         }
       }
@@ -4976,7 +4907,8 @@ class CloudLlmService {
     final notes = data['notes'];
     final progression = data['progression'];
     final hasNotes = notes is List && notes.isNotEmpty;
-    final hasProgression = (progression is List && progression.isNotEmpty) ||
+    final hasProgression =
+        (progression is List && progression.isNotEmpty) ||
         (progression is String && progression.trim().isNotEmpty);
     return hasNotes || hasProgression;
   }
@@ -5026,14 +4958,16 @@ class CloudLlmService {
         }
         if (operation == 'pitch_shift') {
           final target = _actionTargetMap(data);
-          return _parseActionDouble(data['semitones'] ??
-                  target['semitones'] ??
-                  data['delta_semitones'] ??
-                  target['delta_semitones'] ??
-                  data['pitch_semitones'] ??
-                  target['pitch_semitones'] ??
-                  data['new_pitch_semitones'] ??
-                  target['new_pitch_semitones']) !=
+          return _parseActionDouble(
+                data['semitones'] ??
+                    target['semitones'] ??
+                    data['delta_semitones'] ??
+                    target['delta_semitones'] ??
+                    data['pitch_semitones'] ??
+                    target['pitch_semitones'] ??
+                    data['new_pitch_semitones'] ??
+                    target['new_pitch_semitones'],
+              ) !=
               null;
         }
         return true;
@@ -5050,12 +4984,13 @@ class CloudLlmService {
         final operation = data['operation']?.toString().trim().toLowerCase();
         final target = _actionTargetMap(data);
         if (operation == 'apply_template') {
-          final template = (data['template'] ??
-                  target['template'] ??
-                  data['pattern'] ??
-                  target['pattern'] ??
-                  '')
-              .toString();
+          final template =
+              (data['template'] ??
+                      target['template'] ??
+                      data['pattern'] ??
+                      target['pattern'] ??
+                      '')
+                  .toString();
           if (!_isKnownAutomationTemplate(template)) {
             return false;
           }
@@ -5129,8 +5064,8 @@ class CloudLlmService {
       final data = rawData is Map<String, dynamic>
           ? Map<String, dynamic>.from(rawData)
           : (rawData is Map
-              ? Map<String, dynamic>.from(rawData)
-              : <String, dynamic>{});
+                ? Map<String, dynamic>.from(rawData)
+                : <String, dynamic>{});
       if (type == 'project_edit') {
         data['operation'] = _normalizeProjectEditOperation(data['operation']);
       } else if (type == 'sample_insert') {
@@ -5144,8 +5079,9 @@ class CloudLlmService {
       } else if (type == 'row_color_edit') {
         data['operation'] = _normalizeActionToken(data['operation'] ?? 'set');
       } else if (type == 'automation_edit') {
-        data['operation'] =
-            _normalizeAutomationEditOperation(data['operation']);
+        data['operation'] = _normalizeAutomationEditOperation(
+          data['operation'],
+        );
       } else if (type == 'midi_compose') {
         data['operation'] = _normalizeMidiComposeOperation(data['operation']);
       } else if (type == 'stem_separate') {
@@ -5166,10 +5102,7 @@ class CloudLlmService {
         );
         continue;
       }
-      out.add({
-        'type': type,
-        'data': normalizedData,
-      });
+      out.add({'type': type, 'data': normalizedData});
     }
     final normalized = _postProcessNormalizedActions(out);
     if (droppedInvalid &&
@@ -5235,8 +5168,9 @@ class CloudLlmService {
   }
 
   List<String> _normalizeMixStyleTags(dynamic raw) {
-    final values =
-        raw is List ? raw : (raw is String ? <String>[raw] : const <String>[]);
+    final values = raw is List
+        ? raw
+        : (raw is String ? <String>[raw] : const <String>[]);
     final out = <String>[];
     final seen = <String>{};
     for (final value in values) {
@@ -5295,8 +5229,9 @@ class CloudLlmService {
     } else {
       return null;
     }
-    normalized['confidence'] =
-        ((normalized['confidence'] ?? 0.5) as num).toDouble().clamp(0.0, 1.0);
+    normalized['confidence'] = ((normalized['confidence'] ?? 0.5) as num)
+        .toDouble()
+        .clamp(0.0, 1.0);
     return normalized;
   }
 
@@ -5370,8 +5305,8 @@ class CloudLlmService {
           );
           normalizedGoal['reference_closeness'] =
               _normalizeMixReferenceCloseness(
-            normalizedGoal['reference_closeness'],
-          );
+                normalizedGoal['reference_closeness'],
+              );
         } else {
           normalizedGoal.remove('reference_target');
           normalizedGoal.remove('reference_mode');
@@ -5479,15 +5414,16 @@ class CloudLlmService {
         );
         final normalizedSessionId =
             (conversationSessionId ?? '').trim().isNotEmpty
-                ? conversationSessionId!.trim()
-                : 'direct-debug-session';
+            ? conversationSessionId!.trim()
+            : 'direct-debug-session';
         final conversationKey = _directConversationKey(
           sessionId: normalizedSessionId,
           aiFeature: aiFeature,
           clientContext: effectiveClientContext,
         );
-        final directClientCapabilities =
-            _readClientCapabilities(effectiveClientContext);
+        final directClientCapabilities = _readClientCapabilities(
+          effectiveClientContext,
+        );
         final directClientPolicy = _readClientPolicy(effectiveClientContext);
         final directInstructionOverlay = aiExecutionGuidance();
         final directSeedInstructions = _buildDirectSeedInstructions(
@@ -5505,8 +5441,9 @@ class CloudLlmService {
             ? await _ensureDirectOpenAiConversation(
                 conversationKey,
                 seedItems: directSeedItems,
-                seedHash:
-                    _usesSeededOpenAiConversationState ? directSeedHash : '',
+                seedHash: _usesSeededOpenAiConversationState
+                    ? directSeedHash
+                    : '',
               )
             : null;
         final inputMessages = _usesOpenAiConversationState
@@ -5557,10 +5494,7 @@ class CloudLlmService {
         final hasRetryDroppableContext = pendingMix != null;
         final initialTimeout = hasRetryDroppableContext
             ? Duration(
-                milliseconds: math.min(
-                  requestTimeout.inMilliseconds,
-                  12000,
-                ),
+                milliseconds: math.min(requestTimeout.inMilliseconds, 12000),
               )
             : requestTimeout;
 
@@ -5578,7 +5512,8 @@ class CloudLlmService {
           requestStopwatch.stop();
         } on TimeoutException {
           requestStopwatch.stop();
-          final canRetryWithoutHeavyContext = hasRetryDroppableContext &&
+          final canRetryWithoutHeavyContext =
+              hasRetryDroppableContext &&
               initialTimeout.inMilliseconds < requestTimeout.inMilliseconds;
           if (!canRetryWithoutHeavyContext) rethrow;
 
@@ -5685,13 +5620,13 @@ class CloudLlmService {
         if (_usesOpenAiConversationState)
           'conversation_turn_index':
               _conversationTurnCounts[_directConversationKey(
-                    sessionId: (conversationSessionId ?? '').trim().isNotEmpty
-                        ? conversationSessionId!.trim()
-                        : 'direct-debug-session',
-                    aiFeature: aiFeature,
-                    clientContext: _mergedAnalyticsClientContext(clientContext),
-                  )] ??
-                  0,
+                sessionId: (conversationSessionId ?? '').trim().isNotEmpty
+                    ? conversationSessionId!.trim()
+                    : 'direct-debug-session',
+                aiFeature: aiFeature,
+                clientContext: _mergedAnalyticsClientContext(clientContext),
+              )] ??
+              0,
         if (directRetriedWithoutPendingMix)
           'direct_retry_without_pending_mix': true,
       },
@@ -5700,12 +5635,9 @@ class CloudLlmService {
       payload?['prompt_rate_limit'],
     );
     parseStopwatch.stop();
-    responseMeta = _mergeMetaObservability(
-      responseMeta,
-      <String, dynamic>{
-        'response_parse_ms': parseStopwatch.elapsedMilliseconds,
-      },
-    );
+    responseMeta = _mergeMetaObservability(responseMeta, <String, dynamic>{
+      'response_parse_ms': parseStopwatch.elapsedMilliseconds,
+    });
 
     if (!_isProxyEnabled && response.statusCode != 200) {
       aiDebugLog(
@@ -5740,20 +5672,17 @@ class CloudLlmService {
             'prompt_rate_limit': promptRateLimit.toJson(),
           'prompt_rate_limit_hit': true,
         };
-        return LlmResult.text(
-          message,
-          {
-            'message': message,
-            'cancels_pending': false,
-          },
-          meta: rateLimitMeta,
-        );
+        return LlmResult.text(message, {
+          'message': message,
+          'cancels_pending': false,
+        }, meta: rateLimitMeta);
       }
       if (response.statusCode == 401 || response.statusCode == 403) {
         if (_isProxyEnabled && refreshAuthTokenProvider != null) {
           try {
-            final refreshedToken =
-                await _resolveProxyAuthToken(forceRefresh: true);
+            final refreshedToken = await _resolveProxyAuthToken(
+              forceRefresh: true,
+            );
             if (refreshedToken != null && refreshedToken.isNotEmpty) {
               requestStopwatch
                 ..reset()
@@ -5778,32 +5707,30 @@ class CloudLlmService {
                 ..start();
               payload = _decodeJsonObject(response.body);
               responseMeta = _buildResponseMeta(payload);
-              responseMeta = _mergeMetaObservability(
-                responseMeta,
-                <String, dynamic>{
-                  if ((promptTraceId ?? '').trim().isNotEmpty)
-                    'prompt_trace_id': promptTraceId!.trim(),
-                  'proxy_roundtrip_ms': requestStopwatch.elapsedMilliseconds,
-                  'http_status_code': response.statusCode,
-                  'llm_route': _llmRouteLabel,
-                  'prompt_source': _promptSourceLabel,
-                  'conversation_state_mode_requested':
-                      _normalizedConversationStateMode,
-                  'conversation_state_mode_effective':
-                      _usesOpenAiConversationState
-                          ? _normalizedConversationStateMode
-                          : 'manual_history',
-                  'context_packing_mode': _readContextPackingMode(
-                    clientContext,
-                  ),
-                  'tool_routing_mode': _readToolRoutingMode(clientContext),
-                  'effective_tool_routing_mode': _effectiveToolRoutingMode(
-                    clientContext,
-                  ),
-                  if ((conversationSessionId ?? '').trim().isNotEmpty)
-                    'conversation_session_id': conversationSessionId!.trim(),
-                },
-              );
+              responseMeta =
+                  _mergeMetaObservability(responseMeta, <String, dynamic>{
+                    if ((promptTraceId ?? '').trim().isNotEmpty)
+                      'prompt_trace_id': promptTraceId!.trim(),
+                    'proxy_roundtrip_ms': requestStopwatch.elapsedMilliseconds,
+                    'http_status_code': response.statusCode,
+                    'llm_route': _llmRouteLabel,
+                    'prompt_source': _promptSourceLabel,
+                    'conversation_state_mode_requested':
+                        _normalizedConversationStateMode,
+                    'conversation_state_mode_effective':
+                        _usesOpenAiConversationState
+                        ? _normalizedConversationStateMode
+                        : 'manual_history',
+                    'context_packing_mode': _readContextPackingMode(
+                      clientContext,
+                    ),
+                    'tool_routing_mode': _readToolRoutingMode(clientContext),
+                    'effective_tool_routing_mode': _effectiveToolRoutingMode(
+                      clientContext,
+                    ),
+                    if ((conversationSessionId ?? '').trim().isNotEmpty)
+                      'conversation_session_id': conversationSessionId!.trim(),
+                  });
               promptRateLimit = _parsePromptRateLimitStatus(
                 payload?['prompt_rate_limit'],
               );
@@ -5827,14 +5754,10 @@ class CloudLlmService {
                       ? payload!['message'].toString().trim()
                       : 'You have reached the prompt limit. Please try again later.',
                 );
-                return LlmResult.text(
-                  message,
-                  {
-                    'message': message,
-                    'cancels_pending': false,
-                  },
-                  meta: responseMeta,
-                );
+                return LlmResult.text(message, {
+                  'message': message,
+                  'cancels_pending': false,
+                }, meta: responseMeta);
               } else if (response.statusCode == 401 ||
                   response.statusCode == 403) {
                 return _recoverableTextResult(
@@ -5898,11 +5821,9 @@ class CloudLlmService {
             o['arguments'],
             userText: userText,
           );
-          return LlmResult.text(
-            fallbackText,
-            <String, dynamic>{'message': fallbackText},
-            meta: responseMeta,
-          );
+          return LlmResult.text(fallbackText, <String, dynamic>{
+            'message': fallbackText,
+          }, meta: responseMeta);
         }
         aiDebugLog(
           'llm-parse',
@@ -5950,18 +5871,12 @@ class CloudLlmService {
                 text,
                 userText: userText,
               );
-              return LlmResult.text(
-                fallbackText,
-                <String, dynamic>{'message': fallbackText},
-                meta: responseMeta,
-              );
+              return LlmResult.text(fallbackText, <String, dynamic>{
+                'message': fallbackText,
+              }, meta: responseMeta);
             }
             toolResults.add(
-              LlmResult.tool(
-                'mix_model_request',
-                args,
-                meta: responseMeta,
-              ),
+              LlmResult.tool('mix_model_request', args, meta: responseMeta),
             );
             continue;
           }
@@ -5981,10 +5896,12 @@ class CloudLlmService {
     }
 
     if (toolResults.isNotEmpty) {
-      final informationalResults =
-          toolResults.where((t) => t.toolName == 'informational_response');
-      final nonInformationalResults =
-          toolResults.where((t) => t.toolName != 'informational_response');
+      final informationalResults = toolResults.where(
+        (t) => t.toolName == 'informational_response',
+      );
+      final nonInformationalResults = toolResults.where(
+        (t) => t.toolName != 'informational_response',
+      );
 
       if (nonInformationalResults.isEmpty) {
         final firstInfo = informationalResults.first;
@@ -6006,15 +5923,17 @@ class CloudLlmService {
         final mixResults = nonInformationalResults
             .where((t) => t.toolName == 'mix_model_request')
             .toList(growable: false);
-        final preferredResults =
-            dawResults.isNotEmpty ? dawResults : mixResults;
+        final preferredResults = dawResults.isNotEmpty
+            ? dawResults
+            : mixResults;
         if (preferredResults.isNotEmpty) {
           final preferredTool = preferredResults.first.toolName!;
           final preferredArgs = preferredResults
               .map((t) => t.toolArgs)
               .whereType<Map<String, dynamic>>()
               .toList(growable: false);
-          final userFacingText = assistantText ??
+          final userFacingText =
+              assistantText ??
               preferredResults
                   .map((t) => t.text?.trim() ?? '')
                   .firstWhere((t) => t.isNotEmpty, orElse: () => '');
@@ -6049,7 +5968,8 @@ class CloudLlmService {
           .map((t) => t.toolArgs)
           .whereType<Map<String, dynamic>>()
           .toList(growable: false);
-      final userFacingText = assistantText ??
+      final userFacingText =
+          assistantText ??
           nonInformationalResults
               .map((t) => t.text?.trim() ?? '')
               .firstWhere((t) => t.isNotEmpty, orElse: () => '');
@@ -6077,13 +5997,9 @@ class CloudLlmService {
       return LlmResult.text(assistantText, null, meta: responseMeta);
     }
 
-    return LlmResult.text(
-      _fallbackAssistantText('informational_response'),
-      {
-        'message': _fallbackAssistantText('informational_response'),
-        'cancels_pending': false,
-      },
-      meta: responseMeta,
-    );
+    return LlmResult.text(_fallbackAssistantText('informational_response'), {
+      'message': _fallbackAssistantText('informational_response'),
+      'cancels_pending': false,
+    }, meta: responseMeta);
   }
 }

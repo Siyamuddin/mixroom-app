@@ -160,7 +160,7 @@ class ApiBillingTests(unittest.TestCase):
         self.assertEqual(event["user_id"], "user-1")
         self.assertEqual(event["raw_payload"]["product_code"], "studio_monthly")
 
-    def test_checkout_session_routes_kr_yearly_to_paddle(self):
+    def test_checkout_session_rejects_unconfigured_paddle_yearly_price(self):
         module.catalog_repo.get_product.return_value = {
             "code": "producer_yearly",
             "plan_code": "producer",
@@ -185,16 +185,10 @@ class ApiBillingTests(unittest.TestCase):
             object(),
         )
 
-        self.assertEqual(response["statusCode"], 200)
-        payload = decode_json_response(response)
-        self.assertEqual(payload["provider"], "paddle")
-        self.assertNotIn("toss", payload)
-        self.assertEqual(
-            payload["paddle"]["items"],
-            [{"priceId": "pri_01krvt15ak2k4ck94fzhfa0mr5", "quantity": 1}],
-        )
+        self.assertEqual(response["statusCode"], 409)
+        self.assertIn("Paddle price is not configured", decode_json_response(response)["error"])
 
-    def test_checkout_session_returns_paddle_yearly_studio_seat_items(self):
+    def test_checkout_session_rejects_unconfigured_paddle_yearly_studio_price(self):
         module.catalog_repo.get_product.return_value = {
             "code": "studio_yearly",
             "plan_code": "studio",
@@ -220,16 +214,8 @@ class ApiBillingTests(unittest.TestCase):
             object(),
         )
 
-        self.assertEqual(response["statusCode"], 200)
-        payload = decode_json_response(response)
-        self.assertEqual(payload["provider"], "paddle")
-        self.assertEqual(
-            payload["paddle"]["items"],
-            [
-                {"priceId": "pri_01krvt4dn9kfz44s6dqyaedpyc", "quantity": 1},
-                {"priceId": "pri_01krvt8a8vhstfkv7qxyjkc1av", "quantity": 2},
-            ],
-        )
+        self.assertEqual(response["statusCode"], 409)
+        self.assertIn("Paddle price is not configured", decode_json_response(response)["error"])
 
     def test_checkout_session_rejects_contract_products(self):
         module.catalog_repo.get_product.return_value = {
@@ -1152,7 +1138,7 @@ class ApiBillingTests(unittest.TestCase):
         self.assertEqual(payload["proration_billing_mode"], "prorated_immediately")
         patch_subscription.assert_called_once()
         request_payload = patch_subscription.call_args.args[1]
-        self.assertEqual(request_payload["items"][0]["price_id"], "pri_01krvt0hvcvhx4dtr1tdhyhp32")
+        self.assertEqual(request_payload["items"][0]["price_id"], "pri_01ks4kfx9v056g4bg90dw5sbgj")
         self.assertEqual(self.repo.subscriptions["sub_123"]["plan_code"], "producer")
         self.assertEqual(self.repo.entitlements["user-1"]["plan_code"], "producer")
 

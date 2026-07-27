@@ -1158,6 +1158,14 @@ class L10n {
           'Save producer session': 'Save producer session',
           'Clip tempo mode turned off.': 'Clip tempo mode turned off.',
           'Detecting clip tempo...': 'Detecting clip tempo...',
+          'Detecting project BPM...': 'Detecting project BPM...',
+          'Could not detect project BPM.': 'Could not detect project BPM.',
+          'Project BPM detected and set to': 'Project BPM detected and set to',
+          'Add an audio clip before detecting project BPM.':
+              'Add an audio clip before detecting project BPM.',
+          'Select a rhythmic audio clip to detect project BPM.':
+              'Select a rhythmic audio clip to detect project BPM.',
+          'Auto Detect Project BPM': 'Auto Detect Project BPM',
           'Could not detect clip tempo.': 'Could not detect clip tempo.',
           'Change Project BPM?': 'Change Project BPM?',
           'Detected': 'Detected',
@@ -3060,6 +3068,14 @@ class L10n {
           'Save producer session': '프로듀서 세션 저장',
           'Clip tempo mode turned off.': '클립 템포 모드를 껐습니다.',
           'Detecting clip tempo...': '클립 템포 감지 중...',
+          'Detecting project BPM...': '프로젝트 BPM 감지 중...',
+          'Could not detect project BPM.': '프로젝트 BPM을 감지할 수 없습니다.',
+          'Project BPM detected and set to': '프로젝트 BPM을 감지하여',
+          'Add an audio clip before detecting project BPM.':
+              '프로젝트 BPM을 감지하려면 오디오 클립을 추가하세요.',
+          'Select a rhythmic audio clip to detect project BPM.':
+              '프로젝트 BPM을 감지할 리듬 오디오 클립을 선택하세요.',
+          'Auto Detect Project BPM': '프로젝트 BPM 자동 감지',
           'Could not detect clip tempo.': '클립 템포를 감지할 수 없습니다.',
           'Change Project BPM?': '프로젝트 BPM을 변경할까요?',
           'Detected': '감지됨',

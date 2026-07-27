@@ -14,8 +14,9 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 
-  testWidgets('translated widgets rebuild immediately when locale changes',
-      (tester) async {
+  testWidgets('translated widgets rebuild immediately when locale changes', (
+    tester,
+  ) async {
     final localeProvider = LocaleProvider();
     final dependencyChanges = ValueNotifier<int>(0);
 
@@ -55,8 +56,9 @@ void main() {
     dependencyChanges.dispose();
   });
 
-  testWidgets('signed-in content surfaces respond to locale changes',
-      (tester) async {
+  testWidgets('signed-in content surfaces respond to locale changes', (
+    tester,
+  ) async {
     final localeProvider = LocaleProvider();
 
     await tester.pumpWidget(
@@ -72,9 +74,7 @@ void main() {
                 GlobalWidgetsLocalizations.delegate,
                 GlobalCupertinoLocalizations.delegate,
               ],
-              home: const Scaffold(
-                body: VideoProjectsPlaceholderView(),
-              ),
+              home: const Scaffold(body: VideoProjectsPlaceholderView()),
             );
           },
         ),
@@ -91,9 +91,7 @@ void main() {
 }
 
 class _LocaleDependencyProbe extends StatefulWidget {
-  const _LocaleDependencyProbe({
-    required this.dependencyChanges,
-  });
+  const _LocaleDependencyProbe({required this.dependencyChanges});
 
   final ValueNotifier<int> dependencyChanges;
 

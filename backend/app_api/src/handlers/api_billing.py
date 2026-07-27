@@ -99,14 +99,10 @@ _PLAN_RANK = {
     "enterprise": 50,
 }
 _PADDLE_PRICE_IDS = {
-    "starter_monthly": "pri_01krvsxsje1tymj05tnbz7y50r",
-    "starter_yearly": "pri_01krvsyt2dyd285ytdy47e8sry",
-    "producer_monthly": "pri_01krvt0hvcvhx4dtr1tdhyhp32",
-    "producer_yearly": "pri_01krvt15ak2k4ck94fzhfa0mr5",
-    "studio_monthly": "pri_01krvt3yjmznvz0rw8amb9j12a",
-    "studio_yearly": "pri_01krvt4dn9kfz44s6dqyaedpyc",
-    "studio_seat_addon_monthly": "pri_01krvt7kktn7br0044kd7strcj",
-    "studio_seat_addon_yearly": "pri_01krvt8a8vhstfkv7qxyjkc1av",
+    "starter_monthly": "pri_01ks4kf6bv3srq0qtkgabfg1bm",
+    "producer_monthly": "pri_01ks4kfx9v056g4bg90dw5sbgj",
+    "studio_monthly": "pri_01ks4kk4dtdgn6xdqqt5ghad30",
+    "studio_seat_addon_monthly": "pri_01ks4krz52h671zwyvxk58vrfy",
 }
 
 
