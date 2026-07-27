@@ -1216,7 +1216,7 @@ Map<String, dynamic> _aiV3PlanSchema(
           'minLength': 1,
           'maxLength': 1000,
           'description':
-              'Concise user-facing response or summary of the proposed plan. Never claim that unexecuted commands were applied.',
+              'For outcome plan, write a concise one- or two-sentence past-tense completion summary of the requested result. This text is held until exact execution and readback succeed. For every other outcome, write the appropriate user-facing response and never claim execution.',
         },
         'commands': <String, dynamic>{
           'type': 'array',

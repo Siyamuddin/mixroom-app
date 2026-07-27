@@ -1004,10 +1004,10 @@ void main() {
       );
     });
 
-    test('verified completion is concise while conversation keeps detail', () {
+    test('verified completion uses the planner summary after success', () {
       const bundle = <String, dynamic>{
         'plan': <String, dynamic>{
-          'user_message': 'Delete Track 3.',
+          'user_message': 'Deleted Track 3.',
         },
         'receipts': <Map<String, dynamic>>[
           <String, dynamic>{
@@ -1020,7 +1020,7 @@ void main() {
       };
       expect(
         aiV3VerifiedCompletionMessage(bundle),
-        'Done.',
+        'Deleted Track 3.',
       );
       expect(
         aiV3VerifiedConversationMessage(bundle),
