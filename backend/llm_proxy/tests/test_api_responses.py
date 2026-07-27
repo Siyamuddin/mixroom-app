@@ -427,7 +427,7 @@ class ApiResponsesTests(unittest.TestCase):
             "parallel_tool_calls": False,
             "max_output_tokens": 9999,
             "reasoning": {"effort": "high"},
-            "store": False,
+            "store": True,
             "ai_feature": "ai_chat",
             "client_context": {"app_version": "3.0.0"},
         }
@@ -462,7 +462,7 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertEqual(provider.request_body["reasoning"], {"effort": "low"})
         self.assertEqual(provider.request_body["max_output_tokens"], 4096)
         self.assertFalse(provider.request_body["parallel_tool_calls"])
-        self.assertFalse(provider.request_body["store"])
+        self.assertTrue(provider.request_body["store"])
         self.assertEqual(
             provider.request_body["tools"][0]["name"],
             "submit_plan_v3",
@@ -497,7 +497,7 @@ class ApiResponsesTests(unittest.TestCase):
                         "name": "submit_plan_v3",
                     },
                     "parallel_tool_calls": False,
-                    "store": False,
+                    "store": True,
                 }
             ),
             path="/v1/llm/v3/responses",
@@ -554,7 +554,7 @@ class ApiResponsesTests(unittest.TestCase):
                         "name": "submit_plan_v3",
                     },
                     "parallel_tool_calls": False,
-                    "store": False,
+                    "store": True,
                 }
             ),
             path="/v1/llm/v3/responses",

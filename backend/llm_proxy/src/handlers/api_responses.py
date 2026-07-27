@@ -450,8 +450,8 @@ def _validate_v3_request_body(body: Dict[str, Any]) -> None:
         raise ValueError("V3 requires submit_plan_v3 tool choice.")
     if body.get("parallel_tool_calls") is not False:
         raise ValueError("V3 parallel tool calls must be disabled.")
-    if body.get("store") is not False:
-        raise ValueError("V3 provider storage must be disabled.")
+    if body.get("store") is not True:
+        raise ValueError("V3 provider storage must be enabled.")
 
 
 def _provider_name() -> str:
@@ -3072,7 +3072,9 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             4096,
         )
         request_body["parallel_tool_calls"] = False
-        request_body["store"] = False
+        # V3 is intentionally retained in OpenAI Responses for production
+        # diagnostics; the proxy owns and enforces this policy.
+        request_body["store"] = True
 
     apply_server_output_token_cap(request_body)
     _update_request_log_context_with_cache_request(request_log_context, request_body)
