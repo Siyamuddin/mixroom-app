@@ -250,15 +250,6 @@ class AiV3CommandPreparer {
       throw const AiV3PreparationException('v3_row_capacity_missing');
     }
     final maximumRows = rowCapacity['max_rows'] as int;
-    final nextRowIndex = rows.fold<int>(
-          -1,
-          (value, row) => math.max(
-            value,
-            (row['display_index'] as num?)?.toInt() ?? -1,
-          ),
-        ) +
-        1;
-    var createdRows = 0;
     var simulatedRowCount = rows.length;
     final deletedRowIds = <int>{};
     final unavailableClipIds = <String>{};
@@ -373,7 +364,10 @@ class AiV3CommandPreparer {
       if (simulatedRowCount >= maximumRows) {
         throw const AiV3PreparationException('v3_row_capacity_exceeded');
       }
-      final rowIndex = nextRowIndex + createdRows++;
+      // Embedded destinations always append their row. Its executable index is
+      // therefore the current simulated row count, not an index derived from
+      // the original snapshot. A preceding deletion changes that count.
+      final rowIndex = simulatedRowCount;
       simulatedRowCount += 1;
       hasPriorTopologyMutation = true;
       final instrumentId = newRow['instrument_id']?.toString().trim() ?? '';
@@ -725,7 +719,6 @@ class AiV3CommandPreparer {
             },
           ));
           simulatedRowCount += 1;
-          createdRows += 1;
           hasPriorTopologyMutation = true;
           label = laneKind == 'midi'
               ? 'Create MIDI row $name'
@@ -1227,7 +1220,6 @@ class AiV3CommandPreparer {
             },
           ));
           simulatedRowCount += 2;
-          createdRows += 2;
           hasPriorTopologyMutation = true;
           hasPreparedStemSeparation = true;
           label =
@@ -1306,7 +1298,6 @@ class AiV3CommandPreparer {
             },
           ));
           simulatedRowCount += 1;
-          createdRows += 1;
           hasPriorTopologyMutation = true;
           hasPreparedAudioToMidi = true;
           label =

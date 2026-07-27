@@ -2178,6 +2178,46 @@ void main() {
       );
     });
 
+    test('delete then embedded MIDI destination uses the final row index', () {
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
+        _command('delete-keys', 'row.delete', <String, dynamic>{
+          'row_id': 200,
+        }),
+        _command('replacement', 'midi.create_clip', <String, dynamic>{
+          'destination': <String, dynamic>{
+            'new_row': <String, dynamic>{
+              'name': 'Replacement Keys',
+              'instrument_id': 'piano',
+            },
+          },
+          'start_beat': 0,
+          'length_beats': 4,
+          'notes': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'pitch': 60,
+              'start_beat': 0,
+              'length_beats': 4,
+              'velocity': 0.8,
+            },
+          ],
+        }),
+      ]));
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+
+      expect(
+        prepared.actions.map((action) => action.type),
+        <String>['row_delete', 'row_create', 'midi_compose'],
+      );
+      expect(
+        (prepared.actions.last.data['target'] as Map)['row_index'],
+        1,
+      );
+    });
+
     test('canonicalizes exact standalone and embedded MIDI row duplication',
         () {
       Map<String, dynamic> createRow(String id) =>
