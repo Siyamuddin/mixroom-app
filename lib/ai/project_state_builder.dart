@@ -233,6 +233,15 @@ class ProjectStateBuilder {
       final effects = <EffectState>[];
 
       final names = await JuceAudioEngine.getTrackEffectsForRow(row);
+      var instanceIds =
+          await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
+      if (instanceIds.length != names.length) {
+        instanceIds = List<String>.filled(names.length, '');
+      }
+      var effectIds = await JuceAudioEngine.getTrackEffectIdsForRow(row);
+      if (effectIds.length != names.length) {
+        effectIds = List<String>.from(names);
+      }
       for (int i = 0; i < names.length; i++) {
         final params = exposedEffectParameters(
           names[i],
@@ -242,6 +251,8 @@ class ProjectStateBuilder {
         effects.add(
           EffectState(
             effectIndex: i,
+            instanceId: instanceIds[i],
+            effectId: effectIds[i],
             name: names[i],
             isBypassed: await JuceAudioEngine.getRowEffectBypassState(row, i),
             parameters: params

@@ -1013,6 +1013,8 @@ class L10n {
               'Chat context now stays with this project.\nStart a conversation and it will still be here when you reopen it.',
           'This is an experimental feature in development. Output may be unexpected.':
               'This is an experimental feature in development. Output may be unexpected.',
+          'Ask Mixroom to create, edit, or mix your project.':
+              'Ask Mixroom to create, edit, or mix your project.',
           'Copied': 'Copied',
           'Copied chat log.': 'Copied chat log.',
           'Drop audio here': 'Drop audio here',
@@ -2917,6 +2919,8 @@ class L10n {
               '채팅 컨텍스트는 이 프로젝트에 저장됩니다.\n대화를 시작하면 다시 열어도 그대로 유지됩니다.',
           'This is an experimental feature in development. Output may be unexpected.':
               '이 기능은 개발 중인 실험적 기능입니다. 출력이 예상과 다를 수 있습니다.',
+          'Ask Mixroom to create, edit, or mix your project.':
+              'Mixroom에게 프로젝트 생성, 편집 또는 믹싱을 요청해 보세요.',
           'Copied': '복사됨',
           'Copied chat log.': '채팅 로그를 복사했습니다.',
           'Drop audio here': '여기에 오디오 놓기',
@@ -5528,6 +5532,8 @@ class L10n {
               'チャットコンテキストはこのプロジェクトに保存されます。\n会話を始めると、再度開いたときもそのまま残ります。',
           'This is an experimental feature in development. Output may be unexpected.':
               'この機能は開発中の実験的な機能です。出力は予期しない場合があります。',
+          'Ask Mixroom to create, edit, or mix your project.':
+              'Mixroomにプロジェクトの作成、編集、ミックスを頼んでみましょう。',
           'Copied': 'コピー済み',
           'Copied chat log.': 'チャットログをコピーしました。',
           'Drop audio here': 'ここにオーディオをドロップ',

@@ -1580,11 +1580,16 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<int> addRow(String name, {int iconId = 0}) async {
+  static Future<int> addRow(
+    String name, {
+    int iconId = 0,
+    int? preferredRowId,
+  }) async {
     try {
       final id = await _ch.invokeMethod<int>('addRow', {
         'name': name,
         'iconId': iconId,
+        if (preferredRowId != null) 'preferredRowId': preferredRowId,
       });
       return id ?? -1;
     } on PlatformException catch (e) {
@@ -1593,13 +1598,18 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<int> insertRowAbove(int referenceRowId, String name,
-      {int iconId = 0}) async {
+  static Future<int> insertRowAbove(
+    int referenceRowId,
+    String name, {
+    int iconId = 0,
+    int? preferredRowId,
+  }) async {
     try {
       final id = await _ch.invokeMethod<int>('insertRowAbove', {
         'referenceRowId': referenceRowId,
         'name': name,
         'iconId': iconId,
+        if (preferredRowId != null) 'preferredRowId': preferredRowId,
       });
       return id ?? -1;
     } on PlatformException catch (e) {
@@ -1608,13 +1618,18 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<int> insertRowBelow(int referenceRowId, String name,
-      {int iconId = 0}) async {
+  static Future<int> insertRowBelow(
+    int referenceRowId,
+    String name, {
+    int iconId = 0,
+    int? preferredRowId,
+  }) async {
     try {
       final id = await _ch.invokeMethod<int>('insertRowBelow', {
         'referenceRowId': referenceRowId,
         'name': name,
         'iconId': iconId,
+        if (preferredRowId != null) 'preferredRowId': preferredRowId,
       });
       return id ?? -1;
     } on PlatformException catch (e) {

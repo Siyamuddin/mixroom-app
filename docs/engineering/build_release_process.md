@@ -87,6 +87,13 @@ App API and AI proxy deployments use AWS SAM and related scripts. Start with:
 Do not treat app release and backend release as independent when auth, billing,
 entitlements, AI actions, feature flags, or cloud project behavior changes.
 
+For an AI V3 client release, deploy and verify the authenticated
+`/v1/llm/v3/responses` route before distributing a build with
+`AI_V3_PRIMARY_ENABLED=true`. The backend owns `AI_V3_MODEL`,
+`AI_V3_REASONING_EFFORT`, and the `AI_V3_ENABLED` kill switch. A client build
+with `AI_V3_PRIMARY_ENABLED=false` keeps the existing V1 route; the app never
+silently retries an individual failed V3 request through V1.
+
 ## Release Sign-Off
 
 Before public release, record owners for:

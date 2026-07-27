@@ -1,6 +1,20 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:crypto/crypto.dart' as crypto;
+
 import 'ai_debug.dart';
+import 'v3/ai_v3_context.dart';
+import 'v3/ai_v3_contract.dart';
+import 'v3/ai_v3_capture.dart';
+import 'v3/ai_v3_adaptive_midi_planner.dart';
+import 'v3/ai_v3_compact_core.dart';
+import 'v3/ai_v3_planning_snapshot.dart';
+import 'v3/ai_v3_planner_service.dart';
+import 'v3/ai_v3_preparer.dart';
+import 'v3/ai_v3_mix_materializer.dart';
+import 'v3/ai_v3_audio_facts.dart';
 import 'assistant_action_utils.dart';
 import 'cloud_llm_service.dart';
 import 'project_state_builder.dart';
@@ -11,6 +25,333 @@ import '../models/mixing_result.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/models/project_state.dart';
 
+typedef AiV3ClipTempoDetector = Future<double?> Function(AudioTrack clip);
+typedef AiV3ClipBoundaryAnalyzer = Future<AiV3ClipBoundaryAnalysis?> Function(
+  AudioTrack clip,
+);
+
+class _AiV3PreparationFailureResponse {
+  const _AiV3PreparationFailureResponse({
+    required this.decision,
+    required this.message,
+  });
+
+  final String decision;
+  final String message;
+}
+
+List<String> aiV3VerifiedExecutionDetails(
+  Map<String, dynamic> bundle, {
+  Map<String, List<String>> executionSummariesByCommandId =
+      const <String, List<String>>{},
+  List<String> actionNotices = const <String>[],
+}) {
+  final executionDetails = <String>[];
+  void addDetail(String rawDetail) {
+    final detail = _normalizeAiV3ExecutionSummary(rawDetail);
+    if (detail.isEmpty || executionDetails.contains(detail)) return;
+    executionDetails.add(detail);
+  }
+
+  for (final notice in actionNotices) {
+    addDetail(notice);
+  }
+  if (executionDetails.isNotEmpty) {
+    return List<String>.unmodifiable(executionDetails);
+  }
+
+  final rawReceipts = bundle['receipts'];
+  if (rawReceipts is List) {
+    for (final rawReceipt in rawReceipts.whereType<Map>()) {
+      final commandId = rawReceipt['command_id']?.toString().trim() ?? '';
+      final executionSummaries =
+          executionSummariesByCommandId[commandId] ?? const <String>[];
+      if (executionSummaries.isNotEmpty) {
+        for (final summary in executionSummaries) {
+          addDetail(summary);
+        }
+        continue;
+      }
+      final label = rawReceipt['preview_label']?.toString().trim() ?? '';
+      if (label.isEmpty) continue;
+      final status = rawReceipt['status']?.toString().trim() ?? '';
+      addDetail(
+        status == 'already_satisfied' ? '$label (already set)' : label,
+      );
+    }
+  }
+  return List<String>.unmodifiable(executionDetails);
+}
+
+String aiV3VerifiedConversationMessage(
+  Map<String, dynamic> bundle, {
+  Map<String, List<String>> executionSummariesByCommandId =
+      const <String, List<String>>{},
+  List<String> actionNotices = const <String>[],
+}) {
+  final executionDetails = aiV3VerifiedExecutionDetails(
+    bundle,
+    executionSummariesByCommandId: executionSummariesByCommandId,
+    actionNotices: actionNotices,
+  );
+  if (executionDetails.isEmpty) return 'Done.';
+  return <String>[
+    'Done:',
+    ...executionDetails.map((detail) => '- $detail'),
+  ].join('\n');
+}
+
+String aiV3AlreadySatisfiedConversationMessage(Map<String, dynamic> bundle) {
+  final details = <String>[];
+  final rawReceipts = bundle['receipts'];
+  if (rawReceipts is List) {
+    for (final rawReceipt in rawReceipts.whereType<Map>()) {
+      if (rawReceipt['status']?.toString().trim() != 'already_satisfied') {
+        continue;
+      }
+      final label = _normalizeAiV3ExecutionSummary(
+        rawReceipt['preview_label']?.toString() ?? '',
+      );
+      if (label.isEmpty || details.contains(label)) continue;
+      details.add(label);
+    }
+  }
+  if (details.isEmpty) return 'No changes were needed.';
+  return <String>[
+    'No changes were needed:',
+    ...details.map((detail) => '- $detail (already set)'),
+  ].join('\n');
+}
+
+String aiV3VerifiedCompletionMessage(Map<String, dynamic> bundle) => 'Done.';
+
+String _aiV3ClarificationMessage(
+  String question,
+  List<String> options,
+) {
+  if (options.isEmpty) return question;
+  String normalize(String value) =>
+      value.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+  final normalizedQuestion = normalize(question);
+  final numberedOptionCount =
+      RegExp(r'^\s*\d+[.)]\s+\S', multiLine: true).allMatches(question).length;
+  final optionsAlreadyShown = options.every((option) {
+    final normalizedOption = normalize(option);
+    return normalizedOption.isNotEmpty &&
+        normalizedQuestion.contains(normalizedOption);
+  });
+  return optionsAlreadyShown || numberedOptionCount >= options.length
+      ? question
+      : '$question\n\nOptions: ${options.join(' / ')}';
+}
+
+String _normalizeAiV3ExecutionSummary(String summary) {
+  var normalized = summary.trim();
+  if (normalized.startsWith('•')) {
+    normalized = normalized.substring(1).trimLeft();
+  }
+  if (normalized.endsWith('•')) {
+    normalized = normalized.substring(0, normalized.length - 1).trimRight();
+  }
+  return normalized;
+}
+
+class _AiWorkflowCaptureContext {
+  const _AiWorkflowCaptureContext({
+    required this.captureId,
+    required this.conversation,
+    required this.userText,
+    required this.projectSnapshot,
+    required this.selectionSnapshot,
+    required this.validationState,
+    required this.librarySnapshot,
+    required this.promptTraceId,
+    required this.projectId,
+    required this.aiFeature,
+    required this.conversationSessionId,
+    required this.clientContext,
+    required this.legacyPendingMix,
+  });
+
+  final String captureId;
+  final List<Map<String, String>> conversation;
+  final String userText;
+  final String projectSnapshot;
+  final String selectionSnapshot;
+  final Map<String, dynamic> validationState;
+  final String librarySnapshot;
+  final String? promptTraceId;
+  final String? projectId;
+  final String? aiFeature;
+  final String? conversationSessionId;
+  final Map<String, dynamic> clientContext;
+  final MixingResult? legacyPendingMix;
+
+  Map<String, dynamic> get requestSnapshot => <String, dynamic>{
+        'schema_version': 'ai_workflow_request_snapshot_v1',
+        'prompt_trace_id': promptTraceId,
+        'project_id': projectId,
+        'ai_feature': aiFeature,
+        'conversation_session_id': conversationSessionId,
+        'user_text': userText,
+        'conversation': conversation,
+        'project_snapshot': projectSnapshot,
+        'selection_snapshot': selectionSnapshot,
+        'validation_state': validationState,
+        'library_snapshot': librarySnapshot,
+        'client_context': clientContext,
+        if (legacyPendingMix != null)
+          'legacy_pending_mix': legacyPendingMix!.toJson(),
+      };
+}
+
+_AiV3PreparationFailureResponse? _aiV3PreparationFailureResponse(
+  String code,
+) =>
+    switch (code) {
+      'v3_mix_reference_audio_missing' => const _AiV3PreparationFailureResponse(
+          decision: 'clarify',
+          message:
+              'That row cannot be used as a reference because it has no usable analyzed audio. Choose a different audio reference.',
+        ),
+      'v3_mix_reference_equals_target' => const _AiV3PreparationFailureResponse(
+          decision: 'clarify',
+          message:
+              'The processing target and reference must be different rows. Choose a separate reference row.',
+        ),
+      'v3_mix_master_reference_unsupported' =>
+        const _AiV3PreparationFailureResponse(
+          decision: 'unsupported',
+          message:
+              'Reference matching is not available for the master target yet. Choose a row or group target instead.',
+        ),
+      'v3_mix_audio_missing' => const _AiV3PreparationFailureResponse(
+          decision: 'blocked',
+          message:
+              'There is no playable audio or MIDI material to mix. Add material to the project, then try again.',
+        ),
+      'v3_clip_stretch_global_conflict' =>
+        const _AiV3PreparationFailureResponse(
+          decision: 'clarify',
+          message:
+              'Other clips are configured to follow project tempo. Choose whether those clips should remain unchanged before stretching this clip.',
+        ),
+      'v3_clip_tempo_detection_unavailable' =>
+        const _AiV3PreparationFailureResponse(
+          decision: 'clarify',
+          message:
+              'I could not detect a reliable tempo from that clip. Choose a clearer rhythmic audio clip or provide its source BPM manually.',
+        ),
+      'v3_clip_boundary_analysis_unavailable' =>
+        const _AiV3PreparationFailureResponse(
+          decision: 'clarify',
+          message:
+              'I could not detect a clear audible boundary in that clip. Choose a clearer audio clip or make the trim or alignment manually.',
+        ),
+      'v3_clip_first_sound_negative_start' =>
+        const _AiV3PreparationFailureResponse(
+          decision: 'clarify',
+          message:
+              'That first sound cannot reach the requested position without moving the clip before the project start. Choose a later position or trim the leading silence first.',
+        ),
+      'v3_row_capacity_exceeded' => const _AiV3PreparationFailureResponse(
+          decision: 'blocked',
+          message:
+              'This project has reached its row limit. Delete an existing row before creating another one.',
+        ),
+      'v3_instrument_id_unknown' => const _AiV3PreparationFailureResponse(
+          decision: 'clarify',
+          message:
+              'That instrument is not available in the current project. Choose one of the available instruments.',
+        ),
+      'v3_embedded_destination_row_conflict' =>
+        const _AiV3PreparationFailureResponse(
+          decision: 'blocked',
+          message:
+              'The plan tries to create the same destination row more than once. Use one MIDI or sample command to create that destination row.',
+        ),
+      'v3_row_delete_last_remaining' => const _AiV3PreparationFailureResponse(
+          decision: 'unsupported',
+          message:
+              'The project must keep at least one row, so the final remaining row cannot be deleted.',
+        ),
+      'v3_group_members_already_grouped' =>
+        const _AiV3PreparationFailureResponse(
+          decision: 'blocked',
+          message:
+              'Those rows already form a group. Ask to change that existing group instead of creating another group from the same rows.',
+        ),
+      'v3_group_membership_mismatch' => const _AiV3PreparationFailureResponse(
+          decision: 'clarify',
+          message:
+              'That row is not currently a member of the specified group. Choose a current group member.',
+        ),
+      'v3_transport_recording_active' => const _AiV3PreparationFailureResponse(
+          decision: 'blocked',
+          message:
+              'Playback controls cannot be changed while recording. Stop recording first, then try again.',
+        ),
+      'v3_phone_cleanup_unavailable' => const _AiV3PreparationFailureResponse(
+          decision: 'unsupported',
+          message:
+              'Phone-recording cleanup is not available with the current effects and service access.',
+        ),
+      'v3_phone_cleanup_audio_missing' => const _AiV3PreparationFailureResponse(
+          decision: 'clarify',
+          message:
+              'That row has no audio clips to clean. Choose a row containing an audio recording.',
+        ),
+      'v3_phone_cleanup_effect_conflict' =>
+        const _AiV3PreparationFailureResponse(
+          decision: 'blocked',
+          message:
+              'Phone-recording cleanup and another effect or mix change target the same row. Apply the cleanup first, then make the other sound change.',
+        ),
+      _ => null,
+    };
+
+_AiV3PreparationFailureResponse _aiV3PlannerFailureResponse(String code) =>
+    switch (code) {
+      'v3_planner_timeout' => const _AiV3PreparationFailureResponse(
+          decision: 'blocked',
+          message:
+              'The AI took too long to finish this request. Nothing was changed. Try again, or split a very large request into smaller parts.',
+        ),
+      'v3_proxy_auth_token_missing' => const _AiV3PreparationFailureResponse(
+          decision: 'blocked',
+          message:
+              'Your session could not be verified for AI editing. Nothing was changed. Sign in again, then retry the request.',
+        ),
+      'v3_openai_configuration_missing' =>
+        const _AiV3PreparationFailureResponse(
+          decision: 'unsupported',
+          message:
+              'AI editing is not available in this build. Nothing was changed.',
+        ),
+      'v3_planner_contract_invalid' ||
+      'v3_planner_tool_call_missing' ||
+      'v3_planner_tool_call_count_invalid' ||
+      'v3_planner_tool_call_invalid' ||
+      'v3_planner_arguments_invalid_json' =>
+        const _AiV3PreparationFailureResponse(
+          decision: 'blocked',
+          message:
+              'I could not turn the AI response into safe DAW changes. Nothing was changed. Rephrase the request or split it into smaller steps.',
+        ),
+      'v3_planner_http_error' ||
+      'v3_planner_response_invalid_json' =>
+        const _AiV3PreparationFailureResponse(
+          decision: 'blocked',
+          message:
+              'The AI service returned an unusable response. Nothing was changed. Try again in a moment.',
+        ),
+      _ => const _AiV3PreparationFailureResponse(
+          decision: 'blocked',
+          message:
+              'I could not safely complete this AI request. Nothing was changed.',
+        ),
+    };
+
 class ChatPipeline {
   static const int _kMaxConversationMessages = 24;
   static const int _kMaxConversationCharacters = 12000;
@@ -20,12 +361,26 @@ class ChatPipeline {
   final ProjectStateBuilder projectBuilder;
   final LocalMixingModel mixModel;
   final MixingMagnitudePredictor magnitudePredictor;
+  final AiV3Planner? aiV3Planner;
+  final AiV3Planner? aiV3CompactShadowPlanner;
+  final AiV3AdaptivePlanner? aiV3AdaptiveShadowPlanner;
+  final AiV3AdaptivePlanner? aiV3AdaptiveShadowComparisonPlanner;
+  final AiV3Capture aiV3Capture;
+  final bool aiV3DetachedComparisonsEnabled;
+  final AiV3ContextProfile aiV3ContextProfile;
+  final AiV3CommandPreparer _aiV3Preparer;
+  final AiV3PlanningSnapshotBuilder _aiV3PlanningSnapshotBuilder;
+  final AiV3CompactCoreBuilder _aiV3CompactCoreBuilder;
+  final AiV3ClipTempoDetector? _aiV3ClipTempoDetector;
+  final AiV3ClipBoundaryAnalyzer? _aiV3ClipBoundaryAnalyzer;
 
   /// Optional: UI can hook into this to show a global "thinking..." indicator.
   final void Function(bool isThinking)? onThinkingChanged;
 
   final List<Map<String, String>> _conversation = [];
   MixingResult? _pendingMix;
+  AiV3PreparedBundle? _pendingAiV3Bundle;
+  String? _pendingAiV3PlanId;
   final Map<int, String> _roleOverrides = {};
 
   ChatPipeline({
@@ -34,8 +389,108 @@ class ChatPipeline {
     required this.mixModel,
     this.onThinkingChanged,
     MixingMagnitudePredictor? magnitudePredictor,
-  }) : magnitudePredictor =
-            magnitudePredictor ?? const NoopMixingMagnitudePredictor();
+    this.aiV3Planner,
+    this.aiV3CompactShadowPlanner,
+    this.aiV3AdaptiveShadowPlanner,
+    this.aiV3AdaptiveShadowComparisonPlanner,
+    this.aiV3Capture = const AiV3Capture(
+      enabled: false,
+      directoryPath: '',
+    ),
+    this.aiV3DetachedComparisonsEnabled = true,
+    this.aiV3ContextProfile = AiV3ContextProfile.essential,
+    AiV3CommandPreparer aiV3Preparer = const AiV3CommandPreparer(),
+    AiV3PlanningSnapshotBuilder? aiV3PlanningSnapshotBuilder,
+    AiV3CompactCoreBuilder aiV3CompactCoreBuilder =
+        const AiV3CompactCoreBuilder(),
+    AiV3ClipTempoDetector? aiV3ClipTempoDetector,
+    AiV3ClipBoundaryAnalyzer? aiV3ClipBoundaryAnalyzer,
+  })  : magnitudePredictor =
+            magnitudePredictor ?? const NoopMixingMagnitudePredictor(),
+        _aiV3Preparer = aiV3Preparer,
+        _aiV3PlanningSnapshotBuilder =
+            aiV3PlanningSnapshotBuilder ?? AiV3PlanningSnapshotBuilder(),
+        _aiV3CompactCoreBuilder = aiV3CompactCoreBuilder,
+        _aiV3ClipTempoDetector = aiV3ClipTempoDetector,
+        _aiV3ClipBoundaryAnalyzer = aiV3ClipBoundaryAnalyzer;
+
+  Future<Map<String, double>> _detectTemposForPlan(
+    AiV3Plan plan,
+    List<AudioTrack> audioTracks,
+    Map<String, Future<double?>> requestCache,
+  ) async {
+    final detector = _aiV3ClipTempoDetector;
+    if (detector == null) return const <String, double>{};
+    final requestedIds = plan.commands
+        .where((command) =>
+            command.type == 'clip.align_tempo_to_project' ||
+            command.type == 'project.set_tempo_from_clip')
+        .map((command) => command.arguments['clip_id']?.toString() ?? '')
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    if (requestedIds.isEmpty) return const <String, double>{};
+    final trackById = <String, AudioTrack>{
+      for (final track in audioTracks) track.clipId: track,
+    };
+    final detected = <String, double>{};
+    for (final clipId in requestedIds) {
+      final track = trackById[clipId];
+      if (track == null || track.isMidi) continue;
+      final value = await requestCache.putIfAbsent(
+        clipId,
+        () async {
+          try {
+            return await detector(track);
+          } catch (_) {
+            return null;
+          }
+        },
+      );
+      if (value != null && value.isFinite) detected[clipId] = value;
+    }
+    return Map<String, double>.unmodifiable(detected);
+  }
+
+  Future<Map<String, AiV3ClipBoundaryAnalysis>> _analyzeBoundariesForPlan(
+    AiV3Plan plan,
+    List<AudioTrack> audioTracks,
+    Map<String, Future<AiV3ClipBoundaryAnalysis?>> requestCache,
+  ) async {
+    final analyzer = _aiV3ClipBoundaryAnalyzer;
+    if (analyzer == null) {
+      return const <String, AiV3ClipBoundaryAnalysis>{};
+    }
+    final requestedIds = plan.commands
+        .where((command) =>
+            command.type == 'clip.trim_silence' ||
+            command.type == 'clip.align_first_sound')
+        .map((command) => command.arguments['clip_id']?.toString() ?? '')
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    if (requestedIds.isEmpty) {
+      return const <String, AiV3ClipBoundaryAnalysis>{};
+    }
+    final trackById = <String, AudioTrack>{
+      for (final track in audioTracks) track.clipId: track,
+    };
+    final analyzed = <String, AiV3ClipBoundaryAnalysis>{};
+    for (final clipId in requestedIds) {
+      final track = trackById[clipId];
+      if (track == null || track.isMidi) continue;
+      final value = await requestCache.putIfAbsent(
+        clipId,
+        () async {
+          try {
+            return await analyzer(track);
+          } catch (_) {
+            return null;
+          }
+        },
+      );
+      if (value != null) analyzed[clipId] = value;
+    }
+    return Map<String, AiV3ClipBoundaryAnalysis>.unmodifiable(analyzed);
+  }
 
   Map<String, dynamic> _mergeObservabilityMeta(
     Map<String, dynamic>? meta,
@@ -74,10 +529,19 @@ class ChatPipeline {
     int primarySelectedClipIndex = -1,
     int? selectedRowIndex,
     String automationClipSnapshot = '',
+    int beatsPerBar = 4,
+    int beatUnit = 4,
+    Map<int, List<Map<String, dynamic>>> validationAutomationTargets =
+        const <int, List<Map<String, dynamic>>>{},
+    List<Map<String, dynamic>> validationMasterAutomationTargets =
+        const <Map<String, dynamic>>[],
+    List<Map<String, dynamic>> validationAutomationClips =
+        const <Map<String, dynamic>>[],
     String? promptTraceId,
     String? projectId,
     String? aiFeature,
     String? conversationSessionId,
+    String? clientStateDigest,
     Map<String, dynamic> clientContext = const <String, dynamic>{},
     bool autoApplyProposals = false,
     bool bypassLearnedMagnitudes = false,
@@ -138,6 +602,41 @@ class ChatPipeline {
         selectedRowIndex: selectedRowIndex,
         automationClipSnapshot: automationClipSnapshot,
       );
+      final validationState = _validationStateSnapshot(
+        project: project,
+        audioTracks: audioTracks,
+        rowNames: rowNames,
+        selectedClipIndices: selectedClipIndices,
+        primarySelectedClipIndex: primarySelectedClipIndex,
+        selectedRowIndex: selectedRowIndex,
+        beatsPerBar: beatsPerBar,
+        beatUnit: beatUnit,
+        automationTargetsByRow: validationAutomationTargets,
+        masterAutomationTargets: validationMasterAutomationTargets,
+        automationClips: validationAutomationClips,
+        clientStateDigest: clientStateDigest,
+      );
+      final workflowCaptureContext = aiV3Capture.isEnabled
+          ? _AiWorkflowCaptureContext(
+              captureId: (promptTraceId ?? '').trim().isNotEmpty
+                  ? promptTraceId!.trim()
+                  : 'workflow_${DateTime.now().microsecondsSinceEpoch}',
+              conversation: _conversation
+                  .map((entry) => Map<String, String>.from(entry))
+                  .toList(growable: false),
+              userText: userText,
+              projectSnapshot: snapshot,
+              selectionSnapshot: selectionSnapshot,
+              validationState: Map<String, dynamic>.from(validationState),
+              librarySnapshot: librarySnapshot,
+              promptTraceId: promptTraceId,
+              projectId: projectId,
+              aiFeature: aiFeature,
+              conversationSessionId: conversationSessionId,
+              clientContext: Map<String, dynamic>.from(clientContext),
+              legacyPendingMix: _pendingMix,
+            )
+          : null;
 
       // final hasAudio = audioTracks.isNotEmpty;
       final hasAudio = project.rows.any((r) => r.hasAudio);
@@ -145,6 +644,26 @@ class ChatPipeline {
         'pipeline',
         'project built rows=${project.rows.length} rowsWithAudio=${project.rows.where((r) => r.hasAudio).length} bpm=${project.bpm.toStringAsFixed(1)} hasAudio=$hasAudio',
       );
+
+      final normalizedAiFeature = (aiFeature ?? 'ai_chat').trim();
+      final isProjectChat =
+          normalizedAiFeature.isEmpty || normalizedAiFeature == 'ai_chat';
+      if (clientContext['ai_v3_prototype_enabled'] == true && isProjectChat) {
+        return await _handleAiV3(
+          userText: userText,
+          project: project,
+          audioTracks: audioTracks,
+          validationState: validationState,
+          clientContext: clientContext,
+          bpm: bpmFallback,
+          beatsPerBar: beatsPerBar,
+          beatUnit: beatUnit,
+          promptTraceId: promptTraceId,
+          projectId: projectId,
+          captureContext: workflowCaptureContext,
+          bypassLearnedMagnitudes: bypassLearnedMagnitudes,
+        );
+      }
 
       // 2) Ask LLM (do NOT push userText yet to avoid duplicating inside request)
       final llmRes = await llm.send(
@@ -631,13 +1150,849 @@ class ChatPipeline {
       aiDebugLog(
           'pipeline', 'proposal result actions=${mergedMix.actions.length}');
       _push('assistant', msg);
-      return ChatPipelineResult.message(
-        msg,
-        meta: finalizeMeta(modelMeta, toolName: llmRes.toolName),
+      return _completeLegacyResult(
+        ChatPipelineResult.message(
+          msg,
+          meta: finalizeMeta(modelMeta, toolName: llmRes.toolName),
+        ),
+        workflowCaptureContext,
       );
     } finally {
       onThinkingChanged?.call(false);
     }
+  }
+
+  ChatPipelineResult _completeLegacyResult(
+    ChatPipelineResult result,
+    _AiWorkflowCaptureContext? captureContext,
+  ) =>
+      result;
+
+  bool hasActiveAiV3PendingPlan([String planId = '']) {
+    if (_pendingAiV3Bundle == null || _pendingAiV3PlanId == null) return false;
+    return planId.trim().isEmpty || planId.trim() == _pendingAiV3PlanId;
+  }
+
+  void recordAiV3Execution({
+    required Map<String, dynamic> handoff,
+    required Map<String, dynamic> result,
+    String conversationMessage = '',
+  }) {
+    final completedMessage = conversationMessage.trim();
+    if (result['status'] == 'succeeded' && completedMessage.isNotEmpty) {
+      _push('assistant', completedMessage);
+    }
+    final planId = handoff['plan_id']?.toString().trim() ?? '';
+    if (!aiV3Capture.isEnabled || planId.isEmpty) return;
+    unawaited(aiV3Capture.captureExecution(
+      planId: planId,
+      handoff: handoff,
+      executionResult: result,
+    ));
+  }
+
+  Future<ChatPipelineResult> _handleAiV3({
+    required String userText,
+    required ProjectState project,
+    required List<AudioTrack> audioTracks,
+    required Map<String, dynamic> validationState,
+    required Map<String, dynamic> clientContext,
+    required double bpm,
+    required int beatsPerBar,
+    required int beatUnit,
+    required String? promptTraceId,
+    required String? projectId,
+    required _AiWorkflowCaptureContext? captureContext,
+    required bool bypassLearnedMagnitudes,
+  }) async {
+    final normalized = userText.trim().toLowerCase();
+    final pending = _pendingAiV3Bundle;
+    final pendingPlanId = _pendingAiV3PlanId;
+    final isModification = pending != null &&
+        pendingPlanId != null &&
+        normalized != 'apply' &&
+        normalized != 'cancel';
+    final modificationRequest = isModification &&
+            userText.trimLeft().toLowerCase().startsWith('modify:')
+        ? userText.trimLeft().substring('modify:'.length).trim()
+        : userText.trim();
+    if (pending != null && pendingPlanId != null && normalized == 'apply') {
+      final currentDigest =
+          validationState['client_state_digest']?.toString().trim() ?? '';
+      _push('user', userText);
+      if (currentDigest.isEmpty || currentDigest != pending.stateDigest) {
+        _pendingAiV3Bundle = null;
+        _pendingAiV3PlanId = null;
+        const message =
+            'The project changed after this plan was prepared. Please run the request again.';
+        _push('assistant', message);
+        return ChatPipelineResult.v3(
+          message,
+          <String, dynamic>{
+            'schema_version': 'ai_v3_handoff_prototype_1',
+            'decision': 'stale',
+            'plan_id': pendingPlanId,
+            'error_code': 'v3_execution_state_changed',
+            'message': message,
+          },
+          meta: const <String, dynamic>{'tool': 'ai_v3_execution'},
+        );
+      }
+      _pendingAiV3Bundle = null;
+      _pendingAiV3PlanId = null;
+      return ChatPipelineResult.v3(
+        '',
+        <String, dynamic>{
+          'schema_version': 'ai_v3_handoff_prototype_1',
+          'decision': 'execute_now',
+          'plan_id': pendingPlanId,
+          'prepared_bundle': pending.toJson(),
+          'execution_policy': pending.executionPolicy.wireName,
+          'confirmation_granted': true,
+        },
+        meta: const <String, dynamic>{'tool': 'ai_v3_execution'},
+      );
+    }
+    if (pending != null && pendingPlanId != null && normalized == 'cancel') {
+      _pendingAiV3Bundle = null;
+      _pendingAiV3PlanId = null;
+      _push('user', userText);
+      const message = 'Canceled. Nothing was changed.';
+      _push('assistant', message);
+      return ChatPipelineResult.v3(
+        message,
+        <String, dynamic>{
+          'schema_version': 'ai_v3_handoff_prototype_1',
+          'decision': 'canceled',
+          'plan_id': pendingPlanId,
+          'message': message,
+        },
+        meta: const <String, dynamic>{'tool': 'ai_v3_execution'},
+      );
+    }
+    if (pending == null && (normalized == 'apply' || normalized == 'cancel')) {
+      _push('user', userText);
+      const message = 'There is no pending plan to apply or cancel.';
+      _push('assistant', message);
+      return ChatPipelineResult.v3(
+        message,
+        <String, dynamic>{
+          'schema_version': 'ai_v3_handoff_prototype_1',
+          'decision': 'no_pending_plan',
+          'error_code': 'v3_pending_plan_missing',
+          'message': message,
+        },
+        meta: const <String, dynamic>{'tool': 'ai_v3_execution'},
+      );
+    }
+
+    final planner = aiV3Planner;
+    if (planner == null) {
+      throw const AiV3PlannerException('v3_planner_not_configured');
+    }
+    PlanningSnapshotV3? planningSnapshot;
+    late final Map<String, dynamic> planningSnapshotShadowMetadata;
+    try {
+      planningSnapshot = _aiV3PlanningSnapshotBuilder.build(
+        project: project,
+        audioTracks: audioTracks,
+        validationState: validationState,
+        clientContext: clientContext,
+        beatsPerBar: beatsPerBar,
+        beatUnit: beatUnit,
+        projectId: projectId,
+        pendingPlan: pending?.plan.toJson(),
+        pendingPlanId: pendingPlanId,
+        requestMode: isModification ? 'modify_pending_plan' : 'new_request',
+      );
+      planningSnapshotShadowMetadata = planningSnapshot.safeMetadata;
+    } on AiV3PlanningSnapshotException catch (error) {
+      planningSnapshotShadowMetadata = <String, dynamic>{
+        'status': 'failed',
+        'schema_version': aiV3PlanningSnapshotSchemaVersion,
+        'error_code': error.code,
+      };
+      aiDebugLog(
+        'v3_snapshot',
+        'shadow snapshot failed code=${error.code}',
+      );
+    } catch (_) {
+      planningSnapshotShadowMetadata = const <String, dynamic>{
+        'status': 'failed',
+        'schema_version': aiV3PlanningSnapshotSchemaVersion,
+        'error_code': 'planning_snapshot_unexpected',
+      };
+      aiDebugLog(
+        'v3_snapshot',
+        'shadow snapshot failed code=planning_snapshot_unexpected',
+      );
+    }
+    CompactCoreV3? compactCore;
+    late Map<String, dynamic> compactCoreShadowMetadata;
+    final frozenSnapshot = planningSnapshot;
+    if (frozenSnapshot == null) {
+      compactCoreShadowMetadata = const <String, dynamic>{
+        'status': 'skipped',
+        'schema_version': aiV3CompactCoreSchemaVersion,
+        'error_code': 'compact_core_snapshot_unavailable',
+      };
+    } else {
+      try {
+        compactCore = _aiV3CompactCoreBuilder.build(
+          snapshot: frozenSnapshot,
+          conversation: _conversation,
+        );
+        compactCoreShadowMetadata = compactCore.safeMetadata;
+      } on AiV3CompactCoreException catch (error) {
+        compactCoreShadowMetadata = <String, dynamic>{
+          'status': 'failed',
+          'schema_version': aiV3CompactCoreSchemaVersion,
+          'error_code': error.code,
+        };
+        aiDebugLog(
+          'v3_compact_core',
+          'shadow compact core failed code=${error.code}',
+        );
+      } catch (_) {
+        compactCoreShadowMetadata = const <String, dynamic>{
+          'status': 'failed',
+          'schema_version': aiV3CompactCoreSchemaVersion,
+          'error_code': 'compact_core_unexpected',
+        };
+        aiDebugLog(
+          'v3_compact_core',
+          'shadow compact core failed code=compact_core_unexpected',
+        );
+      }
+    }
+    late final AiV3CoreContext context;
+    try {
+      context = const AiV3CoreContextBuilder().build(
+        profile: aiV3ContextProfile,
+        userRequest: userText,
+        conversation: _conversation,
+        validationState: validationState,
+        audioTracks: audioTracks,
+        clientContext: clientContext,
+        bpm: bpm,
+        beatsPerBar: beatsPerBar,
+        beatUnit: beatUnit,
+        projectId: projectId,
+        pendingPlan: pending?.plan.toJson(),
+        requestMode: isModification ? 'modify_pending_plan' : 'new_request',
+        modificationRequest: isModification ? modificationRequest : null,
+      );
+    } on AiV3ContextException catch (error) {
+      _pendingAiV3Bundle = null;
+      _pendingAiV3PlanId = null;
+      _push('user', userText);
+      const message =
+          'This project is too large for this request right now. Nothing was changed.';
+      _push('assistant', message);
+      return ChatPipelineResult.v3(
+        message,
+        <String, dynamic>{
+          'schema_version': 'ai_v3_handoff_prototype_1',
+          'decision': 'unsupported',
+          'error_code': error.code,
+        },
+        meta: <String, dynamic>{
+          'tool': 'ai_v3_context',
+          'error_code': error.code,
+        },
+      );
+    }
+    final currentContextBytes = utf8.encode(context.canonicalJson).length;
+    final tempoDetectionCache = <String, Future<double?>>{};
+    final boundaryAnalysisCache = <String, Future<AiV3ClipBoundaryAnalysis?>>{};
+    final projected = compactCore;
+    if (projected != null) {
+      final reductionBytes = currentContextBytes - projected.serializedBytes;
+      compactCoreShadowMetadata = <String, dynamic>{
+        ...compactCoreShadowMetadata,
+        'current_context_serialized_bytes': currentContextBytes,
+        'current_context_approximate_tokens': context.approximateTokens,
+        'reduction_bytes': reductionBytes,
+        'reduction_percent': currentContextBytes == 0
+            ? 0.0
+            : reductionBytes * 100.0 / currentContextBytes,
+      };
+    }
+    if (isModification) {
+      // A modification request invalidates the prior preview immediately.
+      // Only the complete replacement returned below can become pending.
+      _pendingAiV3Bundle = null;
+      _pendingAiV3PlanId = null;
+    }
+    Map<String, dynamic> captureRequestSnapshot() => <String, dynamic>{
+          ...?captureContext?.requestSnapshot,
+          'core_context_v3': context.data,
+          'context_profile': context.profileName,
+          'context_serialized_bytes': currentContextBytes,
+          'context_approximate_tokens': context.approximateTokens,
+          'planning_snapshot_v3_shadow': planningSnapshotShadowMetadata,
+          'compact_core_v3_shadow_metrics': compactCoreShadowMetadata,
+          if (compactCore != null) 'compact_core_v3_shadow': compactCore.data,
+        };
+    List<AiV3CaptureRun> comparisonRuns() {
+      final activeCaptureContext = captureContext;
+      if (activeCaptureContext == null || !aiV3DetachedComparisonsEnabled) {
+        return const <AiV3CaptureRun>[];
+      }
+      return <AiV3CaptureRun>[
+        if (aiV3CompactShadowPlanner case final compactPlanner?)
+          if (compactCore case final compact?)
+            AiV3CaptureRun(
+              architecture: 'v3_compact_common_shadow',
+              model: compactPlanner.model,
+              reasoningEffort: compactPlanner.reasoningEffort,
+              run: () => _runAiV3PlannerComparison(
+                compactPlanner,
+                context: AiV3CoreContext(
+                  profile: AiV3ContextProfile.essential,
+                  stateDigest: compact.data['state_digest'].toString(),
+                  data: compact.data,
+                ),
+                preparationContext: context,
+                project: project,
+                originalRequest: userText,
+                promptTraceId: promptTraceId,
+                projectId: projectId,
+                bypassLearnedMagnitudes: bypassLearnedMagnitudes,
+                audioTracks: audioTracks,
+                tempoDetectionCache: tempoDetectionCache,
+                boundaryAnalysisCache: boundaryAnalysisCache,
+              ),
+            ),
+        if (aiV3AdaptiveShadowPlanner case final adaptivePlanner?)
+          if (compactCore case final compact?)
+            if (frozenSnapshot case final snapshot?)
+              AiV3CaptureRun(
+                architecture: aiV3AdaptiveArchitecture,
+                model: adaptivePlanner.model,
+                reasoningEffort: adaptivePlanner.reasoningEffort,
+                errorDiagnostic: (error) =>
+                    error is AiV3AdaptivePlannerException
+                        ? error.diagnostic
+                        : const <String, dynamic>{},
+                run: isModification
+                    ? () async => const <String, dynamic>{
+                          'comparison_stage': 'v3_adaptive_shadow_skipped',
+                          'status': 'skipped',
+                          'error_code': 'adaptive_shadow_modify_deferred',
+                        }
+                    : () => _runAiV3AdaptiveComparison(
+                          adaptivePlanner,
+                          compactCore: compact,
+                          snapshot: snapshot,
+                          preparationContext: context,
+                          project: project,
+                          originalRequest: userText,
+                          promptTraceId: promptTraceId,
+                          projectId: projectId,
+                          bypassLearnedMagnitudes: bypassLearnedMagnitudes,
+                          audioTracks: audioTracks,
+                          tempoDetectionCache: tempoDetectionCache,
+                          boundaryAnalysisCache: boundaryAnalysisCache,
+                        ),
+              ),
+        if (aiV3AdaptiveShadowComparisonPlanner case final adaptiveComparison?)
+          if (compactCore case final compact?)
+            if (frozenSnapshot case final snapshot?)
+              AiV3CaptureRun(
+                architecture: aiV3AdaptiveArchitecture,
+                model: adaptiveComparison.model,
+                reasoningEffort: adaptiveComparison.reasoningEffort,
+                errorDiagnostic: (error) =>
+                    error is AiV3AdaptivePlannerException
+                        ? error.diagnostic
+                        : const <String, dynamic>{},
+                run: isModification
+                    ? () async => const <String, dynamic>{
+                          'comparison_stage': 'v3_adaptive_shadow_skipped',
+                          'status': 'skipped',
+                          'error_code': 'adaptive_shadow_modify_deferred',
+                        }
+                    : () => _runAiV3AdaptiveComparison(
+                          adaptiveComparison,
+                          compactCore: compact,
+                          snapshot: snapshot,
+                          preparationContext: context,
+                          project: project,
+                          originalRequest: userText,
+                          promptTraceId: promptTraceId,
+                          projectId: projectId,
+                          bypassLearnedMagnitudes: bypassLearnedMagnitudes,
+                          audioTracks: audioTracks,
+                          tempoDetectionCache: tempoDetectionCache,
+                          boundaryAnalysisCache: boundaryAnalysisCache,
+                        ),
+              ),
+      ];
+    }
+
+    late final AiV3PlannerResult result;
+    try {
+      result = await planner.plan(
+        context: context,
+        originalRequest: userText,
+        promptTraceId: promptTraceId,
+      );
+    } catch (error) {
+      final activeCaptureContext = captureContext;
+      if (aiV3Capture.isEnabled && activeCaptureContext != null) {
+        unawaited(aiV3Capture.captureFailure(
+          captureId: activeCaptureContext.captureId,
+          request: captureRequestSnapshot(),
+          active: AiV3CaptureRun(
+            architecture: 'v3',
+            model: planner.model,
+            reasoningEffort: planner.reasoningEffort,
+            run: () async => const <String, dynamic>{},
+          ),
+          error: error,
+          diagnostic: error is AiV3PlannerException
+              ? error.diagnostic
+              : const <String, dynamic>{},
+          comparisons: comparisonRuns(),
+        ));
+      }
+      final code =
+          error is AiV3PlannerException ? error.code : 'v3_planner_unexpected';
+      final response = _aiV3PlannerFailureResponse(code);
+      _pendingAiV3Bundle = null;
+      _pendingAiV3PlanId = null;
+      _push('user', userText);
+      _push('assistant', response.message);
+      final handoff = <String, dynamic>{
+        'schema_version': 'ai_v3_handoff_prototype_1',
+        'decision': response.decision,
+        'error_code': code,
+        'message': response.message,
+      };
+      return ChatPipelineResult.v3(
+        response.message,
+        handoff,
+        meta: <String, dynamic>{
+          'tool': 'ai_v3_planner',
+          'error_code': code,
+        },
+      );
+    }
+    final plan = result.plan;
+    var preparationElapsedMs = 0;
+    var mixMaterializationMeta = const <String, dynamic>{};
+    var tempoAnalysisMeta = const <String, dynamic>{};
+    var boundaryAnalysisMeta = const <String, dynamic>{};
+    void capturePlannerResult(
+      Map<String, dynamic> handoff, {
+      String preparationErrorCode = '',
+    }) {
+      if (!aiV3Capture.isEnabled || captureContext == null) return;
+      unawaited(aiV3Capture.capture(
+        captureId: captureContext.captureId,
+        request: captureRequestSnapshot(),
+        active: AiV3CaptureRun(
+          architecture: 'v3',
+          model: planner.model,
+          reasoningEffort: planner.reasoningEffort,
+          run: () async => const <String, dynamic>{},
+        ),
+        activeResult: <String, dynamic>{
+          if (result.requestBody.isNotEmpty)
+            'planner_request_body': result.requestBody,
+          'raw_output': result.rawResponse,
+          'plan': plan.toJson(),
+          'handoff': handoff,
+          'metrics': <String, dynamic>{
+            ...result.meta,
+            'preparation_elapsed_ms': preparationElapsedMs,
+            ...tempoAnalysisMeta,
+            ...boundaryAnalysisMeta,
+            ...mixMaterializationMeta,
+          },
+          if (preparationErrorCode.isNotEmpty)
+            'preparation_error_code': preparationErrorCode,
+        },
+        comparisons: comparisonRuns(),
+      ));
+    }
+
+    _push('user', userText);
+    if (!plan.isMutating) {
+      _pendingAiV3Bundle = null;
+      _pendingAiV3PlanId = null;
+      final message = plan.outcome == 'clarify'
+          ? _aiV3ClarificationMessage(
+              plan.userMessage,
+              plan.questionOptions,
+            )
+          : plan.userMessage;
+      _push('assistant', message);
+      final handoff = <String, dynamic>{
+        'schema_version': 'ai_v3_handoff_prototype_1',
+        'decision': plan.outcome,
+        'plan': plan.toJson(),
+        'message': message,
+      };
+      capturePlannerResult(handoff);
+      return ChatPipelineResult.v3(
+        message,
+        handoff,
+        meta: <String, dynamic>{
+          'tool': 'submit_plan_v3',
+          ...result.meta,
+        },
+      );
+    }
+    late AiV3PreparedBundle prepared;
+    AiV3MixMaterializationResult? mixMaterialization;
+    final preparationStopwatch = Stopwatch()..start();
+    try {
+      final analysisStopwatch = Stopwatch()..start();
+      final detectedTempos = await _detectTemposForPlan(
+        plan,
+        audioTracks,
+        tempoDetectionCache,
+      );
+      analysisStopwatch.stop();
+      if (detectedTempos.isNotEmpty) {
+        tempoAnalysisMeta = <String, dynamic>{
+          'tempo_analysis': <String, dynamic>{
+            'clip_tempos_bpm': detectedTempos,
+            'elapsed_ms': analysisStopwatch.elapsedMilliseconds,
+          },
+        };
+      }
+      final boundaryStopwatch = Stopwatch()..start();
+      final boundaryAnalyses = await _analyzeBoundariesForPlan(
+        plan,
+        audioTracks,
+        boundaryAnalysisCache,
+      );
+      boundaryStopwatch.stop();
+      if (boundaryAnalyses.isNotEmpty) {
+        boundaryAnalysisMeta = <String, dynamic>{
+          'clip_boundary_analysis': <String, dynamic>{
+            'clips': <String, dynamic>{
+              for (final entry in boundaryAnalyses.entries)
+                entry.key: entry.value.toJson(),
+            },
+            'elapsed_ms': boundaryStopwatch.elapsedMilliseconds,
+          },
+        };
+      }
+      prepared = _aiV3Preparer.prepare(
+        plan: plan,
+        context: context,
+        detectedTempoByClipId: detectedTempos,
+        boundaryAnalysisByClipId: boundaryAnalyses,
+      );
+      mixMaterialization = await AiV3MixGoalMaterializer(
+        mixModel: mixModel,
+        magnitudePredictor: magnitudePredictor,
+      ).materialize(
+        bundle: prepared,
+        project: project,
+        roleOverrides: _roleOverrides,
+        bypassLearnedMagnitudes: bypassLearnedMagnitudes,
+        projectId: projectId,
+      );
+      prepared = mixMaterialization.bundle;
+      mixMaterializationMeta = mixMaterialization.metadata;
+    } on AiV3PreparationException catch (error) {
+      preparationStopwatch.stop();
+      preparationElapsedMs = preparationStopwatch.elapsedMilliseconds;
+      _pendingAiV3Bundle = null;
+      _pendingAiV3PlanId = null;
+      final actionable = _aiV3PreparationFailureResponse(error.code);
+      final message = actionable?.message ??
+          'I could not safely prepare every requested change. Nothing was changed.';
+      _push('assistant', message);
+      final handoff = <String, dynamic>{
+        'schema_version': 'ai_v3_handoff_prototype_1',
+        'decision': actionable?.decision ?? 'blocked',
+        'plan': plan.toJson(),
+        'error_code': error.code,
+        'message': message,
+      };
+      capturePlannerResult(
+        handoff,
+        preparationErrorCode: error.code,
+      );
+      return ChatPipelineResult.v3(
+        message,
+        handoff,
+        meta: <String, dynamic>{
+          'tool': 'submit_plan_v3',
+          ...result.meta,
+          'preparation_error_code': error.code,
+        },
+      );
+    }
+    preparationStopwatch.stop();
+    preparationElapsedMs = preparationStopwatch.elapsedMilliseconds;
+    if (prepared.actions.isEmpty) {
+      _pendingAiV3Bundle = null;
+      _pendingAiV3PlanId = null;
+      final message = aiV3AlreadySatisfiedConversationMessage(
+        prepared.toJson(),
+      );
+      _push('assistant', message);
+      final handoff = <String, dynamic>{
+        'schema_version': 'ai_v3_handoff_prototype_1',
+        'decision': 'respond',
+        'plan': plan.toJson(),
+        'prepared_bundle': prepared.toJson(),
+        'reason': 'already_satisfied',
+        'message': message,
+      };
+      capturePlannerResult(handoff);
+      return ChatPipelineResult.v3(
+        message,
+        handoff,
+        meta: <String, dynamic>{
+          'tool': 'submit_plan_v3',
+          ...result.meta,
+          ...mixMaterializationMeta,
+        },
+      );
+    }
+    final idSeed =
+        '${promptTraceId ?? ''}:${context.stateDigest}:${jsonEncode(plan.toJson())}';
+    final planId =
+        crypto.sha256.convert(utf8.encode(idSeed)).toString().substring(0, 24);
+    final executionPolicy = prepared.executionPolicy;
+    final handoff = <String, dynamic>{
+      'schema_version': 'ai_v3_handoff_prototype_1',
+      'decision': executionPolicy == AiV3ExecutionPolicy.autoApply
+          ? 'execute_now'
+          : 'ask_confirmation',
+      'plan_id': planId,
+      'prepared_bundle': prepared.toJson(),
+      'execution_policy': executionPolicy.wireName,
+    };
+    if (executionPolicy == AiV3ExecutionPolicy.confirm) {
+      _pendingAiV3Bundle = prepared;
+      _pendingAiV3PlanId = planId;
+      _push('assistant', prepared.preview);
+    } else {
+      _pendingAiV3Bundle = null;
+      _pendingAiV3PlanId = null;
+    }
+    capturePlannerResult(handoff);
+    return ChatPipelineResult.v3(
+      executionPolicy == AiV3ExecutionPolicy.confirm ? prepared.preview : '',
+      handoff,
+      meta: <String, dynamic>{
+        'tool': 'submit_plan_v3',
+        ...result.meta,
+        'preparation_elapsed_ms': preparationElapsedMs,
+        'prepared_action_count': prepared.actions.length,
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>> _runAiV3PlannerComparison(
+    AiV3Planner planner, {
+    required AiV3CoreContext context,
+    AiV3CoreContext? preparationContext,
+    required ProjectState project,
+    required String originalRequest,
+    required String? promptTraceId,
+    required String? projectId,
+    required bool bypassLearnedMagnitudes,
+    required List<AudioTrack> audioTracks,
+    required Map<String, Future<double?>> tempoDetectionCache,
+    required Map<String, Future<AiV3ClipBoundaryAnalysis?>>
+        boundaryAnalysisCache,
+  }) async {
+    final result = await planner.plan(
+      context: context,
+      originalRequest: originalRequest,
+      promptTraceId: promptTraceId,
+    );
+    Map<String, dynamic>? prepared;
+    String? preparationError;
+    var tempoAnalysis = const <String, dynamic>{};
+    var boundaryAnalysis = const <String, dynamic>{};
+    if (result.plan.isMutating) {
+      try {
+        final analysisStopwatch = Stopwatch()..start();
+        final detectedTempos = await _detectTemposForPlan(
+          result.plan,
+          audioTracks,
+          tempoDetectionCache,
+        );
+        analysisStopwatch.stop();
+        if (detectedTempos.isNotEmpty) {
+          tempoAnalysis = <String, dynamic>{
+            'tempo_analysis': <String, dynamic>{
+              'clip_tempos_bpm': detectedTempos,
+              'elapsed_ms': analysisStopwatch.elapsedMilliseconds,
+            },
+          };
+        }
+        final boundaryStopwatch = Stopwatch()..start();
+        final boundaryAnalyses = await _analyzeBoundariesForPlan(
+          result.plan,
+          audioTracks,
+          boundaryAnalysisCache,
+        );
+        boundaryStopwatch.stop();
+        if (boundaryAnalyses.isNotEmpty) {
+          boundaryAnalysis = <String, dynamic>{
+            'clip_boundary_analysis': <String, dynamic>{
+              'clips': <String, dynamic>{
+                for (final entry in boundaryAnalyses.entries)
+                  entry.key: entry.value.toJson(),
+              },
+              'elapsed_ms': boundaryStopwatch.elapsedMilliseconds,
+            },
+          };
+        }
+        final base = _aiV3Preparer.prepare(
+          plan: result.plan,
+          context: preparationContext ?? context,
+          detectedTempoByClipId: detectedTempos,
+          boundaryAnalysisByClipId: boundaryAnalyses,
+        );
+        final materialized = await AiV3MixGoalMaterializer(
+          mixModel: mixModel,
+          magnitudePredictor: magnitudePredictor,
+        ).materialize(
+          bundle: base,
+          project: project,
+          roleOverrides: _roleOverrides,
+          bypassLearnedMagnitudes: bypassLearnedMagnitudes,
+          projectId: projectId,
+        );
+        prepared = materialized.bundle.toJson();
+      } on AiV3PreparationException catch (error) {
+        preparationError = error.code;
+      }
+    }
+    return <String, dynamic>{
+      'comparison_stage': 'v3_comparison_model_output',
+      'model': planner.model,
+      'reasoning_effort': planner.reasoningEffort,
+      'plan': result.plan.toJson(),
+      if (result.requestBody.isNotEmpty)
+        'planner_request_body': result.requestBody,
+      'raw_output': result.rawResponse,
+      'metrics': <String, dynamic>{
+        ...result.meta,
+        ...tempoAnalysis,
+        ...boundaryAnalysis,
+      },
+      if (prepared != null) 'prepared_bundle': prepared,
+      if (preparationError != null) 'preparation_error_code': preparationError,
+      if (preparationError != null)
+        if (_aiV3PreparationFailureResponse(preparationError)
+            case final response?) ...<String, dynamic>{
+          'preparation_decision': response.decision,
+          'preparation_message': response.message,
+        },
+    };
+  }
+
+  Future<Map<String, dynamic>> _runAiV3AdaptiveComparison(
+    AiV3AdaptivePlanner planner, {
+    required CompactCoreV3 compactCore,
+    required PlanningSnapshotV3 snapshot,
+    required AiV3CoreContext preparationContext,
+    required ProjectState project,
+    required String originalRequest,
+    required String? promptTraceId,
+    required String? projectId,
+    required bool bypassLearnedMagnitudes,
+    required List<AudioTrack> audioTracks,
+    required Map<String, Future<double?>> tempoDetectionCache,
+    required Map<String, Future<AiV3ClipBoundaryAnalysis?>>
+        boundaryAnalysisCache,
+  }) async {
+    final result = await planner.plan(
+      compactCore: compactCore,
+      snapshot: snapshot,
+      originalRequest: originalRequest,
+      promptTraceId: promptTraceId,
+    );
+    Map<String, dynamic>? prepared;
+    String? preparationError;
+    var tempoAnalysis = const <String, dynamic>{};
+    var boundaryAnalysis = const <String, dynamic>{};
+    if (result.plan.isMutating) {
+      try {
+        final analysisStopwatch = Stopwatch()..start();
+        final detectedTempos = await _detectTemposForPlan(
+          result.plan,
+          audioTracks,
+          tempoDetectionCache,
+        );
+        analysisStopwatch.stop();
+        if (detectedTempos.isNotEmpty) {
+          tempoAnalysis = <String, dynamic>{
+            'tempo_analysis': <String, dynamic>{
+              'clip_tempos_bpm': detectedTempos,
+              'elapsed_ms': analysisStopwatch.elapsedMilliseconds,
+            },
+          };
+        }
+        final boundaryStopwatch = Stopwatch()..start();
+        final boundaryAnalyses = await _analyzeBoundariesForPlan(
+          result.plan,
+          audioTracks,
+          boundaryAnalysisCache,
+        );
+        boundaryStopwatch.stop();
+        if (boundaryAnalyses.isNotEmpty) {
+          boundaryAnalysis = <String, dynamic>{
+            'clip_boundary_analysis': <String, dynamic>{
+              'clips': <String, dynamic>{
+                for (final entry in boundaryAnalyses.entries)
+                  entry.key: entry.value.toJson(),
+              },
+              'elapsed_ms': boundaryStopwatch.elapsedMilliseconds,
+            },
+          };
+        }
+        final base = _aiV3Preparer.prepare(
+          plan: result.plan,
+          context: preparationContext,
+          detectedTempoByClipId: detectedTempos,
+          boundaryAnalysisByClipId: boundaryAnalyses,
+        );
+        final materialized = await AiV3MixGoalMaterializer(
+          mixModel: mixModel,
+          magnitudePredictor: magnitudePredictor,
+        ).materialize(
+          bundle: base,
+          project: project,
+          roleOverrides: _roleOverrides,
+          bypassLearnedMagnitudes: bypassLearnedMagnitudes,
+          projectId: projectId,
+        );
+        prepared = materialized.bundle.toJson();
+      } on AiV3PreparationException catch (error) {
+        preparationError = error.code;
+      }
+    }
+    return <String, dynamic>{
+      'comparison_stage': 'v3_adaptive_model_output',
+      'model': planner.model,
+      'reasoning_effort': planner.reasoningEffort,
+      ...result.toCaptureJson(),
+      if (tempoAnalysis.isNotEmpty) 'tempo_analysis': tempoAnalysis,
+      ...boundaryAnalysis,
+      if (prepared != null) 'prepared_bundle': prepared,
+      if (preparationError != null) 'preparation_error_code': preparationError,
+      if (preparationError != null)
+        if (_aiV3PreparationFailureResponse(preparationError)
+            case final response?) ...<String, dynamic>{
+          'preparation_decision': response.decision,
+          'preparation_message': response.message,
+        },
+    };
   }
 
   String _intentSummary(GoalVector goal) {
@@ -1281,6 +2636,238 @@ class ChatPipeline {
     }
 
     return out.toString().trim();
+  }
+
+  Map<String, dynamic> _validationStateSnapshot({
+    required ProjectState project,
+    required List<AudioTrack> audioTracks,
+    required List<String> rowNames,
+    required List<int> selectedClipIndices,
+    required int primarySelectedClipIndex,
+    required int? selectedRowIndex,
+    required int beatsPerBar,
+    required int beatUnit,
+    required Map<int, List<Map<String, dynamic>>> automationTargetsByRow,
+    required List<Map<String, dynamic>> masterAutomationTargets,
+    required List<Map<String, dynamic>> automationClips,
+    String? clientStateDigest,
+  }) {
+    final tracksByRow = <int, List<AudioTrack>>{};
+    for (final track in audioTracks) {
+      if (track.rowIndex < 0) continue;
+      tracksByRow.putIfAbsent(track.rowIndex, () => <AudioTrack>[]).add(track);
+    }
+    final rowIndexById = <int, int>{
+      for (final row in project.rows)
+        if (row.rowId >= 0) row.rowId: row.rowIndex,
+    };
+    final rows = project.rows.map((row) {
+      final clips = tracksByRow[row.rowIndex] ?? const <AudioTrack>[];
+      final name = row.rowName.trim().isNotEmpty
+          ? row.rowName.trim()
+          : _rowNameForSnapshot(row.rowIndex, rowNames);
+      final identity = <String>[
+        name,
+        row.roleOverride,
+        row.interpretation.topRole,
+        ...clips.map((clip) => clip.label),
+        ...clips.map((clip) => clip.file.path.split('/').last),
+      ].join(' ').toLowerCase();
+      final roleEntries = row.roleProbs.entries.toList()
+        ..sort((left, right) => right.value.compareTo(left.value));
+      final audioFacts = AiV3AudioFacts.fromAnalysis(
+        mixProcessingSupported: row.hasAudio || clips.isNotEmpty,
+        hasAudio: row.hasAudio,
+        approxRms: row.approxRms,
+        audioStatistics: row.audioStats,
+      );
+      return <String, dynamic>{
+        'row_index': row.rowIndex,
+        'row_id': row.rowId,
+        'name': name,
+        'row_name': name,
+        'lane_kind': row.laneKind,
+        if (row.instrumentId.trim().isNotEmpty)
+          'instrument_id': row.instrumentId.trim(),
+        if (row.instrumentName.trim().isNotEmpty)
+          'instrument_name': row.instrumentName.trim(),
+        if (row.roleOverride.trim().isNotEmpty)
+          'role_override': row.roleOverride.trim(),
+        if (row.groupId.trim().isNotEmpty) 'group_id': row.groupId.trim(),
+        'row_color': row.rowColor,
+        'clip_count': clips.length,
+        'occupied': clips.isNotEmpty,
+        'has_audio': row.hasAudio,
+        'approx_rms': row.approxRms,
+        'approx_crest': row.approxCrest,
+        ...audioFacts.toJson(),
+        'gain': row.gain0to3,
+        'pan': row.pan0To1,
+        'top_role': row.interpretation.topRole,
+        'source_type': row.interpretation.sourceType,
+        'role_hints': roleEntries
+            .where((entry) => entry.value > 0)
+            .take(6)
+            .map((entry) => entry.key)
+            .toList(growable: false),
+        'audio_analysis': <String, double>{
+          for (final entry in row.audioStats.entries)
+            if (entry.value.isFinite) entry.key: entry.value,
+        },
+        'labels': clips.map((clip) => clip.label).toList(growable: false),
+        'files': clips
+            .map((clip) => clip.file.path.split('/').last)
+            .toList(growable: false),
+        'is_reference':
+            RegExp(r'\b(reference|ref\s+track)\b').hasMatch(identity),
+        'effects': row.effects
+            .map(
+              (effect) => <String, dynamic>{
+                'effect_index': effect.effectIndex,
+                'effect_instance_id': effect.instanceId,
+                'effect_id': effect.effectId,
+                'name': effect.name,
+                'bypassed': effect.isBypassed,
+                'parameters': effect.parameters
+                    .map((parameter) => parameter.toJson())
+                    .toList(growable: false),
+              },
+            )
+            .toList(growable: false),
+        'automation_targets': List<Map<String, dynamic>>.from(
+          automationTargetsByRow[row.rowIndex] ??
+              const <Map<String, dynamic>>[],
+        ),
+      };
+    }).toList(growable: false);
+    final clips = <Map<String, dynamic>>[];
+    for (int clipIndex = 0; clipIndex < audioTracks.length; clipIndex++) {
+      final clip = audioTracks[clipIndex];
+      if (clip.rowIndex < 0) continue;
+      final startMs = clip.offset * 1000.0;
+      final durationMs = math.max(
+        0.0,
+        (clip.trimEnd - clip.trimStart).inMilliseconds.toDouble(),
+      );
+      final midiPitches =
+          clip.midiNotes.map((note) => note.pitch).toList(growable: false);
+      final midiNotes = clip.midiNotes
+          .map(
+            (note) => <String, dynamic>{
+              'pitch': note.pitch,
+              'start_beat': note.startBeat,
+              'length_beats': note.lengthBeats,
+              'velocity': note.velocity,
+            },
+          )
+          .toList(growable: false);
+      clips.add(<String, dynamic>{
+        'clip_index': clipIndex,
+        'clip_id': clip.clipId,
+        'engine_clip_id': clip.engineClipId,
+        'row_index': clip.rowIndex,
+        'row_id': clip.rowId,
+        'clip_kind': clip.clipKind.wireName,
+        'start_ms': startMs,
+        'end_ms': startMs + durationMs,
+        'duration_ms': durationMs,
+        'trim_start_ms': clip.trimStart.inMilliseconds,
+        'trim_end_ms': clip.trimEnd.inMilliseconds,
+        'alignment_offset_ms': clip.alignmentOffsetMs,
+        'label': clip.label,
+        'file': clip.file.path.split('/').last,
+        'gain': clip.gain,
+        'pitch_semitones': clip.pitchSemitones,
+        if (clip.instrumentId.trim().isNotEmpty)
+          'instrument_id': clip.instrumentId.trim(),
+        if (clip.instrumentName.trim().isNotEmpty)
+          'instrument_name': clip.instrumentName.trim(),
+        'midi_note_count': midiNotes.length,
+        if (midiPitches.isNotEmpty)
+          'midi_pitch_min': midiPitches.reduce(math.min),
+        if (midiPitches.isNotEmpty)
+          'midi_pitch_max': midiPitches.reduce(math.max),
+        if (midiNotes.isNotEmpty)
+          'midi_notes_digest': crypto.sha256
+              .convert(utf8.encode(jsonEncode(midiNotes)))
+              .toString(),
+      });
+    }
+    final groups = project.trackGroups.map((group) {
+      return <String, dynamic>{
+        'group_id': group.id,
+        'name': group.name,
+        'member_row_indices': group.rowIds
+            .map((rowId) => rowIndexById[rowId])
+            .whereType<int>()
+            .toList(growable: false),
+        'collapsed': group.collapsed,
+        'gain': group.gain,
+        'pan': group.pan,
+        'muted': group.muted,
+        'soloed': group.soloed,
+        'effects': group.effects.asMap().entries.map((entry) {
+          final effect = entry.value;
+          return <String, dynamic>{
+            'effect_index': entry.key,
+            'effect_id': effect.effectId,
+            'name': effect.displayName.trim().isNotEmpty
+                ? effect.displayName.trim()
+                : effect.effectId,
+            'bypassed': effect.bypassed,
+            'parameters': effect.params,
+          };
+        }).toList(growable: false),
+      };
+    }).toList(growable: false);
+    final selected = selectedClipIndices
+        .where((index) => index >= 0 && index < audioTracks.length)
+        .toSet()
+        .toList()
+      ..sort();
+    return <String, dynamic>{
+      'schema_version': 'validation_state_v1',
+      if ((clientStateDigest ?? '').trim().isNotEmpty)
+        'client_state_digest': clientStateDigest!.trim(),
+      'project': <String, dynamic>{
+        'tempo_bpm': project.bpm,
+        'project_key': project.projectKey,
+        'estimated_key': project.estimatedKey,
+        'current_rows': project.rows.length,
+        'beats_per_bar': math.max(1, beatsPerBar),
+        'beat_unit': math.max(1, beatUnit),
+      },
+      'rows': rows,
+      'clips': clips,
+      'groups': groups,
+      'automation_clips': automationClips,
+      'master': <String, dynamic>{
+        'gain': project.masterGain0to3,
+        'pan': project.masterPan0to1,
+        'effects': project.masterEffects
+            .map(
+              (effect) => <String, dynamic>{
+                'effect_index': effect.effectIndex,
+                'name': effect.name,
+                'bypassed': effect.isBypassed,
+                'parameters': effect.parameters
+                    .map((parameter) => parameter.toJson())
+                    .toList(growable: false),
+              },
+            )
+            .toList(growable: false),
+        'automation_targets': List<Map<String, dynamic>>.from(
+          masterAutomationTargets,
+        ),
+      },
+      'selection': <String, dynamic>{
+        if (selectedRowIndex != null && selectedRowIndex >= 0)
+          'selected_row_index': selectedRowIndex,
+        'selected_clip_indices': selected,
+        if (primarySelectedClipIndex >= 0)
+          'primary_selected_clip_index': primarySelectedClipIndex,
+      },
+    };
   }
 
   String _selectedMidiClipSnapshot(int clipIndex, AudioTrack clip) {

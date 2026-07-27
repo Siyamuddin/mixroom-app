@@ -129,9 +129,9 @@ object JuceBridge {
     @JvmStatic external fun getPluginBypassStateJNI(trackIndex: Int, effectIndex: Int): Boolean
 
     // Row management
-    @JvmStatic external fun addRowJNI(name: String, iconId: Int): Int
-    @JvmStatic external fun insertRowAboveJNI(referenceRowId: Int, name: String, iconId: Int): Int
-    @JvmStatic external fun insertRowBelowJNI(referenceRowId: Int, name: String, iconId: Int): Int
+    @JvmStatic external fun addRowJNI(name: String, iconId: Int, preferredRowId: Int): Int
+    @JvmStatic external fun insertRowAboveJNI(referenceRowId: Int, name: String, iconId: Int, preferredRowId: Int): Int
+    @JvmStatic external fun insertRowBelowJNI(referenceRowId: Int, name: String, iconId: Int, preferredRowId: Int): Int
     @JvmStatic external fun removeRowJNI(rowId: Int): Boolean
     @JvmStatic external fun moveRowOrderJNI(fromIndex: Int, toIndex: Int): Boolean
     @JvmStatic external fun renameRowJNI(rowId: Int, name: String): Boolean

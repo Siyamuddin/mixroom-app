@@ -1581,8 +1581,12 @@ void JuceAudioEnginePlugin::HandleMethodCall(
     if (method_call.method_name() == "addRow") {
       const std::string name = FindString(args, "name", "Row");
       const int icon = FindInt(args, "iconId", 0);
+      const int preferred_row = FindInt(args, "preferredRowId", -1);
       const int row_id = CallOnMessageThreadSync(
-          [name, icon] { return JuceEngine::get().addRow(ToJuceString(name), icon); });
+          [name, icon, preferred_row] {
+            return JuceEngine::get().addRow(ToJuceString(name), icon,
+                                            preferred_row);
+          });
       result->Success(flutter::EncodableValue(static_cast<int32_t>(row_id)));
       return;
     }
@@ -1591,9 +1595,10 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       const int reference_row = FindInt(args, "referenceRowId", 0);
       const std::string name = FindString(args, "name", "Row");
       const int icon = FindInt(args, "iconId", 0);
+      const int preferred_row = FindInt(args, "preferredRowId", -1);
       const int row_id = CallOnMessageThreadSync([=] {
         return JuceEngine::get().insertRowAbove(reference_row, ToJuceString(name),
-                                                icon);
+                                                icon, preferred_row);
       });
       result->Success(flutter::EncodableValue(static_cast<int32_t>(row_id)));
       return;
@@ -1603,9 +1608,10 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       const int reference_row = FindInt(args, "referenceRowId", 0);
       const std::string name = FindString(args, "name", "Row");
       const int icon = FindInt(args, "iconId", 0);
+      const int preferred_row = FindInt(args, "preferredRowId", -1);
       const int row_id = CallOnMessageThreadSync([=] {
         return JuceEngine::get().insertRowBelow(reference_row, ToJuceString(name),
-                                                icon);
+                                                icon, preferred_row);
       });
       result->Success(flutter::EncodableValue(static_cast<int32_t>(row_id)));
       return;

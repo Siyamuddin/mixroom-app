@@ -71,9 +71,9 @@ extern "C"
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_bypassTrackJNI(JNIEnv *, jclass, jint, jboolean);
 
     // Row management
-    JNIEXPORT jint JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_addRowJNI(JNIEnv *, jclass, jstring, jint);
-    JNIEXPORT jint JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_insertRowAboveJNI(JNIEnv *, jclass, jint, jstring, jint);
-    JNIEXPORT jint JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_insertRowBelowJNI(JNIEnv *, jclass, jint, jstring, jint);
+    JNIEXPORT jint JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_addRowJNI(JNIEnv *, jclass, jstring, jint, jint);
+    JNIEXPORT jint JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_insertRowAboveJNI(JNIEnv *, jclass, jint, jstring, jint, jint);
+    JNIEXPORT jint JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_insertRowBelowJNI(JNIEnv *, jclass, jint, jstring, jint, jint);
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_removeRowJNI(JNIEnv *, jclass, jint);
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_moveRowOrderJNI(JNIEnv *, jclass, jint, jint);
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_renameRowJNI(JNIEnv *, jclass, jint, jstring);

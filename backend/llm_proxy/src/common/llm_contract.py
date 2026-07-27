@@ -4118,11 +4118,12 @@ _ALLOWED_OPENAI_COMPATIBLE_FIELDS = frozenset(
         "conversation",
         "prompt_cache_key",
         "prompt_cache_retention",
+        "store",
     }
 )
 
 
-def _normalize_conversation_item(message: Any, index: int) -> Dict[str, str]:
+def _normalize_conversation_item(message: Any, index: int) -> Dict[str, Any]:
     if not isinstance(message, dict):
         raise ValueError(f"'conversation[{index}]' must be an object.")
 
@@ -4131,8 +4132,27 @@ def _normalize_conversation_item(message: Any, index: int) -> Dict[str, str]:
         raise ValueError(f"'conversation[{index}].role' must be a non-empty string.")
 
     content = message.get("content")
-    if not isinstance(content, str):
-        raise ValueError(f"'conversation[{index}].content' must be a string.")
+    if isinstance(content, list):
+        normalized_content = []
+        for block_index, block in enumerate(content):
+            if not isinstance(block, dict):
+                raise ValueError(
+                    f"'conversation[{index}].content[{block_index}]' must be an object."
+                )
+            block_type = block.get("type")
+            if not isinstance(block_type, str) or not block_type.strip():
+                raise ValueError(
+                    f"'conversation[{index}].content[{block_index}].type' "
+                    "must be a non-empty string."
+                )
+            normalized_content.append(dict(block))
+        if not normalized_content:
+            raise ValueError(f"'conversation[{index}].content' must not be empty.")
+        content = normalized_content
+    elif not isinstance(content, str):
+        raise ValueError(
+            f"'conversation[{index}].content' must be a string or content list."
+        )
 
     return {
         "role": role.strip(),
@@ -4568,6 +4588,10 @@ def normalize_openai_compatible_request(
     ):
         raise ValueError("'parallel_tool_calls' must be a boolean.")
 
+    store_value = sanitized.get("store")
+    if store_value is not None and not isinstance(store_value, bool):
+        raise ValueError("'store' must be a boolean.")
+
     temperature_value = sanitized.get("temperature")
     if temperature_value is not None and not isinstance(temperature_value, (int, float)):
         raise ValueError("'temperature' must be numeric.")
@@ -4616,6 +4640,7 @@ def normalize_openai_compatible_request(
         "conversation",
         "prompt_cache_key",
         "prompt_cache_retention",
+        "store",
     ):
         if key in sanitized:
             normalized[key] = sanitized[key]
@@ -4652,6 +4677,7 @@ def build_openai_responses_request(
         "conversation",
         "prompt_cache_key",
         "prompt_cache_retention",
+        "store",
     ):
         if key in request:
             body[key] = request[key]

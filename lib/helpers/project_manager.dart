@@ -70,6 +70,12 @@ class ProjectManager {
       '.bundled_demo_dismissed_v1.json';
   static final ValueNotifier<int> projectLibraryRevision =
       ValueNotifier<int>(0);
+  static Directory? _rootDirectoryOverrideForTesting;
+
+  @visibleForTesting
+  static void setRootDirectoryForTesting(Directory? directory) {
+    _rootDirectoryOverrideForTesting = directory;
+  }
 
   static String _nextProjectId() =>
       DateTime.now().microsecondsSinceEpoch.toString();
@@ -79,6 +85,11 @@ class ProjectManager {
   }
 
   static Future<Directory> _rootDir() async {
+    final override = _rootDirectoryOverrideForTesting;
+    if (override != null) {
+      if (!await override.exists()) await override.create(recursive: true);
+      return override;
+    }
     final docs = await getApplicationDocumentsDirectory();
     final root = Directory(p.join(docs.path, "mixroom_projects"));
     if (!await root.exists()) await root.create(recursive: true);

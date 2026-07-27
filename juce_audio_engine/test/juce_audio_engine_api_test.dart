@@ -196,6 +196,22 @@ void main() {
     expect(calls[2].arguments, <String, dynamic>{'from': 2, 'to': 0});
   });
 
+  test('row restoration forwards an optional preferred stable id', () async {
+    final rowId = await JuceAudioEngine.addRow(
+      'Restored',
+      iconId: 1,
+      preferredRowId: 42,
+    );
+
+    expect(rowId, 42);
+    expect(calls.single.method, 'addRow');
+    expect(calls.single.arguments, <String, dynamic>{
+      'name': 'Restored',
+      'iconId': 1,
+      'preferredRowId': 42,
+    });
+  });
+
   test('global transport getters/setters', () async {
     await JuceAudioEngine.setTransportSeconds(9.25);
     final now = await JuceAudioEngine.getTransportSeconds();

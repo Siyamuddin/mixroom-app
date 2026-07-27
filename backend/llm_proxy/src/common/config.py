@@ -27,6 +27,10 @@ AI_RUNTIME_DEFAULT_MODEL = os.environ.get(
     "AI_RUNTIME_DEFAULT_MODEL",
     os.environ.get("LLM_MODEL", os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")),
 ).strip() or "gpt-4.1-mini"
+AI_V3_MODEL = os.environ.get("AI_V3_MODEL", "gpt-5.6-luna").strip() or "gpt-5.6-luna"
+AI_V3_REASONING_EFFORT = (
+    os.environ.get("AI_V3_REASONING_EFFORT", "low").strip().lower() or "low"
+)
 AI_CHAT_DEFAULT_TEMPERATURE = float(
     os.environ.get("AI_CHAT_DEFAULT_TEMPERATURE", "0.35") or "0.35"
 )

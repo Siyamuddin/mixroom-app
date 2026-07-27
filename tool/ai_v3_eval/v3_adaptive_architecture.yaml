@@ -1,0 +1,374 @@
+schema_version: ai_v3_adaptive_architecture_v1
+status: capability_transparent_fact_retrieval_shadow_implemented
+last_reviewed: "2026-07-22"
+authority:
+  adr: docs/engineering/adr/0002-ai-v3-architecture.md
+  specification: docs/engineering/ai_v3_adaptive_planner.md
+  capability_inventory: tool/ai_v3_eval/v3_capabilities.yaml
+
+semantic_authority:
+  planner_count: 1
+  model_continuation: same_planner
+  original_request_preserved: true
+  selector_llm: false
+  intent_llm: false
+  repair_llm: false
+  semantic_validator: false
+
+planning_snapshot:
+  runtime_status: shadow_only
+  immutable: true
+  retrieval_reads_live_state: false
+  final_preparation_rechecks_live_state: true
+  identity_authority: stable_id
+
+compact_core:
+  runtime_status: shadow_only
+  complete_row_identity_limit: 32
+  clip_summary_limit: 64
+  loaded_identity_limit_per_category: 32
+  conversation_turn_limit: 8
+  includes:
+    - project_and_digest
+    - selection
+    - complete_lightweight_rows
+    - bounded_lightweight_clips
+    - loaded_resource_identities
+    - resource_counts_and_has_more
+    - capability_domain_directory
+  excludes:
+    - midi_notes
+    - raw_audio_analysis
+    - full_asset_catalog
+    - full_effect_parameter_catalog
+    - automation_points
+    - uncommon_command_schemas
+
+common_commands:
+  runtime_status: shadow_evaluated_not_active
+  count: 17
+  commands:
+    - project.set_tempo
+    - transport.set_playing
+    - transport.restart
+    - transport.set_metronome_enabled
+    - transport.set_loop_enabled
+    - row.adjust_gain_db
+    - row.set_gain_db
+    - row.adjust_pan
+    - row.set_pan
+    - row.set_muted
+    - row.set_soloed
+    - row.rename
+    - clip.move_by_beats
+    - clip.trim_to_range
+    - clip.split_at
+    - clip.duplicate_to
+    - clip.delete
+  evaluation:
+    paired_cases: 22
+    current_passed: 18
+    compact_passed: 18
+    wrong_or_protected_target_failures: 0
+    preparation_failures: 0
+    out_of_surface_commands: 0
+    average_provider_input_tokens:
+      current: 11510
+      compact: 2871
+    activation_performed: false
+
+adaptive_command_surface:
+  revision: full_commands_fact_retrieval_v1
+  source_of_truth: aiV3CommandTypes
+  command_count: 53
+  first_call_exposes_all: true
+  continuation_exposes_all: true
+  retrieval_unlocks_commands: false
+  compact_directory_exposes_command_names: false
+  compact_directory_exposes_capability_ids: false
+  fresh_gate:
+    cases: 10
+    one_shot_verified: 7
+    adaptive_verified: 6
+    one_shot_input_tokens: 109363
+    adaptive_first_input_tokens: 49916
+    adaptive_total_input_tokens: 62648
+    one_shot_model_latency_ms: 32051
+    adaptive_model_latency_ms: 46705
+    activation_qualified: false
+
+v1_capability_placement:
+  entry_surfaces:
+    daw_assistant_actions: common_or_requested_domain
+    mix_model_request: mix
+    informational_response: respond_or_clarify
+    tutorial: tutorial_ui
+    clarify: respond_or_clarify
+    compound_calls: common_or_requested_domains
+    one_button_mix: mix
+  family_defaults:
+    tutorial: tutorial_ui
+    clarify: respond_or_clarify
+    project_edit: common
+    transport_control: project_structure
+    row_mix: common
+    row_mute: common
+    row_solo: common
+    row_select: project_structure
+    row_rename: common
+    row_delete: project_structure
+    row_create: project_structure
+    row_color_edit: project_structure
+    row_group_edit: project_structure
+    clip_edit: clip_advanced
+    sample_insert: samples
+    midi_compose: midi
+    effect_edit: effects
+    automation_edit: automation
+    stem_separate: external_audio
+    role_override: project_structure
+    audio_enhance: external_audio
+    mix_goal: mix
+  operation_overrides:
+    clip_edit.trim: common
+    clip_edit.cut: common
+    clip_edit.move: common
+    clip_edit.duplicate: common
+    clip_edit.delete: common
+    midi_compose.compose_bassline: music_generation
+    midi_compose.compose_pattern: music_generation
+    midi_compose.convert_audio_to_midi: clip_advanced
+  other_subsystems:
+    informational_response: respond_or_clarify
+    one_button_mix: mix
+    reference_track_mixing: mix
+    local_mixing_model: mix
+    local_onnx_mix_refinement: mix
+    remote_mix_refinement: mix
+    spleeter: external_audio
+    basic_pitch: external_audio
+    phone_mic_cleanup: external_audio
+    yamnet: mix
+    project_audio_analysis: mix
+    sample_library: samples
+    file_browser: files_plugins
+    instruments: files_plugins
+    hosted_plugins: files_plugins
+    mix_actions: mix
+    automation_templates: automation
+
+domains:
+  project_structure: {purpose: transport_row_lifecycle_metadata_and_grouping, current_commands: [row.select, row.set_color, row.set_role_override, row.create, row.delete, group.create, group.remove_row, group.set_collapsed]}
+  clip_advanced: {purpose: rendered_analysis_tempo_dialogue_and_multi_clip_editing, current_commands: [clip.set_pitch_semitones, clip.adjust_pitch_semitones, clip.set_timeline_length_beats, clip.scale_timeline_length, clip.set_source_tempo_bpm, clip.set_tempo_follow_mode, clip.align_tempo_to_project, project.set_tempo_from_clip, clip.trim_silence, clip.align_first_sound, clip.glue, clip.separate_stems, clip.convert_to_midi]}
+  midi: {purpose: midi_content_and_editing, current_commands: [midi.transpose, midi.create_clip, midi.replace_notes, midi.append_notes, midi.chop_notes]}
+  samples: {purpose: asset_search_insertion_and_replacement, current_commands: [sample.place, sample.replace]}
+  effects: {purpose: effect_instances_parameters_presets_and_configuration, current_commands: [effect.ensure_configured, effect.remove, effect.set_bypassed]}
+  automation: {purpose: targets_points_ramps_clips_templates_and_state, current_commands: [automation.gain_fade, automation.set_points, automation.clear]}
+  mix: {purpose: mix_analysis_reference_state_and_mixroom_engines, current_commands: [mix.apply_goal]}
+  music_generation: {purpose: typed_music_briefs_and_provider_realization, current_commands: []}
+  files_plugins: {purpose: file_browser_instruments_plugins_and_presets, current_commands: []}
+  external_audio: {purpose: stem_transcription_cleanup_rendering_and_jobs, current_commands: [row.apply_phone_mic_cleanup]}
+  tutorial_ui: {purpose: non_mutating_ui_and_platform_guidance, current_commands: []}
+
+adaptive_domain_registry:
+  prompt_policy: capability_independent
+  source_of_truth: lib/ai/v3/ai_v3_domain_registry.dart
+  clip_advanced:
+    retrieval_enabled: true
+    capabilities: [set_audio_clip_pitch, adjust_audio_clip_pitch, set_audio_clip_timeline_length, scale_audio_clip_timeline_length, set_audio_clip_source_tempo, set_audio_clip_tempo_follow_mode, align_audio_clip_tempo_to_project, set_project_tempo_from_audio_clip, trim_audio_clip_silence, align_audio_clip_first_sound, glue_audio_clips, separate_vocal_instrumental_stems, convert_audio_clip_to_midi]
+    requested_fields: [clip_details, transform_capabilities]
+    continuation_commands: [clip.set_pitch_semitones, clip.adjust_pitch_semitones, clip.set_timeline_length_beats, clip.scale_timeline_length, clip.set_source_tempo_bpm, clip.set_tempo_follow_mode, clip.align_tempo_to_project, project.set_tempo_from_clip, clip.trim_silence, clip.align_first_sound, clip.glue, clip.separate_stems, clip.convert_to_midi]
+  midi:
+    retrieval_enabled: true
+    capabilities: [transpose_notes, create_midi_clip, replace_notes, append_notes, chop_notes]
+    requested_fields: [clip_notes, clip_instruments, edit_capabilities]
+    continuation_commands: [midi.transpose, midi.create_clip, midi.replace_notes, midi.append_notes, midi.chop_notes]
+  effects:
+    retrieval_enabled: true
+    capabilities: [ensure_configured_effect, remove_effect, set_effect_bypass]
+    requested_fields: [instances, catalog, parameter_definitions, target_capabilities]
+    continuation_commands: [effect.ensure_configured, effect.remove, effect.set_bypassed]
+  samples:
+    retrieval_enabled: true
+    capabilities: [place_samples, replace_audio_clip_source]
+    requested_fields: [search_results, asset_metadata, placement_capabilities]
+    continuation_commands: [sample.place, sample.replace]
+  automation:
+    retrieval_enabled: true
+    capabilities: [create_gain_fade, set_automation_points, clear_automation]
+    requested_fields: [gain_points, automation_targets, automation_points, target_capabilities]
+    continuation_commands: [automation.gain_fade, automation.set_points, automation.clear]
+  mix:
+    retrieval_enabled: true
+    capabilities:
+      - apply_mix_goal
+      - subjective_sonic_mixing
+      - group_mixing
+      - all_rows_mixing
+      - master_mixing
+      - reference_mixing
+    requested_fields: [row_analysis, group_state, master_state, reference_analysis, engine_capabilities]
+    continuation_commands: [mix.apply_goal]
+  disabled_domains:
+    - project_structure
+    - music_generation
+    - files_plugins
+    - external_audio
+    - tutorial_ui
+
+domain_requested_fields:
+  project_structure: [transport, history, row_details, groups, role_overrides, capabilities]
+  clip_advanced: [clip_details, transform_capabilities]
+  midi: [clip_notes, clip_instruments, edit_capabilities, transcription_status]
+  samples: [search_results, asset_metadata, placement_capabilities, replacement_capabilities]
+  effects: [instances, catalog, parameter_definitions, presets, target_capabilities]
+  automation: [targets, points, clips, templates, state]
+  mix: [row_analysis, group_state, master_state, reference_analysis, engine_capabilities]
+  music_generation: [provider_capabilities, roles, styles, destination_capabilities]
+  files_plugins: [file_results, instrument_catalog, plugin_catalog, preset_results, parameter_definitions]
+  external_audio: [job_capabilities, source_requirements, service_status]
+  tutorial_ui: [topics, visible_controls, platform_capabilities]
+
+retrieval:
+  enabled_in_current_runtime: false
+  initial_round_limit: 1
+  query_limit_per_round: 4
+  batched: true
+  read_only: true
+  tool_name: get_context_domains
+  represented_as_plan_v3_outcome: false
+  first_call_tools: [submit_plan_v3, get_context_domains]
+  continuation_tools: [submit_plan_v3]
+  parallel_tool_calls: false
+  result_limits:
+    clip_summaries: 64
+    midi_notes: 512
+    library_results_per_query: 32
+    library_results_total: 64
+    effect_instances: 64
+    parameter_definitions: 128
+    automation_points: 512
+    file_plugin_preset_results_per_query: 32
+    file_plugin_preset_results_total: 64
+    mix_rows: 32
+  continuation_receives:
+    - original_request
+    - original_compact_core
+    - typed_retrieval_request
+    - typed_retrieval_results
+    - all_canonical_command_schemas
+  continuation_can_request_more_context: false
+  midi_shadow:
+    runtime_status: shadow_evaluated_not_active
+    enabled_fields: [clip_notes, clip_instruments, edit_capabilities]
+    domain_commands: [midi.transpose, midi.create_clip, midi.replace_notes, midi.append_notes, midi.chop_notes]
+    paired_cases: 12
+    current_passed: 11
+    adaptive_passed: 12
+    common_one_call_cases: 4
+    midi_two_call_cases: 8
+    wrong_or_protected_target_failures: 0
+    preparation_failures: 0
+    project_mutations: 0
+    third_calls: 0
+    provider_input_tokens_total:
+      current: 141201
+      adaptive: 73629
+    estimated_cost_usd_total:
+      current: 0.10343835
+      adaptive: 0.06819705
+    activation_performed: false
+  effects_shadow:
+    runtime_status: genuine_smoke_completed_corrections_need_live_rerun
+    enabled_fields: [instances, catalog, parameter_definitions, target_capabilities]
+    domain_commands: [effect.ensure_configured, effect.remove, effect.set_bypassed]
+    built_in_effects_only: true
+    hosted_plugins_deferred: true
+    genuine_project_cases: 7
+    current_strict_passed: 6
+    adaptive_strict_passed_before_correction: 6
+    adaptive_input_tokens_before_correction: 40523
+    current_input_tokens: 89577
+    demonstrated_corrections:
+      - normalize_existing_parameter_values
+      - allow_unscoped_general_target_capabilities
+    project_mutations: 0
+    third_calls: 0
+    activation_performed: false
+  samples_shadow:
+    runtime_status: deterministic_tests_passed_live_evaluation_pending
+    enabled_fields: [search_results, asset_metadata, placement_capabilities]
+    domain_commands: [sample.place, sample.replace]
+    lexical_snapshot_search_only: true
+    replacement_deferred: false
+    project_mutations: 0
+    activation_performed: false
+  mix_shadow:
+    runtime_status: genuine_gate_completed_shadow_only
+    enabled_fields: [row_analysis, group_state, master_state, reference_analysis, engine_capabilities]
+    domain_commands: [mix.apply_goal]
+    genuine_project_categories:
+      - common
+      - row
+      - all_rows
+      - master
+      - group
+      - compound_direct_mix
+      - compound_effect_mix
+      - reference
+      - unusable_reference
+    targeted_post_correction_categories: 3
+    targeted_passing_captures: 3
+    isolated_direct_effect_substitution_attempts: 1
+    wrong_target_failures: 0
+    preparation_failures: 0
+    project_mutations: 0
+    third_calls: 0
+    targeted_passing_input_tokens:
+      current: 33933
+      adaptive: 25842
+    existing_mixroom_materializer_used: true
+    packaged_learned_refinement_observed: true
+    activation_performed: false
+
+music_generation:
+  planner_output: MusicSpecV3
+  realization_output: GeneratedMusicBundleV3
+  provider_neutral: true
+  raw_note_default: false
+  raw_note_mode: experimental_preview_only
+  initial_candidates:
+    - gpt_compact_pattern_with_deterministic_expansion
+    - curated_deterministic_provider
+    - hybrid_gpt_brief_provider_realization
+  production_default_selected: false
+
+execution:
+  owner: flutter
+  preparation: operation_local_factual
+  prototype_confirmation: every_mutation
+  local_transaction: atomic
+  stale_digest_check: true
+  targeted_readback: true
+  receipt_messages: true
+  external_work: staged_job
+
+performance_targets:
+  hard_production_timeout_selected: false
+  common_one_shot_median_seconds: 5
+  common_one_shot_p95_seconds: 10
+  retrieval_round_median_seconds: 15
+  retrieval_round_p95_measurement_seconds: 20
+  external_jobs_excluded: true
+
+forbidden:
+  - selector_model
+  - intent_model
+  - critic_in_mutation_path
+  - repair_model
+  - open_ended_tool_loop
+  - request_regex_router
+  - central_semantic_validator
+  - direct_gpt_mutation
+  - silent_v1_fallback
+  - flat_v1_operation_parity_schema

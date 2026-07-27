@@ -22,7 +22,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - local dev/test fallback
     boto3 = None
 
-_SUPPORTED_FEATURES = {"ai_chat", "video_editor_chat"}
+_SUPPORTED_FEATURES = {"ai_chat", "ai_chat_v3", "video_editor_chat"}
 _SETTING_PREFIX = "ai_runtime_config#"
 _CACHE_TTL_SECONDS = 60
 _ALLOWED_MODEL_OVERRIDES = frozenset(
@@ -40,6 +40,7 @@ _ALLOWED_MODEL_OVERRIDES = frozenset(
         "gpt-5.4",
         "gpt-5.4-mini",
         "gpt-5.4-nano",
+        "gpt-5.6-luna",
     }
 )
 _ALLOWED_REASONING_EFFORT_OVERRIDES = frozenset(
@@ -96,6 +97,25 @@ def clear_ai_runtime_cache() -> None:
 
 def _default_feature_runtime(feature: str, fallback_model: str) -> dict[str, Any]:
     normalized_feature = _safe_str(feature).lower() or "ai_chat"
+    if normalized_feature == "ai_chat_v3":
+        return {
+            "feature": normalized_feature,
+            "model": config.AI_V3_MODEL,
+            "system_prompt": "",
+            "temperature": None,
+            "reasoning": {"effort": config.AI_V3_REASONING_EFFORT},
+            "max_output_tokens": 4096,
+            "prompt_cache_retention": default_prompt_cache_retention(
+                config.AI_V3_MODEL
+            ),
+            "has_model_override": False,
+            "has_system_prompt_override": False,
+            "has_temperature_override": False,
+            "has_reasoning_override": False,
+            "has_max_output_tokens_override": False,
+            "has_prompt_cache_retention_override": False,
+            "source": "default",
+        }
     if normalized_feature == "video_editor_chat":
         return {
             "feature": normalized_feature,

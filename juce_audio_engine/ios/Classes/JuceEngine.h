@@ -5815,11 +5815,11 @@ public:
     void shutdownEngine();
 
     // Rows
-    int addRow(const juce::String &name, int iconId);
+    int addRow(const juce::String &name, int iconId, int preferredRowId = -1);
     bool removeRow(int rowId);
     bool moveRowOrder(int fromIndex, int toIndex);
-    int insertRowAbove(int referenceRowId, const juce::String &name, int iconId);
-    int insertRowBelow(int referenceRowId, const juce::String &name, int iconId);
+    int insertRowAbove(int referenceRowId, const juce::String &name, int iconId, int preferredRowId = -1);
+    int insertRowBelow(int referenceRowId, const juce::String &name, int iconId, int preferredRowId = -1);
     bool renameRow(int rowId, const juce::String &newName);
     bool setRowIcon(int rowId, int iconId);
     juce::Array<juce::NamedValueSet> getRows() const;
@@ -6659,6 +6659,7 @@ private:
     std::shared_ptr<const MeterReadoutSnapshot> meterReadoutSnapshot;
     std::unordered_map<std::string, std::unique_ptr<HostedPluginEditorWindow>> hostedPluginEditorWindows;
     std::atomic<int> nextRowId{1};
+    int allocateRowId(int preferredRowId);
 
     // MASTER bus: rows → master input → [FX...] → gain → pan → output
     juce::Array<juce::AudioProcessorGraph::NodeID> *masterEffectChain = nullptr;

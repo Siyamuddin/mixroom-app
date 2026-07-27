@@ -48,6 +48,7 @@ ios/Flutter/AppSecrets.xcconfig
 
 # Local/generated artifacts
 .aws-sam/
+tool/ai_v3_captures.local/
 tools/live_chatbar_probe_v2_full_results.json
 tools/live_chatbar_probe_v2_full_results_r2.json
 tools/ai_mixing/out*/

@@ -2,7 +2,7 @@
 
 Owner: Engineering  
 Status: Draft  
-Last reviewed: 2026-06-05  
+Last reviewed: 2026-07-26
 Update trigger: Update this when supported platforms, required SDK versions,
 native library selection, media dependencies, or backend local setup changes.
 
@@ -73,3 +73,7 @@ The main backend docs live outside this section:
 
 Use those docs when working on auth, billing, entitlements, admin APIs, AI
 proxy behavior, or deployment.
+
+Local V3 backend work uses the existing LLM proxy stack and test environment.
+The server-owned V3 settings are `AI_V3_ENABLED`, `AI_V3_MODEL`, and
+`AI_V3_REASONING_EFFORT`; no provider key belongs in the Flutter client.

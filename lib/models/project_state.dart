@@ -540,12 +540,16 @@ class EffectParameterState {
 
 class EffectState {
   final int effectIndex; // Position in chain
+  final String instanceId; // Runtime plugin-instance identity
+  final String effectId; // Stable plugin/catalog identity when available
   final String name; // Plugin name
   final bool isBypassed;
   final List<EffectParameterState> parameters;
 
   const EffectState({
     required this.effectIndex,
+    this.instanceId = '',
+    this.effectId = '',
     required this.name,
     required this.isBypassed,
     required this.parameters,
@@ -554,6 +558,8 @@ class EffectState {
   factory EffectState.fromMap(Map<String, dynamic> m) {
     return EffectState(
       effectIndex: m['effectIndex'] as int,
+      instanceId: (m['instanceId'] as String?) ?? '',
+      effectId: (m['effectId'] as String?) ?? '',
       name: m['name'] as String,
       isBypassed: m['isBypassed'] as bool? ?? false,
       parameters: (m['parameters'] as List<dynamic>? ?? [])
@@ -565,6 +571,8 @@ class EffectState {
 
   Map<String, dynamic> toJson() => {
         'effectIndex': effectIndex,
+        'instanceId': instanceId,
+        'effectId': effectId,
         'name': name,
         'isBypassed': isBypassed,
         'parameters': parameters.map((p) => p.toJson()).toList(),

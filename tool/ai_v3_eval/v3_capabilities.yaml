@@ -1,0 +1,983 @@
+schema_version: ai_v3_capability_inventory_v2
+status: v1_audit_complete
+last_reviewed: "2026-07-24"
+canonical_action_contract: backend/llm_proxy/src/common/llm_contract.py
+human_readable_matrix: docs/engineering/ai_v3_capability_matrix.md
+v3_architecture: docs/engineering/adr/0002-ai-v3-architecture.md
+v3_adaptive_specification: docs/engineering/ai_v3_adaptive_planner.md
+v3_adaptive_machine_contract: tool/ai_v3_eval/v3_adaptive_architecture.yaml
+scope:
+  included: Mixroom DAW project-chat AI, deterministic DAW AI entrypoints, mixing engines, and audio/context models used by those paths
+  excluded: standalone Video Editor AI in lib/ai/video_editor_ai.dart
+  exclusion_reason: Video Editor AI has a separate prompt, tool contract, state model, and executor; it is not part of the V1-to-V3 DAW migration
+
+# An operation inherits the implementation, execution, dependencies, evidence,
+# and default status fields of its family. Operation fields override family
+# fields. This keeps the 87-operation ledger readable without hiding omissions.
+inventory_rules:
+  family_count: 22
+  canonical_operation_count: 87
+  v3_prototype_command_count: 53
+  completion_rule: every accepted, emitted, routed, or executed capability has an explicit disposition
+  verified_rule: verified requires real editor execution plus undo_or_rollback and readback evidence
+  allowed_v1_statuses: [verified, implemented_unverified, partial, broken, non_mutating, context_only, unreachable, test_only]
+  allowed_v3_dispositions: [prototype_supported, typed_command_needed, mix_engine_integration_needed, context_needed, retrieval_candidate, external_async_workflow, respond_only, unsupported_intentionally]
+
+authoritative_sources:
+  llm_contract: [lib/ai/debug_system_prompt.dart, lib/ai/cloud_llm_service.dart, backend/llm_proxy/src/common/llm_contract.py]
+  canonical_actions: [lib/ai/debug_system_prompt.dart, lib/ai/cloud_llm_service.dart, backend/llm_proxy/src/common/llm_contract.py, backend/llm_proxy/src/handlers/api_responses.py]
+  proxy_normalization: [backend/llm_proxy/src/handlers/api_responses.py]
+  flutter_routing: [lib/ai/chat_pipeline.dart, lib/ai/cloud_llm_service.dart, lib/ai/assistant_action_timeline_reducer.dart]
+  editor_execution: [lib/screens/audio_editor.dart]
+  mixing: [lib/models/goal_vector.dart, lib/models/mixing_result.dart, lib/ai/local_mixing_model.dart, lib/ai/magnitude_predictor.dart]
+  captures: [tool/ai_v3_captures.local]
+
+entry_surfaces:
+  - id: entry.daw_assistant_actions
+    category: entry_surface
+    purpose: Return one or more ordered concrete DAW action bundles.
+    examples: [mute and rename two rows, create a row then place a sample]
+    inputs: [assistant_message, actions, optional calls wrapper]
+    target_semantics: delegated to each action family
+    context: project snapshot, selection snapshot, capability list, recent conversation, pending proposal
+    implementation: {llm: lib/ai/cloud_llm_service.dart, proxy: backend/llm_proxy/src/handlers/api_responses.py, dart: lib/ai/cloud_llm_service.dart, flutter: lib/ai/chat_pipeline.dart, executor: lib/screens/audio_editor.dart}
+    execution: {kind: ordered_editor_actions, confirmation: action_dependent, undo_or_rollback: handler_dependent, readback: partial}
+    dependencies: [OpenAI response tool call, advertised client capabilities]
+    evidence: [backend/llm_proxy/tests/test_llm_contract_routing.py, test/cloud_llm_service_test.dart, test/assistant_action_flow_test.dart, tool/ai_v3_captures.local]
+    status: implemented_unverified
+    gaps: [V1 actions use heterogeneous payloads and do not share universal atomic rollback or readback]
+    v3: {disposition: typed_command_needed, phase: incremental_surface_expansion, dependency: typed operation contracts}
+
+  - id: entry.mix_model_request
+    category: entry_surface
+    purpose: Express subjective sonic goals which Mixroom resolves into concrete mix actions.
+    examples: [make the vocal warmer, match this track's tone to the reference]
+    inputs: [mode, assistant_message, asks_permission, actions.goal]
+    target_semantics: row, group, master, auto, plus a separately protected reference target
+    context: project analysis, row interpretations, selection, effects, reference analysis
+    implementation: {llm: lib/ai/cloud_llm_service.dart, proxy: backend/llm_proxy/src/handlers/api_responses.py, dart: lib/models/goal_vector.dart, flutter: lib/ai/chat_pipeline.dart, executor: lib/screens/audio_editor.dart}
+    execution: {kind: heuristic_then_optional_learned_refinement, confirmation: propose_or_execute, undo_or_rollback: editor_undo_snapshot, readback: apply_report}
+    dependencies: [LocalMixingModel, optional magnitude predictor]
+    evidence: [test/cloud_llm_service_test.dart, test/assistant_action_flow_test.dart, test/local_mixing_model_reference_test.dart, backend/llm_proxy/tests/test_mix_resolve.py]
+    status: implemented_unverified
+    gaps: [model output quality and complete atomicity require workflow evaluation]
+    v3: {disposition: prototype_supported, command: mix.apply_goal, adaptive_retrieval: shadow_supported, phase: mixing_vertical_slice, dependency: none}
+
+  - id: entry.informational_response
+    category: entry_surface
+    purpose: Answer factual, musical, explanatory, or tutorial questions without mutation.
+    examples: [report current BPM, explain how to add automation]
+    inputs: [assistant_message]
+    target_semantics: optional factual project target
+    context: project snapshot, selection, recent conversation
+    implementation: {llm: lib/ai/cloud_llm_service.dart, proxy: backend/llm_proxy/src/handlers/api_responses.py, dart: lib/ai/chat_pipeline.dart, flutter: lib/ai/chat_pipeline.dart, executor: none}
+    execution: {kind: non_mutating, confirmation: none, undo_or_rollback: not_applicable, readback: factual_context_only}
+    dependencies: [OpenAI response]
+    evidence: [backend/llm_proxy/tests/test_llm_contract_routing.py, test/cloud_llm_service_test.dart, tool/ai_v3_captures.local]
+    status: non_mutating
+    gaps: [factual correctness depends on context completeness]
+    v3: {disposition: respond_only, phase: prototype, dependency: CoreContextV3}
+
+  - id: entry.tutorial
+    category: entry_surface
+    purpose: Return UI guidance or educational steps without editor mutation.
+    examples: [show me how to split a clip]
+    inputs: [topic, optional step or UI target]
+    target_semantics: UI feature rather than mutable project object
+    context: platform and visible editor state
+    implementation: {llm: lib/ai/cloud_llm_service.dart, proxy: backend/llm_proxy/src/handlers/api_responses.py, dart: lib/ai/assistant_action_timeline_reducer.dart, flutter: lib/screens/audio_editor.dart, executor: tutorial UI}
+    execution: {kind: non_mutating, confirmation: none, undo_or_rollback: not_applicable, readback: none}
+    dependencies: [tutorial content and UI availability]
+    evidence: [test/assistant_action_flow_test.dart, test/assistant_action_timeline_reducer_test.dart]
+    status: non_mutating
+    gaps: [tutorial coverage is not identical to editor capability coverage]
+    v3: {disposition: respond_only, phase: informational_surface, dependency: compact UI capability context}
+
+  - id: entry.clarify
+    category: entry_surface
+    purpose: Ask for missing information when different answers would change the action.
+    examples: [which of the duplicate tracks do you mean]
+    inputs: [question, optional options]
+    target_semantics: unresolved or contradictory target
+    context: project identities, selection, conversation
+    implementation: {llm: lib/ai/cloud_llm_service.dart, proxy: backend/llm_proxy/src/handlers/api_responses.py, dart: lib/ai/chat_pipeline.dart, flutter: lib/screens/audio_editor.dart, executor: none}
+    execution: {kind: non_mutating, confirmation: none, undo_or_rollback: not_applicable, readback: none}
+    dependencies: [conversation continuation]
+    evidence: [test/cloud_llm_service_test.dart, test/assistant_action_flow_test.dart]
+    status: non_mutating
+    gaps: [V1 can falsely clarify when targeting or payload normalization fails]
+    v3: {disposition: respond_only, phase: prototype, dependency: stable identity context}
+
+  - id: entry.compound_calls
+    category: entry_surface
+    purpose: Preserve ordered concrete-edit and sonic-mix calls in one assistant turn.
+    examples: [create drums then perform a sonic mix pass]
+    inputs: [multiple tool calls or calls wrapper]
+    target_semantics: per child call
+    context: shared request and project snapshot
+    implementation: {llm: lib/ai/cloud_llm_service.dart, proxy: backend/llm_proxy/src/handlers/api_responses.py, dart: lib/ai/chat_pipeline.dart, flutter: lib/screens/audio_editor.dart, executor: sequential handlers}
+    execution: {kind: ordered_multi_surface, confirmation: child_dependent, undo_or_rollback: not_universally_atomic, readback: child_dependent}
+    dependencies: [both tool surfaces enabled]
+    evidence: [test/cloud_llm_service_test.dart, test/assistant_action_flow_test.dart]
+    status: partial
+    gaps: [V1 does not guarantee one transaction across every heterogeneous or asynchronous child]
+    v3: {disposition: typed_command_needed, phase: transaction_expansion, dependency: atomic local bundle plus staged external jobs}
+
+  - id: entry.one_button_mix
+    category: deterministic_entry_surface
+    purpose: Submit the fixed professional-release mix request through V1 and automatically apply the resulting mix actions.
+    examples: [One-Button Mix from the editor]
+    inputs: [current project state, fixed mix prompt, selected UI profile]
+    target_semantics: broad occupied-project mix; concrete targets are resolved by mix_model_request and the mixing stack
+    context: project analysis, selection, effects, row capacity, library and capability snapshots
+    implementation: {llm: fixed prompt through lib/ai/chat_pipeline.dart, proxy: ai_feature one_button_mix normalized to ai_chat, dart: lib/ai/chat_pipeline.dart, flutter: lib/screens/audio_editor.dart, executor: applyMixingResult}
+    execution: {kind: fixed_prompt_then_auto_apply_mix, confirmation: dedicated pre-run UI confirmation, undo_or_rollback: editor mix undo snapshot, readback: MixApplyReport}
+    dependencies: [mix_model_request, LocalMixingModel, optional magnitude predictor]
+    evidence: [lib/screens/audio_editor.dart, test/assistant_action_flow_test.dart]
+    status: implemented_unverified
+    gaps: [the current profile selector exposes one profile and the selected profile is not included in the submitted fixed prompt]
+    v3: {disposition: mix_engine_integration_needed, phase: mixing_vertical_slice, dependency: typed broad-mix goal and explicit auto-apply policy}
+
+direct_action_families:
+  - family: tutorial
+    id: direct.tutorial
+    category: informational
+    purpose: UI guidance represented inside the legacy action envelope.
+    operations: []
+    inputs: [topic, optional UI target]
+    aliases: []
+    target_semantics: UI topic
+    context: platform and UI state
+    implementation: {llm: legacy action schema, proxy: accepted legacy family, dart: routed action family, flutter: tutorial handler, executor: none}
+    execution: {kind: non_mutating, confirmation: none, undo_or_rollback: not_applicable, readback: none}
+    dependencies: [tutorial content]
+    evidence: [test/cloud_llm_service_test.dart, test/assistant_action_flow_test.dart]
+    status: non_mutating
+    gaps: []
+    v3: {disposition: respond_only, phase: informational_surface, dependency: none}
+
+  - family: clarify
+    id: direct.clarify
+    category: informational
+    purpose: Clarification represented inside the legacy action envelope.
+    operations: []
+    inputs: [question, optional options]
+    aliases: []
+    target_semantics: unresolved target or parameter
+    context: project identities and conversation
+    implementation: {llm: legacy action schema, proxy: accepted legacy family, dart: routed action family, flutter: clarification handler, executor: none}
+    execution: {kind: non_mutating, confirmation: none, undo_or_rollback: not_applicable, readback: none}
+    dependencies: [conversation continuation]
+    evidence: [test/cloud_llm_service_test.dart, test/assistant_action_flow_test.dart]
+    status: non_mutating
+    gaps: []
+    v3: {disposition: respond_only, phase: prototype, dependency: none}
+
+  - family: project_edit
+    category: project
+    purpose: Change authoritative project metadata.
+    target_semantics: project
+    context: BPM and audio stretch state
+    implementation: {llm: daw_assistant_actions, proxy: api_responses.py, dart: cloud_llm_service.dart, flutter: audio_editor.dart, executor: project editor operation}
+    execution: {kind: local_editor_action, confirmation: policy_dependent, undo_or_rollback: undo, readback: project_state}
+    dependencies: [daw.project_edit.set_tempo]
+    evidence: [test/cloud_llm_service_test.dart, test/assistant_action_flow_test.dart, tool/ai_v3_captures.local]
+    status: implemented_unverified
+    gaps: [full audio-stretch outcome is not universally verified]
+    operations:
+      - {id: direct.project_edit.set_tempo, operation: set_tempo, purpose: Set project BPM with optional stretch and pitch preservation, inputs: [bpm, time_stretch_audio, preserve_pitch], aliases: [set_bpm, change_bpm, set_project_bpm, change_project_bpm, set_project_tempo, change_tempo], capture_observed: true, v3: {disposition: prototype_supported, command: project.set_tempo, phase: prototype, dependency: none}}
+
+  - family: transport_control
+    category: transport
+    purpose: Control playback, recording, history, metronome, and loop state.
+    target_semantics: project transport
+    context: playback, recording, metronome, loop, undo and redo state
+    implementation: {llm: daw_assistant_actions, proxy: api_responses.py, dart: cloud_llm_service.dart, flutter: audio_editor.dart, executor: transport controller}
+    execution: {kind: immediate_transport_action, confirmation: none, undo_or_rollback: operation_dependent, readback: transport_state}
+    dependencies: [daw.transport_control]
+    evidence: [test/cloud_llm_service_test.dart, test/assistant_action_flow_test.dart, test/assistant_action_timeline_reducer_test.dart]
+    status: implemented_unverified
+    gaps: [recording availability and undo history are runtime dependent]
+    operations:
+      - {id: direct.transport_control.play, operation: play, purpose: Start playback, inputs: [], aliases: [start_playback, resume, resume_playback], v3: {disposition: prototype_supported, command: transport.set_playing, phase: transport, dependency: transport state}}
+      - {id: direct.transport_control.pause, operation: pause, purpose: Pause playback, inputs: [], aliases: [pause_playback], v3: {disposition: prototype_supported, command: transport.set_playing, phase: transport, dependency: transport state}}
+      - {id: direct.transport_control.stop, operation: stop, purpose: Stop playback, inputs: [], aliases: [stop_playback], v3: {disposition: prototype_supported, command: transport.set_playing, phase: transport, dependency: transport state}}
+      - {id: direct.transport_control.restart, operation: restart, purpose: Restart from project start, inputs: [], aliases: [restart_song, go_to_start, back_to_start, return_to_start], v3: {disposition: prototype_supported, command: transport.restart, phase: transport, dependency: transport state}}
+      - {id: direct.transport_control.toggle_play_pause, operation: toggle_play_pause, purpose: Toggle playback, inputs: [], aliases: [toggle, toggle_play, toggle_playback, play_pause], v3: {disposition: prototype_supported, command: transport.set_playing, phase: transport, dependency: transport state}}
+      - {id: direct.transport_control.start_recording, operation: start_recording, purpose: Begin recording, inputs: [], aliases: [record, start_record, begin_recording], v3: {disposition: typed_command_needed, phase: recording, dependency: armed input state}}
+      - {id: direct.transport_control.stop_recording, operation: stop_recording, purpose: End recording, inputs: [], aliases: [stop_record], v3: {disposition: typed_command_needed, phase: recording, dependency: recording state}}
+      - {id: direct.transport_control.toggle_recording, operation: toggle_recording, purpose: Toggle recording, inputs: [], aliases: [toggle_record], v3: {disposition: typed_command_needed, phase: recording, dependency: recording state}}
+      - {id: direct.transport_control.undo, operation: undo, purpose: Undo latest editor transaction, inputs: [], aliases: [undo_last, undo_last_action], v3: {disposition: typed_command_needed, phase: history, dependency: undo stack}}
+      - {id: direct.transport_control.redo, operation: redo, purpose: Redo latest undone transaction, inputs: [], aliases: [redo_last, redo_last_action], v3: {disposition: typed_command_needed, phase: history, dependency: redo stack}}
+      - {id: direct.transport_control.enable_metronome, operation: enable_metronome, purpose: Enable metronome, inputs: [], aliases: [metronome_on, turn_on_metronome, click_on, turn_on_click], v3: {disposition: prototype_supported, command: transport.set_metronome_enabled, phase: transport, dependency: metronome state}}
+      - {id: direct.transport_control.disable_metronome, operation: disable_metronome, purpose: Disable metronome, inputs: [], aliases: [metronome_off, turn_off_metronome, click_off, turn_off_click], v3: {disposition: prototype_supported, command: transport.set_metronome_enabled, phase: transport, dependency: metronome state}}
+      - {id: direct.transport_control.toggle_metronome, operation: toggle_metronome, purpose: Toggle metronome, inputs: [], aliases: [metronome, toggle_click, click], v3: {disposition: prototype_supported, command: transport.set_metronome_enabled, phase: transport, dependency: metronome state}}
+      - {id: direct.transport_control.enable_loop, operation: enable_loop, purpose: Enable loop playback, inputs: [optional loop range], aliases: [loop_on, turn_on_loop], v3: {disposition: prototype_supported, command: transport.set_loop_enabled, phase: transport, dependency: loop state}}
+      - {id: direct.transport_control.disable_loop, operation: disable_loop, purpose: Disable loop playback, inputs: [], aliases: [loop_off, turn_off_loop], v3: {disposition: prototype_supported, command: transport.set_loop_enabled, phase: transport, dependency: loop state}}
+      - {id: direct.transport_control.toggle_loop, operation: toggle_loop, purpose: Toggle loop playback, inputs: [optional loop range], aliases: [loop], v3: {disposition: prototype_supported, command: transport.set_loop_enabled, phase: transport, dependency: loop state}}
+
+  - family: row_mix
+    category: row
+    purpose: Set or adjust row gain and pan.
+    target_semantics: row by resolved ID, index, name, role, or selection
+    context: row identities, selection, current gain and pan
+    implementation: {llm: daw_assistant_actions, proxy: api_responses.py, dart: cloud_llm_service.dart, flutter: audio_editor.dart, executor: row mixer}
+    execution: {kind: local_editor_action, confirmation: policy_dependent, undo_or_rollback: undo, readback: row_mix_state}
+    dependencies: [daw.row_mix]
+    evidence: [test/cloud_llm_service_test.dart, test/assistant_action_flow_test.dart, tool/ai_v3_captures.local]
+    status: implemented_unverified
+    gaps: [legacy absolute/relative value fields are heterogeneous]
+    operations:
+      - {id: direct.row_mix.set_gain, operation: set_gain, purpose: Set row gain, inputs: [row target, gain/value/db], aliases: [set, gain, volume, set_volume, track_volume, row_volume, fader, set_fader], v3: {disposition: prototype_supported, command: row.set_gain_db, phase: row_controls, dependency: none}}
+      - {id: direct.row_mix.adjust_gain, operation: adjust_gain, purpose: Adjust row gain relatively, inputs: [row target, delta/db], aliases: [adjust, change_gain, gain_up, gain_down, volume_up, volume_down, turn_up, turn_down, make_louder, make_quieter], capture_observed: true, v3: {disposition: prototype_supported, command: row.adjust_gain_db, phase: prototype, dependency: none}}
+      - {id: direct.row_mix.set_pan, operation: set_pan, purpose: Set exact stereo pan, inputs: [row target, pan/value], aliases: [pan, pan_to, center_pan, pan_center, pan_left, pan_right], capture_observed: true, v3: {disposition: prototype_supported, command: row.set_pan, phase: prototype, dependency: none}}
+      - {id: direct.row_mix.adjust_pan, operation: adjust_pan, purpose: Adjust stereo pan relatively, inputs: [row target, delta], aliases: [pan_more_left, pan_more_right, move_left, move_right], capture_observed: true, v3: {disposition: prototype_supported, command: row.adjust_pan, phase: row_controls, dependency: none}}
+
+  - family: row_mute
+    category: row
+    purpose: Set or toggle row mute state.
+    target_semantics: one or more resolved rows
+    context: row identities, selection, mute state
+    implementation: {llm: daw_assistant_actions, proxy: api_responses.py, dart: cloud_llm_service.dart, flutter: audio_editor.dart, executor: row state handler}
+    execution: {kind: local_editor_action, confirmation: policy_dependent, undo_or_rollback: undo, readback: row_mute_state}
+    dependencies: [daw.row_mute]
+    evidence: [test/assistant_action_flow_test.dart, tool/ai_v3_captures.local]
+    status: implemented_unverified
+    gaps: []
+    operations:
+      - {id: direct.row_mute.mute, operation: mute, purpose: Mute rows, inputs: [row targets], aliases: [mute_row, mute_track, row_mute, track_mute, silence, silence_row, silence_track], capture_observed: true, v3: {disposition: prototype_supported, command: row.set_muted, phase: prototype, dependency: none}}
+      - {id: direct.row_mute.unmute, operation: unmute, purpose: Unmute rows, inputs: [row targets], aliases: [un_mute, unmute_row, unmute_track, clear_mute], v3: {disposition: prototype_supported, command: row.set_muted, phase: prototype, dependency: none}}
+      - {id: direct.row_mute.toggle, operation: toggle, purpose: Toggle mute state, inputs: [row targets], aliases: [toggle_mute, toggle_row_mute, toggle_track_mute], v3: {disposition: prototype_supported, command: row.set_muted, phase: row_metadata, dependency: current mute state}}
+
+  - family: row_solo
+    category: row
+    purpose: Set or toggle row solo state.
+    target_semantics: one or more resolved rows
+    context: row identities, selection, solo state
+    implementation: {llm: daw_assistant_actions, proxy: api_responses.py, dart: cloud_llm_service.dart, flutter: audio_editor.dart, executor: row state handler}
+    execution: {kind: local_editor_action, confirmation: policy_dependent, undo_or_rollback: undo, readback: row_solo_state}
+    dependencies: [daw.row_solo]
+    evidence: [test/assistant_action_flow_test.dart]
+    status: implemented_unverified
+    gaps: []
+    operations:
+      - {id: direct.row_solo.solo, operation: solo, purpose: Solo rows, inputs: [row targets], aliases: [solo_row, solo_track, track_solo, row_solo], v3: {disposition: prototype_supported, command: row.set_soloed, phase: row_controls, dependency: none}}
+      - {id: direct.row_solo.unsolo, operation: unsolo, purpose: Clear solo on rows, inputs: [row targets], aliases: [un_solo, unsolo_row, unsolo_track, un_solo_row, un_solo_track, clear_solo], v3: {disposition: prototype_supported, command: row.set_soloed, phase: row_controls, dependency: none}}
+      - {id: direct.row_solo.toggle, operation: toggle, purpose: Toggle solo state, inputs: [row targets], aliases: [toggle_solo, toggle_row_solo, toggle_track_solo], v3: {disposition: prototype_supported, command: row.set_soloed, phase: row_controls, dependency: current solo state plus stale-state digest}}
+
+  - family: row_select
+    category: row
+    purpose: Select a row in the editor.
+    target_semantics: resolved row
+    context: row identities and current selection
+    implementation: {llm: daw_assistant_actions, proxy: api_responses.py, dart: cloud_llm_service.dart, flutter: audio_editor.dart, executor: selection handler}
+    execution: {kind: local_ui_state, confirmation: none, undo_or_rollback: not_applicable, readback: selection_state}
+    dependencies: [daw.row_select]
+    evidence: [test/assistant_action_flow_test.dart]
+    status: implemented_unverified
+    gaps: [selection is UI state rather than project mutation]
+    operations:
+      - {id: direct.row_select.select, operation: select, purpose: Select a row, inputs: [row target], aliases: [select_row, select_track, focus, focus_row, focus_track, make_active, activate], v3: {disposition: prototype_supported, command: row.select, phase: row_metadata, dependency: identity index}}
+
+  - family: row_rename
+    category: row
+    purpose: Rename a row.
+    target_semantics: resolved row
+    context: row identities and names
+    implementation: {llm: daw_assistant_actions, proxy: api_responses.py, dart: cloud_llm_service.dart, flutter: audio_editor.dart, executor: row metadata handler}
+    execution: {kind: local_editor_action, confirmation: policy_dependent, undo_or_rollback: undo, readback: row_name}
+    dependencies: [daw.row_rename]
+    evidence: [test/assistant_action_flow_test.dart, tool/ai_v3_captures.local]
+    status: implemented_unverified
+    gaps: []
+    operations:
+      - {id: direct.row_rename.rename, operation: rename, purpose: Rename a row, inputs: [row target, name], aliases: [rename_row, rename_track, track_rename, row_rename, set_name, set_row_name, set_track_name], capture_observed: true, v3: {disposition: prototype_supported, command: row.rename, phase: prototype, dependency: none}}
+
+  - family: row_delete
+    category: row
+    purpose: Delete a row and its contents.
+    target_semantics: resolved row
+    context: row identities, contents, group membership
+    implementation: {llm: daw_assistant_actions, proxy: api_responses.py, dart: cloud_llm_service.dart, flutter: audio_editor.dart, executor: row lifecycle handler}
+    execution: {kind: destructive_local_action, confirmation: required_or_policy, undo_or_rollback: undo, readback: row_absence}
+    dependencies: [daw.row_delete]
+    evidence: [test/assistant_action_flow_test.dart]
+    status: implemented_unverified
+    gaps: [compound rollback must restore row contents and relationships]
+    operations:
+      - {id: direct.row_delete.delete, operation: delete, purpose: Delete a row, inputs: [row target], aliases: [remove, delete_row, delete_track, remove_row, remove_track, trash, trash_row, trash_track], v3: {disposition: prototype_supported, command: row.delete, phase: row_lifecycle, dependency: complete row snapshot rollback}}
+
+  - family: row_create
+    category: row
+    purpose: Create audio, MIDI, or group rows.
+    target_semantics: project insertion position or embedded destination request
+    context: row capacity, current order, instruments
+    implementation: {llm: daw_assistant_actions, proxy: api_responses.py, dart: cloud_llm_service.dart, flutter: audio_editor.dart, executor: row lifecycle handler}
+    execution: {kind: local_editor_action, confirmation: policy_dependent, undo_or_rollback: undo, readback: created_row}
+    dependencies: [daw.row_create, row capacity]
+    evidence: [test/assistant_action_flow_test.dart, tool/ai_v3_captures.local]
+    status: implemented_unverified
+    gaps: [legacy continuation can bind a new row by position rather than a typed transaction-local ID]
+    operations:
+      - {id: direct.row_create.create, operation: create, purpose: Create and name a row, inputs: [row_type, name, position, optional instrument], aliases: [add, new, create_row, create_track, add_row, add_track, new_row, new_track, insert_row, insert_track], capture_observed: true, v3: {disposition: prototype_supported, command: row.create, phase: row_lifecycle, dependency: stable row lifecycle action}}
+
+  - family: row_color_edit
+    category: row
+    purpose: Set or clear row display color.
+    target_semantics: resolved row
+    context: row identities and current color
+    implementation: {llm: daw_assistant_actions, proxy: api_responses.py, dart: cloud_llm_service.dart, flutter: audio_editor.dart, executor: row metadata handler}
+    execution: {kind: local_editor_action, confirmation: policy_dependent, undo_or_rollback: undo, readback: row_color}
+    dependencies: [daw.row_color_edit]
+    evidence: [test/assistant_action_flow_test.dart]
+    status: implemented_unverified
+    gaps: [not separately advertised by the legacy capability field]
+    operations:
+      - {id: direct.row_color_edit.set, operation: set, purpose: Set row color, inputs: [row target, color], aliases: [], v3: {disposition: prototype_supported, command: row.set_color, phase: row_metadata, dependency: canonical color representation}}
+      - {id: direct.row_color_edit.clear, operation: clear, purpose: Clear row color, inputs: [row target], aliases: [remove, unset, delete], v3: {disposition: prototype_supported, command: row.set_color, phase: row_metadata, dependency: row state}}
+
+  - family: row_group_edit
+    category: row
+    purpose: Create groups, remove rows from groups, and toggle collapsed state.
+    target_semantics: resolved rows or group
+    context: row identities, order, group membership and collapsed state
+    implementation: {llm: daw_assistant_actions, proxy: api_responses.py, dart: cloud_llm_service.dart, flutter: audio_editor.dart, executor: group handler}
+    execution: {kind: local_editor_action, confirmation: policy_dependent, undo_or_rollback: undo, readback: group_state}
+    dependencies: [daw.row_group_edit]
+    evidence: [test/assistant_action_flow_test.dart]
+    status: implemented_unverified
+    gaps: [not separately advertised by the legacy capability field]
+    operations:
+      - {id: direct.row_group_edit.create, operation: create, purpose: Group selected or specified rows, inputs: [row targets, optional group name], aliases: [group, group_rows, create_group, create_row_group, make_group, make_row_group], v3: {disposition: prototype_supported, command: group.create, phase: grouping, dependency: stable group identity and atomic layout action}}
+      - {id: direct.row_group_edit.remove_row, operation: remove_row, purpose: Remove a row from its group, inputs: [row target], aliases: [ungroup_row, remove_from_group, remove_row_from_group], v3: {disposition: prototype_supported, command: group.remove_row, phase: grouping, dependency: exact group membership}}
+      - {id: direct.row_group_edit.toggle_collapsed, operation: toggle_collapsed, purpose: Toggle group collapsed state, inputs: [group target], aliases: [toggle, fold, unfold, collapse, expand, toggle_group, toggle_row_group], v3: {disposition: prototype_supported, command: group.set_collapsed, phase: grouping, dependency: final collapsed state}}
+
+  - family: clip_edit
+    category: clip
+    purpose: Edit audio or MIDI clips on the timeline, including dialogue cleanup.
+    target_semantics: resolved clip, clip set, row clips, or current selection
+    context: clip identities, types, positions, durations, sources, selection, BPM and analysis
+    implementation: {llm: daw_assistant_actions, proxy: api_responses.py, dart: cloud_llm_service.dart, flutter: audio_editor.dart, executor: clip editor handlers}
+    execution: {kind: local_or_rendering_action, confirmation: operation_dependent, undo_or_rollback: operation_dependent, readback: clip_state}
+    dependencies: [daw.clip_edit, optional daw.clip_edit.pitch_shift]
+    evidence: [test/cloud_llm_service_test.dart, test/assistant_action_flow_test.dart, test/assistant_action_timeline_reducer_test.dart]
+    status: implemented_unverified
+    gaps: [rendering and cleanup variants are not uniformly atomic]
+    operations:
+      - {id: direct.clip_edit.trim, operation: trim, purpose: Trim a clip to explicit bounds, inputs: [clip target, start/end or trim amounts], aliases: [], v3: {disposition: prototype_supported, command: clip.trim_to_range, phase: clip_core, dependency: exact absolute beat bounds; audio clips only}}
+      - {id: direct.clip_edit.auto_trim, operation: auto_trim, purpose: Trim silence automatically, inputs: [clip target, optional threshold/padding], aliases: [], v3: {disposition: prototype_supported, command: clip.trim_silence, adaptive_retrieval: shadow_supported, phase: shared_clip_boundary_analysis, dependency: exact stable audio clip ID and local waveform boundary analysis}}
+      - {id: direct.clip_edit.cut, operation: cut, purpose: Split a clip, inputs: [clip target, cut position], aliases: [split, split_clip, cut_clip], v3: {disposition: prototype_supported, command: clip.split_at, phase: clip_core, dependency: exact absolute beat position}}
+      - {id: direct.clip_edit.stretch, operation: stretch, purpose: Time-stretch a clip, inputs: [clip target, duration/factor, preserve_pitch], aliases: [resize, resize_clip], v3: {disposition: prototype_supported, commands: [clip.set_timeline_length_beats, clip.scale_timeline_length], adaptive_retrieval: shadow_supported, phase: shared_clip_stretch, dependency: exact stable audio clip ID and existing non-destructive stretch engine}}
+      - {id: direct.clip_edit.pitch_shift, operation: pitch_shift, purpose: Pitch-shift audio in semitones, inputs: [clip target, semitones], aliases: [pitch, pitch_clip, pitch_shift_clip, shift_pitch, lower_pitch, raise_pitch, lower_key, raise_key, change_key, transpose_audio, transpose_clip], v3: {disposition: prototype_supported, commands: [clip.set_pitch_semitones, clip.adjust_pitch_semitones], adaptive_retrieval: shadow_supported, phase: shared_clip_pitch, dependency: exact stable audio clip ID}}
+      - {id: direct.clip_edit.glue, operation: glue, purpose: Consolidate adjacent or selected clips, inputs: [clip targets, optional destination], aliases: [glue_clips, merge, merge_clip, merge_clips, consolidate, consolidate_clip, consolidate_clips, bounce_clip, bounce_clips], v3: {disposition: prototype_supported, command: clip.glue, adaptive_retrieval: shadow_supported, phase: clip_rendering, dependency: exact same-row audio clip IDs and transactional dry render}}
+      - {id: direct.clip_edit.move, operation: move, purpose: Move a clip to an absolute or relative timeline position, inputs: [clip target, beat/time/delta, optional row target], aliases: [move_clip, reposition, shift, nudge], capture_observed: true, v3: {disposition: prototype_supported, command: clip.move_by_beats, phase: prototype, dependency: current prototype covers same-row relative beats only}}
+      - {id: direct.clip_edit.tempo_follow, operation: tempo_follow, purpose: Set source-tempo metadata and enable, configure, or disable project-tempo following, inputs: [clip target, source tempo, enabled/mode], aliases: [tempo_follow_project], v3: {disposition: prototype_supported, commands: [clip.set_source_tempo_bpm, clip.set_tempo_follow_mode], adaptive_retrieval: shadow_supported, phase: shared_clip_tempo, dependency: exact stable audio clip ID and existing non-destructive stretch engine}}
+      - {id: direct.clip_edit.auto_bpm_align, operation: auto_bpm_align, purpose: Detect and align clip tempo to project, inputs: [clip target, optional preserve_pitch], aliases: [align_tempo, align_to_project_tempo], v3: {disposition: prototype_supported, command: clip.align_tempo_to_project, adaptive_retrieval: shadow_supported, phase: shared_clip_tempo_analysis, dependency: exact stable audio clip ID and local BPM analysis}}
+      - {id: direct.clip_edit.align_first_sound, operation: align_first_sound, purpose: Align the detected first audible onset, inputs: [clip target, destination position], aliases: [align_onset, onset_align, first_sound_align, align_volume_start, align_audio_start, align_to_first_sound], v3: {disposition: prototype_supported, command: clip.align_first_sound, adaptive_retrieval: shadow_supported, phase: shared_clip_boundary_analysis, dependency: exact stable audio clip ID and local waveform boundary analysis}}
+      - {id: direct.clip_edit.tempo_detect_set_project, operation: tempo_detect_set_project, purpose: Detect clip tempo and set project BPM, inputs: [clip target, stretch policy], aliases: [detect_tempo_set_project], v3: {disposition: prototype_supported, command: project.set_tempo_from_clip, adaptive_retrieval: shadow_supported, phase: shared_clip_tempo_analysis, dependency: exact stable audio clip ID, local BPM analysis, and atomic project tempo action}}
+      - {id: direct.clip_edit.duplicate, operation: duplicate, purpose: Duplicate clips, inputs: [clip targets, destination position/row], aliases: [copy, copy_clip], v3: {disposition: prototype_supported, command: clip.duplicate_to, phase: clip_core, dependency: exact destination row ID and absolute beat; newly created clip references deferred}}
+      - {id: direct.clip_edit.delete, operation: delete, purpose: Delete clips, inputs: [clip targets], aliases: [remove, remove_clip, delete_clip], v3: {disposition: prototype_supported, command: clip.delete, phase: clip_core, dependency: complete clip rollback snapshot}}
+      - {id: direct.clip_edit.dialog_cleanup, operation: dialog_cleanup, purpose: Apply dialogue cleanup, inputs: [audio clip target, cleanup settings], aliases: [], v3: {disposition: external_async_workflow, phase: audio_processing, dependency: rendered-file staging}}
+      - {id: direct.clip_edit.dialog_remove_range, operation: dialog_remove_range, purpose: Remove a specified dialogue range, inputs: [audio clip target, start/end], aliases: [], v3: {disposition: external_async_workflow, phase: audio_processing, dependency: rendered-file staging}}
+      - {id: direct.clip_edit.dialog_tighten_pauses, operation: dialog_tighten_pauses, purpose: Shorten excessive dialogue pauses, inputs: [audio clip target, threshold/target pause], aliases: [], v3: {disposition: external_async_workflow, phase: audio_processing, dependency: speech/silence analysis}}
+      - {id: direct.clip_edit.dialog_lift_quiet, operation: dialog_lift_quiet, purpose: Raise quiet dialogue regions, inputs: [audio clip target, threshold/amount], aliases: [], v3: {disposition: external_async_workflow, phase: audio_processing, dependency: loudness analysis}}
+
+  - family: sample_insert
+    category: library
+    purpose: Insert indexed audio assets or replace existing audio clips.
+    target_semantics: existing/new audio row and optional replacement clips
+    context: asset catalog, row capacity, clip identities, timeline
+    implementation: {llm: daw_assistant_actions, proxy: api_responses.py, dart: cloud_llm_service.dart, flutter: audio_editor.dart, executor: sample insertion handler}
+    execution: {kind: local_file_backed_action, confirmation: policy_dependent, undo_or_rollback: undo, readback: created_or_replaced_clips}
+    dependencies: [daw.sample_insert.library, indexed asset availability]
+    evidence: [test/cloud_llm_service_test.dart, test/assistant_action_flow_test.dart, tool/ai_v3_captures.local]
+    status: implemented_unverified
+    gaps: [legacy matching can depend on descriptive catalog search rather than stable asset IDs]
+    operations:
+      - {id: direct.sample_insert.insert_audio_clips, operation: insert_audio_clips, purpose: Insert one or more samples, inputs: [asset/file IDs, row target, positions, optional new row], aliases: [insert_audio_clip, insert_sample, insert_samples, add_sample, add_samples, insert_library_audio], capture_observed: true, v3: {disposition: prototype_supported, command: sample.place, adaptive_retrieval: shadow_supported, phase: prototype, dependency: exact indexed asset IDs}}
+      - {id: direct.sample_insert.replace_audio_clips, operation: replace_audio_clips, purpose: Replace one exact audio clip source while preserving its stable arrangement identity and reusable edits, inputs: [stable clip ID, authoritative replacement asset ID], aliases: [replace_audio_clip, replace_audio, replace_sample, replace_samples, swap_sample, swap_samples, swap_audio_clips, change_sample], v3: {disposition: prototype_supported, command: sample.replace, adaptive_retrieval: shadow_supported, phase: prototype, dependency: exact indexed asset IDs}}
+
+  - family: midi_compose
+    category: midi
+    purpose: Create, replace, extend, transpose, transcribe, or rhythmically chop MIDI content.
+    target_semantics: MIDI clip/row, audio source for transcription, or new instrument row
+    context: exact notes, clip timing, instruments, key/BPM, row capacity and audio source
+    implementation: {llm: daw_assistant_actions, proxy: api_responses.py, dart: cloud_llm_service.dart, flutter: audio_editor.dart, executor: MIDI handlers plus Basic Pitch}
+    execution: {kind: local_editor_or_local_model_action, confirmation: operation_dependent, undo_or_rollback: undo, readback: MIDI clip and notes}
+    dependencies: [daw.midi_compose, instrument insert, transpose, optional audio-to-MIDI]
+    evidence: [test/cloud_llm_service_test.dart, test/assistant_action_flow_test.dart, test/assistant_action_timeline_reducer_test.dart, tool/ai_v3_captures.local]
+    status: implemented_unverified
+    gaps: [LLM-authored raw composition quality is not established; transcription is model dependent]
+    operations:
+      - {id: direct.midi_compose.create_clip, operation: create_clip, purpose: Create exact MIDI notes in a clip, inputs: [row/instrument destination, clip bounds, notes], aliases: [create, new_clip, new_midi_clip], capture_observed: true, v3: {disposition: prototype_supported, command: midi.create_clip, phase: prototype, dependency: exact notes and instrument ID}}
+      - {id: direct.midi_compose.compose_bassline, operation: compose_bassline, purpose: Generate a bassline from musical instructions, inputs: [destination, progression/key, rhythm/notes, instrument], aliases: [compose_bass, write_bassline, generate_bassline, make_bassline], v3: {disposition: typed_command_needed, phase: musical_generation, dependency: music-generation strategy}}
+      - {id: direct.midi_compose.compose_pattern, operation: compose_pattern, purpose: Generate a MIDI pattern, inputs: [destination, notes/progression, musical role, instrument], aliases: [compose, compose_notes, write_pattern, generate_pattern, make_pattern], v3: {disposition: typed_command_needed, phase: musical_generation, dependency: music-generation strategy}}
+      - {id: direct.midi_compose.replace_notes, operation: replace_notes, purpose: Replace existing MIDI notes, inputs: [clip target, exact notes or progression], aliases: [replace, overwrite_notes, set_notes], capture_observed: true, v3: {disposition: prototype_supported, command: midi.replace_notes, phase: midi_editing, dependency: exact notes within existing clip bounds}}
+      - {id: direct.midi_compose.append_notes, operation: append_notes, purpose: Append notes to an existing MIDI clip, inputs: [clip target, exact notes], aliases: [append, add_notes, extend_notes], v3: {disposition: prototype_supported, command: midi.append_notes, phase: midi_editing, dependency: exact notes within existing clip bounds}}
+      - {id: direct.midi_compose.transpose_notes, operation: transpose_notes, purpose: Transpose existing MIDI notes, inputs: [clip target, semitones], aliases: [transpose, transpose_note, shift_pitch, pitch_shift, octave_up, octave_down], capture_observed: true, v3: {disposition: prototype_supported, command: midi.transpose, phase: prototype, dependency: none}}
+      - {id: direct.midi_compose.convert_audio_to_midi, operation: convert_audio_to_midi, purpose: Transcribe audio into a new MIDI clip, inputs: [audio clip target, instrument destination], aliases: [audio_to_midi, convert_to_midi, transcribe_audio, extract_midi], status: partial, v3: {disposition: prototype_supported, command: clip.convert_to_midi, adaptive_retrieval: shadow_supported, phase: local_audio_models, dependency: exact audio clip and instrument IDs, bundled Basic Pitch model, staged local result}}
+      - {id: direct.midi_compose.chop_notes, operation: chop_notes, purpose: Split notes into rhythmic subdivisions or ratchets, inputs: [clip target, grid/division, selection], aliases: [chop, chop_note, note_chop, note_chopper, splice_notes, slice_notes, split_notes, grid_chop, ratchet, stutter], v3: {disposition: prototype_supported, command: midi.chop_notes, phase: midi_editing, dependency: deterministic subdivision contract}}
+
+  - family: effect_edit
+    category: effects
+    purpose: Add, remove, bypass, unbypass, or toggle an effect instance.
+    target_semantics: row/master plus optional effect instance identity/name/index
+    context: effect catalog, exposed parameters, instances, bypass state
+    implementation: {llm: daw_assistant_actions, proxy: api_responses.py, dart: cloud_llm_service.dart, flutter: audio_editor.dart, executor: effect chain handler}
+    execution: {kind: local_editor_action, confirmation: operation_dependent, undo_or_rollback: undo, readback: effect_chain}
+    dependencies: [daw.effect_edit, available effect/plugin catalog]
+    evidence: [test/cloud_llm_service_test.dart, test/assistant_action_flow_test.dart, tool/ai_v3_captures.local]
+    status: implemented_unverified
+    gaps: [hosted-plugin parameters are not a uniform typed surface]
+    operations:
+      - {id: direct.effect_edit.add, operation: add, purpose: Add an effect, inputs: [target, effect ID/name, optional preset/parameters], aliases: [insert, ensure, ensure_effect, add_effect, insert_effect], capture_observed: true, v3: {disposition: prototype_supported, command: effect.ensure_configured, adaptive_retrieval: shadow_supported, phase: prototype, dependency: prototype covers built-in exposed effects only}}
+      - {id: direct.effect_edit.remove, operation: remove, purpose: Remove an effect instance, inputs: [target, effect instance ID/name/index], aliases: [delete, delete_effect, remove_effect, take_out], v3: {disposition: prototype_supported, command: effect.remove, adaptive_retrieval: shadow_supported, phase: effects, dependency: row effect instances only; master/group controls remain deferred}}
+      - {id: direct.effect_edit.bypass, operation: bypass, purpose: Bypass an effect instance, inputs: [target, effect instance], aliases: [disable, mute], v3: {disposition: prototype_supported, command: effect.set_bypassed, adaptive_retrieval: shadow_supported, phase: effects, dependency: row effect instances only}}
+      - {id: direct.effect_edit.unbypass, operation: unbypass, purpose: Re-enable a bypassed effect, inputs: [target, effect instance], aliases: [enable, unmute], v3: {disposition: prototype_supported, command: effect.set_bypassed, adaptive_retrieval: shadow_supported, phase: effects, dependency: row effect instances only}}
+      - {id: direct.effect_edit.toggle_bypass, operation: toggle_bypass, purpose: Toggle effect bypass, inputs: [target, effect instance], aliases: [toggle], v3: {disposition: prototype_supported, command: effect.set_bypassed, adaptive_retrieval: shadow_supported, phase: effects, dependency: planner emits explicit final state from current row instance context}}
+
+  - family: automation_edit
+    category: automation
+    purpose: Create and edit automation points, ramps, clips, templates, and clip state.
+    target_semantics: row/master parameter and optional automation clip
+    context: automatable targets, existing lanes, points, clips, ranges and values
+    implementation: {llm: daw_assistant_actions, proxy: api_responses.py, dart: cloud_llm_service.dart, flutter: audio_editor.dart, executor: automation handler}
+    execution: {kind: local_editor_action, confirmation: policy_dependent, undo_or_rollback: undo, readback: automation_state}
+    dependencies: [daw.automation_edit]
+    evidence: [test/cloud_llm_service_test.dart, test/assistant_action_flow_test.dart, test/assistant_action_timeline_reducer_test.dart, tool/ai_v3_captures.local]
+    status: implemented_unverified
+    gaps: [parameter support and value units vary by automation target, legacy create means set_points in proxy/Dart normalization but create_clip in the final editor normalizer]
+    template_catalog:
+      sidechain_pump: [sidechain, sidechain_pump, pump]
+      sidechain_from_kick: [sidechain_from_kick, kick_sidechain, duck_to_kick, kick_duck]
+      reverb_tail: [reverb_tail, tail, decay]
+      filter_sweep: [filter_sweep, sweep, lowpass_sweep, highpass_sweep]
+      auto_pan: [auto_pan, autopan, stereo_motion, stereo_direction, pan_motion, left_right_motion]
+    operations:
+      - {id: direct.automation_edit.set_points, operation: set_points, purpose: Replace automation with exact points, inputs: [target parameter, points], aliases: [create], v3: {disposition: prototype_supported, command: automation.set_points, adaptive_retrieval: shadow_supported, phase: prototype, dependency: row-owned authoritative automation target ID}}
+      - {id: direct.automation_edit.add_ramp, operation: add_ramp, purpose: Add an automation ramp, inputs: [target parameter, range, start/end values], aliases: [], capture_observed: true, v3: {disposition: prototype_supported, command: automation.gain_fade, adaptive_retrieval: shadow_supported, phase: prototype, dependency: prototype covers row gain only}}
+      - {id: direct.automation_edit.clear, operation: clear, purpose: Clear automation points, inputs: [target parameter, optional range], aliases: [], v3: {disposition: prototype_supported, command: automation.clear, adaptive_retrieval: shadow_supported, phase: prototype, dependency: row-owned authoritative automation target ID}}
+      - {id: direct.automation_edit.create_clip, operation: create_clip, purpose: Create an automation clip, inputs: [target parameter, range, points], aliases: [new_clip, add_clip, insert_clip], v3: {disposition: typed_command_needed, phase: automation_clips, dependency: automation clip contract}}
+      - {id: direct.automation_edit.duplicate_clip, operation: duplicate_clip, purpose: Duplicate an automation clip, inputs: [clip target, destination], aliases: [clone, clone_clip, copy_clip], v3: {disposition: typed_command_needed, phase: automation_clips, dependency: stable automation clip IDs}}
+      - {id: direct.automation_edit.move_clip, operation: move_clip, purpose: Move an automation clip, inputs: [clip target, position/delta], aliases: [nudge_clip], v3: {disposition: typed_command_needed, phase: automation_clips, dependency: stable automation clip IDs}}
+      - {id: direct.automation_edit.delete_clip, operation: delete_clip, purpose: Delete an automation clip, inputs: [clip target], aliases: [remove_clip], v3: {disposition: typed_command_needed, phase: automation_clips, dependency: stable automation clip IDs}}
+      - {id: direct.automation_edit.clear_clips, operation: clear_clips, purpose: Delete all matching automation clips, inputs: [target lane/range], aliases: [delete_clips, remove_clips], v3: {disposition: typed_command_needed, phase: automation_clips, dependency: explicit scope}}
+      - {id: direct.automation_edit.mute_clip, operation: mute_clip, purpose: Mute an automation clip, inputs: [clip target], aliases: [mute], v3: {disposition: typed_command_needed, phase: automation_clips, dependency: stable automation clip IDs}}
+      - {id: direct.automation_edit.unmute_clip, operation: unmute_clip, purpose: Unmute an automation clip, inputs: [clip target], aliases: [unmute], v3: {disposition: typed_command_needed, phase: automation_clips, dependency: stable automation clip IDs}}
+      - {id: direct.automation_edit.toggle_clip_mute, operation: toggle_clip_mute, purpose: Toggle automation clip mute, inputs: [clip target], aliases: [toggle_mute], v3: {disposition: typed_command_needed, phase: automation_clips, dependency: current clip state}}
+      - {id: direct.automation_edit.make_unique_clip, operation: make_unique_clip, purpose: Detach a linked automation clip, inputs: [clip target], aliases: [make_unique, unique_clip], v3: {disposition: typed_command_needed, phase: automation_clips, dependency: linked clip state}}
+      - {id: direct.automation_edit.set_clip_points, operation: set_clip_points, purpose: Replace points inside an automation clip, inputs: [clip target, points], aliases: [], v3: {disposition: typed_command_needed, phase: automation_clips, dependency: point/value contract}}
+      - {id: direct.automation_edit.apply_template, operation: apply_template, purpose: Apply a named sidechain, reverb-tail, filter-sweep, or auto-pan automation pattern, inputs: [target parameter, template ID, range/strength, optional kick source], aliases: [template, generate_template], v3: {disposition: typed_command_needed, phase: automation_templates, dependency: typed template catalog and source target IDs}}
+
+  - family: stem_separate
+    category: audio_model
+    purpose: Separate an audio clip into vocal and instrumental stems.
+    target_semantics: existing audio clip or row
+    context: source file, clip bounds, row capacity
+    implementation: {llm: daw_assistant_actions, proxy: api_responses.py, dart: cloud_llm_service.dart, flutter: audio_editor.dart, executor: SpleeterStemSeparator}
+    execution: {kind: asynchronous_local_model_and_files, confirmation: required_or_policy, undo_or_rollback: partial, readback: created stem rows/clips}
+    dependencies: [daw.stem_separate, Spleeter ONNX models, filesystem]
+    evidence: [lib/ai/spleeter_stem_separator.dart, test/assistant_action_flow_test.dart]
+    status: partial
+    gaps: [external files and long-running inference are not a simple atomic editor transaction]
+    operations:
+      - {id: direct.stem_separate.vocal_instrumental, operation: vocal_instrumental, purpose: Create vocal and instrumental stems, inputs: [audio target], aliases: [], v3: {disposition: prototype_supported, command: clip.separate_stems, adaptive_retrieval: shadow_supported, phase: local_audio_models, dependency: exact audio clip ID, bundled Spleeter models, staged local files}}
+
+  - family: role_override
+    category: analysis
+    purpose: Set or clear the semantic mix role assigned to a row.
+    target_semantics: resolved row
+    context: inferred role, available canonical roles, current override
+    implementation: {llm: daw_assistant_actions, proxy: api_responses.py, dart: cloud_llm_service.dart, flutter: audio_editor.dart, executor: role override state}
+    execution: {kind: local_metadata_action, confirmation: policy_dependent, undo_or_rollback: state_restore, readback: role_override}
+    dependencies: [daw.role_override]
+    evidence: [test/assistant_action_flow_test.dart, test/local_mixing_model_reference_test.dart]
+    status: implemented_unverified
+    gaps: [role affects later mixing interpretation rather than audio directly]
+    operations:
+      - {id: direct.role_override.set, operation: set, purpose: Set a row's mix role, inputs: [row target, role], aliases: [], v3: {disposition: prototype_supported, command: row.set_role_override, phase: row_role_metadata, dependency: canonical role catalog}}
+      - {id: direct.role_override.clear, operation: clear, purpose: Clear a row role override, inputs: [row target], aliases: [remove, unset, delete], v3: {disposition: prototype_supported, command: row.set_role_override, phase: row_role_metadata, dependency: role state}}
+
+  - family: audio_enhance
+    category: audio_processing
+    purpose: Apply the supported recording-restoration preset.
+    target_semantics: existing audio clip or row
+    context: source file, clip bounds, existing enhancement metadata
+    implementation: {llm: daw_assistant_actions or Capture Deck deterministic entrypoint, proxy: api_responses.py for chat requests, dart: cloud_llm_service.dart, flutter: audio_editor.dart, executor: effect-chain insertion plus background enhanced-cache render}
+    execution: {kind: effect_chain_and_background_cache_action, confirmation: chat policy or direct Capture Deck invocation, undo_or_rollback: partial, readback: row effect chain and clip enhancement preset}
+    dependencies: [daw.audio_enhance, filesystem and audio processing]
+    evidence: [lib/screens/audio_editor.dart, test/assistant_action_flow_test.dart]
+    status: partial
+    gaps: [the legacy asynchronous rendered cache remains best-effort derived output and is not playback authority]
+    operations:
+      - {id: direct.audio_enhance.phone_mic_cleanup, operation: phone_mic_cleanup, purpose: Add the canonical cleanup chain and mark every current audio clip on the target row, inputs: [stable audio row ID], aliases: [phone_cleanup, phone_mic, cleanup, denoise, clean_up_recording, voice_clean], v3: {disposition: prototype_supported, command: row.apply_phone_mic_cleanup, phase: row_phone_cleanup, dependency: daw.audio_enhance and complete built-in cleanup chain}}
+
+  - family: mix_goal
+    category: mixing
+    purpose: Route subjective sonic intent into the Mixroom mixing subsystem.
+    target_semantics: auto, row, group, or master plus optional protected reference
+    context: project analysis, roles, effects, reference features and selection
+    implementation: {llm: mix_model_request, proxy: api_responses.py, dart: goal_vector.dart, flutter: chat_pipeline.dart, executor: LocalMixingModel plus magnitude predictor}
+    execution: {kind: goal_resolution_then_mix_actions, confirmation: propose_or_execute, undo_or_rollback: editor_undo_snapshot, readback: MixApplyReport}
+    dependencies: [LocalMixingModel, optional learned magnitude route]
+    evidence: [test/assistant_action_flow_test.dart, test/local_mixing_model_reference_test.dart, backend/llm_proxy/tests/test_mix_resolve.py]
+    status: implemented_unverified
+    gaps: [the canonical action contract represents the route but not the complete goal or MixAction surfaces]
+    operations:
+      - {id: direct.mix_goal.mix_request, operation: mix_request, purpose: Resolve one subjective mix goal, inputs: [intents, target, intensity, execution_profile, audibility, reset_fx, optional reference], aliases: [], v3: {disposition: prototype_supported, command: mix.apply_goal, adaptive_retrieval: shadow_supported, phase: mixing_vertical_slice, dependency: none}}
+
+mix_goal_contract:
+  id: mixing.goal_vector
+  category: mixing
+  purpose: Structured semantic request consumed by Mixroom's deterministic/learned mixing stack.
+  inputs: [intents, target, intensity, execution_profile, audibility, reset_fx, optional reference target/mode/closeness]
+  fields:
+    type: mix_request
+    intents:
+      fields: [kind, direction, descriptor, confidence]
+      kinds: [gain, pan, eq, reverb, delay, distortion, deesser, compressor, limiter, clipper, balance]
+      directions: [up, down, left, right, center, widen, narrow, remove, "null"]
+      eq_descriptors: [mud_cut, box_cut, boom_cut, harsh_cut, presence_boost, air_boost, warmth_boost, thin_fix, dull_fix, low_cut, high_cut, "null"]
+      non_eq_descriptors: ["null"]
+    target: {scopes: [auto, row, group, master], fields: [role, row_index, group_id, group_name, scope, confidence]}
+    intensity: {minimum: 0.0, maximum: 1.0, default: 0.5}
+    execution_profile: [producer_safe, creative_bold, experimental_extreme]
+    audibility: [subtle, noticeable, obvious, extreme]
+    style_tags: {reachability: accepted_by_downstream_normalizers_but_not_declared_in_current_gpt_tool_schema, maximum: 8, maximum_token_length: 40}
+    destructive_ok: {reachability: accepted_by_downstream_normalizers_but_not_declared_in_current_gpt_tool_schema, type: boolean}
+    reset_fx: boolean
+    reference_target: [row_index, prefer_selected, confidence]
+    reference_mode: [tone, loudness, width, glue, full_mix]
+    reference_closeness: [loose, balanced, close]
+  target_semantics: processing target and reference target are resolved independently; the reference is protected from processing
+  context: row interpretation, audio features, selection, groups, effects, master state
+  implementation: {llm: lib/ai/cloud_llm_service.dart, proxy: backend/llm_proxy/src/handlers/api_responses.py, dart: lib/models/goal_vector.dart, flutter: lib/ai/chat_pipeline.dart, executor: lib/ai/local_mixing_model.dart}
+  execution: {kind: heuristic_plan_with_optional_magnitude_refinement, confirmation: mode propose or execute, undo_or_rollback: editor undo snapshot, readback: MixApplyReport}
+  dependencies: [project has occupied audio or MIDI material]
+  evidence: [test/cloud_llm_service_test.dart, test/assistant_action_flow_test.dart, test/local_mixing_model_reference_test.dart]
+  status: implemented_unverified
+  gaps: [style_tags and destructive_ok exist downstream but are not currently advertised in the GPT-facing mix tool schema]
+  v3: {disposition: prototype_supported, command: mix.apply_goal, adaptive_retrieval: shadow_supported, phase: mixing_vertical_slice, dependency: none}
+
+reference_mixing:
+  id: mixing.reference_track
+  category: mixing
+  purpose: Move a processing target toward a separate reference without mutating the reference.
+  modes: [tone, loudness, width, glue, full_mix]
+  closeness: [loose, balanced, close]
+  inputs: [processing target, reference target, reference mode, closeness, confidence]
+  target_semantics: reference and processing targets must resolve to different rows; selected reference is allowed when explicitly requested
+  context: reference row audio features and whether it resembles a full mix
+  implementation: {llm: mix_model_request, proxy: api_responses.py, dart: goal_vector.dart, flutter: chat_pipeline.dart, executor: LocalMixingModel reference resolver}
+  execution: {kind: protected_reference_mix_resolution, confirmation: propose_or_execute, undo_or_rollback: editor undo snapshot, readback: processing target only}
+  dependencies: [analyzable reference material]
+  evidence: [test/local_mixing_model_reference_test.dart, test/assistant_action_flow_test.dart]
+  status: implemented_unverified
+  gaps: [reference suitability and sonic quality require audio-level evaluation]
+  v3: {disposition: prototype_supported, command: mix.apply_goal, adaptive_retrieval: shadow_supported, phase: mixing_vertical_slice, dependency: none}
+
+mix_engines:
+  - id: mixing.engine.local_heuristic
+    category: mixing_engine
+    purpose: Convert GoalVector and ProjectState into concrete MixActions.
+    inputs: [ProjectState, GoalVector, strict flag, role overrides]
+    target_semantics: row/group/master plus protected reference
+    context: row interpretation, loudness/tone/width/glue features, effects and master state
+    implementation: {llm: none, proxy: none, dart: lib/ai/local_mixing_model.dart, flutter: lib/ai/chat_pipeline.dart, executor: none}
+    execution: {kind: deterministic_heuristic_planning, confirmation: upstream, undo_or_rollback: not_applicable, readback: MixingResult}
+    dependencies: []
+    evidence: [test/local_mixing_model_reference_test.dart, lib/ai/local_mixing_model.dart]
+    status: implemented_unverified
+    gaps: [musical quality is heuristic and scenario dependent]
+    v3: {disposition: prototype_supported, command: mix.apply_goal, adaptive_retrieval: shadow_supported, phase: mixing_vertical_slice, dependency: none}
+
+  - id: mixing.engine.local_onnx_refinement
+    category: mixing_engine
+    purpose: Refine heuristic action application and magnitude with bundled/downloaded ONNX models.
+    inputs: [ProjectState, GoalVector, heuristic MixActions, strict flag]
+    target_semantics: preserves heuristic action targets
+    context: engineered project, goal, and action features
+    implementation: {llm: none, proxy: optional model manifest download, dart: lib/ai/onnx_magnitude_predictor.dart, flutter: lib/ai/chat_pipeline.dart, executor: none}
+    execution: {kind: local_apply_classifier_and_magnitude_regressor, confirmation: upstream, undo_or_rollback: not_applicable, readback: MagnitudeRefineResult}
+    dependencies: [mix_apply_classifier ONNX, mix_magnitude_regressor ONNX, flutter_onnxruntime]
+    evidence: [lib/ai/onnx_magnitude_predictor.dart, lib/ai/magnitude_predictor_flags.dart, backend/llm_proxy/tests/test_mix_resolve.py]
+    status: implemented_unverified
+    gaps: [runtime can fall back when models are unavailable or inference fails]
+    v3: {disposition: prototype_supported, command: mix.apply_goal, adaptive_retrieval: shadow_supported, phase: mixing_vertical_slice, dependency: none}
+
+  - id: mixing.engine.remote_refinement
+    category: mixing_engine
+    purpose: Refine mix actions through the backend /mix/resolve path.
+    inputs: [project, goal, heuristic actions, strict flag, project ID]
+    target_semantics: preserves heuristic action targets
+    context: serialized features required by backend resolver
+    implementation: {llm: none, proxy: backend/llm_proxy/src/handlers/api_mix_resolve.py, dart: lib/ai/remote_mixing_magnitude_predictor.dart, flutter: lib/ai/chat_pipeline.dart, executor: backend/llm_proxy/src/common/mix_resolve.py}
+    execution: {kind: remote_apply_classifier_and_magnitude_regressor, confirmation: upstream, undo_or_rollback: not_applicable, readback: refined actions and observability}
+    dependencies: [authenticated backend, deployed ONNX models]
+    evidence: [backend/llm_proxy/tests/test_mix_resolve.py, backend/llm_proxy/tests/test_api_mix_resolve.py, lib/ai/remote_mixing_magnitude_predictor.dart]
+    status: implemented_unverified
+    gaps: [network failure uses fallback; backend and Flutter feature parity must be maintained]
+    v3: {disposition: prototype_supported, command: mix.apply_goal, adaptive_retrieval: shadow_supported, phase: mixing_vertical_slice, dependency: none}
+
+  - id: mixing.engine.disabled_refinement
+    category: mixing_engine
+    purpose: Preserve heuristic actions when learned magnitudes are disabled or intentionally bypassed.
+    inputs: [heuristic MixActions]
+    target_semantics: unchanged
+    context: none
+    implementation: {llm: none, proxy: none, dart: lib/ai/magnitude_predictor.dart, flutter: lib/ai/chat_pipeline.dart, executor: none}
+    execution: {kind: no_op_refinement, confirmation: upstream, undo_or_rollback: not_applicable, readback: fallback reason disabled or producer_capture_mode}
+    dependencies: [MIXROOM_USE_LEARNED_MAGNITUDES flag or capture bypass]
+    evidence: [lib/ai/magnitude_predictor.dart, lib/ai/chat_pipeline.dart, test/ai_v3_mix_materializer_test.dart]
+    status: implemented_unverified
+    gaps: []
+    v3: {disposition: prototype_supported, command: mix.apply_goal, adaptive_retrieval: shadow_supported, phase: mixing_vertical_slice, dependency: none}
+
+mix_actions:
+  common:
+    category: mix_executor_action
+    target_semantics: concrete row or master target produced by the mixing engine
+    context: current row/master mix and effect state
+    implementation: {llm: none, proxy: backend mix resolver may emit, dart: lib/models/mixing_result.dart, flutter: lib/screens/audio_editor.dart, executor: mix apply switch}
+    execution: {kind: concrete_mix_mutation, confirmation: upstream, undo_or_rollback: editor undo snapshot, readback: MixApplyReport}
+    dependencies: [valid MixAction payload and available effect]
+    evidence: [lib/ai/local_mixing_model.dart, backend/llm_proxy/src/common/mix_resolve.py, test/assistant_action_flow_test.dart]
+    status: implemented_unverified
+    gaps: [comments in mixing_result.dart omit hard_reset_row_fx although executor supports it]
+    v3: {disposition: prototype_supported, command: mix.apply_goal, adaptive_retrieval: shadow_supported, phase: mixing_vertical_slice, dependency: none}
+  actions:
+    - {id: mix_action.set_row_gain, type: set_row_gain, purpose: Set or adjust row gain, inputs: [row, mode, value or delta]}
+    - {id: mix_action.set_row_pan, type: set_row_pan, purpose: Set or adjust row pan, inputs: [row, mode, value or delta]}
+    - {id: mix_action.ensure_effect, type: ensure_effect, purpose: Ensure a row effect exists, inputs: [row, effect_name_contains]}
+    - {id: mix_action.delete_effect, type: delete_effect, purpose: Delete a matching row effect, inputs: [row, effect_name_contains]}
+    - {id: mix_action.adjust_effect_param_by_name, type: adjust_effect_param_by_name, purpose: Set or adjust a row effect parameter, inputs: [row, effect match, parameter match, mode, normalized or raw value]}
+    - {id: mix_action.hard_reset_row_fx, type: hard_reset_row_fx, purpose: Remove/reset the row effect chain, inputs: [row]}
+    - {id: mix_action.set_master_gain, type: set_master_gain, purpose: Set or adjust master gain, inputs: [mode, value or delta]}
+    - {id: mix_action.set_master_pan, type: set_master_pan, purpose: Set or adjust master pan, inputs: [mode, value or delta]}
+    - {id: mix_action.ensure_master_effect, type: ensure_master_effect, purpose: Ensure a master effect exists, inputs: [effect_name_contains]}
+    - {id: mix_action.delete_master_effect, type: delete_master_effect, purpose: Delete a matching master effect, inputs: [effect_name_contains]}
+    - {id: mix_action.adjust_master_effect_param_by_name, type: adjust_master_effect_param_by_name, purpose: Set or adjust a master effect parameter, inputs: [effect match, parameter match, mode, normalized or raw value]}
+    - {id: mix_action.hard_reset_master_fx, type: hard_reset_master_fx, purpose: Remove/reset the master effect chain, inputs: []}
+    - {id: mix_action.noop, type: noop, purpose: Represent an intentionally empty mix result, inputs: [], status: non_mutating}
+    - {id: mix_action.invent_plugin, type: invent_plugin, purpose: Negative-test action proving unknown actions are rejected, inputs: [], status: test_only, v3: {disposition: unsupported_intentionally, phase: none, dependency: none}}
+
+audio_and_context_models:
+  - id: audio_model.spleeter_two_stem
+    category: user_invokable_audio_model
+    purpose: Produce vocal and instrumental audio stems from a source clip.
+    inputs: [source audio file and clip]
+    target_semantics: one source audio clip; creates derived rows/clips
+    context: source path, sample rate, duration, row capacity
+    implementation: {llm: stem_separate action, proxy: action normalization, dart: lib/ai/spleeter_stem_separator.dart, flutter: lib/screens/audio_editor.dart, executor: local ONNX and file writes}
+    execution: {kind: asynchronous_local_inference, confirmation: operation_dependent, undo_or_rollback: partial, readback: derived files and clips}
+    dependencies: [spleeter_vocals.fp16.onnx, spleeter_accompaniment.fp16.onnx, model download fallback]
+    evidence: [lib/ai/spleeter_stem_separator.dart, test/assistant_action_flow_test.dart]
+    status: partial
+    gaps: [file cleanup and cancellation are not represented as one atomic local transaction]
+    v3: {disposition: external_async_workflow, phase: staged_audio_jobs, dependency: explicit job state}
+
+  - id: audio_model.basic_pitch
+    category: user_invokable_audio_model
+    purpose: Transcribe source audio into MIDI notes.
+    inputs: [source audio clip, optional destination instrument]
+    target_semantics: source audio clip plus created MIDI destination
+    context: source path, clip bounds, instrument catalog, row capacity
+    implementation: {llm: midi_compose.convert_audio_to_midi, proxy: action normalization, dart: lib/ai/basic_pitch_transcriber.dart, flutter: lib/screens/audio_editor.dart, executor: local ONNX then MIDI insertion}
+    execution: {kind: asynchronous_local_inference, confirmation: operation_dependent, undo_or_rollback: partial, readback: created MIDI clip and notes}
+    dependencies: [basic_pitch_nmp.onnx, daw.midi_compose.audio_to_midi]
+    evidence: [lib/ai/basic_pitch_transcriber.dart, test/assistant_action_flow_test.dart]
+    status: partial
+    gaps: [transcription quality and compound source-to-destination rollback require evaluation]
+    v3: {disposition: external_async_workflow, phase: audio_to_midi, dependency: staged model result}
+
+  - id: audio_model.yamnet_instrument_classifier
+    category: context_model
+    purpose: Classify audio/instrument content used by role inference and mixing context.
+    inputs: [audio features]
+    target_semantics: analyzed audio row or clip
+    context: audio samples and classifier label map
+    implementation: {llm: none, proxy: none, dart: lib/ai/instrument_classifier.dart, flutter: project state construction, executor: local ONNX}
+    execution: {kind: non_mutating_analysis, confirmation: none, undo_or_rollback: not_applicable, readback: classification and confidence}
+    dependencies: [yamnet.onnx]
+    evidence: [lib/ai/instrument_classifier.dart, lib/ai/project_state_builder.dart]
+    status: context_only
+    gaps: [classifier availability and accuracy are not equivalent to a user-invokable edit]
+    v3: {disposition: context_needed, phase: enriched_context, dependency: compact role and confidence fields}
+
+  - id: audio_model.project_state_analysis
+    category: context_model
+    purpose: Derive roles, source interpretation, loudness, tone, width, glue, and confidence for mixing.
+    inputs: [project rows, clips, audio analysis, role overrides]
+    target_semantics: project, row, group and master summaries
+    context: authoritative editor state and audio features
+    implementation: {llm: receives summaries, proxy: serializes snapshots, dart: lib/ai/project_state_builder.dart, flutter: lib/ai/chat_pipeline.dart, executor: none}
+    execution: {kind: non_mutating_analysis, confirmation: none, undo_or_rollback: not_applicable, readback: ProjectState}
+    dependencies: [available analysis metadata]
+    evidence: [lib/models/project_state.dart, lib/ai/project_state_builder.dart, test/local_mixing_model_reference_test.dart]
+    status: context_only
+    gaps: [missing or low-confidence features affect mixing decisions]
+    v3: {disposition: context_needed, phase: mixing_vertical_slice, dependency: compact stable-ID analysis summaries}
+
+  - id: audio_processing.phone_mic_cleanup
+    category: user_invokable_audio_processing
+    purpose: Add a canonical cleanup effect chain, persist the cleanup preset, and warm a rendered cache for noisy phone or voice recordings.
+    inputs: [source audio target, fixed phone_mic_cleanup_v1 preset]
+    target_semantics: existing source audio clip or row
+    context: source path and clip metadata
+    implementation: {llm: audio_enhance.phone_mic_cleanup or none for Capture Deck, proxy: action normalization for chat requests, dart: action route, flutter: lib/screens/audio_editor.dart, executor: effect insertion, preset metadata, and background cache renderer}
+    execution: {kind: effect_chain_and_background_cache_action, confirmation: operation_dependent, undo_or_rollback: partial, readback: effects and enhancement preset}
+    dependencies: [filesystem and audio processing engine]
+    evidence: [lib/screens/audio_editor.dart, test/assistant_action_flow_test.dart]
+    status: partial
+    gaps: [enhancement metadata and asynchronously rendered cache are not explicitly included in the effect undo bundle]
+    v3: {disposition: prototype_supported, command: row.apply_phone_mic_cleanup, phase: row_phone_cleanup, dependency: stable audio row, daw.audio_enhance and complete built-in cleanup chain}
+
+  - id: catalog.sample_library
+    category: context_and_resource_catalog
+    purpose: Expose searchable audio assets, paths, and musical tags for sample insertion.
+    inputs: [indexed local/file-browser assets]
+    target_semantics: stable asset identity and source path
+    context: asset ID, path, name, category, role, BPM, key and other available tags
+    implementation: {llm: project/library context, proxy: snapshot transport, dart: library snapshot builders, flutter: sample browser and insertion handler, executor: filesystem-backed clip creation}
+    execution: {kind: read_only_catalog_then_mutation, confirmation: insertion_dependent, undo_or_rollback: insertion undo, readback: inserted asset ID}
+    dependencies: [accessible indexed folders and files]
+    evidence: [lib/ai/cloud_llm_service.dart, lib/screens/audio_editor.dart, test/assistant_action_flow_test.dart]
+    status: implemented_unverified
+    gaps: [large libraries require deterministic compacting or later retrieval without hiding exact identities]
+    v3: {disposition: context_needed, phase: library_expansion, dependency: bounded full identity catalog or planner-owned retrieval}
+
+  - id: catalog.instruments_effects_plugins
+    category: context_and_resource_catalog
+    purpose: Expose available instruments, built-in effects, hosted plugins, instances, presets, and parameters.
+    inputs: [runtime catalogs and current project instances]
+    target_semantics: stable catalog and instance identities where available
+    context: names, IDs, categories, exposed parameters, presets and availability
+    implementation: {llm: capability/project context, proxy: schema and snapshot, dart: context builders, flutter: instrument/effect handlers, executor: editor/plugin host}
+    execution: {kind: read_only_catalog_then_mutation, confirmation: operation_dependent, undo_or_rollback: handler_dependent, readback: instance state}
+    dependencies: [platform and installed resources]
+    evidence: [lib/ai/cloud_llm_service.dart, lib/screens/audio_editor.dart, test/cloud_llm_service_test.dart]
+    status: implemented_unverified
+    gaps: [hosted plugin discovery and arbitrary parameter semantics are not a single portable contract]
+    v3: {disposition: context_needed, phase: effects_and_instruments, dependency: stable catalog/instance IDs and compact parameter descriptions}
+
+cross_cutting_capabilities:
+  - id: cross.target_resolution
+    category: cross_cutting
+    purpose: Resolve row, clip, group, effect, automation, asset, and reference targets.
+    inputs: [stable ID when available, index, name, role, selection, parent relationship]
+    target_semantics: reject unresolved contradictions; legacy V1 also supports fuzzy/name/index hints
+    context: complete identity index and selection
+    implementation: {llm: target hints, proxy: normalization, dart: assistant action utilities/reducer, flutter: audio_editor target handlers, executor: per operation}
+    execution: {kind: preparation, confirmation: downstream, undo_or_rollback: not_applicable, readback: resolved identity}
+    dependencies: [current project state]
+    evidence: [test/assistant_action_utils_test.dart, test/assistant_action_timeline_reducer_test.dart, test/assistant_action_flow_test.dart]
+    status: implemented_unverified
+    gaps: [V1 can disagree across stable IDs, display indexes, names and selected targets]
+    v3: {disposition: context_needed, phase: prototype, dependency: stable IDs as authority}
+
+  - id: cross.capability_gating
+    category: cross_cutting
+    purpose: Prevent generation or execution of unsupported client operations.
+    inputs: [client capabilities, platform, available resources]
+    target_semantics: operation-level
+    context: capability and catalog availability
+    implementation: {llm: tool surface filtering, proxy: llm_contract.py and api_responses.py, dart: cloud_llm_service.dart, flutter: runtime checks, executor: handler checks}
+    execution: {kind: preflight, confirmation: none, undo_or_rollback: not_applicable, readback: error code}
+    dependencies: [capability parity]
+    evidence: [backend/llm_proxy/tests/test_llm_contract_routing.py, test/cloud_llm_service_test.dart]
+    status: implemented_unverified
+    gaps: [proxy/Dart/runtime drift remains possible]
+    v3: {disposition: context_needed, phase: every_capability_slice, dependency: one Flutter-owned capability authority}
+
+  - id: cross.proposal_confirmation
+    category: cross_cutting
+    purpose: Separate proposed work from approved execution.
+    inputs: [mode, asks_permission, pending proposal, Apply/Cancel/Modify]
+    target_semantics: pending bundle tied to project state
+    context: conversation and pending proposal
+    implementation: {llm: propose/execute mode, proxy: normalized mode, dart: chat pipeline, flutter: chat UI and audio editor, executor: pending action application}
+    execution: {kind: preview_state_machine, confirmation: explicit where required, undo_or_rollback: after apply, readback: pending/applied state}
+    dependencies: [conversation UI]
+    evidence: [test/assistant_action_flow_test.dart, test/cloud_llm_service_test.dart]
+    status: implemented_unverified
+    gaps: [V1 confirmation policy is heterogeneous across action types]
+    v3: {disposition: prototype_supported, phase: prototype, dependency: prepared bundle and state digest}
+
+  - id: cross.compound_ordering
+    category: cross_cutting
+    purpose: Preserve dependencies such as create-row then insert sample/MIDI and concrete edits then mixing.
+    inputs: [ordered calls/actions]
+    target_semantics: child targets and newly created destinations
+    context: initial state plus intermediate identities
+    implementation: {llm: ordered tool calls, proxy: calls normalization, dart: timeline reducer/chat pipeline, flutter: sequential handlers, executor: heterogeneous}
+    execution: {kind: ordered_execution, confirmation: bundle_dependent, undo_or_rollback: partial_across_heterogeneous_actions, readback: child_dependent}
+    dependencies: [continuation bindings]
+    evidence: [test/assistant_action_timeline_reducer_test.dart, test/assistant_action_flow_test.dart]
+    status: partial
+    gaps: [legacy continuation does not universally guarantee atomicity]
+    v3: {disposition: typed_command_needed, phase: transaction_expansion, dependency: transaction-local IDs and staged external jobs}
+
+  - id: cross.undo_rollback_readback
+    category: cross_cutting
+    purpose: Restore prior state after failure and verify intended mutations.
+    inputs: [pre-state, prepared writes, expected post-state]
+    target_semantics: affected project objects and files
+    context: editor undo state and operation receipts
+    implementation: {llm: none, proxy: limited receipts, dart: action result structures, flutter: audio editor undo/apply reports, executor: editor transaction/file handlers}
+    execution: {kind: safety_and_verification, confirmation: not_applicable, undo_or_rollback: heterogeneous, readback: heterogeneous}
+    dependencies: [operation implementation]
+    evidence: [test/assistant_action_flow_test.dart, test/ai_v3_transaction_test.dart]
+    status: partial
+    gaps: [V1 lacks universal atomic rollback and operation-specific post-state verification]
+    v3: {disposition: prototype_supported, phase: every_capability_slice, dependency: Flutter-only prepared transactions}
+
+  - id: cross.async_jobs
+    category: cross_cutting
+    purpose: Run inference/rendering/file operations that cannot be promised as one immediate editor transaction.
+    inputs: [source resource, job parameters]
+    target_semantics: source identity plus staged output identities
+    context: filesystem, model availability, row capacity and cancellation state
+    implementation: {llm: async-capable action, proxy: request normalization, dart: handler route, flutter: audio editor, executor: model/render/file services}
+    execution: {kind: asynchronous_or_external, confirmation: before job, undo_or_rollback: compensating_cleanup, readback: job and output state}
+    dependencies: [models, filesystem, optional network]
+    evidence: [lib/ai/spleeter_stem_separator.dart, lib/ai/basic_pitch_transcriber.dart, lib/screens/audio_editor.dart]
+    status: partial
+    gaps: [V1 does not expose one uniform job lifecycle contract]
+    v3: {disposition: external_async_workflow, phase: staged_audio_jobs, dependency: explicit job states and cleanup}
+
+  - id: cross.observability_receipts
+    category: cross_cutting
+    purpose: Record model, tokens, cost, latency, fallback, actions, and application outcome.
+    inputs: [LLM metadata, model observability, apply report]
+    target_semantics: request and affected project
+    context: request/capture identifiers and project digest
+    implementation: {llm: usage metadata, proxy: analytics fields, dart: chat pipeline and ai_v3_capture.dart, flutter: audio editor analytics, executor: capture/analytics sinks}
+    execution: {kind: non_mutating_observability, confirmation: none, undo_or_rollback: not_applicable, readback: capture and analytics records}
+    dependencies: [capture/analytics flags]
+    evidence: [lib/ai/v3/ai_v3_capture.dart, lib/core/analytics/analytics_events.dart, test/ai_v3_capture_test.dart]
+    status: implemented_unverified
+    gaps: [capture evidence is diagnostic and does not itself prove correct mutation]
+    v3: {disposition: prototype_supported, phase: prototype, dependency: capture mode}
+
+  - id: cross.legacy_aliases
+    category: cross_cutting
+    purpose: Normalize historical operation spellings into canonical operations.
+    inputs: [legacy family/operation/payload tokens]
+    target_semantics: unchanged after normalization
+    context: canonical action contract
+    implementation: {llm: may emit aliases, proxy: api_responses.py, dart: cloud_llm_service.dart and assistant_action_utils.dart, flutter: canonical handlers, executor: canonical operations}
+    execution: {kind: normalization, confirmation: none, undo_or_rollback: not_applicable, readback: canonical payload}
+    dependencies: [proxy/Dart alias parity]
+    evidence: [backend/llm_proxy/tests/test_api_responses.py, test/cloud_llm_service_test.dart]
+    status: implemented_unverified
+    gaps: [aliases are duplicated across languages and are not the preferred V3 boundary]
+    v3: {disposition: unsupported_intentionally, phase: none, dependency: V3 planner emits canonical typed commands only}
+
+v3_prototype_commands:
+  - {command: project.set_tempo, maps_to: direct.project_edit.set_tempo}
+  - {command: transport.set_playing, maps_to: [direct.transport_control.play, direct.transport_control.pause, direct.transport_control.stop, direct.transport_control.toggle_play_pause]}
+  - {command: transport.restart, maps_to: direct.transport_control.restart}
+  - {command: transport.set_metronome_enabled, maps_to: [direct.transport_control.enable_metronome, direct.transport_control.disable_metronome, direct.transport_control.toggle_metronome]}
+  - {command: transport.set_loop_enabled, maps_to: [direct.transport_control.enable_loop, direct.transport_control.disable_loop, direct.transport_control.toggle_loop]}
+  - {command: row.adjust_gain_db, maps_to: direct.row_mix.adjust_gain}
+  - {command: row.set_gain_db, maps_to: direct.row_mix.set_gain}
+  - {command: row.adjust_pan, maps_to: direct.row_mix.adjust_pan}
+  - {command: row.set_pan, maps_to: direct.row_mix.set_pan}
+  - {command: row.set_muted, maps_to: [direct.row_mute.mute, direct.row_mute.unmute, direct.row_mute.toggle]}
+  - {command: row.set_soloed, maps_to: [direct.row_solo.solo, direct.row_solo.unsolo, direct.row_solo.toggle]}
+  - {command: row.rename, maps_to: direct.row_rename.rename}
+  - {command: row.set_role_override, maps_to: [direct.role_override.set, direct.role_override.clear]}
+  - {command: row.select, maps_to: direct.row_select.select}
+  - {command: row.set_color, maps_to: [direct.row_color_edit.set, direct.row_color_edit.clear]}
+  - {command: row.create, maps_to: direct.row_create.create}
+  - {command: row.delete, maps_to: direct.row_delete.delete}
+  - {command: group.create, maps_to: direct.row_group_edit.create}
+  - {command: group.remove_row, maps_to: direct.row_group_edit.remove_row}
+  - {command: group.set_collapsed, maps_to: direct.row_group_edit.toggle_collapsed}
+  - {command: clip.move_by_beats, maps_to: direct.clip_edit.move}
+  - {command: clip.trim_to_range, maps_to: direct.clip_edit.trim}
+  - {command: clip.split_at, maps_to: direct.clip_edit.cut}
+  - {command: clip.duplicate_to, maps_to: direct.clip_edit.duplicate}
+  - {command: clip.delete, maps_to: direct.clip_edit.delete}
+  - {command: clip.set_pitch_semitones, maps_to: direct.clip_edit.pitch_shift}
+  - {command: clip.adjust_pitch_semitones, maps_to: direct.clip_edit.pitch_shift}
+  - {command: clip.set_timeline_length_beats, maps_to: direct.clip_edit.stretch}
+  - {command: clip.scale_timeline_length, maps_to: direct.clip_edit.stretch}
+  - {command: clip.set_source_tempo_bpm, maps_to: direct.clip_edit.tempo_follow}
+  - {command: clip.set_tempo_follow_mode, maps_to: direct.clip_edit.tempo_follow}
+  - {command: clip.align_tempo_to_project, maps_to: direct.clip_edit.auto_bpm_align}
+  - {command: project.set_tempo_from_clip, maps_to: direct.clip_edit.tempo_detect_set_project}
+  - {command: clip.trim_silence, maps_to: direct.clip_edit.auto_trim}
+  - {command: clip.align_first_sound, maps_to: direct.clip_edit.align_first_sound}
+  - {command: clip.glue, maps_to: direct.clip_edit.glue}
+  - {command: clip.separate_stems, maps_to: direct.stem_separate.vocal_instrumental}
+  - {command: clip.convert_to_midi, maps_to: direct.midi_compose.convert_audio_to_midi}
+  - {command: midi.transpose, maps_to: direct.midi_compose.transpose_notes}
+  - {command: midi.create_clip, maps_to: direct.midi_compose.create_clip}
+  - {command: midi.replace_notes, maps_to: direct.midi_compose.replace_notes}
+  - {command: midi.append_notes, maps_to: direct.midi_compose.append_notes}
+  - {command: midi.chop_notes, maps_to: direct.midi_compose.chop_notes}
+  - {command: effect.ensure_configured, maps_to: direct.effect_edit.add}
+  - {command: effect.remove, maps_to: direct.effect_edit.remove}
+  - {command: effect.set_bypassed, maps_to: [direct.effect_edit.bypass, direct.effect_edit.unbypass, direct.effect_edit.toggle_bypass]}
+  - {command: automation.gain_fade, maps_to: direct.automation_edit.add_ramp}
+  - {command: automation.set_points, maps_to: direct.automation_edit.set_points}
+  - {command: automation.clear, maps_to: direct.automation_edit.clear}
+  - {command: sample.place, maps_to: direct.sample_insert.insert_audio_clips}
+  - {command: sample.replace, maps_to: direct.sample_insert.replace_audio_clips}
+  - {command: row.apply_phone_mic_cleanup, maps_to: direct.audio_enhance.phone_mic_cleanup}
+  - {command: mix.apply_goal, maps_to: direct.mix_goal.mix_request}
+
+capture_evidence:
+  directory: tool/ai_v3_captures.local
+  audited_v1_files: 34
+  top_level_tools_observed: [daw_assistant_actions, mix_model_request, informational_response]
+  direct_operations_observed:
+    - direct.automation_edit.add_ramp
+    - direct.clip_edit.move
+    - direct.effect_edit.add
+    - direct.midi_compose.create_clip
+    - direct.midi_compose.replace_notes
+    - direct.midi_compose.transpose_notes
+    - direct.project_edit.set_tempo
+    - direct.row_create.create
+    - direct.row_mix.adjust_gain
+    - direct.row_mix.adjust_pan
+    - direct.row_mix.set_pan
+    - direct.row_mute.mute
+    - direct.row_rename.rename
+    - direct.sample_insert.insert_audio_clips
+  limitation: captures prove observed model output and recorded workflow data, not universal correct editor mutation
+
+known_discrepancies:
+  - id: discrepancy.mix_action_docs
+    severity: low
+    finding: mixing_result.dart documentation omits hard_reset_row_fx although LocalMixingModel and AudioEditor support it.
+  - id: discrepancy.contract_scope
+    severity: architectural
+    finding: the 87-operation action contract records mix_goal.mix_request but not GoalVector fields, mixing engines, or concrete MixActions.
+  - id: discrepancy.atomicity
+    severity: medium
+    finding: V1 ordered and asynchronous actions do not share a universal atomic rollback/readback contract.
+  - id: discrepancy.alias_authority
+    severity: medium
+    finding: legacy alias and payload normalization exists in Python, CloudLlmService, AssistantActionUtils, and AudioEditor; automation create currently means set_points before routing but create_clip in the editor normalizer.
+  - id: discrepancy.capture_coverage
+    severity: informational
+    finding: only 14 of 87 canonical operations appear in the current 34 V1 comparison captures.
+  - id: discrepancy.hosted_plugins
+    severity: architectural
+    finding: installed plugin discovery and arbitrary parameter semantics are broader than the typed built-in V3 prototype effect command.
+  - id: discrepancy.model_naming
+    severity: informational
+    finding: source code identifies an ONNX apply classifier and magnitude regressor; the inventory does not assume a regression-tree implementation without model metadata proving it.
+
+migration_order:
+  - {phase: prototype, capabilities: [existing typed V3 commands, stable IDs, preparation, confirmation, atomic local execution, readback]}
+  - {phase: adaptive_core, capabilities: [immutable planning snapshot, compact core, exact 17 common commands, capability-domain directory]}
+  - {phase: bounded_retrieval, capabilities: [one batched same-planner retrieval round, typed snapshot facts, domain command schemas]}
+  - {phase: core_editing, capabilities: [transport, row lifecycle/state, advanced clip editing, MIDI editing, effect instances, general automation]}
+  - {phase: mixing_vertical_slice, capabilities: [GoalVector, LocalMixingModel, local/remote magnitude refinement, reference-track protection, MixActions]}
+  - {phase: musical_generation, capabilities: [MusicSpecV3, provider-neutral realization, evaluated GPT/curated/hybrid providers, broader instruments and samples]}
+  - {phase: staged_audio_jobs, capabilities: [stem separation, audio-to-MIDI, cleanup and rendered clip processing]}
+  - {phase: scale, capabilities: [large catalogs/projects, retrieval result limits, token and latency gates]}

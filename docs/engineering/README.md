@@ -27,6 +27,8 @@ page in the same commit or record why the doc still holds.
 - [Build and release process](build_release_process.md)
 - [Known platform issues](known_platform_issues.md)
 - [How to add a feature](how_to_add_a_feature.md)
+- [AI V3 capability matrix](ai_v3_capability_matrix.md)
+- [AI V3 adaptive planner specification](ai_v3_adaptive_planner.md)
 - [Architecture decisions](adr/README.md)
 
 ## Docs Freshness Check

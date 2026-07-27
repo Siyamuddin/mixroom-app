@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -9,7 +10,6 @@ import 'package:mixroom/helpers/project_manager.dart';
 import 'package:mixroom/models/app_user_models.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/auth_user_profile.dart';
-import 'package:mixroom/models/entitlement_models.dart';
 import 'package:mixroom/providers/locale_provider.dart';
 import 'package:provider/provider.dart';
 
@@ -60,10 +60,7 @@ class IntegrationTestEntitlementService extends EntitlementService {
   String? get lastError => null;
 
   @override
-  PlanTier get currentTier => PlanTier.pro;
-
-  @override
-  bool get isProEntitled => true;
+  bool get isEnforcementEnabled => false;
 
   @override
   bool canUseCapability(String capability) => true;
@@ -138,8 +135,20 @@ Widget buildIntegrationTestApp({
 }
 
 Future<void> deleteAllProjects() async {
+  await _ensureIsolatedProjectRoot();
   final projects = await ProjectManager.listProjects();
   for (final project in projects) {
     await ProjectManager.deleteProject(project.dir);
   }
+}
+
+Directory? _integrationTestProjectRoot;
+
+Future<void> _ensureIsolatedProjectRoot() async {
+  if (_integrationTestProjectRoot != null) return;
+  final root = await Directory.systemTemp.createTemp(
+    'mixroom_integration_projects_',
+  );
+  _integrationTestProjectRoot = root;
+  ProjectManager.setRootDirectoryForTesting(root);
 }

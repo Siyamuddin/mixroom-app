@@ -6,6 +6,14 @@ import 'package:mixroom/ai/cloud_llm_service.dart';
 import 'package:mixroom/ai/instrument_classifier.dart';
 import 'package:mixroom/ai/local_mixing_model.dart';
 import 'package:mixroom/ai/project_state_builder.dart';
+import 'package:mixroom/ai/v3/ai_v3_adaptive_midi_planner.dart';
+import 'package:mixroom/ai/v3/ai_v3_capture.dart';
+import 'package:mixroom/ai/v3/ai_v3_compact_core.dart';
+import 'package:mixroom/ai/v3/ai_v3_context.dart';
+import 'package:mixroom/ai/v3/ai_v3_contract.dart';
+import 'package:mixroom/ai/v3/ai_v3_planner_service.dart';
+import 'package:mixroom/ai/v3/ai_v3_planning_snapshot.dart';
+import 'package:mixroom/ai/v3/ai_v3_preparer.dart';
 import 'package:mixroom/models/mixing_result.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/models/project_state.dart';
@@ -72,6 +80,188 @@ class _QueuedFakeCloudLlmService extends CloudLlmService {
     return _results.removeAt(0);
   }
 }
+
+class _FakeAiV3Planner implements AiV3Planner {
+  int callCount = 0;
+  String? seenRequest;
+
+  @override
+  String get model => 'test-v3';
+
+  @override
+  String get reasoningEffort => 'low';
+
+  @override
+  Future<AiV3PlannerResult> plan({
+    required AiV3CoreContext context,
+    required String originalRequest,
+    String? promptTraceId,
+  }) async {
+    callCount += 1;
+    seenRequest = originalRequest;
+    return const AiV3PlannerResult(
+      plan: AiV3Plan(
+        outcome: 'respond',
+        userMessage: 'V3 handled the request.',
+        commands: <AiV3Command>[],
+      ),
+      rawResponse: <String, dynamic>{},
+      meta: <String, dynamic>{'architecture': 'test_v3'},
+    );
+  }
+}
+
+class _StaticAiV3Planner implements AiV3Planner {
+  _StaticAiV3Planner(this.nextPlan);
+
+  final AiV3Plan nextPlan;
+  int callCount = 0;
+  final List<AiV3CoreContext> seenContexts = <AiV3CoreContext>[];
+
+  @override
+  String get model => 'test-v3';
+
+  @override
+  String get reasoningEffort => 'low';
+
+  @override
+  Future<AiV3PlannerResult> plan({
+    required AiV3CoreContext context,
+    required String originalRequest,
+    String? promptTraceId,
+  }) async {
+    callCount += 1;
+    seenContexts.add(context);
+    return AiV3PlannerResult(
+      plan: nextPlan,
+      rawResponse: const <String, dynamic>{},
+      meta: const <String, dynamic>{'architecture': 'test_v3'},
+    );
+  }
+}
+
+class _FailingAiV3Planner implements AiV3Planner {
+  const _FailingAiV3Planner(this.code);
+
+  final String code;
+
+  @override
+  String get model => 'test-v3';
+
+  @override
+  String get reasoningEffort => 'low';
+
+  @override
+  Future<AiV3PlannerResult> plan({
+    required AiV3CoreContext context,
+    required String originalRequest,
+    String? promptTraceId,
+  }) {
+    throw AiV3PlannerException(code);
+  }
+}
+
+class _ConfirmingAiV3Preparer extends AiV3CommandPreparer {
+  const _ConfirmingAiV3Preparer();
+
+  @override
+  AiV3PreparedBundle prepare({
+    required AiV3Plan plan,
+    required AiV3CoreContext context,
+    Map<String, double> detectedTempoByClipId = const <String, double>{},
+    Map<String, AiV3ClipBoundaryAnalysis> boundaryAnalysisByClipId =
+        const <String, AiV3ClipBoundaryAnalysis>{},
+  }) {
+    final prepared = super.prepare(
+      plan: plan,
+      context: context,
+      detectedTempoByClipId: detectedTempoByClipId,
+      boundaryAnalysisByClipId: boundaryAnalysisByClipId,
+    );
+    return AiV3PreparedBundle(
+      plan: prepared.plan,
+      stateDigest: prepared.stateDigest,
+      actions: prepared.actions,
+      receipts: prepared.receipts,
+      preview: prepared.preview,
+      executionPolicy: AiV3ExecutionPolicy.confirm,
+    );
+  }
+}
+
+class _FailingAiV3Preparer extends AiV3CommandPreparer {
+  const _FailingAiV3Preparer(this.code);
+
+  final String code;
+
+  @override
+  AiV3PreparedBundle prepare({
+    required AiV3Plan plan,
+    required AiV3CoreContext context,
+    Map<String, double> detectedTempoByClipId = const <String, double>{},
+    Map<String, AiV3ClipBoundaryAnalysis> boundaryAnalysisByClipId =
+        const <String, AiV3ClipBoundaryAnalysis>{},
+  }) {
+    throw AiV3PreparationException(code);
+  }
+}
+
+class _FakeAdaptivePlanner implements AiV3AdaptivePlanner {
+  int callCount = 0;
+
+  @override
+  String get model => 'test-adaptive';
+
+  @override
+  String get reasoningEffort => 'low';
+
+  @override
+  Future<AiV3AdaptivePlannerResult> plan({
+    required CompactCoreV3 compactCore,
+    required PlanningSnapshotV3 snapshot,
+    required String originalRequest,
+    String? promptTraceId,
+  }) async {
+    callCount += 1;
+    return const AiV3AdaptivePlannerResult(
+      plan: AiV3Plan(
+        outcome: 'respond',
+        userMessage: 'Detached adaptive result.',
+        commands: <AiV3Command>[],
+      ),
+      firstRawResponse: <String, dynamic>{},
+      secondRawResponse: null,
+      retrievalRequest: null,
+      retrievalResult: null,
+      firstRequestBody: <String, dynamic>{},
+      secondRequestBody: null,
+      meta: <String, dynamic>{},
+    );
+  }
+}
+
+Map<String, dynamic> _v3ClientContext() => <String, dynamic>{
+      'ai_v3_prototype_enabled': true,
+      'ai_v3_row_state': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'row_id': 101,
+          'muted': false,
+          'soloed': false,
+        },
+      ],
+      'ai_v3_clip_timeline_lengths_ms': <String, double>{},
+      'ai_v3_playhead_ms': 0,
+      'ai_v3_transport': <String, dynamic>{
+        'playing': false,
+        'recording': false,
+        'metronome_enabled': false,
+        'loop_enabled': false,
+        'loop_start_ms': 0,
+        'loop_end_ms': 0,
+      },
+      'current_rows': 1,
+      'max_rows': 32,
+    };
 
 class _FakeProjectStateBuilder extends ProjectStateBuilder {
   _FakeProjectStateBuilder({
@@ -227,6 +417,703 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('Assistant Action Pipeline Smoke', () {
+    test('V3-disabled project chat keeps the existing V1 route', () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'informational_response',
+          const <String, dynamic>{'message': 'V1 handled the request.'},
+          text: 'V1 handled the request.',
+        ),
+      );
+      final fakeV3 = _FakeAiV3Planner();
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: fakeV3,
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Tell me about this project.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        clientContext: const <String, dynamic>{
+          'ai_v3_prototype_enabled': false,
+        },
+      );
+
+      expect(fakeLlm.seenUserText, 'Tell me about this project.');
+      expect(fakeV3.callCount, 0);
+      expect(result.hasAiV3Handoff, isFalse);
+      expect(result.message, 'V1 handled the request.');
+    });
+
+    test('V3-enabled project chat uses V3 and does not call V1', () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'informational_response',
+          const <String, dynamic>{'message': 'Unexpected V1 result.'},
+          text: 'Unexpected V1 result.',
+        ),
+      );
+      final fakeV3 = _FakeAiV3Planner();
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: fakeV3,
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Tell me about this project.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        clientContext: _v3ClientContext(),
+      );
+
+      expect(fakeLlm.seenUserText, isNull);
+      expect(fakeV3.callCount, 1, reason: result.toString());
+      expect(fakeV3.seenRequest, 'Tell me about this project.');
+      expect(result.hasAiV3Handoff, isTrue);
+      expect(result.aiV3Handoff?['decision'], 'respond');
+      expect(result.message, 'V3 handled the request.');
+    });
+
+    test('invalid V3 planner output returns an actionable safe result',
+        () async {
+      final pipeline = ChatPipeline(
+        llm: _FakeCloudLlmService(
+          LlmResult.text('Unexpected V1 result.', null),
+        ),
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: const _FailingAiV3Planner('v3_planner_contract_invalid'),
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Replace this instrument and add more musical parts.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Epic Melody', iconId: 1),
+        ],
+        clientContext: _v3ClientContext(),
+      );
+
+      expect(result.hasAiV3Handoff, isTrue);
+      expect(result.aiV3Handoff?['decision'], 'blocked');
+      expect(
+        result.aiV3Handoff?['error_code'],
+        'v3_planner_contract_invalid',
+      );
+      expect(
+        result.message,
+        'I could not turn the AI response into safe DAW changes. '
+        'Nothing was changed. Rephrase the request or split it into '
+        'smaller steps.',
+      );
+      expect(result.message, isNot(contains('AI request failed')));
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+    });
+
+    test(
+        'clear mutating V3 request executes immediately without a pending plan',
+        () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.text('Unexpected V1 result.', null),
+      );
+      final planner = _StaticAiV3Planner(
+        const AiV3Plan(
+          outcome: 'plan',
+          userMessage: 'Lowering Audio 1 by 2 dB.',
+          commands: <AiV3Command>[
+            AiV3Command(
+              commandId: 'gain',
+              type: 'row.adjust_gain_db',
+              arguments: <String, dynamic>{
+                'row_id': 101,
+                'delta_db': -2,
+              },
+            ),
+          ],
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: planner,
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Lower Audio 1 by 2 dB.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        clientContext: _v3ClientContext(),
+      );
+
+      expect(result.aiV3Handoff?['decision'], 'execute_now');
+      expect(result.aiV3Handoff?['execution_policy'], 'auto_apply');
+      expect(
+        (result.aiV3Handoff?['prepared_bundle'] as Map)['execution_policy'],
+        'auto_apply',
+      );
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+      expect(result.message, isEmpty);
+      expect(fakeLlm.seenUserText, isNull);
+
+      final bundle = Map<String, dynamic>.from(
+        result.aiV3Handoff?['prepared_bundle'] as Map,
+      );
+      final completionMessage = aiV3VerifiedConversationMessage(bundle);
+      pipeline.recordAiV3Execution(
+        handoff: result.aiV3Handoff!,
+        result: const <String, dynamic>{'status': 'succeeded'},
+        conversationMessage: completionMessage,
+      );
+      await pipeline.handleUserText(
+        text: 'What did you change?',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        clientContext: _v3ClientContext(),
+      );
+      final secondConversation =
+          planner.seenContexts.last.data['conversation'] as List;
+      expect(
+        secondConversation.whereType<Map>().any(
+              (entry) =>
+                  entry['role'] == 'assistant' &&
+                  entry['content'] == completionMessage,
+            ),
+        isTrue,
+      );
+    });
+
+    test('already-satisfied plan returns an honest no-change response',
+        () async {
+      final planner = _StaticAiV3Planner(
+        const AiV3Plan(
+          outcome: 'plan',
+          userMessage: 'I will keep Audio 1 unmuted.',
+          commands: <AiV3Command>[
+            AiV3Command(
+              commandId: 'mute',
+              type: 'row.set_muted',
+              arguments: <String, dynamic>{
+                'row_id': 101,
+                'muted': false,
+              },
+            ),
+          ],
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: _FakeCloudLlmService(
+          LlmResult.text('Unexpected V1 result.', null),
+        ),
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: planner,
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Keep Audio 1 unmuted.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        clientStateDigest: 'no-op-state',
+        clientContext: _v3ClientContext(),
+      );
+
+      expect(result.aiV3Handoff?['decision'], 'respond');
+      expect(result.aiV3Handoff?['reason'], 'already_satisfied');
+      expect(
+        result.message,
+        'No changes were needed:\n- Unmute Audio 1 (already set)',
+      );
+      expect(result.message, isNot(contains('I will')));
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+    });
+
+    test('clarification options survive the V3 handoff exactly', () async {
+      final planner = _StaticAiV3Planner(
+        const AiV3Plan(
+          outcome: 'clarify',
+          userMessage: 'Which vocal row should I change?',
+          commands: <AiV3Command>[],
+          questionOptions: <String>['Lead Vocal', 'Backing Vocal'],
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: _FakeCloudLlmService(
+          LlmResult.text('Unexpected V1 result.', null),
+        ),
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: planner,
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Make the vocal louder.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        clientContext: _v3ClientContext(),
+      );
+
+      const expected =
+          'Which vocal row should I change?\n\nOptions: Lead Vocal / Backing Vocal';
+      expect(result.message, expected);
+      expect(result.aiV3Handoff?['decision'], 'clarify');
+      expect(result.aiV3Handoff?['message'], expected);
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+    });
+
+    test('clarification does not repeat options already shown in its message',
+        () async {
+      const message = 'The clips are on different rows. Which should I do?\n\n'
+          '1. Move one clip, then glue them\n'
+          '2. Keep them separate';
+      final planner = _StaticAiV3Planner(
+        const AiV3Plan(
+          outcome: 'clarify',
+          userMessage: message,
+          commands: <AiV3Command>[],
+          questionOptions: <String>[
+            'Move one clip, then glue them',
+            'Keep the clips separate',
+          ],
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: _FakeCloudLlmService(
+          LlmResult.text('Unexpected V1 result.', null),
+        ),
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: planner,
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Glue these clips.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        clientContext: _v3ClientContext(),
+      );
+
+      expect(result.message, message);
+      expect(result.aiV3Handoff?['message'], message);
+      expect(result.message, isNot(contains('Options:')));
+    });
+
+    test('factual preparation block explains the prerequisite without preview',
+        () async {
+      final planner = _StaticAiV3Planner(
+        const AiV3Plan(
+          outcome: 'plan',
+          userMessage: 'Creating another row.',
+          commands: <AiV3Command>[
+            AiV3Command(
+              commandId: 'create',
+              type: 'row.create',
+              arguments: <String, dynamic>{
+                'name': 'Audio 2',
+                'lane': <String, dynamic>{'kind': 'audio'},
+                'position': <String, dynamic>{'kind': 'end'},
+              },
+            ),
+          ],
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: _FakeCloudLlmService(
+          LlmResult.text('Unexpected V1 result.', null),
+        ),
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: planner,
+        aiV3Preparer: const _FailingAiV3Preparer('v3_row_capacity_exceeded'),
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Create another audio row.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        clientContext: _v3ClientContext(),
+      );
+
+      expect(result.aiV3Handoff?['decision'], 'blocked');
+      expect(
+        result.aiV3Handoff?['message'],
+        'This project has reached its row limit. '
+        'Delete an existing row before creating another one.',
+      );
+      expect(result.message, result.aiV3Handoff?['message']);
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+    });
+
+    test('empty-project mixing failure explains the missing material',
+        () async {
+      final planner = _StaticAiV3Planner(
+        const AiV3Plan(
+          outcome: 'plan',
+          userMessage: 'Mixing the complete project.',
+          commands: <AiV3Command>[
+            AiV3Command(
+              commandId: 'mix',
+              type: 'mix.apply_goal',
+              arguments: <String, dynamic>{
+                'target': <String, dynamic>{'scope': 'all_rows'},
+                'intents': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'kind': 'balance',
+                    'direction': null,
+                    'descriptor': null,
+                  },
+                ],
+                'intensity': 0.5,
+                'execution_profile': 'producer_safe',
+                'audibility': 'noticeable',
+                'style_tags': <String>[],
+                'reset_fx': false,
+                'reference': null,
+              },
+            ),
+          ],
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: _FakeCloudLlmService(
+          LlmResult.text('Unexpected V1 result.', null),
+        ),
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: planner,
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Mix the complete project.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        clientStateDigest: 'empty-mix-state',
+        clientContext: _v3ClientContext(),
+      );
+
+      expect(result.aiV3Handoff?['decision'], 'blocked');
+      expect(result.aiV3Handoff?['error_code'], 'v3_mix_audio_missing');
+      expect(
+        result.message,
+        'There is no playable audio or MIDI material to mix. '
+        'Add material to the project, then try again.',
+      );
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+    });
+
+    test('future confirmation policy preserves Apply and Cancel handoff',
+        () async {
+      final planner = _StaticAiV3Planner(
+        const AiV3Plan(
+          outcome: 'plan',
+          userMessage: 'Preparing the requested change.',
+          commands: <AiV3Command>[
+            AiV3Command(
+              commandId: 'gain',
+              type: 'row.adjust_gain_db',
+              arguments: <String, dynamic>{
+                'row_id': 101,
+                'delta_db': -2,
+              },
+            ),
+          ],
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: _FakeCloudLlmService(
+          LlmResult.text('Unexpected V1 result.', null),
+        ),
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: planner,
+        aiV3Preparer: const _ConfirmingAiV3Preparer(),
+      );
+      final timelineRows = <TimelineRow>[
+        TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+      ];
+
+      final preview = await pipeline.handleUserText(
+        text: 'Run the future external operation.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: timelineRows,
+        clientStateDigest: 'future-confirm-state',
+        clientContext: _v3ClientContext(),
+      );
+      expect(preview.aiV3Handoff?['decision'], 'ask_confirmation');
+      expect(pipeline.hasActiveAiV3PendingPlan(), isTrue);
+
+      final apply = await pipeline.handleUserText(
+        text: 'apply',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: timelineRows,
+        clientStateDigest: 'future-confirm-state',
+        clientContext: _v3ClientContext(),
+      );
+      expect(apply.aiV3Handoff?['decision'], 'execute_now');
+      expect(apply.aiV3Handoff?['confirmation_granted'], isTrue);
+      expect(
+        (apply.aiV3Handoff?['prepared_bundle'] as Map)['execution_policy'],
+        'confirm',
+      );
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+    });
+
+    test('verified execution details report receipts without repeating plan',
+        () {
+      expect(
+        aiV3VerifiedExecutionDetails(
+          const <String, dynamic>{
+            'plan': <String, dynamic>{
+              'user_message': 'Ajustando la mezcla.',
+            },
+            'receipts': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'status': 'prepared',
+                'preview_label': 'Lower Guitar by 1.5 dB',
+              },
+              <String, dynamic>{
+                'status': 'already_satisfied',
+                'preview_label': 'Keep Piano unchanged',
+              },
+            ],
+          },
+        ),
+        <String>[
+          'Lower Guitar by 1.5 dB',
+          'Keep Piano unchanged (already set)',
+        ],
+      );
+    });
+
+    test('already-satisfied completion is factual rather than future tense',
+        () {
+      expect(
+        aiV3AlreadySatisfiedConversationMessage(
+          const <String, dynamic>{
+            'plan': <String, dynamic>{
+              'user_message': 'I will make Piano blue.',
+            },
+            'receipts': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'status': 'already_satisfied',
+                'preview_label': 'Set Piano color to blue',
+              },
+            ],
+          },
+        ),
+        'No changes were needed:\n'
+        '- Set Piano color to blue (already set)',
+      );
+    });
+
+    test('verified execution details expand materialized mix summaries', () {
+      expect(
+        aiV3VerifiedExecutionDetails(
+          const <String, dynamic>{
+            'plan': <String, dynamic>{
+              'user_message': 'Apply a subtle polish to the master.',
+            },
+            'receipts': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'command_id': 'mix-master',
+                'type': 'mix.apply_goal',
+                'status': 'prepared',
+                'preview_label': 'Mix Master Bus',
+              },
+            ],
+          },
+          executionSummariesByCommandId: const <String, List<String>>{
+            'mix-master': <String>[
+              '• Added Compressor to Master Bus •',
+              '• Adjusted Threshold from 0.50 to 0.42 on Compressor (Master Bus) •',
+            ],
+          },
+        ),
+        <String>[
+          'Added Compressor to Master Bus',
+          'Adjusted Threshold from 0.50 to 0.42 on Compressor (Master Bus)',
+        ],
+      );
+    });
+
+    test('verified completion is concise while conversation keeps detail', () {
+      const bundle = <String, dynamic>{
+        'plan': <String, dynamic>{
+          'user_message': 'Delete Track 3.',
+        },
+        'receipts': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'command_id': 'delete-track-3',
+            'type': 'row.delete',
+            'status': 'prepared',
+            'preview_label': 'Delete Track 3',
+          },
+        ],
+      };
+      expect(
+        aiV3VerifiedCompletionMessage(bundle),
+        'Done.',
+      );
+      expect(
+        aiV3VerifiedConversationMessage(bundle),
+        'Done:\n- Delete Track 3',
+      );
+    });
+
+    test('verified action notices replace fallback summaries and receipts', () {
+      expect(
+        aiV3VerifiedExecutionDetails(
+          const <String, dynamic>{
+            'receipts': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'command_id': 'gain',
+                'status': 'prepared',
+                'preview_label': 'Adjust Automation Lead by -0.5 dB',
+              },
+            ],
+          },
+          executionSummariesByCommandId: const <String, List<String>>{
+            'gain': <String>['Adjust Automation Lead by -0.5 dB'],
+          },
+          actionNotices: const <String>[
+            '• Adjusted Gain from -1.0 dB to -1.5 dB on Automation Lead •',
+          ],
+        ),
+        <String>[
+          'Adjusted Gain from -1.0 dB to -1.5 dB on Automation Lead',
+        ],
+      );
+    });
+
+    test('adaptive evaluation stays detached from the visible V3 result',
+        () async {
+      final captureDirectory =
+          await Directory.systemTemp.createTemp('mixroom_v3_routing_');
+      addTearDown(() async {
+        if (await captureDirectory.exists()) {
+          await captureDirectory.delete(recursive: true);
+        }
+      });
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'informational_response',
+          const <String, dynamic>{'message': 'Unexpected V1 result.'},
+          text: 'Unexpected V1 result.',
+        ),
+      );
+      final fakeV3 = _FakeAiV3Planner();
+      final fakeAdaptive = _FakeAdaptivePlanner();
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: fakeV3,
+        aiV3AdaptiveShadowPlanner: fakeAdaptive,
+        aiV3Capture: AiV3Capture(
+          enabled: true,
+          directoryPath: captureDirectory.path,
+        ),
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Tell me about this project.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        promptTraceId: 'routing-shadow-test',
+        clientStateDigest: 'routing-shadow-state',
+        clientContext: _v3ClientContext(),
+      );
+      for (var attempt = 0;
+          attempt < 50 && fakeAdaptive.callCount == 0;
+          attempt += 1) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+
+      expect(fakeLlm.seenUserText, isNull);
+      expect(fakeV3.callCount, 1);
+      expect(fakeAdaptive.callCount, 1);
+      expect(result.message, 'V3 handled the request.');
+      expect(result.aiV3Handoff?['decision'], 'respond');
+      expect(
+        result.aiV3Handoff?['plan']?['user_message'],
+        'V3 handled the request.',
+      );
+    });
+
     test('forwards all added assistant action types via daw_assistant_actions',
         () async {
       final fakeLlm = _FakeCloudLlmService(

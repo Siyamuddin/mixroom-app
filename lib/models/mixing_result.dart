@@ -97,12 +97,14 @@ class MixApplyReport {
   final int applied;
   final List<String> summaries;
   final List<String> skippedReasons;
+  final List<Map<String, dynamic>> appliedMutations;
 
   const MixApplyReport({
     required this.attempted,
     required this.applied,
     this.summaries = const <String>[],
     this.skippedReasons = const <String>[],
+    this.appliedMutations = const <Map<String, dynamic>>[],
   });
 
   bool get changed => applied > 0;
@@ -113,6 +115,7 @@ class MixApplyReport {
         'applied': applied,
         'summaries': summaries,
         'skipped_reasons': skippedReasons,
+        'applied_mutations': appliedMutations,
       };
 }
 
@@ -121,17 +124,22 @@ class ChatPipelineResult {
   final MixingResult? mixing;
   final Map<String, dynamic>? meta;
   final List<AssistantAction> assistantActions;
+  final Map<String, dynamic>? aiV3Handoff;
 
   const ChatPipelineResult.message(this.message,
-      {this.meta, this.assistantActions = const []})
+      {this.meta, this.assistantActions = const [], this.aiV3Handoff})
       : mixing = null;
   const ChatPipelineResult.mix(this.mixing, this.message,
-      {this.meta, this.assistantActions = const []});
+      {this.meta, this.assistantActions = const [], this.aiV3Handoff});
+  const ChatPipelineResult.v3(this.message, this.aiV3Handoff, {this.meta})
+      : mixing = null,
+        assistantActions = const [];
 
   bool get hasMix =>
       mixing != null && !(mixing!.isNoOp || mixing!.actions.isEmpty);
 
   bool get hasAssistantActions => assistantActions.isNotEmpty;
+  bool get hasAiV3Handoff => aiV3Handoff != null;
 
   @override
   String toString() {

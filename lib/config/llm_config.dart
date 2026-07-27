@@ -16,6 +16,11 @@ class LlmConfig {
     defaultValue: '/v1/llm/responses',
   );
 
+  static const String aiV3ProxyPath = String.fromEnvironment(
+    'AI_V3_PROXY_PATH',
+    defaultValue: '/v1/llm/v3/responses',
+  );
+
   static const String _legacyMixResolvePath = String.fromEnvironment(
     'LLM_MIX_RESOLVE_PATH',
     defaultValue: '',
@@ -70,6 +75,80 @@ class LlmConfig {
     'LLM_DISABLE_PROXY_IN_DEBUG',
     defaultValue: false,
   );
+
+  /// Primary route for updated clients. Set false at build time to retain V1
+  /// as the visible planner without removing either implementation.
+  static const bool aiV3PrimaryEnabled = bool.fromEnvironment(
+    'AI_V3_PRIMARY_ENABLED',
+    defaultValue: true,
+  );
+
+  /// Local debug-only direct-OpenAI V3 route. Release builds always use the
+  /// authenticated proxy when V3 is enabled.
+  static const bool aiV3PrototypeEnabled = bool.fromEnvironment(
+    'AI_V3_PROTOTYPE_ENABLED',
+    defaultValue: false,
+  );
+
+  static const String aiV3Model = String.fromEnvironment(
+    'AI_V3_MODEL',
+    defaultValue: 'gpt-5.6-luna',
+  );
+
+  static const String aiV3ReasoningEffort = String.fromEnvironment(
+    'AI_V3_REASONING_EFFORT',
+    defaultValue: 'low',
+  );
+
+  static const String aiV3ContextProfile = String.fromEnvironment(
+    'AI_V3_CONTEXT_PROFILE',
+    defaultValue: 'essential',
+  );
+
+  static const bool aiV3CaptureEnabled = bool.fromEnvironment(
+    'AI_V3_CAPTURE_ENABLED',
+    defaultValue: false,
+  );
+
+  static const bool aiV3DetachedComparisonsEnabled = bool.fromEnvironment(
+    'AI_V3_DETACHED_COMPARISONS_ENABLED',
+    defaultValue: true,
+  );
+
+  static const bool aiV3CompactShadowEvaluationEnabled = bool.fromEnvironment(
+    'AI_V3_COMPACT_SHADOW_EVAL_ENABLED',
+    defaultValue: false,
+  );
+
+  /// Detached adaptive evaluation only. It never supplies the visible plan.
+  static const bool aiV3AdaptiveShadowEnabled = bool.fromEnvironment(
+    'AI_V3_ADAPTIVE_SHADOW_ENABLED',
+    defaultValue: false,
+  );
+
+  static const String aiV3AdaptiveComparisonModel = String.fromEnvironment(
+    'AI_V3_ADAPTIVE_COMPARISON_MODEL',
+    defaultValue: '',
+  );
+
+  static const String aiV3CaptureDirectory = String.fromEnvironment(
+    'AI_V3_CAPTURE_DIR',
+    defaultValue: 'tool/ai_v3_captures.local',
+  );
+
+  static const bool aiLiveEvaluationEnabled = bool.fromEnvironment(
+    'AI_LIVE_EVAL',
+    defaultValue: false,
+  );
+
+  static bool get effectiveAiV3PrototypeEnabled =>
+      kDebugMode && aiV3PrototypeEnabled && canUseDirectOpenAi;
+
+  static bool get effectiveAiV3ProxyEnabled =>
+      aiV3PrimaryEnabled && hasProxyApiBaseUrl;
+
+  static bool get effectiveAiV3Enabled =>
+      effectiveAiV3ProxyEnabled || effectiveAiV3PrototypeEnabled;
 
   static String get effectiveProxyApiBaseUrl {
     if (kDebugMode && disableProxyInDebug) {

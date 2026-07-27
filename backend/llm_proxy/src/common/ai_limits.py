@@ -23,6 +23,8 @@ _FEATURE_ALIASES = {
     "assistant_chat": "ai_chat",
     "chat": "ai_chat",
     "one_button_mix": "ai_chat",
+    "ai_chat_v3": "ai_chat_v3",
+    "v3": "ai_chat_v3",
     "video_editor_chat": "video_editor_chat",
     "video_chat": "video_editor_chat",
     "video_editor": "video_editor_chat",
