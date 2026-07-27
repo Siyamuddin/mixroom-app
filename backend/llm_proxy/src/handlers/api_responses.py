@@ -3072,8 +3072,6 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             4096,
         )
         request_body["parallel_tool_calls"] = False
-        # The configured V3 Luna model requires the extended cache setting.
-        request_body["prompt_cache_retention"] = "24h"
         # V3 is intentionally retained in OpenAI Responses for production
         # diagnostics; the proxy owns and enforces this policy.
         request_body["store"] = True
