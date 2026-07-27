@@ -128,7 +128,7 @@ class AiRuntimeConfigTests(unittest.TestCase):
         self.assertEqual(runtime["feature"], "ai_chat_v3")
         self.assertEqual(runtime["model"], "gpt-5.6-luna")
         self.assertEqual(runtime["reasoning"], {"effort": "low"})
-        self.assertEqual(runtime["max_output_tokens"], 4096)
+        self.assertEqual(runtime["max_output_tokens"], 8192)
         self.assertEqual(runtime["system_prompt"], "")
 
 

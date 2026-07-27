@@ -104,7 +104,7 @@ def _default_feature_runtime(feature: str, fallback_model: str) -> dict[str, Any
             "system_prompt": "",
             "temperature": None,
             "reasoning": {"effort": config.AI_V3_REASONING_EFFORT},
-            "max_output_tokens": 4096,
+            "max_output_tokens": 8192,
             "prompt_cache_retention": default_prompt_cache_retention(
                 config.AI_V3_MODEL
             ),

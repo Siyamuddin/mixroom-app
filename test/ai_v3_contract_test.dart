@@ -4133,7 +4133,7 @@ void main() {
       }
     });
 
-    test('96 serialized notes fit conservatively and totals above 96 fail', () {
+    test('256 serialized notes fit conservatively and totals above 256 fail', () {
       final notes = List<Map<String, dynamic>>.generate(
         aiV3MaxGeneratedMidiNotes,
         (index) => _note(
@@ -4151,21 +4151,21 @@ void main() {
         ),
       ]);
       expect(AiV3Plan.fromJson(rawPlan).commands, hasLength(1));
-      expect((jsonEncode(rawPlan).length / 4).ceil(), lessThan(4096));
+      expect((jsonEncode(rawPlan).length / 4).ceil(), lessThan(8192));
 
       final tooMany = List<Map<String, dynamic>>.generate(
-        49,
+        (aiV3MaxGeneratedMidiNotes ~/ 2) + 1,
         (index) => _note(60, index * 0.05, 0.01),
       );
       expect(
         () => AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
           editCommand(
-            'replace-49',
+            'replace-129',
             'midi.replace_notes',
             notes: tooMany,
           ),
           editCommand(
-            'append-49',
+            'append-129',
             'midi.append_notes',
             notes: tooMany,
           ),

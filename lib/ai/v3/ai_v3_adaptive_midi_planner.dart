@@ -792,7 +792,7 @@ Map<String, dynamic> _baseRequest({
         ? <String, dynamic>{'type': 'function', 'name': 'submit_plan_v3'}
         : 'required',
     'parallel_tool_calls': false,
-    'max_output_tokens': 4096,
+    'max_output_tokens': 8192,
     'reasoning': <String, dynamic>{'effort': reasoningEffort},
     'store': false,
     if (trace.isNotEmpty)

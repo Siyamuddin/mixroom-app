@@ -91,7 +91,7 @@ ignored, and must never be committed.
 - Transport playback, restart, metronome, and loop state roll back with a
   failed V3 bundle but never enter normal user Undo/Redo history. Mixed-plan
   Undo reverses persistent edits without rewinding successful transport state.
-- At most 96 serialized MIDI notes per plan and eight bars per generated clip;
+- At most 256 serialized MIDI notes per plan and eight bars per generated clip;
   existing-clip MIDI edits may result in at most 512 notes.
 - Built-in effect configuration uses exposed parameter IDs; existing row
   effect removal and bypass use exact native instance IDs.

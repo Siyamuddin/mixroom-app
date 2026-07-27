@@ -87,7 +87,7 @@ Map<String, dynamic> buildAiV3PlannerRequestBody({
       'name': 'submit_plan_v3',
     },
     'parallel_tool_calls': false,
-    'max_output_tokens': 4096,
+    'max_output_tokens': 8192,
     'reasoning': <String, dynamic>{'effort': reasoningEffort},
     'store': true,
     if (normalizedTraceId.isNotEmpty)

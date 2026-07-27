@@ -74,7 +74,7 @@ void main() {
 
     expect(result.plan.outcome, 'respond');
     expect(result.requestBody, sent);
-    expect(sent['max_output_tokens'], 4096);
+    expect(sent['max_output_tokens'], 8192);
     expect(sent['parallel_tool_calls'], isFalse);
     expect((sent['tools'] as List), hasLength(1));
     expect((sent['tools'] as List).single['name'], 'submit_plan_v3');

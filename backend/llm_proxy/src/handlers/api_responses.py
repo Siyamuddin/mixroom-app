@@ -3068,8 +3068,8 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             "effort": _configured_v3_reasoning_effort(),
         }
         request_body["max_output_tokens"] = min(
-            int(request_body.get("max_output_tokens") or 4096),
-            4096,
+            int(request_body.get("max_output_tokens") or 8192),
+            8192,
         )
         request_body["parallel_tool_calls"] = False
         # The configured V3 Luna model requires the extended cache setting.

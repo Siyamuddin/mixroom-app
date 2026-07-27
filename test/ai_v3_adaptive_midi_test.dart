@@ -1331,7 +1331,7 @@ void main() {
     expect(capabilities['can_replace'], isTrue);
     expect(capabilities['can_append'], isTrue);
     expect(capabilities['can_chop'], isTrue);
-    expect(capabilities['max_generated_notes'], 96);
+    expect(capabilities['max_generated_notes'], 256);
   });
 
   test('edit-capability retrieval retains an explicit row without MIDI clips',

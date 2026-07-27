@@ -460,7 +460,7 @@ class ApiResponsesTests(unittest.TestCase):
         assert provider.request_body is not None
         self.assertEqual(provider.request_body["model"], "gpt-5.6-luna")
         self.assertEqual(provider.request_body["reasoning"], {"effort": "low"})
-        self.assertEqual(provider.request_body["max_output_tokens"], 4096)
+        self.assertEqual(provider.request_body["max_output_tokens"], 8192)
         self.assertFalse(provider.request_body["parallel_tool_calls"])
         self.assertEqual(provider.request_body["prompt_cache_retention"], "24h")
         self.assertTrue(provider.request_body["store"])
