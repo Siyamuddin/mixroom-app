@@ -53,6 +53,8 @@ class L10n {
   /// Simple translation map (replace with your ARB-generated translations)
   static Map<String, Map<String, String>> get _translations => const {
         'en': {
+          'Another AI change is still being applied. Please wait for it to finish.':
+              'Another AI change is still being applied. Please wait for it to finish.',
           'hello': 'Hello',
           'share': 'Share',
           'Editor': 'Editor',
@@ -2015,6 +2017,8 @@ class L10n {
           'Finish': 'Finish',
         },
         'ko': {
+          'Another AI change is still being applied. Please wait for it to finish.':
+              '다른 AI 변경 사항을 적용하는 중입니다. 완료될 때까지 기다려 주세요.',
           'hello': '안녕하세요',
           'share': '공유',
           'Editor': '에디터',
@@ -4668,6 +4672,8 @@ class L10n {
           'Retune Speed: how fast notes move.': 'Retune Speed: 音符移动速度。',
         },
         'ja': {
+          'Another AI change is still being applied. Please wait for it to finish.':
+              '別のAI変更を適用中です。完了するまでお待ちください。',
           'hello': 'こんにちは',
           'share': '共有',
           'Editor': 'エディター',

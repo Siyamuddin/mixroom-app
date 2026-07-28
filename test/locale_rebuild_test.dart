@@ -88,6 +88,55 @@ void main() {
 
     expect(find.text('비디오 프로젝트'), findsOneWidget);
   });
+
+  testWidgets('AI execution conflict message uses every supported locale', (
+    tester,
+  ) async {
+    const messageKey =
+        'Another AI change is still being applied. Please wait for it to finish.';
+    final localeProvider = LocaleProvider();
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<LocaleProvider>.value(
+        value: localeProvider,
+        child: Consumer<LocaleProvider>(
+          builder: (context, provider, _) {
+            return MaterialApp(
+              locale: L10n.resolveSupportedLocale(provider.locale),
+              supportedLocales: L10n.supportedLocales,
+              localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
+                GlobalMaterialLocalizations.delegate,
+                GlobalWidgetsLocalizations.delegate,
+                GlobalCupertinoLocalizations.delegate,
+              ],
+              home: Scaffold(
+                body: Builder(
+                  builder: (context) =>
+                      Text(L10n.translate(context, messageKey)),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+
+    expect(find.text(messageKey), findsOneWidget);
+
+    await localeProvider.setLocale(const Locale('ko'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('다른 AI 변경 사항을 적용하는 중입니다. 완료될 때까지 기다려 주세요.'),
+      findsOneWidget,
+    );
+
+    await localeProvider.setLocale(const Locale('ja'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('別のAI変更を適用中です。完了するまでお待ちください。'),
+      findsOneWidget,
+    );
+  });
 }
 
 class _LocaleDependencyProbe extends StatefulWidget {
