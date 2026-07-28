@@ -1832,6 +1832,13 @@ void main() {
       expect(AiV3Plan.fromJson(openClarify).questionOptions, isEmpty);
     });
 
+    test('clarification schema reserves app-owned response controls', () {
+      final encoded = jsonEncode(aiV3SubmitPlanTool());
+      expect(encoded, contains('distinct, concise, meaningful answers'));
+      expect(encoded, contains('Never include Cancel, Something else, Other'));
+      expect(encoded, contains('do not repeat, number, or bullet'));
+    });
+
     test('round-trips complete plans and rejects undeclared fields', () {
       final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('mute', 'row.set_muted', <String, dynamic>{

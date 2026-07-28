@@ -1216,7 +1216,7 @@ Map<String, dynamic> _aiV3PlanSchema(
           'minLength': 1,
           'maxLength': 1000,
           'description':
-              'For outcome plan, write a concise one- or two-sentence past-tense completion summary of the requested result. This text is held until exact execution and readback succeed. For every other outcome, write the appropriate user-facing response and never claim execution.',
+              'For outcome plan, write a concise one- or two-sentence past-tense completion summary of the requested result. This text is held until exact execution and readback succeed. For clarify, write one focused question only and do not repeat, number, or bullet question_options. For every other outcome, write the appropriate user-facing response and never claim execution.',
         },
         'commands': <String, dynamic>{
           'type': 'array',
@@ -1232,7 +1232,7 @@ Map<String, dynamic> _aiV3PlanSchema(
           'type': 'array',
           'maxItems': 4,
           'description':
-              'Up to four concise options for clarify; may be empty when the question stands alone. Otherwise empty.',
+              'Up to four distinct, concise, meaningful answers for clarify; may be empty when the question stands alone. Never include Cancel, Something else, Other, navigation, or custom-answer controls because the application supplies them. Otherwise empty.',
           'items': <String, dynamic>{'type': 'string', 'minLength': 1}
         },
       },

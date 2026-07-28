@@ -136,19 +136,11 @@ String _aiV3ClarificationMessage(
   List<String> options,
 ) {
   if (options.isEmpty) return question;
-  String normalize(String value) =>
-      value.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
-  final normalizedQuestion = normalize(question);
-  final numberedOptionCount =
-      RegExp(r'^\s*\d+[.)]\s+\S', multiLine: true).allMatches(question).length;
-  final optionsAlreadyShown = options.every((option) {
-    final normalizedOption = normalize(option);
-    return normalizedOption.isNotEmpty &&
-        normalizedQuestion.contains(normalizedOption);
-  });
-  return optionsAlreadyShown || numberedOptionCount >= options.length
-      ? question
-      : '$question\n\nOptions: ${options.join(' / ')}';
+  return <String>[
+    question,
+    '',
+    ...options.map((option) => '• $option'),
+  ].join('\n');
 }
 
 String _normalizeAiV3ExecutionSummary(String summary) {

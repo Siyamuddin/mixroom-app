@@ -97,6 +97,9 @@ void main() {
         contains('Never invent a group.'),
         contains('multiple named ungrouped rows'),
         contains('Use all_rows only'),
+        contains('user_message must contain one focused question only'),
+        contains('distinct, concise, meaningful'),
+        contains('Never include Cancel, Something else, Other'),
       ),
     );
     expect(jsonEncode(sent['input']), contains(request));

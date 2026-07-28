@@ -696,18 +696,17 @@ void main() {
       );
 
       const expected =
-          'Which vocal row should I change?\n\nOptions: Lead Vocal / Backing Vocal';
+          'Which vocal row should I change?\n\n'
+          '• Lead Vocal\n'
+          '• Backing Vocal';
       expect(result.message, expected);
       expect(result.aiV3Handoff?['decision'], 'clarify');
       expect(result.aiV3Handoff?['message'], expected);
       expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
     });
 
-    test('clarification does not repeat options already shown in its message',
-        () async {
-      const message = 'The clips are on different rows. Which should I do?\n\n'
-          '1. Move one clip, then glue them\n'
-          '2. Keep them separate';
+    test('clarification fallback uses structured bullets', () async {
+      const message = 'The clips are on different rows. Which should I do?';
       final planner = _StaticAiV3Planner(
         const AiV3Plan(
           outcome: 'clarify',
@@ -741,8 +740,12 @@ void main() {
         clientContext: _v3ClientContext(),
       );
 
-      expect(result.message, message);
-      expect(result.aiV3Handoff?['message'], message);
+      const expected =
+          '$message\n\n'
+          '• Move one clip, then glue them\n'
+          '• Keep the clips separate';
+      expect(result.message, expected);
+      expect(result.aiV3Handoff?['message'], expected);
       expect(result.message, isNot(contains('Options:')));
     });
 

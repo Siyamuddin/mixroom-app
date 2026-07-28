@@ -146,6 +146,9 @@ class L10n {
           'Are you sure you want to delete this audio track?':
               'Are you sure you want to delete this audio track?',
           'Cancel': 'Cancel',
+          'Something else…': 'Something else…',
+          'Describe what you want': 'Describe what you want',
+          'Send response': 'Send response',
           'Delete': 'Delete',
           'Add Video Clip': 'Add Video Clip',
           'Pro Mode Feature': 'Pro Mode Feature',
@@ -2104,6 +2107,9 @@ class L10n {
           'Are you sure you want to delete this audio track?':
               '이 오디오 트랙을 삭제하시겠습니까?',
           'Cancel': '취소',
+          'Something else…': '다른 요청…',
+          'Describe what you want': '원하는 내용을 입력하세요',
+          'Send response': '응답 보내기',
           'Delete': '삭제',
           'Add Video Clip': '비디오 클립 추가',
           'Pro Mode Feature': '프로 모드 기능',
@@ -4759,6 +4765,9 @@ class L10n {
           'Are you sure you want to delete this audio track?':
               'このオーディオトラックを削除してもよろしいですか？',
           'Cancel': 'キャンセル',
+          'Something else…': 'その他の内容…',
+          'Describe what you want': '希望する内容を入力してください',
+          'Send response': '回答を送信',
           'Delete': '削除',
           'Add Video Clip': '動画クリップを追加',
           'Pro Mode Feature': 'プロモードの機能',

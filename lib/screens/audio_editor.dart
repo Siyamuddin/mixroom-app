@@ -68,6 +68,7 @@ import 'package:mixroom/ai/v3/ai_v3_planner_service.dart';
 import 'package:mixroom/ai/v3/ai_v3_contract.dart';
 import 'package:mixroom/ai/v3/ai_v3_preparer.dart';
 import 'package:mixroom/ai/v3/ai_v3_transaction.dart';
+import 'package:mixroom/widgets/ai_v3_clarification_options.dart';
 import 'package:mixroom/widgets/desktop_scrollable_slider.dart';
 
 // import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
@@ -5745,6 +5746,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _isThinking = false;
   int _chatFlowSequence = 0;
   int? _activeChatFlowId;
+  final AiV3ClarificationSession _aiV3ClarificationSession =
+      AiV3ClarificationSession();
   int _assistantActionNoticeCaptureDepth = 0;
   int _assistantActionExecutionMessageCount = 0;
   int _assistantActionExecutionBatchDepth = 0;
@@ -34697,6 +34700,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                         244,
                                                         0.18,
                                                       );
+                                                final metadata =
+                                                    message.metadata;
+                                                final clarificationId =
+                                                    metadata?[
+                                                            'clarification_id']
+                                                        ?.toString();
+                                                final rawQuestionOptions =
+                                                    metadata?[
+                                                        'question_options'];
+                                                final questionOptions =
+                                                    rawQuestionOptions is List
+                                                        ? rawQuestionOptions
+                                                            .whereType<String>()
+                                                            .toList(
+                                                              growable: false,
+                                                            )
+                                                        : const <String>[];
+                                                final isActiveClarification =
+                                                    !isSentByMe &&
+                                                        metadata?['source'] ==
+                                                            'ai_v3_clarification' &&
+                                                        clarificationId !=
+                                                            null &&
+                                                        clarificationId ==
+                                                            _aiV3ClarificationSession
+                                                                .activeId &&
+                                                        questionOptions
+                                                            .isNotEmpty;
+                                                final visibleMessageText =
+                                                    isActiveClarification
+                                                        ? (metadata?['question']
+                                                                ?.toString()
+                                                                .trim() ??
+                                                            message.text)
+                                                        : message.text;
                                                 return Align(
                                                   alignment: isSentByMe
                                                       ? Alignment.centerRight
@@ -34854,21 +34892,69 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                   ]
                                                                 : null,
                                                           ),
-                                                          child: Text(
-                                                            message.text,
-                                                            style:
-                                                                const TextStyle(
-                                                              fontFamily:
-                                                                  'Pretendard',
-                                                              fontSize: 15,
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .w500,
-                                                              height: 1.2,
-                                                              color:
-                                                                  Colors.white,
-                                                            ),
-                                                          ),
+                                                          child:
+                                                              isActiveClarification
+                                                                  ? ConstrainedBox(
+                                                                      constraints:
+                                                                          const BoxConstraints(
+                                                                        minWidth:
+                                                                            240,
+                                                                        maxWidth:
+                                                                            520,
+                                                                      ),
+                                                                      child:
+                                                                          Column(
+                                                                        crossAxisAlignment:
+                                                                            CrossAxisAlignment.start,
+                                                                        mainAxisSize:
+                                                                            MainAxisSize.min,
+                                                                        children: [
+                                                                          Text(
+                                                                            visibleMessageText,
+                                                                            style:
+                                                                                const TextStyle(
+                                                                              fontFamily: 'Pretendard',
+                                                                              fontSize: 15,
+                                                                              fontWeight: FontWeight.w500,
+                                                                              height: 1.2,
+                                                                              color: Colors.white,
+                                                                            ),
+                                                                          ),
+                                                                          const SizedBox(
+                                                                            height:
+                                                                                12,
+                                                                          ),
+                                                                          AiV3ClarificationOptions(
+                                                                            key:
+                                                                                ValueKey<String>(clarificationId),
+                                                                            options:
+                                                                                questionOptions,
+                                                                            busy:
+                                                                                _isThinking,
+                                                                            onSubmit:
+                                                                                _submitChatPrompt,
+                                                                            onCancel:
+                                                                                () => _resolveAiV3Clarification(clarificationId),
+                                                                          ),
+                                                                        ],
+                                                                      ),
+                                                                    )
+                                                                  : Text(
+                                                                      visibleMessageText,
+                                                                      style:
+                                                                          const TextStyle(
+                                                                        fontFamily:
+                                                                            'Pretendard',
+                                                                        fontSize:
+                                                                            15,
+                                                                        fontWeight:
+                                                                            FontWeight.w500,
+                                                                        height:
+                                                                            1.2,
+                                                                        color: Colors
+                                                                            .white,
+                                                                      ),
+                                                                    ),
                                                         ),
                                                       ),
                                                     ],
@@ -60357,6 +60443,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  void _resolveAiV3Clarification(String? clarificationId) {
+    if (!_aiV3ClarificationSession.resolve(clarificationId)) return;
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
   Widget _buildSystemChatMessage(TextMessage message) {
     final metadata = message.metadata;
     final detailLines = _chatExecutionDetailLines(metadata);
@@ -60853,6 +60946,52 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     final decision = handoff['decision']?.toString().trim() ?? '';
+    if (decision == 'clarify') {
+      final rawPlan = handoff['plan'];
+      final plan = rawPlan is Map
+          ? Map<String, dynamic>.from(rawPlan)
+          : const <String, dynamic>{};
+      final question = plan['user_message']?.toString().trim() ?? '';
+      final rawOptions = plan['question_options'];
+      final options = rawOptions is List
+          ? rawOptions
+              .whereType<String>()
+              .map((option) => option.trim())
+              .where((option) => option.isNotEmpty)
+              .toList(growable: false)
+          : const <String>[];
+      final resolvedMessage = handoff['message']?.toString().trim() ?? '';
+      final message = resolvedMessage.isNotEmpty ? resolvedMessage : question;
+
+      if (message.isNotEmpty) {
+        if (question.isNotEmpty && options.isNotEmpty) {
+          final clarificationId = const Uuid().v4();
+          if (mounted) {
+            setState(() {
+              _aiV3ClarificationSession.activate(clarificationId);
+            });
+          } else {
+            _aiV3ClarificationSession.activate(clarificationId);
+          }
+          _insertAssistantChatText(
+            message,
+            modelAuthored: true,
+            metadata: <String, dynamic>{
+              'source': 'ai_v3_clarification',
+              'clarification_id': clarificationId,
+              'question': question,
+              'question_options': options,
+            },
+          );
+        } else {
+          _insertAssistantChatText(message, modelAuthored: true);
+        }
+      }
+      if (LlmConfig.aiLiveEvaluationEnabled) {
+        await _performAutosaveWrite();
+      }
+      return;
+    }
     if (decision == 'ask_confirmation') {
       final bundle = handoff['prepared_bundle'];
       final preview =
@@ -64186,6 +64325,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _restoreChatHistoryFromProjectJson(
     Map<String, dynamic> json,
   ) async {
+    _aiV3ClarificationSession.clear();
     final history = ProjectChatHistory.fromJson(
         json['assistantChat'] ?? json['chatHistory']);
     _assistantConversationSessionId = history.stateSessionId.trim();
@@ -64212,6 +64352,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _clearChatHistory() async {
+    _aiV3ClarificationSession.clear();
     await _setChatMessages(const <Message>[], animated: false);
     _chatPipeline.clearConversation();
     _rotateAssistantConversationSessionId();
@@ -65905,6 +66046,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _showPromptRateLimitDialog();
       return false;
     }
+    final clarificationIdAtSubmission = _aiV3ClarificationSession.activeId;
     final chatFlowId = _beginChatFlow();
     const aiFeature = 'ai_chat';
     final promptTraceId = const Uuid().v4();
@@ -66188,6 +66330,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ),
       );
       unawaited(_handleDawOnboardingChatReplyReady());
+      _resolveAiV3Clarification(clarificationIdAtSubmission);
       return true;
     } on _ChatFlowCancelledException {
       return false;
