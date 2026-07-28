@@ -1816,19 +1816,17 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   Future<void> _setHeaderRowsMuted(List<int> rows, bool muted) async {
-    await Future.wait(
-      rows
-          .where((row) => row >= 0 && row < widget.rowMuted.length)
-          .map((row) => widget.muteRow(row, muted)),
-    );
+    for (final row in rows) {
+      if (row < 0 || row >= widget.rowMuted.length) continue;
+      await widget.muteRow(row, muted);
+    }
   }
 
   Future<void> _setHeaderRowsSoloed(List<int> rows, bool soloed) async {
-    await Future.wait(
-      rows
-          .where((row) => row >= 0 && row < widget.rowSoloed.length)
-          .map((row) => widget.soloRow(row, soloed)),
-    );
+    for (final row in rows) {
+      if (row < 0 || row >= widget.rowSoloed.length) continue;
+      await widget.soloRow(row, soloed);
+    }
   }
 
   List<int> _mixControlRows(int row) {
@@ -14922,14 +14920,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                 fontSize: 13,
                                 onTap: () {
                                   final next = !headerMuted;
-                                  setState(() {
-                                    for (final item in headerControlRows) {
-                                      if (item >= 0 &&
-                                          item < widget.rowMuted.length) {
-                                        widget.rowMuted[item] = next;
-                                      }
-                                    }
-                                  });
                                   unawaited(_setHeaderRowsMuted(
                                       headerControlRows, next));
                                 },
@@ -14951,14 +14941,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                 fontSize: 13,
                                 onTap: () {
                                   final next = !headerSoloed;
-                                  setState(() {
-                                    for (final item in headerControlRows) {
-                                      if (item >= 0 &&
-                                          item < widget.rowSoloed.length) {
-                                        widget.rowSoloed[item] = next;
-                                      }
-                                    }
-                                  });
                                   unawaited(_setHeaderRowsSoloed(
                                       headerControlRows, next));
                                 },
@@ -14975,14 +14957,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                 borderRadius: controlRadiusTop,
                                 onTap: () {
                                   final next = !headerMuted;
-                                  setState(() {
-                                    for (final item in headerControlRows) {
-                                      if (item >= 0 &&
-                                          item < widget.rowMuted.length) {
-                                        widget.rowMuted[item] = next;
-                                      }
-                                    }
-                                  });
                                   unawaited(_setHeaderRowsMuted(
                                       headerControlRows, next));
                                 },
@@ -15000,14 +14974,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                 borderRadius: controlRadiusBottom,
                                 onTap: () {
                                   final next = !headerSoloed;
-                                  setState(() {
-                                    for (final item in headerControlRows) {
-                                      if (item >= 0 &&
-                                          item < widget.rowSoloed.length) {
-                                        widget.rowSoloed[item] = next;
-                                      }
-                                    }
-                                  });
                                   unawaited(_setHeaderRowsSoloed(
                                       headerControlRows, next));
                                 },
@@ -15099,13 +15065,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       child: InkWell(
         onTap: () {
           final newVal = !headerMuted;
-          setState(() {
-            for (final item in headerControlRows) {
-              if (item >= 0 && item < widget.rowMuted.length) {
-                widget.rowMuted[item] = newVal;
-              }
-            }
-          });
           unawaited(_setHeaderRowsMuted(headerControlRows, newVal));
         },
         splashFactory: NoSplash.splashFactory,
@@ -15157,13 +15116,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       child: InkWell(
         onTap: () {
           final newVal = !headerSoloed;
-          setState(() {
-            for (final item in headerControlRows) {
-              if (item >= 0 && item < widget.rowSoloed.length) {
-                widget.rowSoloed[item] = newVal;
-              }
-            }
-          });
           unawaited(_setHeaderRowsSoloed(headerControlRows, newVal));
         },
         splashFactory: NoSplash.splashFactory,
