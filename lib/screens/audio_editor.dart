@@ -60923,7 +60923,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     if (_v3ExecutionInProgress) {
       _insertAiFailureSystemText(
-        'Another AI change is still being applied. Please wait for it to finish.',
+        L10n.translate(
+          context,
+          'Another AI change is still being applied. Please wait for it to finish.',
+        ),
       );
       return;
     }
