@@ -234,6 +234,8 @@ Widget _buildHarness({
   VoidCallback? onClearCopiedClip,
   Future<void> Function(int row, bool muted)? onMuteRow,
   Future<void> Function(int row, bool soloed)? onSoloRow,
+  List<bool>? rowMutedOverride,
+  List<bool>? rowSoloedOverride,
   Future<void> Function(int row, double gain)? onSetRowGain,
   void Function(int row, double oldGain, double newGain)? onRowGainCommit,
   Future<void> Function(int row, double pan)? onSetRowPan,
@@ -297,8 +299,8 @@ Widget _buildHarness({
       ];
   final rowGain = List<double>.filled(rows.length, 1.0);
   final rowPan = List<double>.filled(rows.length, 0.5);
-  final rowMuted = List<bool>.filled(rows.length, false);
-  final rowSoloed = List<bool>.filled(rows.length, false);
+  final rowMuted = rowMutedOverride ?? List<bool>.filled(rows.length, false);
+  final rowSoloed = rowSoloedOverride ?? List<bool>.filled(rows.length, false);
   final rowVolumeAutomation = List<List<AutomationPoint>>.generate(
     rows.length,
     (_) => <AutomationPoint>[
@@ -1677,6 +1679,50 @@ void main() {
       <String>['0:true', '1:true'],
     );
   });
+
+  for (final useTabletLayout in <bool>[false, true]) {
+    final layoutName = useTabletLayout ? 'tablet' : 'desktop';
+
+    testWidgets(
+      '$layoutName mute and solo callbacks own the shared row state',
+      (tester) async {
+        final rowMuted = <bool>[false];
+        final rowSoloed = <bool>[false];
+        final callbackObservations = <String>[];
+
+        await tester.pumpWidget(
+          _buildHarness(
+            clips: const <AudioTrack>[],
+            onMoveClipCommit: (_, __, ___) async {},
+            useTabletDawLayout: useTabletLayout,
+            rowMutedOverride: rowMuted,
+            rowSoloedOverride: rowSoloed,
+            onMuteRow: (row, muted) async {
+              callbackObservations.add('mute:$row:${rowMuted[row]}->$muted');
+              rowMuted[row] = muted;
+            },
+            onSoloRow: (row, soloed) async {
+              callbackObservations.add('solo:$row:${rowSoloed[row]}->$soloed');
+              rowSoloed[row] = soloed;
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('M').first);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('S').first);
+        await tester.pumpAndSettle();
+
+        expect(
+          callbackObservations,
+          <String>['mute:0:false->true', 'solo:0:false->true'],
+        );
+        expect(rowMuted, <bool>[true]);
+        expect(rowSoloed, <bool>[true]);
+      },
+    );
+  }
 
   testWidgets('row grouping mode toggles row headers without expanding rows',
       (tester) async {

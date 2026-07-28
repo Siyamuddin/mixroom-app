@@ -4514,6 +4514,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _showProgressDialog = false;
   String _progressMessage = "";
   String _currentOperation = "";
+  bool _v3ExecutionInProgress = false;
   bool _showAiBatchProcessingOverlay = false;
   bool _cancelAiBatchProcessingRequested = false;
   int _aiBatchProcessingCompleted = 0;
@@ -8108,6 +8109,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _performEditorUndo() async {
+    if (_v3ExecutionInProgress) return;
     await _commitPendingProjectTempoUndo();
     final action = await _undoManager.undo();
     if (!mounted || action == null) return;
@@ -8131,6 +8133,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _performEditorRedo() async {
+    if (_v3ExecutionInProgress) return;
     await _commitPendingProjectTempoUndo();
     final action = await _undoManager.redo();
     if (!mounted || action == null) return;
@@ -8578,6 +8581,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (_handleDesktopChatEscape(event)) {
+      return true;
+    }
+
+    if (_v3ExecutionInProgress) {
+      if (_desktopMidiHeldKeys.isNotEmpty) {
+        unawaited(_releaseAllDesktopMidiNotes());
+      }
       return true;
     }
 
@@ -18722,6 +18732,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _aiBatchProcessingTotal = 0;
       _aiBatchProcessingTitle = 'Processing';
       _aiBatchProcessingMessage = '';
+    });
+  }
+
+  void _setV3ExecutionInProgress(bool value) {
+    if (_v3ExecutionInProgress == value) return;
+    if (!mounted) {
+      _v3ExecutionInProgress = value;
+      return;
+    }
+    setState(() {
+      _v3ExecutionInProgress = value;
     });
   }
 
@@ -60900,6 +60921,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       return;
     }
+    if (_v3ExecutionInProgress) {
+      _insertAiFailureSystemText(
+        'Another AI change is still being applied. Please wait for it to finish.',
+      );
+      return;
+    }
+    _setV3ExecutionInProgress(true);
+    try {
+      await _executePreparedAiV3Bundle(
+        handoff: handoff,
+        bundle: bundle,
+        chatFlowId: chatFlowId,
+      );
+    } finally {
+      _setV3ExecutionInProgress(false);
+    }
+  }
+
+  Future<void> _executePreparedAiV3Bundle({
+    required Map<String, dynamic> handoff,
+    required Map<String, dynamic> bundle,
+    required int? chatFlowId,
+  }) async {
     final expectedDigest = bundle['state_digest']?.toString().trim() ?? '';
     if (expectedDigest.isEmpty ||
         expectedDigest != _freshAiV3StateFingerprint()) {
@@ -75883,6 +75927,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   usesTabletDawLayout: usesTabletDawLayout,
                   keyboardLift: keyboardLift,
                 ),
+                if (_v3ExecutionInProgress)
+                  const Positioned.fill(
+                    child: ModalBarrier(
+                      dismissible: false,
+                      color: Colors.transparent,
+                    ),
+                  ),
                 if (_isSyncing)
                   Positioned.fill(
                     child: Container(
@@ -75922,7 +75973,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   ),
                 _buildProgressIndicator(),
                 _buildAiBatchProcessingOverlay(),
-                if (_chatExpanded)
+                if (_chatExpanded && !_v3ExecutionInProgress)
                   Positioned(
                     left: usesTabletDawLayout ? tabletSidePanelWidth : 0,
                     right:
@@ -79116,13 +79167,15 @@ class EditorUndoManager extends ChangeNotifier {
   final int maxHistory;
   final List<_EditorUndoStackEntry> _undo = [];
   final List<_EditorUndoStackEntry> _redo = [];
+  final Object _captureZoneKey = Object();
   List<EditorUndoAction>? _capturedActions;
+  Object? _captureOwnerToken;
   EditorUndoAction? _lastAction;
 
   EditorUndoManager({this.maxHistory = 5});
 
-  bool get canUndo => _undo.isNotEmpty;
-  bool get canRedo => _redo.isNotEmpty;
+  bool get canUndo => _capturedActions == null && _undo.isNotEmpty;
+  bool get canRedo => _capturedActions == null && _redo.isNotEmpty;
   bool get isCapturingActions => _capturedActions != null;
   EditorUndoAction? get lastAction => _lastAction;
   List<ProjectUndoSnapshotRecord> get undoSnapshotRecords =>
@@ -79139,14 +79192,17 @@ class EditorUndoManager extends ChangeNotifier {
       List.unmodifiable(_persistableTail(_redo));
 
   int? undoStepCountForRecord(ProjectUndoSnapshotRecord record) {
+    if (_capturedActions != null) return null;
     return _stepCountForRecord(_undo, record);
   }
 
   int? redoStepCountForRecord(ProjectUndoSnapshotRecord record) {
+    if (_capturedActions != null) return null;
     return _stepCountForRecord(_redo, record);
   }
 
   Future<void> execute(EditorUndoAction action) async {
+    _requireActiveCaptureOwner();
     await action.redo();
     if (_capturedActions != null) {
       _captureAction(action);
@@ -79170,6 +79226,7 @@ class EditorUndoManager extends ChangeNotifier {
   // execute an AI action where you want a compound undo history
   // but you need to execute in sequence before you add, because they depend on each other
   Future<void> executeWithoutAdd(EditorUndoAction action) async {
+    _requireActiveCaptureOwner();
     await action.redo();
     if (_capturedActions != null) {
       _captureAction(action);
@@ -79178,6 +79235,7 @@ class EditorUndoManager extends ChangeNotifier {
 
   // same comment here as above
   Future<void> addWithoutExecute(EditorUndoAction action) async {
+    _requireActiveCaptureOwner();
     if (_capturedActions != null) {
       _captureAction(action);
       return;
@@ -79197,7 +79255,7 @@ class EditorUndoManager extends ChangeNotifier {
   }
 
   /// Runs existing editor behavior without creating a history entry. Every
-  /// undoable action it performs is captured so a V2 bundle can commit one
+  /// undoable action it performs is captured so an AI bundle can commit one
   /// compound action only after all requested steps have succeeded.
   Future<List<EditorUndoAction>> captureActions(
     Future<void> Function() perform,
@@ -79206,9 +79264,16 @@ class EditorUndoManager extends ChangeNotifier {
       throw StateError('undo_action_capture_already_active');
     }
     final captured = <EditorUndoAction>[];
+    final ownerToken = Object();
     _capturedActions = captured;
+    _captureOwnerToken = ownerToken;
     try {
-      await perform();
+      await runZoned(
+        perform,
+        zoneValues: <Object, Object>{
+          _captureZoneKey: ownerToken,
+        },
+      );
       return List<EditorUndoAction>.unmodifiable(captured);
     } catch (error, stackTrace) {
       var rollbackIncomplete = false;
@@ -79228,7 +79293,14 @@ class EditorUndoManager extends ChangeNotifier {
       rethrow;
     } finally {
       _capturedActions = null;
+      _captureOwnerToken = null;
     }
+  }
+
+  void _requireActiveCaptureOwner() {
+    if (_capturedActions == null) return;
+    if (identical(Zone.current[_captureZoneKey], _captureOwnerToken)) return;
+    throw StateError('undo_action_capture_external_mutation');
   }
 
   void _captureAction(EditorUndoAction action) {
@@ -79243,6 +79315,7 @@ class EditorUndoManager extends ChangeNotifier {
   }
 
   Future<EditorUndoAction?> undo() async {
+    if (_capturedActions != null) return null;
     if (_undo.isEmpty) return null;
     final entry = _undo.removeLast();
     final a = entry.action;
@@ -79254,6 +79327,7 @@ class EditorUndoManager extends ChangeNotifier {
   }
 
   Future<EditorUndoAction?> redo() async {
+    if (_capturedActions != null) return null;
     if (_redo.isEmpty) return null;
     final entry = _redo.removeLast();
     final a = entry.action;
@@ -79265,12 +79339,14 @@ class EditorUndoManager extends ChangeNotifier {
   }
 
   Future<void> undoSteps(int count) async {
+    if (_capturedActions != null) return;
     for (var i = 0; i < count && _undo.isNotEmpty; i++) {
       await undo();
     }
   }
 
   Future<void> redoSteps(int count) async {
+    if (_capturedActions != null) return;
     for (var i = 0; i < count && _redo.isNotEmpty; i++) {
       await redo();
     }
@@ -79279,6 +79355,7 @@ class EditorUndoManager extends ChangeNotifier {
   Future<EditorUndoAction?> undoToRecord(
     ProjectUndoSnapshotRecord record,
   ) async {
+    if (_capturedActions != null) return null;
     final index = _indexForRecord(_undo, record);
     if (index < 0) return null;
     return _stepUndoToIndex(index);
@@ -79287,6 +79364,7 @@ class EditorUndoManager extends ChangeNotifier {
   Future<EditorUndoAction?> redoToRecord(
     ProjectUndoSnapshotRecord record,
   ) async {
+    if (_capturedActions != null) return null;
     final index = _indexForRecord(_redo, record);
     if (index < 0) return null;
     return _stepRedoToIndex(index);
