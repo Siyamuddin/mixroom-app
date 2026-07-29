@@ -67,6 +67,8 @@ import 'package:mixroom/ai/v3/ai_v3_adaptive_midi_planner.dart';
 import 'package:mixroom/ai/v3/ai_v3_planner_service.dart';
 import 'package:mixroom/ai/v3/ai_v3_contract.dart';
 import 'package:mixroom/ai/v3/ai_v3_preparer.dart';
+import 'package:mixroom/ai/v3/ai_v3_resources.dart';
+import 'package:mixroom/ai/v3/ai_v3_runtime_resources.dart';
 import 'package:mixroom/ai/v3/ai_v3_transaction.dart';
 import 'package:mixroom/widgets/desktop_scrollable_slider.dart';
 
@@ -2079,10 +2081,12 @@ _FallbackInstrumentPreset _fallbackPresetForInstrument({
     return _clampDouble(raw, min, max);
   }
 
-  final oscillator =
-      getParam('oscillator', preset.oscillator.toDouble(), 0.0, 3.0)
-          .round()
-          .clamp(0, 3);
+  final oscillator = getParam(
+    'oscillator',
+    preset.oscillator.toDouble(),
+    0.0,
+    3.0,
+  ).round().clamp(0, 3);
 
   preset = preset.copyWith(
     oscillator: oscillator,
@@ -2097,11 +2101,19 @@ _FallbackInstrumentPreset _fallbackPresetForInstrument({
     stereoWidth: getParam('stereoWidth', preset.stereoWidth, 0.0, 0.45),
     tone: getParam('tone', preset.tone, 0.0, 1.0),
     transient: getParam('transient', preset.transient, 0.0, 1.0),
-    pitchDropSemitones:
-        getParam('pitchDropSemitones', preset.pitchDropSemitones, 0.0, 36.0),
+    pitchDropSemitones: getParam(
+      'pitchDropSemitones',
+      preset.pitchDropSemitones,
+      0.0,
+      36.0,
+    ),
     noise: getParam('noise', preset.noise, 0.0, 0.45),
-    padDetuneOffset:
-        getParam('padDetuneOffset', preset.padDetuneOffset, 0.0, 0.004),
+    padDetuneOffset: getParam(
+      'padDetuneOffset',
+      preset.padDetuneOffset,
+      0.0,
+      0.004,
+    ),
   );
 
   return preset;
@@ -2126,11 +2138,9 @@ double _renderFallbackRawSample({
             _clampDouble(0.94 - toneShape * 0.24, 0.64, 0.94);
         final body = _waveFromType(3, state.phaseB) *
             _clampDouble(0.10 + toneShape * 0.18, 0.08, 0.28);
-        final growl = _waveFromType(
-              1,
-              state.phaseA * (1.15 + toneShape * 0.25),
-            ) *
-            _clampDouble(toneShape * 0.18, 0.0, 0.18);
+        final growl =
+            _waveFromType(1, state.phaseA * (1.15 + toneShape * 0.25)) *
+                _clampDouble(toneShape * 0.18, 0.0, 0.18);
         final overtone = _waveFromType(
               0,
               state.phaseA * (1.8 + toneShape * 1.0 + det * 20.0),
@@ -2144,7 +2154,10 @@ double _renderFallbackRawSample({
             _noiseForSample(state.seed, noteSampleIndex);
         final dynamicCutoff = preset.cutoffHz *
             _clampDouble(
-                0.82 + toneShape * 0.08 - noteProgress * 0.22, 0.30, 0.96);
+              0.82 + toneShape * 0.08 - noteProgress * 0.22,
+              0.30,
+              0.96,
+            );
         final raw = _lowPassSample(
           state: state,
           auxiliaryState: false,
@@ -2321,7 +2334,9 @@ double _renderFallbackRawSample({
             _waveFromType(style == 1 ? 1 : 0, state.phaseB * 1.5 * inharmonic) *
                 0.15;
         final tine = _waveFromType(
-                style == 3 ? 3 : 0, state.phaseB * (2.4 + style * 0.25)) *
+              style == 3 ? 3 : 0,
+              state.phaseB * (2.4 + style * 0.25),
+            ) *
             0.11;
         final raw = _lowPassSample(
           state: state,
@@ -2351,11 +2366,9 @@ double _renderFallbackRawSample({
         final vibratoDepth = 0.0002 + envelope * (0.00025 + style * 0.00008);
         final vibratoRate = 4.2 + style * 0.35;
         final vibrato = 1.0 +
-            math.sin(2.0 *
-                    math.pi *
-                    noteSampleIndex /
-                    sampleRate *
-                    vibratoRate) *
+            math.sin(
+                  2.0 * math.pi * noteSampleIndex / sampleRate * vibratoRate,
+                ) *
                 vibratoDepth;
         final body = _waveFromType(0, state.phaseA) * 0.34;
         final saw = _waveFromType(1, state.phaseA) * 0.22;
@@ -2372,7 +2385,10 @@ double _renderFallbackRawSample({
             math.sin(2.0 * math.pi * (980.0 + style * 120.0) * t) * 0.08;
         final dynamicCutoff = preset.cutoffHz *
             _clampDouble(
-                0.72 + envelope * 0.42 - noteProgress * 0.10, 0.55, 1.18);
+              0.72 + envelope * 0.42 - noteProgress * 0.10,
+              0.55,
+              1.18,
+            );
         final raw = _lowPassSample(
           state: state,
           auxiliaryState: false,
@@ -2397,8 +2413,9 @@ double _renderFallbackRawSample({
       }
     case _FallbackInstrumentFamily.wavetable:
       {
-        final modLfo =
-            math.sin(2.0 * math.pi * noteSampleIndex / sampleRate * 0.35);
+        final modLfo = math.sin(
+          2.0 * math.pi * noteSampleIndex / sampleRate * 0.35,
+        );
         final pd = _wrapUnitPhase(
           state.phaseA + 0.18 * math.sin(2.0 * math.pi * state.phaseB + modLfo),
         );
@@ -2507,13 +2524,13 @@ double _renderFallbackRawSample({
                       ? 16.0
                       : 14.0;
           final curve = style == 0 ? 1.35 : 1.0;
-          final dropSemis =
-              _clampDouble(preset.pitchDropSemitones + extraDrop, 0.0, 36.0);
-          final dropProgress = math.pow(1.0 - noteProgress, curve).toDouble();
-          final ratio = math.pow(
-            2.0,
-            -(dropSemis * dropProgress) / 12.0,
+          final dropSemis = _clampDouble(
+            preset.pitchDropSemitones + extraDrop,
+            0.0,
+            36.0,
           );
+          final dropProgress = math.pow(1.0 - noteProgress, curve).toDouble();
+          final ratio = math.pow(2.0, -(dropSemis * dropProgress) / 12.0);
           final tunedFreq = _clampDouble(
             frequencyHz * ratio.toDouble(),
             24.0,
@@ -2607,8 +2624,11 @@ double _renderFallbackRawSample({
           final burst0 = math.exp(-95.0 * math.pow(noteProgress - 0.028, 2.0));
           final burst1 = math.exp(-125.0 * math.pow(noteProgress - 0.068, 2.0));
           final burst2 = math.exp(-165.0 * math.pow(noteProgress - 0.112, 2.0));
-          final envelopeNoise =
-              _clampDouble(burst0 + burst1 + burst2, 0.0, 1.0);
+          final envelopeNoise = _clampDouble(
+            burst0 + burst1 + burst2,
+            0.0,
+            1.0,
+          );
           final tail = math.exp(-(10.0 + style * 1.5) * noteProgress);
           final noise = _noiseForSample(state.seed + 29, noteSampleIndex);
           return noise * (envelopeNoise * 0.78 + tail * 0.22);
@@ -3068,10 +3088,7 @@ class _PitchEstimate {
   final double frequencyHz;
   final double clarity;
 
-  const _PitchEstimate({
-    required this.frequencyHz,
-    required this.clarity,
-  });
+  const _PitchEstimate({required this.frequencyHz, required this.clarity});
 }
 
 enum AudioEditorInitialAction { exportWav, exportMp3 }
@@ -3862,10 +3879,11 @@ typedef AudioEditorStemSeparatorOverride = Future<void> Function({
   required String instrumentalOutputPath,
 });
 
+typedef AudioEditorSampleDurationOverride = Future<Duration?> Function(
+    String filePath);
+
 typedef AudioEditorBasicPitchOverride = Future<List<BasicPitchNoteEvent>>
-    Function({
-  required Float32List mono16k,
-});
+    Function({required Float32List mono16k});
 
 class AudioEditorScreen extends StatefulWidget {
   final String mode;
@@ -3875,19 +3893,21 @@ class AudioEditorScreen extends StatefulWidget {
   final VoidCallback? onUpgradeRequested;
   final AudioEditorEvaluationController? evaluationController;
   final AudioEditorStemSeparatorOverride? stemSeparatorOverride;
+  final AudioEditorSampleDurationOverride? sampleDurationOverride;
   final AudioEditorBasicPitchOverride? basicPitchOverride;
 
-  const AudioEditorScreen(
-      {Key? key,
-      required this.mode,
-      required this.projectDir,
-      this.isProEntitled,
-      this.initialAction,
-      this.onUpgradeRequested,
-      this.evaluationController,
-      this.stemSeparatorOverride,
-      this.basicPitchOverride})
-      : super(key: key);
+  const AudioEditorScreen({
+    Key? key,
+    required this.mode,
+    required this.projectDir,
+    this.isProEntitled,
+    this.initialAction,
+    this.onUpgradeRequested,
+    this.evaluationController,
+    this.stemSeparatorOverride,
+    this.sampleDurationOverride,
+    this.basicPitchOverride,
+  }) : super(key: key);
   @override
   State<AudioEditorScreen> createState() => _AudioEditorScreenState2();
 }
@@ -4058,19 +4078,9 @@ class _ProjectLoadIssue {
   final String detail;
 }
 
-enum _HostedPluginRestoreScope {
-  rowEffect,
-  masterEffect,
-  midiInstrument,
-}
+enum _HostedPluginRestoreScope { rowEffect, masterEffect, midiInstrument }
 
-enum _HostedPluginRestoreStatus {
-  pending,
-  loading,
-  loaded,
-  partial,
-  failed,
-}
+enum _HostedPluginRestoreStatus { pending, loading, loaded, partial, failed }
 
 class _HostedPluginRestoreEntry {
   const _HostedPluginRestoreEntry({
@@ -4148,37 +4158,52 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   static const bool _kAllowSampledNativeRenderFallbackForBeta = false;
   static const Key _editorScaffoldKey = Key('audio_editor_screen');
   static const Key _editorBackButtonKey = Key('audio_editor_back_button');
-  final GlobalKey _projectSettingsButtonKey =
-      GlobalKey(debugLabel: 'audio_editor_project_settings_button');
-  final GlobalKey _projectNamePillKey =
-      GlobalKey(debugLabel: 'audio_editor_project_name_pill');
-  final GlobalKey _tempoButtonKey =
-      GlobalKey(debugLabel: 'audio_editor_tempo_button');
-  final GlobalKey _masterPluginsButtonKey =
-      GlobalKey(debugLabel: 'audio_editor_master_plugins_button');
-  final GlobalKey _toolbarPillKey =
-      GlobalKey(debugLabel: 'audio_editor_toolbar_pill');
+  final GlobalKey _projectSettingsButtonKey = GlobalKey(
+    debugLabel: 'audio_editor_project_settings_button',
+  );
+  final GlobalKey _projectNamePillKey = GlobalKey(
+    debugLabel: 'audio_editor_project_name_pill',
+  );
+  final GlobalKey _tempoButtonKey = GlobalKey(
+    debugLabel: 'audio_editor_tempo_button',
+  );
+  final GlobalKey _masterPluginsButtonKey = GlobalKey(
+    debugLabel: 'audio_editor_master_plugins_button',
+  );
+  final GlobalKey _toolbarPillKey = GlobalKey(
+    debugLabel: 'audio_editor_toolbar_pill',
+  );
   static const Key _exportButtonKey = Key('audio_editor_export_button');
-  final GlobalKey _masterRackKey =
-      GlobalKey(debugLabel: 'audio_editor_master_rack');
-  final GlobalKey _projectSettingsDialogKey =
-      GlobalKey(debugLabel: 'project_settings_dialog');
-  final GlobalKey _tempoRollDownPanelKey =
-      GlobalKey(debugLabel: 'audio_editor_tempo_roll_down_panel');
-  static const Key _projectSettingsNameFieldKey =
-      Key('project_settings_name_field');
-  static const Key _projectSettingsMetronomeSwitchKey =
-      Key('project_settings_metronome_switch');
-  static const Key _projectSettingsProducerCaptureSwitchKey =
-      Key('project_settings_producer_capture_switch');
-  static const Key _projectSettingsDesktopMidiSwitchKey =
-      Key('project_settings_desktop_midi_switch');
-  static const Key _projectSettingsAllowMultipleExpandedRowsSwitchKey =
-      Key('project_settings_allow_multiple_expanded_rows_switch');
-  static const Key _projectSettingsExpandRowsOnTrackSelectSwitchKey =
-      Key('project_settings_expand_rows_on_track_select_switch');
-  static const Key _projectSettingsCloseButtonKey =
-      Key('project_settings_close_button');
+  final GlobalKey _masterRackKey = GlobalKey(
+    debugLabel: 'audio_editor_master_rack',
+  );
+  final GlobalKey _projectSettingsDialogKey = GlobalKey(
+    debugLabel: 'project_settings_dialog',
+  );
+  final GlobalKey _tempoRollDownPanelKey = GlobalKey(
+    debugLabel: 'audio_editor_tempo_roll_down_panel',
+  );
+  static const Key _projectSettingsNameFieldKey = Key(
+    'project_settings_name_field',
+  );
+  static const Key _projectSettingsMetronomeSwitchKey = Key(
+    'project_settings_metronome_switch',
+  );
+  static const Key _projectSettingsProducerCaptureSwitchKey = Key(
+    'project_settings_producer_capture_switch',
+  );
+  static const Key _projectSettingsDesktopMidiSwitchKey = Key(
+    'project_settings_desktop_midi_switch',
+  );
+  static const Key _projectSettingsAllowMultipleExpandedRowsSwitchKey = Key(
+    'project_settings_allow_multiple_expanded_rows_switch',
+  );
+  static const Key _projectSettingsExpandRowsOnTrackSelectSwitchKey = Key(
+    'project_settings_expand_rows_on_track_select_switch',
+  );
+  static const Key _projectSettingsCloseButtonKey = Key(
+    'project_settings_close_button',
+  );
   static const double _kTransportBarHeight = 88.0;
   static const double _kIosSnackBarExtraLift = 16.0;
   static const double _kChatBarStackHeight = 68.0;
@@ -4199,17 +4224,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     ],
   );
   static const Color _kTabletDawPanelFill = Color.fromRGBO(72, 86, 96, 0.84);
-  static const Color _kTabletDawControlFill =
-      Color.fromRGBO(82, 108, 132, 0.78);
-  static const Color _kTabletDawControlActiveFill =
-      Color.fromRGBO(76, 132, 178, 0.82);
+  static const Color _kTabletDawControlFill = Color.fromRGBO(
+    82,
+    108,
+    132,
+    0.78,
+  );
+  static const Color _kTabletDawControlActiveFill = Color.fromRGBO(
+    76,
+    132,
+    178,
+    0.82,
+  );
   static const LinearGradient _kTabletDawControlFlatGradient = LinearGradient(
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
-    colors: <Color>[
-      _kTabletDawControlFill,
-      _kTabletDawControlFill,
-    ],
+    colors: <Color>[_kTabletDawControlFill, _kTabletDawControlFill],
   );
   double get _chatHistoryBottomGap =>
       Platform.isIOS ? 12.0 : _kChatHistoryBottomGap;
@@ -4262,8 +4292,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _DawTutorialStepId.tutorialComplete,
   ];
 
-  bool _canUseSubscriptionCapability(String capability,
-      {bool fallback = true}) {
+  bool _canUseSubscriptionCapability(
+    String capability, {
+    bool fallback = true,
+  }) {
     try {
       return context.read<EntitlementService>().canUseCapability(capability);
     } catch (_) {
@@ -4403,10 +4435,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool get _desktopNativeWavOnlyExport =>
       _platformCapabilities.desktopNativeWavOnlyExport;
 
-  static const MethodChannel _edgeGesturesChannel =
-      MethodChannel('mixroom/edge_gestures');
-  static const MethodChannel _producerExportsChannel =
-      MethodChannel('mixroom/producer_exports');
+  static const MethodChannel _edgeGesturesChannel = MethodChannel(
+    'mixroom/edge_gestures',
+  );
+  static const MethodChannel _producerExportsChannel = MethodChannel(
+    'mixroom/producer_exports',
+  );
   static void _noopRefreshRowFx(int row) {}
 
   late Directory _projectDir;
@@ -4497,10 +4531,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               _clipLayoutMutations.length - maxRetainedMutations;
           _clipLayoutMutationFloorRevision =
               _clipLayoutMutations[removeCount - 1].revision;
-          _clipLayoutMutations.removeRange(
-            0,
-            removeCount,
-          );
+          _clipLayoutMutations.removeRange(0, removeCount);
         }
       }
     }
@@ -4550,14 +4581,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _clipLoopPreviewRestorePlaying = false;
   Duration _clipLoopPreviewRestoreClock = Duration.zero;
   static const Duration _kTransportPollInterval = Duration(milliseconds: 50);
-  static const Duration _kTransportPlayStartSyncGrace =
-      Duration(milliseconds: 180);
-  static const Duration _kTransportUiNotifyInterval =
-      Duration(milliseconds: 16);
-  static const Duration _kTransportMaxExtrapolation =
-      Duration(milliseconds: 120);
-  static const Duration _kFxPlaybackRefreshInterval =
-      Duration(milliseconds: 90);
+  static const Duration _kTransportPlayStartSyncGrace = Duration(
+    milliseconds: 180,
+  );
+  static const Duration _kTransportUiNotifyInterval = Duration(
+    milliseconds: 16,
+  );
+  static const Duration _kTransportMaxExtrapolation = Duration(
+    milliseconds: 120,
+  );
+  static const Duration _kFxPlaybackRefreshInterval = Duration(
+    milliseconds: 90,
+  );
 
   // string of export filter to pass to effects screen
   String filterString = "";
@@ -4601,8 +4636,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   static const List<String> _kOneButtonMixProfiles = <String>[
     'Mixroom Producer',
   ];
-  static const Color _kOneButtonMixAccentColor =
-      Color.fromRGBO(0, 149, 255, 0.60);
+  static const Color _kOneButtonMixAccentColor = Color.fromRGBO(
+    0,
+    149,
+    255,
+    0.60,
+  );
   String _selectedOneButtonMixProfile = 'Mixroom Producer';
 
   String _localizedOneButtonMixProfile(BuildContext context, String profile) {
@@ -4898,14 +4937,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _finishTabletAudioClipRename(
-      int clipIndex, String rawName) async {
+    int clipIndex,
+    String rawName,
+  ) async {
     await _renameAudioClipFromPanel(clipIndex, rawName);
     if (!mounted) return;
     setState(() {
       _tabletAudioClipOptionsRenaming = false;
       if (_isValidAudioClipOptionsIndex(clipIndex)) {
-        _tabletAudioClipOptionsNameDraft =
-            _audioClipDisplayName(_audioTracks[clipIndex]);
+        _tabletAudioClipOptionsNameDraft = _audioClipDisplayName(
+          _audioTracks[clipIndex],
+        );
       }
     });
     _tabletAudioClipNameFocusNode.unfocus();
@@ -5122,10 +5164,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_isRecording) return;
     final clampedMs = math.max(0.0, ms);
     final newPosition = Duration(milliseconds: clampedMs.round());
-    _syncTransportClock(
-      newPosition,
-      playing: _isPlaying,
-    );
+    _syncTransportClock(newPosition, playing: _isPlaying);
     unawaited(JuceAudioEngine.seekTransport(clampedMs / 1000.0));
     JuceAudioEngine.setAutomationTransport(clampedMs / 1000.0);
     JuceAudioEngine.setMetronomeTransportMs(clampedMs);
@@ -5169,7 +5208,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Duration _estimateTransportClockFromSample() {
     if (!_isPlaying) {
       return Duration(
-          milliseconds: (_lastTransportSampleSeconds * 1000).round());
+        milliseconds: (_lastTransportSampleSeconds * 1000).round(),
+      );
     }
     final elapsedSinceSample =
         _transportUiStopwatch.elapsed - _lastTransportSampleElapsed;
@@ -5302,9 +5342,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           rowGainTargetId,
           timeMs,
         ).clamp(0.0, 1.0);
-        final value = _denormalizeAutomationValue(normalized, target)
-            .clamp(_kGainUiMin, _kGainUiMax)
-            .toDouble();
+        final value = _denormalizeAutomationValue(
+          normalized,
+          target,
+        ).clamp(_kGainUiMin, _kGainUiMax).toDouble();
         if ((value - _rowGain[row]).abs() > 0.0005) {
           _rowGain[row] = value;
           changed = true;
@@ -5320,9 +5361,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           rowPanTargetId,
           timeMs,
         ).clamp(0.0, 1.0);
-        final value = _denormalizeAutomationValue(normalized, target)
-            .clamp(0.0, 1.0)
-            .toDouble();
+        final value = _denormalizeAutomationValue(
+          normalized,
+          target,
+        ).clamp(0.0, 1.0).toDouble();
         if ((value - _rowPan[row]).abs() > 0.0005) {
           _rowPan[row] = value;
           changed = true;
@@ -5340,9 +5382,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           masterGainTargetId,
           timeMs,
         ).clamp(0.0, 1.0);
-        final value = _denormalizeAutomationValue(normalized, target)
-            .clamp(_kGainUiMin, _kGainUiMax)
-            .toDouble();
+        final value = _denormalizeAutomationValue(
+          normalized,
+          target,
+        ).clamp(_kGainUiMin, _kGainUiMax).toDouble();
         if ((value - _masterGain).abs() > 0.0005) {
           _masterGain = value;
           changed = true;
@@ -5358,9 +5401,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           masterPanTargetId,
           timeMs,
         ).clamp(0.0, 1.0);
-        final value = _denormalizeAutomationValue(normalized, target)
-            .clamp(0.0, 1.0)
-            .toDouble();
+        final value = _denormalizeAutomationValue(
+          normalized,
+          target,
+        ).clamp(0.0, 1.0).toDouble();
         if ((value - _masterPan).abs() > 0.0005) {
           _masterPan = value;
           changed = true;
@@ -5561,16 +5605,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   final AudioCanvasTimelineController _timelineController =
       AudioCanvasTimelineController();
   bool _timelineHorizontalScrollbarPointerCaptured = false;
-  final GlobalKey _tabletTopToolButtonKey =
-      GlobalKey(debugLabel: 'tablet_top_tool_button');
-  final GlobalKey _tabletTopQuantizeButtonKey =
-      GlobalKey(debugLabel: 'tablet_top_quantize_button');
-  final GlobalKey _bottomChatBarAnchorKey =
-      GlobalKey(debugLabel: 'bottom_chat_bar_anchor');
+  final GlobalKey _tabletTopToolButtonKey = GlobalKey(
+    debugLabel: 'tablet_top_tool_button',
+  );
+  final GlobalKey _tabletTopQuantizeButtonKey = GlobalKey(
+    debugLabel: 'tablet_top_quantize_button',
+  );
+  final GlobalKey _bottomChatBarAnchorKey = GlobalKey(
+    debugLabel: 'bottom_chat_bar_anchor',
+  );
   final GlobalKey<_DynamicRackContentState> _masterRackContentKey =
       GlobalKey<_DynamicRackContentState>();
-  final GlobalKey _editorContentStackKey =
-      GlobalKey(debugLabel: 'audio_editor_content_stack');
+  final GlobalKey _editorContentStackKey = GlobalKey(
+    debugLabel: 'audio_editor_content_stack',
+  );
   double _masterGain = _kGainUiUnity;
   double _masterPan = 0.5;
   double? _masterGainDragStart;
@@ -5770,8 +5818,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   final Map<String, _HostedPluginRestoreEntry> _hostedPluginRestoreEntries =
       <String, _HostedPluginRestoreEntry>{};
   StateSetter? _projectSettingsStateSetter;
-  final GlobalKey _feedbackScreenshotBoundaryKey =
-      GlobalKey(debugLabel: 'audio_editor_feedback_screenshot_boundary');
+  final GlobalKey _feedbackScreenshotBoundaryKey = GlobalKey(
+    debugLabel: 'audio_editor_feedback_screenshot_boundary',
+  );
   static const double _kChatScrollHintThreshold = 64.0;
 
   bool _sampleBrowserVisible = false;
@@ -5827,8 +5876,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   String? _auditioningSamplePath;
   bool _samplePreviewPlaying = false;
   int _samplePreviewRequestId = 0;
-  List<Map<String, dynamic>> _instrumentCatalog =
-      _cloneInstrumentCatalog(kInstrumentCatalog);
+  List<Map<String, dynamic>> _instrumentCatalog = _cloneInstrumentCatalog(
+    kInstrumentCatalog,
+  );
   bool _instrumentCatalogReady = false;
   List<Map<String, dynamic>> _desktopScannedPlugins = <Map<String, dynamic>>[];
   List<Map<String, dynamic>> _desktopHostedInstrumentCatalog =
@@ -5894,8 +5944,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   void _pruneAutomationDiscoveryCaches() {
     final validRowIds = _rows.map((row) => row.rowId).toSet();
-    _rowAutomationDiscoveryCache
-        .removeWhere((rowId, _) => !validRowIds.contains(rowId));
+    _rowAutomationDiscoveryCache.removeWhere(
+      (rowId, _) => !validRowIds.contains(rowId),
+    );
   }
 
   void _invalidateRowAutomationDiscoveryCache(
@@ -6152,7 +6203,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           aiFeature: aiFeature,
           toolFamily: _aiToolFamily(normalizedToolName),
           toolVariant: _toolVariantForAnalytics(
-              normalizedToolName, normalizedActionTypes),
+            normalizedToolName,
+            normalizedActionTypes,
+          ),
           primaryActionType: _primaryActionType(normalizedActionTypes),
           actionTypes: normalizedActionTypes.isEmpty
               ? null
@@ -6241,14 +6294,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Map<String, dynamic> _buildProjectTelemetrySnapshot(
     Map<String, dynamic> projectJson,
   ) {
-    final tracks = (projectJson['tracks'] as List?)
-            ?.whereType<Map>()
-            .toList(growable: false) ??
+    final tracks = (projectJson['tracks'] as List?)?.whereType<Map>().toList(
+              growable: false,
+            ) ??
         const <Map>[];
-    final rowEffects = (projectJson['rowEffects'] as List?)
-            ?.whereType<Map>()
-            .toList(growable: false) ??
-        const <Map>[];
+    final rowEffects =
+        (projectJson['rowEffects'] as List?)?.whereType<Map>().toList(
+                  growable: false,
+                ) ??
+            const <Map>[];
     final master = projectJson['master'];
     final masterEffectsRaw = master is Map ? master['effects'] : null;
     final masterEffects = master is Map
@@ -6257,7 +6311,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             : masterEffectsRaw is Map
                 ? (masterEffectsRaw['effects'] as List?)
                         ?.whereType<Map>()
-                        .toList(growable: false) ??
+                        .toList(
+                          growable: false,
+                        ) ??
                     const <Map>[]
                 : const <Map>[])
         : const <Map>[];
@@ -6270,9 +6326,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .toList(growable: false)
       ..sort();
     final trackEffectIds = rowEffects
-        .expand((row) => ((row['effects'] as List?) ?? const <Object?>[])
-            .whereType<Map>()
-            .map((fx) => (fx['effectId'] ?? '').toString().trim()))
+        .expand(
+          (row) => ((row['effects'] as List?) ?? const <Object?>[])
+              .whereType<Map>()
+              .map((fx) => (fx['effectId'] ?? '').toString().trim()),
+        )
         .where((value) => value.isNotEmpty)
         .toList(growable: false);
     final masterEffectIds = masterEffects
@@ -6362,7 +6420,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   int _deriveTrackGroupColorFromRows(
-      Iterable<int> rowIds, List<TimelineRow> rows) {
+    Iterable<int> rowIds,
+    List<TimelineRow> rows,
+  ) {
     final rowIdSet = rowIds.toSet();
     for (final row in rows) {
       if (rowIdSet.contains(row.rowId) && row.color != 0) {
@@ -6413,9 +6473,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return reconciled.rows;
   }
 
-  List<TrackGroup> _trackGroupsFromProjectJson(
-    Map<String, dynamic> json,
-  ) {
+  List<TrackGroup> _trackGroupsFromProjectJson(Map<String, dynamic> json) {
     final rawGroups = json["trackGroups"] ?? json["track_groups"];
     if (rawGroups is! List) return const <TrackGroup>[];
     return rawGroups
@@ -6516,9 +6574,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           );
           effects = snapshot.effects;
         } catch (error) {
-          debugPrint(
-            'AI group FX snapshot failed for ${group.id}: $error',
-          );
+          debugPrint('AI group FX snapshot failed for ${group.id}: $error');
         }
       }
       groups.add(
@@ -6674,14 +6730,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _syncTrackGroupsToEngine() async {
     final groups = _trackGroups
-        .map((group) => <String, dynamic>{
-              'id': group.id,
-              'rowIds': group.rowIds,
-              'gain': group.gain,
-              'pan': group.pan,
-              'muted': group.muted,
-              'soloed': group.soloed,
-            })
+        .map(
+          (group) => <String, dynamic>{
+            'id': group.id,
+            'rowIds': group.rowIds,
+            'gain': group.gain,
+            'pan': group.pan,
+            'muted': group.muted,
+            'soloed': group.soloed,
+          },
+        )
         .toList(growable: false);
     final signature = jsonEncode(groups);
     if (signature == _lastNativeTrackGroupSignature) return;
@@ -6915,12 +6973,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           tracksByOriginalRow[sourceIndex] ?? const <Map<String, dynamic>>[];
       final audioTracks = rowTracks.where((track) {
         return ClipKindWire.fromWire(
-                (track['clipType'] as String?) ?? 'audio') !=
+              (track['clipType'] as String?) ?? 'audio',
+            ) !=
             ClipKind.midi;
       }).toList(growable: false);
       final midiTracks = rowTracks.where((track) {
         return ClipKindWire.fromWire(
-                (track['clipType'] as String?) ?? 'audio') ==
+              (track['clipType'] as String?) ?? 'audio',
+            ) ==
             ClipKind.midi;
       }).toList(growable: false);
 
@@ -6930,12 +6990,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final first = midiTracks.first;
         sourceRow['kind'] = 'instrument';
         sourceRow['instrumentId'] = (first['instrumentId'] ?? '').toString();
-        sourceRow['instrumentName'] = ((first['instrumentName'] ?? '')
-                .toString()
-                .trim()
-                .isNotEmpty)
-            ? first['instrumentName'].toString()
-            : _instrumentNameFromId((first['instrumentId'] ?? '').toString());
+        sourceRow['instrumentName'] =
+            ((first['instrumentName'] ?? '').toString().trim().isNotEmpty)
+                ? first['instrumentName'].toString()
+                : _instrumentNameFromId(
+                    (first['instrumentId'] ?? '').toString(),
+                  );
         sourceRow['instrumentParams'] =
             (first['instrumentParams'] as Map?)?.cast<String, dynamic>() ??
                 const <String, dynamic>{};
@@ -7016,10 +7076,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         throw StateError('Could not capture the editor screenshot.');
       }
 
-      final capturedImage =
-          await boundaryRenderObject.toImage(pixelRatio: pixelRatio);
-      final byteData =
-          await capturedImage.toByteData(format: ui.ImageByteFormat.png);
+      final capturedImage = await boundaryRenderObject.toImage(
+        pixelRatio: pixelRatio,
+      );
+      final byteData = await capturedImage.toByteData(
+        format: ui.ImageByteFormat.png,
+      );
       capturedImage.dispose();
       if (byteData == null) {
         throw StateError('Could not capture the editor screenshot.');
@@ -7089,9 +7151,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       FeedbackContextPayload? contextPayload;
       if (draft.includeDawContext) {
         contextPayload = FeedbackContextPayload(
-          chatHistory:
-              ProjectChatHistory.fromChatMessages(_chatController.messages)
-                  .toConversation(),
+          chatHistory: ProjectChatHistory.fromChatMessages(
+            _chatController.messages,
+          ).toConversation(),
           projectSettings: _buildFeedbackProjectSettings(),
         );
       }
@@ -7115,8 +7177,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text(
-                L10n.translate(context, 'Thank you for your submission!'))),
+          content: Text(
+            L10n.translate(context, 'Thank you for your submission!'),
+          ),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
@@ -7136,8 +7200,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _setIOSSystemGestureDeferral(bool enabled) async {
     if (!Platform.isIOS) return;
     try {
-      await _edgeGesturesChannel
-          .invokeMethod<void>('setDeferred', {'enabled': enabled});
+      await _edgeGesturesChannel.invokeMethod<void>('setDeferred', {
+        'enabled': enabled,
+      });
     } catch (_) {}
   }
 
@@ -7317,8 +7382,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return null;
     }
 
-    final Offset topLeft =
-        anchorObject.localToGlobal(Offset.zero, ancestor: stackObject);
+    final Offset topLeft = anchorObject.localToGlobal(
+      Offset.zero,
+      ancestor: stackObject,
+    );
     final Offset topRight = anchorObject.localToGlobal(
       Offset(anchorObject.size.width, 0),
       ancestor: stackObject,
@@ -7332,14 +7399,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       ancestor: stackObject,
     );
 
-    final double left = math.min(math.min(topLeft.dx, topRight.dx),
-        math.min(bottomLeft.dx, bottomRight.dx));
-    final double top = math.min(math.min(topLeft.dy, topRight.dy),
-        math.min(bottomLeft.dy, bottomRight.dy));
-    final double right = math.max(math.max(topLeft.dx, topRight.dx),
-        math.max(bottomLeft.dx, bottomRight.dx));
-    final double bottom = math.max(math.max(topLeft.dy, topRight.dy),
-        math.max(bottomLeft.dy, bottomRight.dy));
+    final double left = math.min(
+      math.min(topLeft.dx, topRight.dx),
+      math.min(bottomLeft.dx, bottomRight.dx),
+    );
+    final double top = math.min(
+      math.min(topLeft.dy, topRight.dy),
+      math.min(bottomLeft.dy, bottomRight.dy),
+    );
+    final double right = math.max(
+      math.max(topLeft.dx, topRight.dx),
+      math.max(bottomLeft.dx, bottomRight.dx),
+    );
+    final double bottom = math.max(
+      math.max(topLeft.dy, topRight.dy),
+      math.max(bottomLeft.dy, bottomRight.dy),
+    );
     return Rect.fromLTRB(left, top, right, bottom);
   }
 
@@ -7435,9 +7510,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (stem.isEmpty) return 'Instrument';
     return stem
         .split(' ')
-        .map((w) => w.isEmpty
-            ? w
-            : '${w[0].toUpperCase()}${w.substring(1).toLowerCase()}')
+        .map(
+          (w) => w.isEmpty
+              ? w
+              : '${w[0].toUpperCase()}${w.substring(1).toLowerCase()}',
+        )
         .join(' ');
   }
 
@@ -7818,7 +7895,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final defaultReleaseMs = pickerCategory == 'Drums' ? 320.0 : 520.0;
         final explicitId = (map['id'] as String?)?.trim() ?? '';
         final idToken = _sanitizeInstrumentIdToken(
-            '${pack ?? 'sfz'}_${presetFile.replaceAll('.sfz', '')}');
+          '${pack ?? 'sfz'}_${presetFile.replaceAll('.sfz', '')}',
+        );
         loaded.add(<String, dynamic>{
           'id': explicitId.isNotEmpty ? explicitId : 'sfz.$idToken',
           'name': displayName,
@@ -7909,25 +7987,33 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _rowGainSnapshot.removeRange(_rowCount, _rowGainSnapshot.length);
       _rowPanSnapshot.removeRange(_rowCount, _rowPanSnapshot.length);
       _rowAutomationSnapshot.removeRange(
-          _rowCount, _rowAutomationSnapshot.length);
+        _rowCount,
+        _rowAutomationSnapshot.length,
+      );
     }
 
     _rowPluginAutomation.removeWhere((row, _) => row < 0 || row >= _rowCount);
     _rowAutomationClips.removeWhere((row, _) => row < 0 || row >= _rowCount);
     _rowAutomationTargets.removeWhere((row, _) => row < 0 || row >= _rowCount);
-    _rowSelectedAutomationTarget
-        .removeWhere((row, _) => row < 0 || row >= _rowCount);
+    _rowSelectedAutomationTarget.removeWhere(
+      (row, _) => row < 0 || row >= _rowCount,
+    );
 
     for (int row = 0; row < _rowCount; row++) {
       _rowPluginAutomation.putIfAbsent(
-          row, () => <String, List<AutomationPoint>>{});
+        row,
+        () => <String, List<AutomationPoint>>{},
+      );
       _rowAutomationClips.putIfAbsent(
-          row, () => <String, List<AutomationClipSnapshot>>{});
+        row,
+        () => <String, List<AutomationClipSnapshot>>{},
+      );
       _rowAutomationTargets.putIfAbsent(
-          row,
-          () => <String, _AutomationTargetMeta>{
-                'volume': _volumeAutomationTargetMeta(),
-              });
+        row,
+        () => <String, _AutomationTargetMeta>{
+          'volume': _volumeAutomationTargetMeta(),
+        },
+      );
       _rowSelectedAutomationTarget.putIfAbsent(row, () => 'volume');
     }
 
@@ -7938,12 +8024,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _meters.dispose();
       _meters = MeterBus(numRows: _rowCount);
     }
-    _rowPeakHoldDb
-        .removeWhere((row, _) => row != -1 && (row < 0 || row >= _rowCount));
-    _rowPeakHoldLastUpdate
-        .removeWhere((row, _) => row != -1 && (row < 0 || row >= _rowCount));
-    _rowPeakHoldFreezeUntil
-        .removeWhere((row, _) => row != -1 && (row < 0 || row >= _rowCount));
+    _rowPeakHoldDb.removeWhere(
+      (row, _) => row != -1 && (row < 0 || row >= _rowCount),
+    );
+    _rowPeakHoldLastUpdate.removeWhere(
+      (row, _) => row != -1 && (row < 0 || row >= _rowCount),
+    );
+    _rowPeakHoldFreezeUntil.removeWhere(
+      (row, _) => row != -1 && (row < 0 || row >= _rowCount),
+    );
   }
 
   Future<void> _refreshPlatformCapabilities() async {
@@ -8277,9 +8366,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            '${L10n.translate(context, 'Undo failed')}: $error',
-          ),
+          content: Text('${L10n.translate(context, 'Undo failed')}: $error'),
         ),
       );
     }
@@ -8295,9 +8382,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            '${L10n.translate(context, 'Redo failed')}: $error',
-          ),
+          content: Text('${L10n.translate(context, 'Redo failed')}: $error'),
         ),
       );
     }
@@ -8324,8 +8409,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final exact = L10n.translate(context, trimmed);
     if (exact != trimmed) return exact;
 
-    final projectTempoMatch =
-        RegExp(r'^Project tempo set to ([0-9]+) BPM\.$').firstMatch(trimmed);
+    final projectTempoMatch = RegExp(
+      r'^Project tempo set to ([0-9]+) BPM\.$',
+    ).firstMatch(trimmed);
     if (projectTempoMatch != null) {
       return '${L10n.translate(context, 'Project tempo set to')} ${projectTempoMatch.group(1)} BPM.';
     }
@@ -8401,18 +8487,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (groupId.isNotEmpty) {
       final groupExists = _trackGroups.any((group) => group.id == groupId);
       if (!groupExists) throw StateError('row_mute_undo_group_missing');
-      _applyTrackGroupMuteSoloState(
-        groupId,
-        muted: groupMuted ?? muted,
-      );
+      _applyTrackGroupMuteSoloState(groupId, muted: groupMuted ?? muted);
     }
     setState(() => _rowMuted[row] = muted);
     await _recomputeAudibleState();
     if (groupId.isNotEmpty) {
-      await _setTrackGroupMuteSoloNative(
-        groupId,
-        muted: groupMuted ?? muted,
-      );
+      await _setTrackGroupMuteSoloNative(groupId, muted: groupMuted ?? muted);
     }
   }
 
@@ -8451,10 +8531,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (groupId.isNotEmpty) {
       final groupExists = _trackGroups.any((group) => group.id == groupId);
       if (!groupExists) throw StateError('row_solo_undo_group_missing');
-      _applyTrackGroupMuteSoloState(
-        groupId,
-        soloed: groupSoloed ?? soloed,
-      );
+      _applyTrackGroupMuteSoloState(groupId, soloed: groupSoloed ?? soloed);
     }
     setState(() => _rowSoloed[row] = soloed);
     await _recomputeAudibleState();
@@ -8825,8 +8902,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 proxyPath: LlmConfig.mixResolvePath,
                 authTokenProvider: authService.getIdTokenOrNull,
                 refreshAuthTokenProvider: authService.refreshIdTokenOrNull,
-                requestTimeout:
-                    Duration(seconds: LlmConfig.requestTimeoutSeconds),
+                requestTimeout: Duration(
+                  seconds: LlmConfig.requestTimeoutSeconds,
+                ),
               )
             : OnnxMixingMagnitudePredictor(
                 enabled: true,
@@ -8856,8 +8934,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   : '',
               model: LlmConfig.aiV3Model,
               reasoningEffort: LlmConfig.aiV3ReasoningEffort,
-              requestTimeout:
-                  Duration(seconds: LlmConfig.requestTimeoutSeconds),
+              requestTimeout: Duration(
+                seconds: LlmConfig.requestTimeoutSeconds,
+              ),
               proxyApiBaseUrl: LlmConfig.effectiveAiV3ProxyEnabled &&
                       !LlmConfig.effectiveAiV3PrototypeEnabled
                   ? LlmConfig.effectiveProxyApiBaseUrl
@@ -8865,6 +8944,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               proxyPath: LlmConfig.aiV3ProxyPath,
               authTokenProvider: authService.getIdTokenOrNull,
               refreshAuthTokenProvider: authService.refreshIdTokenOrNull,
+              resourceRefsEnabled: LlmConfig.aiV3ResourceRefsEnabled,
             )
           : null,
       aiV3CompactShadowPlanner: LlmConfig.aiV3CompactShadowEvaluationEnabled &&
@@ -8875,10 +8955,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               apiKey: LlmConfig.openAiApiKey,
               model: LlmConfig.aiV3Model,
               reasoningEffort: LlmConfig.aiV3ReasoningEffort,
-              requestTimeout:
-                  Duration(seconds: LlmConfig.requestTimeoutSeconds),
+              requestTimeout: Duration(
+                seconds: LlmConfig.requestTimeoutSeconds,
+              ),
               commandTypes: aiV3CommonCommandTypes,
               architecture: 'v3_compact_common_shadow',
+              resourceRefsEnabled: LlmConfig.aiV3ResourceRefsEnabled,
             )
           : null,
       aiV3AdaptiveShadowPlanner: LlmConfig.aiV3AdaptiveShadowEnabled &&
@@ -8889,8 +8971,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               apiKey: LlmConfig.openAiApiKey,
               model: LlmConfig.aiV3Model,
               reasoningEffort: LlmConfig.aiV3ReasoningEffort,
-              requestTimeout:
-                  Duration(seconds: LlmConfig.requestTimeoutSeconds),
+              requestTimeout: Duration(
+                seconds: LlmConfig.requestTimeoutSeconds,
+              ),
+              resourceRefsEnabled: LlmConfig.aiV3ResourceRefsEnabled,
             )
           : null,
       aiV3AdaptiveShadowComparisonPlanner:
@@ -8905,8 +8989,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   apiKey: LlmConfig.openAiApiKey,
                   model: LlmConfig.aiV3AdaptiveComparisonModel,
                   reasoningEffort: LlmConfig.aiV3ReasoningEffort,
-                  requestTimeout:
-                      Duration(seconds: LlmConfig.requestTimeoutSeconds),
+                  requestTimeout: Duration(
+                    seconds: LlmConfig.requestTimeoutSeconds,
+                  ),
+                  resourceRefsEnabled: LlmConfig.aiV3ResourceRefsEnabled,
                 )
               : null,
       aiV3Capture: AiV3Capture(
@@ -8944,8 +9030,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     unawaited(_refreshPromptRateLimitStatus());
 
     _samplePreviewPlayer = ja.AudioPlayer(handleAudioSessionActivation: false);
-    _samplePreviewStateSub =
-        _samplePreviewPlayer.playerStateStream.listen((state) {
+    _samplePreviewStateSub = _samplePreviewPlayer.playerStateStream.listen((
+      state,
+    ) {
       if (!mounted) return;
       setState(() {
         _samplePreviewPlaying = state.playing;
@@ -8981,8 +9068,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await JuceAudioEngine.initialise();
       JuceAudioEngine.initialiseEventListeners();
-      _juceEngineEventSubscription ??=
-          JuceAudioEngine.eventsStream.listen(_handleJuceEngineEvent);
+      _juceEngineEventSubscription ??= JuceAudioEngine.eventsStream.listen(
+        _handleJuceEngineEvent,
+      );
       await _refreshPlatformCapabilities();
       await _refreshMicrophonePermissionState();
       await _maybePromptMicrophonePermissionOnDawEntry();
@@ -9043,8 +9131,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!mounted) return;
     if (_usesContainedExportPanel) {
       await _exportAndNavigate(
-        selectedSettingsOverride:
-            _normalizeAudioExportSettings(_audioExportSettings),
+        selectedSettingsOverride: _normalizeAudioExportSettings(
+          _audioExportSettings,
+        ),
       );
     } else {
       await _exportAndNavigate();
@@ -9442,8 +9531,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required double width,
     double? height,
     EdgeInsetsGeometry padding = const EdgeInsets.fromLTRB(16, 16, 16, 16),
-    EdgeInsets outerPadding =
-        const EdgeInsets.symmetric(horizontal: 32, vertical: 28),
+    EdgeInsets outerPadding = const EdgeInsets.symmetric(
+      horizontal: 32,
+      vertical: 28,
+    ),
   }) {
     final borderRadius = BorderRadius.circular(24);
     return Dialog(
@@ -9527,9 +9618,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.08),
-        ),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -9594,9 +9683,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return '${noteNames[pitch % 12]}$octave';
   }
 
-  Widget _buildDesktopKeyboardMidiReferenceSection({
-    required bool enabled,
-  }) {
+  Widget _buildDesktopKeyboardMidiReferenceSection({required bool enabled}) {
     const whiteKeys = <MapEntry<LogicalKeyboardKey, int>>[
       MapEntry(LogicalKeyboardKey.keyA, 0),
       MapEntry(LogicalKeyboardKey.keyS, 2),
@@ -9694,9 +9781,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.08),
-        ),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -9714,10 +9799,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               ),
               const SizedBox(width: 8),
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 3,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: (enabled ? const Color(0xFF8FE0A2) : Colors.white)
                       .withValues(alpha: enabled ? 0.16 : 0.07),
@@ -9754,8 +9836,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           const SizedBox(height: 12),
           LayoutBuilder(
             builder: (context, constraints) {
-              final whiteWidth =
-                  math.min(42.0, constraints.maxWidth / whiteKeys.length);
+              final whiteWidth = math.min(
+                42.0,
+                constraints.maxWidth / whiteKeys.length,
+              );
               final blackWidth = whiteWidth * 0.66;
               final keyboardWidth = whiteWidth * whiteKeys.length;
               return Center(
@@ -9904,9 +9988,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.08),
-        ),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -9943,9 +10025,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             min: 0.05,
             max: 8.0,
             divisions: 159,
-            update: (value) => onChanged(
-              sensitivity.copyWith(normal: value),
-            ),
+            update: (value) => onChanged(sensitivity.copyWith(normal: value)),
           ),
           sensitivityRow(
             label: 'Fine',
@@ -9954,9 +10034,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             min: 0.01,
             max: 2.0,
             divisions: 199,
-            update: (value) => onChanged(
-              sensitivity.copyWith(fine: value),
-            ),
+            update: (value) => onChanged(sensitivity.copyWith(fine: value)),
           ),
           sensitivityRow(
             label: 'Medium-fine',
@@ -9965,9 +10043,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             min: 0.02,
             max: 4.0,
             divisions: 199,
-            update: (value) => onChanged(
-              sensitivity.copyWith(mediumFine: value),
-            ),
+            update: (value) =>
+                onChanged(sensitivity.copyWith(mediumFine: value)),
           ),
           sensitivityRow(
             label: 'Coarse',
@@ -9976,9 +10053,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             min: 1.0,
             max: 20.0,
             divisions: 190,
-            update: (value) => onChanged(
-              sensitivity.copyWith(coarse: value),
-            ),
+            update: (value) => onChanged(sensitivity.copyWith(coarse: value)),
           ),
         ],
       ),
@@ -10138,7 +10213,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   ),
                                   decoration: BoxDecoration(
                                     color: active
-                                        ? Colors.white.withValues(alpha: 0.11)
+                                        ? Colors.white.withValues(
+                                            alpha: 0.11,
+                                          )
                                         : Colors.white.withValues(
                                             alpha: 0.05,
                                           ),
@@ -10187,10 +10264,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                       binding,
                                                     ),
                                               style: TextStyle(
-                                                color: const Color(0xFFF4F4F4)
-                                                    .withValues(
-                                                  alpha: 0.86,
-                                                ),
+                                                color: const Color(
+                                                  0xFFF4F4F4,
+                                                ).withValues(alpha: 0.86),
                                                 fontFamily: 'Pretendard',
                                                 fontSize: 12.5,
                                                 fontWeight: FontWeight.w600,
@@ -10656,10 +10732,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return 'en';
   }
 
-  String _dawTutorialText(
-    String key, {
-    Map<String, String> params = const {},
-  }) {
+  String _dawTutorialText(String key, {Map<String, String> params = const {}}) {
     final textByLocale = _kDawTutorialText[key];
     var value =
         textByLocale?[_dawTutorialLanguageCode()] ?? textByLocale?['en'] ?? key;
@@ -11024,10 +11097,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .toList(growable: false);
     _mixHighlighter.clear();
     if (keys.isEmpty) return;
-    _mixHighlighter.trigger(
-      keys,
-      duration: const Duration(seconds: 24),
-    );
+    _mixHighlighter.trigger(keys, duration: const Duration(seconds: 24));
   }
 
   void _syncDawOnboardingUiForStep(_DawTutorialStepId stepId) {
@@ -11093,8 +11163,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       case _DawTutorialStepId.chatSend:
         _chatTextController.value = TextEditingValue(
           text: _dawTutorialAiPrompt,
-          selection:
-              TextSelection.collapsed(offset: _dawTutorialAiPrompt.length),
+          selection: TextSelection.collapsed(
+            offset: _dawTutorialAiPrompt.length,
+          ),
         );
         setState(() {
           _chatExpanded = true;
@@ -11342,8 +11413,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               style: TextButton.styleFrom(
                                 minimumSize: const Size(0, 44),
                                 foregroundColor: const Color(0xFFF4F4F4),
-                                backgroundColor:
-                                    Colors.white.withValues(alpha: 0.10),
+                                backgroundColor: Colors.white.withValues(
+                                  alpha: 0.10,
+                                ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(16),
                                   side: BorderSide(
@@ -11411,8 +11483,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     final userId = _currentOnboardingUserId();
-    final pendingQuickTour =
-        await DawOnboardingPrefs.consumePendingQuickTour(userId);
+    final pendingQuickTour = await DawOnboardingPrefs.consumePendingQuickTour(
+      userId,
+    );
     final hasSeen = await DawOnboardingPrefs.hasSeen(userId);
     if (!mounted) return;
     if (!pendingQuickTour && hasSeen) return;
@@ -11532,9 +11605,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _dawTutorialRowIndex = row;
     _dawTutorialEffectIndex = effectIndex;
     if (_currentDawOnboardingStepId == _DawTutorialStepId.rowAddEffect) {
-      _scheduleDawOnboardingAdvance(
-        delay: const Duration(milliseconds: 1100),
-      );
+      _scheduleDawOnboardingAdvance(delay: const Duration(milliseconds: 1100));
     }
   }
 
@@ -11547,9 +11618,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _dawTutorialRowIndex = row;
     _dawTutorialEffectIndex = effectIndex;
     if (_currentDawOnboardingStepId == _DawTutorialStepId.rowOpenEffect) {
-      _scheduleDawOnboardingAdvance(
-        delay: const Duration(milliseconds: 950),
-      );
+      _scheduleDawOnboardingAdvance(delay: const Duration(milliseconds: 950));
     }
   }
 
@@ -11573,12 +11642,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       setState(() {
         _dawTutorialAwaitingChatReply = true;
         _dawTutorialChatAdvanceInFlight = false;
-        _dawTutorialAssistantCountAtPromptSend =
-            _chatTextMessageCount(authorId: 'assistant');
+        _dawTutorialAssistantCountAtPromptSend = _chatTextMessageCount(
+          authorId: 'assistant',
+        );
       });
-      _scheduleDawOnboardingAdvance(
-        delay: const Duration(milliseconds: 700),
-      );
+      _scheduleDawOnboardingAdvance(delay: const Duration(milliseconds: 700));
     }
   }
 
@@ -11633,8 +11701,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         pluginAutomation:
             (_rowPluginAutomation[i] ?? const <String, List<AutomationPoint>>{})
                 .map(
-          (key, value) =>
-              MapEntry(key, value.map((p) => p.copy()).toList(growable: false)),
+          (key, value) => MapEntry(
+            key,
+            value.map((p) => p.copy()).toList(growable: false),
+          ),
         ),
         automationClips: (_rowAutomationClips[i] ??
                 const <String, List<AutomationClipSnapshot>>{})
@@ -11662,9 +11732,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return snapshots;
   }
 
-  void _syncAudioTrackRowsToCurrentRows({
-    Map<int, int>? previousIndexById,
-  }) {
+  void _syncAudioTrackRowsToCurrentRows({Map<int, int>? previousIndexById}) {
     if (_audioTracks.isEmpty) return;
     _ensureClipOperationIndexes();
 
@@ -11745,8 +11813,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           value.map((clip) => clip.copyWith()).toList(growable: false),
         ),
       );
-      _rowAutomationTargets[i] =
-          Map<String, _AutomationTargetMeta>.from(state.automationTargets);
+      _rowAutomationTargets[i] = Map<String, _AutomationTargetMeta>.from(
+        state.automationTargets,
+      );
       _rowSelectedAutomationTarget[i] = state.selectedAutomationTarget;
       if (i < _rowGainSnapshot.length) {
         _rowGainSnapshot[i] = state.gainSnapshot;
@@ -11771,9 +11840,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (syncClipRows) {
-      _syncAudioTrackRowsToCurrentRows(
-        previousIndexById: previousRowIndexById,
-      );
+      _syncAudioTrackRowsToCurrentRows(previousIndexById: previousRowIndexById);
     }
     await _syncTrackGroupsToEngine();
     _pruneAutomationDiscoveryCaches();
@@ -11796,31 +11863,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     };
     final rawRows = await JuceAudioEngine.getRows();
     final nextRows = rawRows
-        .map(
-          (m) {
-            final rowId = (m['rowId'] as num?)?.toInt() ?? -1;
-            final previous = previousRowsById[rowId];
-            return TimelineRow(
-              rowId: rowId,
-              name: (m['name'] as String?) ?? previous?.name ?? '',
-              iconId: (m['iconId'] as num?)?.toInt() ?? previous?.iconId ?? 0,
-              kind: previous?.kind ?? TimelineRowKind.audio,
-              instrumentId: previous?.instrumentId ?? '',
-              instrumentName: previous?.instrumentName ?? '',
-              instrumentParams: previous == null
-                  ? const <String, double>{}
-                  : Map<String, double>.from(previous.instrumentParams),
-              hostedInstrumentStateBase64:
-                  previous?.hostedInstrumentStateBase64 ?? '',
-              roleOverride: previous?.roleOverride ?? '',
-              groupId: previous?.groupId ?? '',
-              color: previous?.color ?? 0,
-              inputDeviceName: previous?.inputDeviceName ?? '',
-              inputChannelStart: previous?.inputChannelStart ?? 0,
-              inputChannelCount: previous?.inputChannelCount ?? 1,
-            );
-          },
-        )
+        .map((m) {
+          final rowId = (m['rowId'] as num?)?.toInt() ?? -1;
+          final previous = previousRowsById[rowId];
+          return TimelineRow(
+            rowId: rowId,
+            name: (m['name'] as String?) ?? previous?.name ?? '',
+            iconId: (m['iconId'] as num?)?.toInt() ?? previous?.iconId ?? 0,
+            kind: previous?.kind ?? TimelineRowKind.audio,
+            instrumentId: previous?.instrumentId ?? '',
+            instrumentName: previous?.instrumentName ?? '',
+            instrumentParams: previous == null
+                ? const <String, double>{}
+                : Map<String, double>.from(previous.instrumentParams),
+            hostedInstrumentStateBase64:
+                previous?.hostedInstrumentStateBase64 ?? '',
+            roleOverride: previous?.roleOverride ?? '',
+            groupId: previous?.groupId ?? '',
+            color: previous?.color ?? 0,
+            inputDeviceName: previous?.inputDeviceName ?? '',
+            inputChannelStart: previous?.inputChannelStart ?? 0,
+            inputChannelCount: previous?.inputChannelCount ?? 1,
+          );
+        })
         .where((r) => r.rowId >= 0)
         .toList(growable: false);
     await _applyRowsToEditorState(
@@ -11834,9 +11899,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final id = await JuceAudioEngine.addRow('Track 1', iconId: 0);
     if (id >= 0) {
       await _applyRowsToEditorState(
-        <TimelineRow>[
-          TimelineRow(rowId: id, name: 'Track 1', iconId: 0),
-        ],
+        <TimelineRow>[TimelineRow(rowId: id, name: 'Track 1', iconId: 0)],
         refreshAutomationTargets: !_isProjectLoading,
         syncClipRows: false,
       );
@@ -11869,7 +11932,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _restoreRowsFromProjectJson(
-      List<Map<String, dynamic>> savedRows, List tracks) async {
+    List<Map<String, dynamic>> savedRows,
+    List tracks,
+  ) async {
     // Preliminary engine row reloads reconcile groups against rows that have
     // not received their persisted group IDs yet. Retain the authoritative
     // project metadata until the persisted rows are ready to be applied.
@@ -11956,9 +12021,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     }
 
-    await _reloadRowsFromEngine(
-      refreshAutomationTargets: false,
-    );
+    await _reloadRowsFromEngine(refreshAutomationTargets: false);
 
     if (isFreshProject) {
       for (int i = 0; i < _rowCount; i++) {
@@ -11967,9 +12030,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         await JuceAudioEngine.renameRow(rowId, 'Track ${i + 1}');
         await JuceAudioEngine.setRowIcon(rowId, 0);
       }
-      await _reloadRowsFromEngine(
-        refreshAutomationTargets: false,
-      );
+      await _reloadRowsFromEngine(refreshAutomationTargets: false);
       await _recomputeAudibleState();
       return;
     }
@@ -11986,9 +12047,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await JuceAudioEngine.setRowIcon(rowId, iconId);
     }
 
-    await _reloadRowsFromEngine(
-      refreshAutomationTargets: false,
-    );
+    await _reloadRowsFromEngine(refreshAutomationTargets: false);
     final restoredRows = <TimelineRow>[];
     for (int i = 0; i < _rowCount; i++) {
       final saved =
@@ -12042,9 +12101,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     widget.evaluationController?._detach();
     if (PlatformCapabilities.current.isDesktop) {
       HardwareKeyboard.instance.removeHandler(_handleMacEditorKeyEvent);
-      unawaited(
-        JuceAudioEngine.setDesktopKeyboardMidiForwardingEnabled(false),
-      );
+      unawaited(JuceAudioEngine.setDesktopKeyboardMidiForwardingEnabled(false));
     }
     unawaited(_releaseAllDesktopMidiNotes());
     unawaited(_setIOSSystemGestureDeferral(false));
@@ -12198,17 +12255,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     try {
       return await action();
     } finally {
-      _androidEngineCriticalSectionDepth =
-          math.max(0, _androidEngineCriticalSectionDepth - 1);
+      _androidEngineCriticalSectionDepth = math.max(
+        0,
+        _androidEngineCriticalSectionDepth - 1,
+      );
       if (_androidEngineCriticalSectionDepth == 0) {
         unawaited(_flushDeferredAndroidRouteRefreshIfNeeded());
       }
     }
   }
 
-  Future<void> _requestAndroidRouteRefresh({
-    required String reason,
-  }) async {
+  Future<void> _requestAndroidRouteRefresh({required String reason}) async {
     if (defaultTargetPlatform != TargetPlatform.android) {
       await JuceAudioEngine.refreshAudioRoute(reason: reason);
       return;
@@ -12371,8 +12428,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _refreshProducerCaptureUiAllowlistAccess() async {
     final fallbackUsername = _fallbackProducerCaptureUsername();
     var resolvedUsername = fallbackUsername;
-    var allowlisted =
-        kDefaultProducerCaptureUsernameAllowlist.contains(fallbackUsername);
+    var allowlisted = kDefaultProducerCaptureUsernameAllowlist.contains(
+      fallbackUsername,
+    );
 
     if (AppApiConfig.hasApiBaseUrl) {
       try {
@@ -12501,8 +12559,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _setMasterMeterExpandedState(false);
       _invalidateAiLibrarySnapshotCache();
       await _ensureDefaultSampleBrowserRoots();
-      final loadResult =
-          await _projectPersistence.loadProjectState(_projectDir);
+      final loadResult = await _projectPersistence.loadProjectState(
+        _projectDir,
+      );
       final json = loadResult.projectState;
       if (loadResult.warningMessage?.trim().isNotEmpty == true) {
         _projectLoadIssues.add(
@@ -12550,7 +12609,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           json["cloudDocumentRevision"] ?? json["cloud_document_revision"];
       _cloudDocumentRevision = rawCloudDocumentRevision is num
           ? rawCloudDocumentRevision.toInt()
-          : int.tryParse((rawCloudDocumentRevision ?? '').toString().trim());
+          : int.tryParse(
+              (rawCloudDocumentRevision ?? '').toString().trim(),
+            );
       _cloudSyncedAt = (json["cloudSyncedAt"] ?? json["cloud_synced_at"] ?? '')
           .toString()
           .trim();
@@ -12604,12 +12665,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       _metronomeEnabled = (uiSettings?["metronomeEnabled"] as bool?) ?? false;
       _metronomeVolume =
-          ((uiSettings?["metronomeVolume"] as num?)?.toDouble() ?? 0.5)
-              .clamp(0.0, 1.0);
-      _preferredDawSampleRate =
-          _normalizeDawSampleRate(uiSettings?["sampleRate"]);
-      _preferredDawBufferSize =
-          _normalizeDawBufferSize(uiSettings?["bufferSize"]);
+          ((uiSettings?["metronomeVolume"] as num?)?.toDouble() ?? 0.5).clamp(
+        0.0,
+        1.0,
+      );
+      _preferredDawSampleRate = _normalizeDawSampleRate(
+        uiSettings?["sampleRate"],
+      );
+      _preferredDawBufferSize = _normalizeDawBufferSize(
+        uiSettings?["bufferSize"],
+      );
       _midiInputChannelFilter = _normalizeMidiInputChannelFilter(
         uiSettings?["midiInputChannel"] ??
             uiSettings?["midiInputChannelFilter"],
@@ -12643,8 +12708,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (migratedLegacyRows) {
         json["version"] = 6;
       }
-      final persistedRowIndexById =
-          ProjectManager.persistedRowOrderIndexById(rowsJson);
+      final persistedRowIndexById = ProjectManager.persistedRowOrderIndexById(
+        rowsJson,
+      );
       final rowFxList = (json["rowEffects"] as List?) ?? [];
       final loadedTracksForWaveforms = <AudioTrack>[];
       final ensuredRowIndexes = <int>{};
@@ -12674,8 +12740,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             persistedRowIndexById: persistedRowIndexById,
           );
 
-          final clipKind =
-              ClipKindWire.fromWire((map['clipType'] as String?) ?? 'audio');
+          final clipKind = ClipKindWire.fromWire(
+            (map['clipType'] as String?) ?? 'audio',
+          );
           final savedLane = rowIndex >= 0 && rowIndex < rowsJson.length
               ? _timelineRowFromJson(rowsJson[rowIndex])
               : null;
@@ -12739,12 +12806,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               desktopExternalPluginHostingActive &&
                   clipKind == ClipKind.midi &&
                   _desktopPluginCatalogLoadAttempted &&
-                  _instrumentIdUsesExternalPlugin(
-                    instrumentId,
-                  ) &&
-                  !_isKnownDesktopPluginId(
-                    instrumentId,
-                  );
+                  _instrumentIdUsesExternalPlugin(instrumentId) &&
+                  !_isKnownDesktopPluginId(instrumentId);
           if (missingDesktopPluginInstrument) {
             _projectLoadIssues.add(
               _ProjectLoadIssue(
@@ -12759,8 +12822,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           final trimStartMs =
               ((map["trimStartMs"] as num?)?.round() ?? 0).clamp(0, 1 << 30);
           final rawTrimEndMs = (map["trimEndMs"] as num?)?.round();
-          final trimStartRequested =
-              Duration(milliseconds: trimStartMs.toInt());
+          final trimStartRequested = Duration(
+            milliseconds: trimStartMs.toInt(),
+          );
           final trimEndRequested =
               (rawTrimEndMs != null && rawTrimEndMs > trimStartMs)
                   ? Duration(milliseconds: rawTrimEndMs)
@@ -12786,11 +12850,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               : (normalizeVolume
                   ? (_gainUiToLinearValue(loadedGain) /
                           math.max(
-                              _gainUiToLinearValue(preNormalizeGain), 0.000001))
-                      .clamp(
-                        _kClipNormalizeGainMin,
-                        _kClipNormalizeGainMax,
-                      )
+                            _gainUiToLinearValue(preNormalizeGain),
+                            0.000001,
+                          ))
+                      .clamp(_kClipNormalizeGainMin, _kClipNormalizeGainMax)
                       .toDouble()
                   : 1.0);
           final gain = (!hasSeparateNormalizeGain && normalizeVolume)
@@ -12826,12 +12889,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
           final automationList = (map["automation"] as List?) ?? [];
           final automation = automationList
-              .map((e) => AutomationPointJson.fromJson(
-                  (e as Map).cast<String, dynamic>()))
+              .map(
+                (e) => AutomationPointJson.fromJson(
+                  (e as Map).cast<String, dynamic>(),
+                ),
+              )
               .toList();
 
-          final audioFile =
-              File(p.join(ProjectManager.audioDir(_projectDir).path, fileName));
+          final audioFile = File(
+            p.join(ProjectManager.audioDir(_projectDir).path, fileName),
+          );
           if (!audioFile.existsSync()) {
             if (clipKind == ClipKind.midi) {
               debugPrint(
@@ -12894,7 +12961,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     ? automation
                     : [
                         AutomationPoint(x: 0.0, volume: 1.0),
-                        AutomationPoint(x: 1.0, volume: 1.0)
+                        AutomationPoint(x: 1.0, volume: 1.0),
                       ];
                 loadedTracksForWaveforms.add(tr);
               }
@@ -13030,11 +13097,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               ? automation
               : [
                   AutomationPoint(x: 0.0, volume: 1.0),
-                  AutomationPoint(x: 1.0, volume: 1.0)
+                  AutomationPoint(x: 1.0, volume: 1.0),
                 ];
           loadedTracksForWaveforms.add(tr);
           debugPrint(
-              '[ProjectLoad] restored clip $savedClipId engine=${tr.engineClipId}');
+            '[ProjectLoad] restored clip $savedClipId engine=${tr.engineClipId}',
+          );
         }
       } finally {
         debugPrint('[ProjectLoad] end native clip load batch');
@@ -13058,8 +13126,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final rowStatesList = (json["rowStates"] as List?) ?? [];
 
       for (final rs in rowStatesList) {
-        final snap =
-            RowStateSnapshot.fromJson((rs as Map).cast<String, dynamic>());
+        final snap = RowStateSnapshot.fromJson(
+          (rs as Map).cast<String, dynamic>(),
+        );
         // Row IDs are session-scoped and can be reassigned after reopen.
         // Prefer persisted row order index, and only fall back to rowId lookup.
         var r = snap.row;
@@ -13115,7 +13184,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _rowEffectSnapshotsByRowId.clear();
         for (final rf in rowFxList) {
           final snap = RowEffectsSnapshotJson.fromJson(
-              (rf as Map).cast<String, dynamic>());
+            (rf as Map).cast<String, dynamic>(),
+          );
           if (snap.rowId >= 0) {
             _rowEffectSnapshotsByRowId[snap.rowId] = snap;
           }
@@ -13170,7 +13240,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final ms = MasterEffectsSnapshotJson.fromJson(masterFx);
             _masterEffectSnapshot = ms;
             debugPrint(
-                '[ProjectLoad] restore master FX count=${ms.effects.length}');
+              '[ProjectLoad] restore master FX count=${ms.effects.length}',
+            );
             _registerPendingMasterEffectRestores(ms);
             for (int i = 0; i < ms.effects.length; i++) {
               final fx = ms.effects[i];
@@ -13201,9 +13272,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         await JuceAudioEngine.endProjectClipLoad();
       }
 
-      await _refreshAutomationTargetsForAllRows(
-        syncNativeWhenDone: false,
-      );
+      await _refreshAutomationTargetsForAllRows(syncNativeWhenDone: false);
 
       // Prime transport state and recover any missing output route before the
       // first user-driven note audition or playback.
@@ -13228,9 +13297,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       unawaited(
         AnalyticsService.instance.trackScreen(
           AnalyticsScreenNames.projectEditor,
-          properties: <String, Object?>{
-            'project_id': _projectId,
-          },
+          properties: <String, Object?>{'project_id': _projectId},
         ),
       );
       unawaited(
@@ -13613,9 +13680,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return Duration(minutes: minutes);
   }
 
-  Future<void> _runCloudAutoSync({
-    required String reason,
-  }) async {
+  Future<void> _runCloudAutoSync({required String reason}) async {
     if (!_cloudAutoSyncDirty || !_canAttemptAutoCloudSync()) return;
     if (_cloudAutoSyncInFlight) return;
 
@@ -13723,8 +13788,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _cloudAutoSyncConflict = true;
       }
       if (!nonRetryable) {
-        _cloudAutoSyncFailureCount =
-            math.min(_cloudAutoSyncFailureCount + 1, 4);
+        _cloudAutoSyncFailureCount = math.min(
+          _cloudAutoSyncFailureCount + 1,
+          4,
+        );
         retryDelay = _nextCloudAutoSyncBackoff();
         _cloudAutoSyncBackoffUntil = DateTime.now().add(retryDelay);
       }
@@ -13840,10 +13907,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final current = _hostedPluginRestoreEntries[key];
     if (current == null) return;
     _setHostedPluginRestoreEntry(
-      current.copyWith(
-        status: status,
-        detail: detail,
-      ),
+      current.copyWith(status: status, detail: detail),
     );
   }
 
@@ -14163,11 +14227,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       final clip = _audioTracks[clipIndex];
       if (!clip.isMidi) continue;
-      final row = _rowForClipFromRows(
-        clip,
-        rows,
-        rowIndexById: rowIndexById,
-      );
+      final row = _rowForClipFromRows(clip, rows, rowIndexById: rowIndexById);
       if (row == null || !row.isInstrumentLane) continue;
 
       final instrumentId = row.instrumentId.trim().isEmpty
@@ -14515,8 +14575,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           return null;
         }
         final referenceRowId = _commandInt(command, 'referenceRowId');
-        final previousSelectedRowId =
-            _commandInt(command, 'previousSelectedRowId');
+        final previousSelectedRowId = _commandInt(
+          command,
+          'previousSelectedRowId',
+        );
         return RowCreateUndoAction(
           previousSelectedRowId: previousSelectedRowId,
           initialRowId: createdRowId,
@@ -14642,14 +14704,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           oldRow: _commandInt(command, 'oldRow') ?? 0,
           newOffset: _commandDouble(command, 'newOffset') ?? 0.0,
           newRow: _commandInt(command, 'newRow') ?? 0,
-          oldAlignmentOffsetMs: _commandDouble(
-            command,
-            'oldAlignmentOffsetMs',
-          ),
-          newAlignmentOffsetMs: _commandDouble(
-            command,
-            'newAlignmentOffsetMs',
-          ),
+          oldAlignmentOffsetMs: _commandDouble(command, 'oldAlignmentOffsetMs'),
+          newAlignmentOffsetMs: _commandDouble(command, 'newAlignmentOffsetMs'),
           onChange: () => _handlePersistedClipTimingUndo(
             clipIndex ?? -1,
             clipId: clipId,
@@ -14717,14 +14773,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           newNotes: _commandMidiNotes(command['newNotes']),
           oldInstrumentId: (command['oldInstrumentId'] ?? '').toString(),
           oldInstrumentName: (command['oldInstrumentName'] ?? '').toString(),
-          oldInstrumentParams:
-              _commandDoubleMap(command['oldInstrumentParams']),
+          oldInstrumentParams: _commandDoubleMap(
+            command['oldInstrumentParams'],
+          ),
           oldHostedInstrumentStateBase64:
               (command['oldHostedInstrumentStateB64'] ?? '').toString(),
           newInstrumentId: (command['newInstrumentId'] ?? '').toString(),
           newInstrumentName: (command['newInstrumentName'] ?? '').toString(),
-          newInstrumentParams:
-              _commandDoubleMap(command['newInstrumentParams']),
+          newInstrumentParams: _commandDoubleMap(
+            command['newInstrumentParams'],
+          ),
           newHostedInstrumentStateBase64:
               (command['newHostedInstrumentStateB64'] ?? '').toString(),
           oldTrimEnd: command.containsKey('oldTrimEndMs')
@@ -15265,8 +15323,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _valueBool(map['tempoStretchPreservePitch']) ?? true,
       tempoWarpMode: normalizeTempoWarpMode(map['tempoWarpMode'] as String?),
       tempoStretchEnabled: _valueBool(map['tempoStretchEnabled']),
-      tempoStretchPreservePitchDefault:
-          _valueBool(map['tempoStretchPreservePitchDefault']),
+      tempoStretchPreservePitchDefault: _valueBool(
+        map['tempoStretchPreservePitchDefault'],
+      ),
     );
   }
 
@@ -15326,14 +15385,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         fallback: _timeSignatureDenominator,
       ),
       clipOffsetsSec: _commandDoubleList(map['clipOffsetsSec']),
-      clipVolumeAutomation:
-          _commandAutomationPointLists(map['clipVolumeAutomation']),
-      rowVolumeAutomation:
-          _commandAutomationPointLists(map['rowVolumeAutomation']),
-      rowPluginAutomation:
-          _commandNestedAutomationPointsByRow(map['rowPluginAutomation']),
-      rowAutomationClips:
-          _commandNestedAutomationClipsByRow(map['rowAutomationClips']),
+      clipVolumeAutomation: _commandAutomationPointLists(
+        map['clipVolumeAutomation'],
+      ),
+      rowVolumeAutomation: _commandAutomationPointLists(
+        map['rowVolumeAutomation'],
+      ),
+      rowPluginAutomation: _commandNestedAutomationPointsByRow(
+        map['rowPluginAutomation'],
+      ),
+      rowAutomationClips: _commandNestedAutomationClipsByRow(
+        map['rowAutomationClips'],
+      ),
       loopEnabled: _valueBool(map['loopEnabled']) ?? false,
       loopStartMs: _valueInt(map['loopStartMs']) ?? 0,
       loopEndMs: _valueInt(map['loopEndMs']) ?? 0,
@@ -15529,8 +15592,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (item is Map<String, dynamic>) {
         lanes.add(AutomationLaneSnapshot.fromJson(item));
       } else if (item is Map) {
-        lanes
-            .add(AutomationLaneSnapshot.fromJson(item.cast<String, dynamic>()));
+        lanes.add(
+          AutomationLaneSnapshot.fromJson(item.cast<String, dynamic>()),
+        );
       }
     }
     return lanes;
@@ -15543,8 +15607,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (item is Map<String, dynamic>) {
         clips.add(AutomationClipSnapshot.fromJson(item));
       } else if (item is Map) {
-        clips
-            .add(AutomationClipSnapshot.fromJson(item.cast<String, dynamic>()));
+        clips.add(
+          AutomationClipSnapshot.fromJson(item.cast<String, dynamic>()),
+        );
       }
     }
     return clips;
@@ -15553,11 +15618,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   List<Map<String, dynamic>> _commandClipPayloads(Object? raw) {
     final list = raw is List ? raw : const <Object?>[];
     return list
-        .map((item) => item is Map<String, dynamic>
-            ? item
-            : item is Map
-                ? item.cast<String, dynamic>()
-                : null)
+        .map(
+          (item) => item is Map<String, dynamic>
+              ? item
+              : item is Map
+                  ? item.cast<String, dynamic>()
+                  : null,
+        )
         .whereType<Map<String, dynamic>>()
         .toList(growable: false);
   }
@@ -15652,9 +15719,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     clip.tempoStretchPreservePitch = snapshot.tempoStretchPreservePitch;
     clip.tempoWarpMode = normalizeTempoWarpMode(snapshot.tempoWarpMode);
     _tempoStretchEnabled = snapshot.tempoStretchEnabled ??
-        _audioTracks.where((track) => !track.isMidi).any(
-              (track) => track.stretchToProjectTempo,
-            );
+        _audioTracks
+            .where((track) => !track.isMidi)
+            .any((track) => track.stretchToProjectTempo);
     _tempoStretchPreservePitchDefault =
         snapshot.tempoStretchPreservePitchDefault ??
             _tempoStretchPreservePitchDefault;
@@ -15672,8 +15739,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_clipIndexForPersistentId(clipId) >= 0) return;
 
     final fileName = (payload['fileName'] ?? '').toString().trim();
-    final file =
-        File(p.join(ProjectManager.audioDir(_projectDir).path, fileName));
+    final file = File(
+      p.join(ProjectManager.audioDir(_projectDir).path, fileName),
+    );
     final kind = ClipKindWire.fromWire((payload['clipType'] ?? '').toString());
     final persistedRowId = _valueInt(payload['rowId']);
     final row = persistedRowId == null
@@ -15708,8 +15776,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         pitchSemitones: _valueDouble(payload['pitchSemitones']),
         sourceTempoBpm: _valueDouble(payload['sourceTempoBpm']),
         stretchToProjectTempo: _valueBool(payload['stretchToProjectTempo']),
-        tempoStretchPreservePitch:
-            _valueBool(payload['tempoStretchPreservePitch']),
+        tempoStretchPreservePitch: _valueBool(
+          payload['tempoStretchPreservePitch'],
+        ),
         tempoWarpMode: payload['tempoWarpMode'] as String?,
         crossfade: _valueDouble(payload['crossfade']),
         automation: automation,
@@ -15738,8 +15807,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       isReversed: _valueBool(payload['isReversed']) ?? false,
       sourceTempoBpm: _valueDouble(payload['sourceTempoBpm']),
       stretchToProjectTempo: _valueBool(payload['stretchToProjectTempo']),
-      tempoStretchPreservePitch:
-          _valueBool(payload['tempoStretchPreservePitch']),
+      tempoStretchPreservePitch: _valueBool(
+        payload['tempoStretchPreservePitch'],
+      ),
       tempoWarpMode: payload['tempoWarpMode'] as String?,
       recordingLatencyMs: _valueDouble(payload['recordingLatencyMs']),
       alignmentOffsetMs: _valueDouble(payload['alignmentOffsetMs']),
@@ -15767,9 +15837,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (clip.engineClipId >= 0) {
       await JuceAudioEngine.removeTrack(clip.engineClipId);
     }
-    _updateOverallDurationIfNeeded(
-      removedClips: <AudioTrack>[clip],
-    );
+    _updateOverallDurationIfNeeded(removedClips: <AudioTrack>[clip]);
     await _syncClipFadesForRowsToEngine({_clipRowIdForFadeSync(clip)});
     _clipFadeRowIdByEngineId.remove(clip.engineClipId);
     if (mounted) setState(() {});
@@ -15828,12 +15896,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_hasExplicitAutomationForTarget(row, gainTargetId)) {
       final target = _rowAutomationTargets[row]?[gainTargetId] ??
           _fallbackAutomationTargetMeta(gainTargetId);
-      final oldPoints = _pointsForAutomationTarget(row, gainTargetId)
-          .map((point) => point.copy())
-          .toList(growable: false);
+      final oldPoints = _pointsForAutomationTarget(
+        row,
+        gainTargetId,
+      ).map((point) => point.copy()).toList(growable: false);
       final delta = safeNewGain - safeOldGain;
       final newPoints = oldPoints.map((point) {
-        final currentValue = _denormalizeAutomationValue(point.volume, target);
+        final currentValue = _denormalizeAutomationValue(
+          point.volume,
+          target,
+        );
         final nextValue =
             (currentValue + delta).clamp(target.min, target.max).toDouble();
         return AutomationPoint(
@@ -15855,8 +15927,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
 
       final timeMs = _globalAudioClock.inMilliseconds.toDouble();
-      final liveNormalized =
-          _resolvedAutomationValueAtMs(row, gainTargetId, timeMs);
+      final liveNormalized = _resolvedAutomationValueAtMs(
+        row,
+        gainTargetId,
+        timeMs,
+      );
       final liveGain = _denormalizeAutomationValue(
         liveNormalized,
         target,
@@ -16126,7 +16201,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (rawTracks != null) {
         redactedJson['tracks'] = rawTracks.map((track) {
           if (track is! Map) return track;
-          final copy = Map<String, dynamic>.from(track.cast<String, dynamic>());
+          final copy = Map<String, dynamic>.from(
+            track.cast<String, dynamic>(),
+          );
           copy.remove('hostedInstrumentStateB64');
           copy.remove('hostedInstrumentStateBase64');
           return copy;
@@ -16354,10 +16431,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       setState(() => _requiresProjectNaming = false);
       return true;
     }
-    return _renameProjectAndSyncState(
-      newName,
-      showSuccessSnackBar: false,
-    );
+    return _renameProjectAndSyncState(newName, showSuccessSnackBar: false);
   }
 
   Future<void> _handleBackPressed() async {
@@ -16398,10 +16472,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   void _handleBackButtonTap() {
     if (_backButtonExitInFlight) return;
-    _trackUiClick(
-      controlId: 'back_button',
-      surface: 'top_bar',
-    );
+    _trackUiClick(controlId: 'back_button', surface: 'top_bar');
     unawaited(_runBackButtonExitSequence());
   }
 
@@ -16443,8 +16514,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     final minutes = twoDigits(duration.inMinutes.remainder(60));
     final seconds = twoDigits(duration.inSeconds.remainder(60));
-    final millisecondsFirstTwo =
-        firstTwoMsDigits(duration.inMilliseconds.remainder(1000));
+    final millisecondsFirstTwo = firstTwoMsDigits(
+      duration.inMilliseconds.remainder(1000),
+    );
 
     return "$minutes:$seconds:$millisecondsFirstTwo";
   }
@@ -16603,9 +16675,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   /// Calculate effective audio position for a given track based on video position.
   Duration _calculateEffectiveAudioPositionForTrack(
-      AudioTrack track, Duration videoPos) {
-    final offsetDuration =
-        Duration(milliseconds: (track.offset * 1000).toInt());
+    AudioTrack track,
+    Duration videoPos,
+  ) {
+    final offsetDuration = Duration(
+      milliseconds: (track.offset * 1000).toInt(),
+    );
     if (videoPos < offsetDuration) {
       return track.trimStart;
     } else {
@@ -16720,12 +16795,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _transportUiStopwatch.elapsed + const Duration(milliseconds: 420);
     final resumeStartPoint = _globalAudioClock;
     await JuceAudioEngine.setTransportSeconds(
-        resumeStartPoint.inMilliseconds / 1000.0);
+      resumeStartPoint.inMilliseconds / 1000.0,
+    );
     await JuceAudioEngine.setMetronomeTransportMs(
-        resumeStartPoint.inMilliseconds.toDouble());
+      resumeStartPoint.inMilliseconds.toDouble(),
+    );
     if (!commandIsCurrent()) return;
-    final routeReady =
-        await _ensurePlaybackRouteReady(reason: 'transportResume');
+    final routeReady = await _ensurePlaybackRouteReady(
+      reason: 'transportResume',
+    );
     if (!routeReady) {
       _transportDesiredPlaying = false;
       _transportTicker?.stop();
@@ -16766,8 +16844,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
     if (!commandIsCurrent()) return;
     if (_transportRateSecPerSec <= 0.0) {
-      final retryReady =
-          await _ensurePlaybackRouteReady(reason: 'transportResumeRetry');
+      final retryReady = await _ensurePlaybackRouteReady(
+        reason: 'transportResumeRetry',
+      );
       if (retryReady) {
         await JuceAudioEngine.play();
       }
@@ -16821,7 +16900,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     await JuceAudioEngine.pause();
     await JuceAudioEngine.setTransportSeconds(
-        newStartPoint.inMilliseconds / 1000.0);
+      newStartPoint.inMilliseconds / 1000.0,
+    );
 
     // Reset the global audio clock.
     setState(() {
@@ -16881,8 +16961,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     if (clipMuteUpdates.isNotEmpty) {
       futures.add(
-        JuceAudioEngine.updateClipTimelineBatch(clipMuteUpdates)
-            .then<void>((_) {}),
+        JuceAudioEngine.updateClipTimelineBatch(
+          clipMuteUpdates,
+        ).then<void>((_) {}),
       );
     }
     if (futures.isNotEmpty) {
@@ -16908,8 +16989,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   void _startClipLoopPreviewTimer() {
     _clipLoopPreviewTimer?.cancel();
-    _clipLoopPreviewTimer =
-        Timer.periodic(const Duration(milliseconds: 24), (_) async {
+    _clipLoopPreviewTimer = Timer.periodic(const Duration(milliseconds: 24), (
+      _,
+    ) async {
       final clipIndex = _clipLoopPreviewClipIndex;
       final startMs = _clipLoopPreviewStartMs;
       final endMs = _clipLoopPreviewEndMs;
@@ -17024,8 +17106,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       SubscriptionCapability.highQualityExport,
       fallback: widget.isProEntitled ?? true,
     );
-    final normalizedCurrentSettings =
-        _normalizeAudioExportSettings(_audioExportSettings);
+    final normalizedCurrentSettings = _normalizeAudioExportSettings(
+      _audioExportSettings,
+    );
     _ExportAudioFormat selectedFormat = normalizedCurrentSettings.format;
     int selectedSampleRate = normalizedCurrentSettings.sampleRate;
     int selectedWavBitDepth = _audioExportSettings.wavBitDepth;
@@ -17072,10 +17155,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       selectedMp3VbrQuality = _kExportMp3VbrQualities.first;
     }
     selectedNormalizeTargetDb = selectedNormalizeTargetDb
-        .clamp(
-          _kExportNormalizeTargetDbMin,
-          _kExportNormalizeTargetDbMax,
-        )
+        .clamp(_kExportNormalizeTargetDbMin, _kExportNormalizeTargetDbMax)
         .toDouble();
     if (!_ExportMp3Mode.values.contains(selectedMp3Mode)) {
       selectedMp3Mode = _ExportMp3Mode.cbr;
@@ -17138,8 +17218,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 icon: Icons.lock_outline_rounded,
               ),
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.035),
                   borderRadius: BorderRadius.circular(20),
@@ -17339,8 +17421,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               children: [
                                 ConstrainedBox(
                                   constraints: BoxConstraints(
-                                    maxHeight: (MediaQuery.sizeOf(dialogContext)
-                                                .height *
+                                    maxHeight: (MediaQuery.sizeOf(
+                                              dialogContext,
+                                            ).height *
                                             0.58)
                                         .clamp(250.0, 520.0)
                                         .toDouble(),
@@ -17367,14 +17450,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         const SizedBox(height: 12),
                                         Container(
                                           decoration: BoxDecoration(
-                                            borderRadius:
-                                                BorderRadius.circular(24),
+                                            borderRadius: BorderRadius.circular(
+                                              24,
+                                            ),
                                             border: Border.all(
-                                              color: Colors.white
-                                                  .withValues(alpha: 0.12),
+                                              color: Colors.white.withValues(
+                                                alpha: 0.12,
+                                              ),
                                             ),
                                             color: const Color.fromRGBO(
-                                                244, 244, 244, 0.10),
+                                              244,
+                                              244,
+                                              244,
+                                              0.10,
+                                            ),
                                           ),
                                           child: Row(
                                             children: [
@@ -17383,7 +17472,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                 label: 'WAV',
                                                 borderRadius:
                                                     const BorderRadius.only(
-                                                  topLeft: Radius.circular(24),
+                                                  topLeft: Radius.circular(
+                                                    24,
+                                                  ),
                                                   bottomLeft:
                                                       Radius.circular(24),
                                                 ),
@@ -17393,8 +17484,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               Container(
                                                 width: 1,
                                                 height: 48,
-                                                color: Colors.white
-                                                    .withValues(alpha: 0.12),
+                                                color: Colors.white.withValues(
+                                                  alpha: 0.12,
+                                                ),
                                               ),
                                               buildFormatOption(
                                                 format: _ExportAudioFormat.mp3,
@@ -17405,15 +17497,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               Container(
                                                 width: 1,
                                                 height: 48,
-                                                color: Colors.white
-                                                    .withValues(alpha: 0.12),
+                                                color: Colors.white.withValues(
+                                                  alpha: 0.12,
+                                                ),
                                               ),
                                               buildFormatOption(
                                                 format: _ExportAudioFormat.flac,
                                                 label: 'FLAC',
                                                 borderRadius:
                                                     const BorderRadius.only(
-                                                  topRight: Radius.circular(24),
+                                                  topRight: Radius.circular(
+                                                    24,
+                                                  ),
                                                   bottomRight:
                                                       Radius.circular(24),
                                                 ),
@@ -17427,15 +17522,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           const SizedBox(height: 10),
                                           Container(
                                             padding: const EdgeInsets.symmetric(
-                                                horizontal: 10, vertical: 8),
+                                              horizontal: 10,
+                                              vertical: 8,
+                                            ),
                                             decoration: BoxDecoration(
                                               color: const Color.fromRGBO(
-                                                  244, 244, 244, 0.10),
+                                                244,
+                                                244,
+                                                244,
+                                                0.10,
+                                              ),
                                               borderRadius:
                                                   BorderRadius.circular(18),
                                               border: Border.all(
-                                                color: Colors.white
-                                                    .withValues(alpha: 0.09),
+                                                color: Colors.white.withValues(
+                                                  alpha: 0.09,
+                                                ),
                                               ),
                                             ),
                                             child: Text(
@@ -17444,8 +17546,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                 'Windows desktop currently exports with native WAV render only. MP3 and post-processing controls are disabled.',
                                               ),
                                               style: TextStyle(
-                                                color: Colors.white
-                                                    .withValues(alpha: 0.86),
+                                                color: Colors.white.withValues(
+                                                  alpha: 0.86,
+                                                ),
                                                 fontSize: 12.2,
                                                 height: 1.3,
                                                 fontWeight: FontWeight.w500,
@@ -17457,8 +17560,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         GestureDetector(
                                           behavior: HitTestBehavior.opaque,
                                           onTap: () {
-                                            setSheetState(() =>
-                                                showAdvanced = !showAdvanced);
+                                            setSheetState(
+                                              () =>
+                                                  showAdvanced = !showAdvanced,
+                                            );
                                           },
                                           child: Padding(
                                             padding: const EdgeInsets.symmetric(
@@ -17476,9 +17581,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                       .textTheme.bodyMedium
                                                       ?.copyWith(
                                                     fontWeight: FontWeight.w700,
-                                                    color: Colors.white
-                                                        .withValues(
-                                                            alpha: 0.82),
+                                                    color:
+                                                        Colors.white.withValues(
+                                                      alpha: 0.82,
+                                                    ),
                                                   ),
                                                 ),
                                                 const Spacer(),
@@ -17486,7 +17592,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                   turns:
                                                       showAdvanced ? 0.5 : 0.0,
                                                   duration: const Duration(
-                                                      milliseconds: 220),
+                                                    milliseconds: 220,
+                                                  ),
                                                   curve: Curves.easeOutCubic,
                                                   child: Icon(
                                                     Icons.keyboard_arrow_down,
@@ -17498,8 +17605,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           ),
                                         ),
                                         AnimatedSize(
-                                          duration:
-                                              const Duration(milliseconds: 260),
+                                          duration: const Duration(
+                                            milliseconds: 260,
+                                          ),
                                           curve: Curves.easeOutCubic,
                                           alignment: Alignment.topCenter,
                                           child: ClipRect(
@@ -17511,21 +17619,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                 ignoring: !showAdvanced,
                                                 child: AnimatedOpacity(
                                                   duration: const Duration(
-                                                      milliseconds: 180),
+                                                    milliseconds: 180,
+                                                  ),
                                                   curve: Curves.easeOutCubic,
                                                   opacity:
                                                       showAdvanced ? 1.0 : 0.0,
                                                   child: Padding(
                                                     padding:
                                                         const EdgeInsets.only(
-                                                            top: 10),
+                                                      top: 10,
+                                                    ),
                                                     child: Theme(
                                                       data: theme.copyWith(
                                                         unselectedWidgetColor:
                                                             Colors.white
                                                                 .withValues(
-                                                                    alpha:
-                                                                        0.45),
+                                                          alpha: 0.45,
+                                                        ),
                                                         colorScheme: theme
                                                             .colorScheme
                                                             .copyWith(
@@ -17538,9 +17648,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                 .stretch,
                                                         children: [
                                                           buildDropdownField(
-                                                            label: L10n.translate(
-                                                                context,
-                                                                'Sample rate'),
+                                                            label:
+                                                                L10n.translate(
+                                                              context,
+                                                              'Sample rate',
+                                                            ),
                                                             value:
                                                                 selectedSampleRate,
                                                             options:
@@ -17560,7 +17672,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                           if (!nativeWavOnly &&
                                                               !highQualityExport) ...[
                                                             const SizedBox(
-                                                                height: 10),
+                                                              height: 10,
+                                                            ),
                                                             buildLockedUpgradeRow(
                                                               label:
                                                                   '48 kHz export',
@@ -17568,7 +17681,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                   .graphic_eq_rounded,
                                                             ),
                                                             const SizedBox(
-                                                                height: 10),
+                                                              height: 10,
+                                                            ),
                                                             buildLockedUpgradeRow(
                                                               label:
                                                                   '24-bit WAV export',
@@ -17576,7 +17690,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                   .audio_file_outlined,
                                                             ),
                                                             const SizedBox(
-                                                                height: 10),
+                                                              height: 10,
+                                                            ),
                                                             buildLockedUpgradeRow(
                                                               label:
                                                                   'FLAC export',
@@ -17587,12 +17702,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                           if (!nativeWavOnly &&
                                                               highQualityExport) ...[
                                                             const SizedBox(
-                                                                height: 10),
+                                                              height: 10,
+                                                            ),
                                                             buildDropdownField(
                                                               label: L10n
                                                                   .translate(
-                                                                      context,
-                                                                      'Channels'),
+                                                                context,
+                                                                'Channels',
+                                                              ),
                                                               value:
                                                                   selectedChannelMode,
                                                               options:
@@ -17601,14 +17718,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                               textBuilder: (value) => value ==
                                                                       _ExportChannelMode
                                                                           .stereo
-                                                                  ? L10n.translate(
+                                                                  ? L10n
+                                                                      .translate(
                                                                       context,
-                                                                      'Stereo')
-                                                                  : L10n.translate(
+                                                                      'Stereo',
+                                                                    )
+                                                                  : L10n
+                                                                      .translate(
                                                                       context,
-                                                                      'Mono'),
-                                                              onChanged:
-                                                                  (value) {
+                                                                      'Mono',
+                                                                    ),
+                                                              onChanged: (
+                                                                value,
+                                                              ) {
                                                                 if (value ==
                                                                     null) {
                                                                   return;
@@ -17621,38 +17743,49 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                               },
                                                             ),
                                                             const SizedBox(
-                                                                height: 10),
+                                                              height: 10,
+                                                            ),
                                                             buildDropdownField(
-                                                              label: L10n.translate(
-                                                                  context,
-                                                                  'Resample quality'),
+                                                              label: L10n
+                                                                  .translate(
+                                                                context,
+                                                                'Resample quality',
+                                                              ),
                                                               value:
                                                                   selectedResampleQuality,
                                                               options:
                                                                   _ExportResampleQuality
                                                                       .values,
-                                                              textBuilder:
-                                                                  (value) {
+                                                              textBuilder: (
+                                                                value,
+                                                              ) {
                                                                 switch (value) {
                                                                   case _ExportResampleQuality
                                                                         .draft:
-                                                                    return L10n.translate(
-                                                                        context,
-                                                                        'Draft (fast)');
+                                                                    return L10n
+                                                                        .translate(
+                                                                      context,
+                                                                      'Draft (fast)',
+                                                                    );
                                                                   case _ExportResampleQuality
                                                                         .good:
-                                                                    return L10n.translate(
-                                                                        context,
-                                                                        'Good');
+                                                                    return L10n
+                                                                        .translate(
+                                                                      context,
+                                                                      'Good',
+                                                                    );
                                                                   case _ExportResampleQuality
                                                                         .best:
-                                                                    return L10n.translate(
-                                                                        context,
-                                                                        'Best');
+                                                                    return L10n
+                                                                        .translate(
+                                                                      context,
+                                                                      'Best',
+                                                                    );
                                                                 }
                                                               },
-                                                              onChanged:
-                                                                  (value) {
+                                                              onChanged: (
+                                                                value,
+                                                              ) {
                                                                 if (value ==
                                                                     null) {
                                                                   return;
@@ -17665,7 +17798,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                               },
                                                             ),
                                                             const SizedBox(
-                                                                height: 6),
+                                                              height: 6,
+                                                            ),
                                                             Material(
                                                               color: Colors
                                                                   .transparent,
@@ -17676,8 +17810,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                         .zero,
                                                                 title: Text(
                                                                   L10n.translate(
-                                                                      context,
-                                                                      'Normalize loudness'),
+                                                                    context,
+                                                                    'Normalize loudness',
+                                                                  ),
                                                                   style:
                                                                       TextStyle(
                                                                     color:
@@ -17688,13 +17823,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                     selectedNormalize,
                                                                 activeColor:
                                                                     exportBlue,
-                                                                onChanged:
-                                                                    (value) {
+                                                                onChanged: (
+                                                                  value,
+                                                                ) {
                                                                   setSheetState(
-                                                                      () {
-                                                                    selectedNormalize =
-                                                                        value;
-                                                                  });
+                                                                    () {
+                                                                      selectedNormalize =
+                                                                          value;
+                                                                    },
+                                                                  );
                                                                 },
                                                               ),
                                                             ),
@@ -17703,31 +17840,36 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                               highQualityExport &&
                                                               selectedNormalize) ...[
                                                             const SizedBox(
-                                                                height: 4),
+                                                              height: 4,
+                                                            ),
                                                             Text(
                                                               L10n.translate(
-                                                                  context,
-                                                                  'Limiter ceiling (dBTP)'),
+                                                                context,
+                                                                'Limiter ceiling (dBTP)',
+                                                              ),
                                                               style: theme
                                                                   .textTheme
                                                                   .bodySmall
                                                                   ?.copyWith(
-                                                                      color:
-                                                                          mutedText),
+                                                                color:
+                                                                    mutedText,
+                                                              ),
                                                             ),
                                                             const SizedBox(
-                                                                height: 6),
+                                                              height: 6,
+                                                            ),
                                                             SliderTheme(
                                                               data: SliderTheme
-                                                                      .of(context)
-                                                                  .copyWith(
+                                                                  .of(
+                                                                context,
+                                                              ).copyWith(
                                                                 activeTrackColor:
                                                                     exportBlue,
-                                                                inactiveTrackColor: Colors
-                                                                    .white
-                                                                    .withValues(
-                                                                        alpha:
-                                                                            0.14),
+                                                                inactiveTrackColor:
+                                                                    Colors.white
+                                                                        .withValues(
+                                                                  alpha: 0.14,
+                                                                ),
                                                                 thumbColor:
                                                                     Colors
                                                                         .white,
@@ -17753,12 +17895,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                 divisions: 17,
                                                                 label:
                                                                     '${selectedNormalizeTargetDb.toStringAsFixed(1)} dB',
-                                                                onChanged:
-                                                                    (value) {
+                                                                onChanged: (
+                                                                  value,
+                                                                ) {
                                                                   final stepped =
-                                                                      double.parse(
-                                                                          value.toStringAsFixed(
-                                                                              1));
+                                                                      double
+                                                                          .parse(
+                                                                    value
+                                                                        .toStringAsFixed(
+                                                                      1,
+                                                                    ),
+                                                                  );
                                                                   setSheetState(
                                                                       () {
                                                                     selectedNormalizeTargetDb =
@@ -17784,8 +17931,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                   color: Colors
                                                                       .white
                                                                       .withValues(
-                                                                          alpha:
-                                                                              0.82),
+                                                                    alpha: 0.82,
+                                                                  ),
                                                                   fontWeight:
                                                                       FontWeight
                                                                           .w700,
@@ -17793,14 +17940,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                               ),
                                                             ),
                                                             const SizedBox(
-                                                                height: 6),
+                                                              height: 6,
+                                                            ),
                                                             Wrap(
                                                               spacing: 8,
                                                               runSpacing: 6,
                                                               children:
                                                                   _kExportNormalizeTargetsDb
                                                                       .map(
-                                                                        (preset) =>
+                                                                        (
+                                                                          preset,
+                                                                        ) =>
                                                                             ChoiceChip(
                                                                           label:
                                                                               Text(
@@ -17813,22 +17963,34 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                               .bodySmall
                                                                               ?.copyWith(
                                                                             color:
-                                                                                Colors.white.withValues(alpha: 0.9),
+                                                                                Colors.white.withValues(
+                                                                              alpha: 0.9,
+                                                                            ),
                                                                             fontWeight:
                                                                                 FontWeight.w600,
                                                                           ),
                                                                           backgroundColor: Colors
                                                                               .white
-                                                                              .withValues(alpha: 0.05),
+                                                                              .withValues(
+                                                                            alpha:
+                                                                                0.05,
+                                                                          ),
                                                                           selectedColor:
-                                                                              exportBlue.withValues(alpha: 0.26),
+                                                                              exportBlue.withValues(
+                                                                            alpha:
+                                                                                0.26,
+                                                                          ),
                                                                           side:
                                                                               BorderSide(
                                                                             color:
-                                                                                Colors.white.withValues(alpha: 0.16),
+                                                                                Colors.white.withValues(
+                                                                              alpha: 0.16,
+                                                                            ),
                                                                           ),
                                                                           onSelected:
-                                                                              (_) {
+                                                                              (
+                                                                            _,
+                                                                          ) {
                                                                             setSheetState(() {
                                                                               selectedNormalizeTargetDb = preset;
                                                                             });
@@ -17836,12 +17998,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                         ),
                                                                       )
                                                                       .toList(
-                                                                          growable:
-                                                                              false),
+                                                                        growable:
+                                                                            false,
+                                                                      ),
                                                             ),
                                                           ],
                                                           const SizedBox(
-                                                              height: 10),
+                                                            height: 10,
+                                                          ),
                                                           if (selectedFormat ==
                                                                   _ExportAudioFormat
                                                                       .wav ||
@@ -17849,8 +18013,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                             buildDropdownField(
                                                               label: L10n
                                                                   .translate(
-                                                                      context,
-                                                                      'Bit depth'),
+                                                                context,
+                                                                'Bit depth',
+                                                              ),
                                                               value:
                                                                   selectedWavBitDepth,
                                                               options:
@@ -17858,8 +18023,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                               textBuilder:
                                                                   (value) =>
                                                                       '$value-bit',
-                                                              onChanged:
-                                                                  (value) {
+                                                              onChanged: (
+                                                                value,
+                                                              ) {
                                                                 if (value ==
                                                                     null) {
                                                                   return;
@@ -17872,7 +18038,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                               },
                                                             ),
                                                             const SizedBox(
-                                                                height: 6),
+                                                              height: 6,
+                                                            ),
                                                             Material(
                                                               color: Colors
                                                                   .transparent,
@@ -17883,31 +18050,38 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                         .zero,
                                                                 title: Text(
                                                                   L10n.translate(
-                                                                      context,
-                                                                      'Enable dithering'),
-                                                                  style: TextStyle(
-                                                                      color:
-                                                                          mutedText),
+                                                                    context,
+                                                                    'Enable dithering',
+                                                                  ),
+                                                                  style:
+                                                                      TextStyle(
+                                                                    color:
+                                                                        mutedText,
+                                                                  ),
                                                                 ),
                                                                 value:
                                                                     selectedWavDithering,
                                                                 activeColor:
                                                                     exportBlue,
-                                                                onChanged:
-                                                                    (value) {
+                                                                onChanged: (
+                                                                  value,
+                                                                ) {
                                                                   setSheetState(
-                                                                      () {
-                                                                    selectedWavDithering =
-                                                                        value;
-                                                                  });
+                                                                    () {
+                                                                      selectedWavDithering =
+                                                                          value;
+                                                                    },
+                                                                  );
                                                                 },
                                                               ),
                                                             ),
                                                           ] else ...[
                                                             buildDropdownField(
-                                                              label: L10n.translate(
-                                                                  context,
-                                                                  'Encoding mode'),
+                                                              label: L10n
+                                                                  .translate(
+                                                                context,
+                                                                'Encoding mode',
+                                                              ),
                                                               value:
                                                                   selectedMp3Mode,
                                                               options:
@@ -17919,8 +18093,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                               .cbr
                                                                       ? 'CBR'
                                                                       : 'VBR',
-                                                              onChanged:
-                                                                  (value) {
+                                                              onChanged: (
+                                                                value,
+                                                              ) {
                                                                 if (value ==
                                                                     null) {
                                                                   return;
@@ -17933,15 +18108,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                               },
                                                             ),
                                                             const SizedBox(
-                                                                height: 10),
+                                                              height: 10,
+                                                            ),
                                                             if (selectedMp3Mode ==
                                                                 _ExportMp3Mode
                                                                     .cbr)
                                                               buildDropdownField(
                                                                 label: L10n
                                                                     .translate(
-                                                                        context,
-                                                                        'Bit rate'),
+                                                                  context,
+                                                                  'Bit rate',
+                                                                ),
                                                                 value:
                                                                     selectedMp3Bitrate,
                                                                 options:
@@ -17949,25 +18126,28 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                 textBuilder:
                                                                     (value) =>
                                                                         '${value} kbps',
-                                                                onChanged:
-                                                                    (value) {
+                                                                onChanged: (
+                                                                  value,
+                                                                ) {
                                                                   if (value ==
                                                                       null) {
                                                                     return;
                                                                   }
                                                                   setSheetState(
-                                                                      () {
-                                                                    selectedMp3Bitrate =
-                                                                        value;
-                                                                  });
+                                                                    () {
+                                                                      selectedMp3Bitrate =
+                                                                          value;
+                                                                    },
+                                                                  );
                                                                 },
                                                               )
                                                             else
                                                               buildDropdownField(
                                                                 label: L10n
                                                                     .translate(
-                                                                        context,
-                                                                        'VBR quality'),
+                                                                  context,
+                                                                  'VBR quality',
+                                                                ),
                                                                 value:
                                                                     selectedMp3VbrQuality,
                                                                 options:
@@ -17975,17 +18155,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                 textBuilder:
                                                                     (value) =>
                                                                         'V$value (${L10n.translate(context, value == 0 ? "highest" : "smaller file")})',
-                                                                onChanged:
-                                                                    (value) {
+                                                                onChanged: (
+                                                                  value,
+                                                                ) {
                                                                   if (value ==
                                                                       null) {
                                                                     return;
                                                                   }
                                                                   setSheetState(
-                                                                      () {
-                                                                    selectedMp3VbrQuality =
-                                                                        value;
-                                                                  });
+                                                                    () {
+                                                                      selectedMp3VbrQuality =
+                                                                          value;
+                                                                    },
+                                                                  );
                                                                 },
                                                               ),
                                                           ],
@@ -18009,10 +18191,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   decoration: BoxDecoration(
                                     borderRadius: BorderRadius.circular(25),
                                     color: const Color.fromRGBO(
-                                        244, 244, 244, 0.10),
+                                      244,
+                                      244,
+                                      244,
+                                      0.10,
+                                    ),
                                     border: Border.all(
-                                      color:
-                                          Colors.white.withValues(alpha: 0.12),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.12,
+                                      ),
                                     ),
                                   ),
                                   child: Row(
@@ -18021,8 +18208,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         child: Material(
                                           color: Colors.transparent,
                                           child: InkWell(
-                                            onTap: () =>
-                                                Navigator.pop(dialogContext),
+                                            onTap: () => Navigator.pop(
+                                              dialogContext,
+                                            ),
                                             child: Center(
                                               child: Text(
                                                 L10n.translate(
@@ -18034,7 +18222,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                   fontWeight: FontWeight.w600,
                                                   fontSize: 14,
                                                   color: Color.fromRGBO(
-                                                      255, 255, 255, 0.94),
+                                                    255,
+                                                    255,
+                                                    255,
+                                                    0.94,
+                                                  ),
                                                 ),
                                               ),
                                             ),
@@ -18044,8 +18236,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       Container(
                                         width: 1,
                                         height: double.infinity,
-                                        color: Colors.white
-                                            .withValues(alpha: 0.10),
+                                        color: Colors.white.withValues(
+                                          alpha: 0.10,
+                                        ),
                                       ),
                                       Expanded(
                                         child: Container(
@@ -18118,7 +18311,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                     fontWeight: FontWeight.w700,
                                                     fontSize: 14,
                                                     color: Color.fromRGBO(
-                                                        255, 255, 255, 0.98),
+                                                      255,
+                                                      255,
+                                                      255,
+                                                      0.98,
+                                                    ),
                                                   ),
                                                 ),
                                               ),
@@ -18216,7 +18413,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         SnackBar(
           content: Text(
             L10n.translate(
-                context, 'Export failed: Output file missing or too small.'),
+              context,
+              'Export failed: Output file missing or too small.',
+            ),
           ),
         ),
       );
@@ -18325,8 +18524,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_audioTracks.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text(L10n.translate(context,
-                'No audio tracks selected'))), // TODO: FIX THIS WORDING
+          content: Text(L10n.translate(context, 'No audio tracks selected')),
+        ), // TODO: FIX THIS WORDING
       );
       return "";
     }
@@ -18379,8 +18578,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
-                  L10n.translate(context,
-                      'Export failed: Output file missing or too small.'),
+                  L10n.translate(
+                    context,
+                    'Export failed: Output file missing or too small.',
+                  ),
                 ),
               ),
             );
@@ -18392,7 +18593,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                  '${L10n.translate(context, "Export error")}: ${e.toString().split('\n').first}'),
+                '${L10n.translate(context, "Export error")}: ${e.toString().split('\n').first}',
+              ),
               duration: const Duration(seconds: 5),
             ),
           );
@@ -18437,8 +18639,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
-                  L10n.translate(context,
-                      'Export failed: Output file missing or too small.'),
+                  L10n.translate(
+                    context,
+                    'Export failed: Output file missing or too small.',
+                  ),
                 ),
               ),
             );
@@ -18450,7 +18654,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                  '${L10n.translate(context, "Export error")}: ${e.toString().split('\n').first}'),
+                '${L10n.translate(context, "Export error")}: ${e.toString().split('\n').first}',
+              ),
               duration: const Duration(seconds: 5),
             ),
           );
@@ -18476,8 +18681,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         reportProgress(0.80);
 
         if (exportedPath.isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text(L10n.translate(context, "Export failed"))));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(L10n.translate(context, "Export failed"))),
+          );
           return "";
         }
 
@@ -18485,8 +18691,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (!await outFile.exists() || (await outFile.length()) < 1000) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(L10n.translate(
-                  context, 'Export failed: Output file missing or too small.')),
+              content: Text(
+                L10n.translate(
+                  context,
+                  'Export failed: Output file missing or too small.',
+                ),
+              ),
             ),
           );
           return "";
@@ -18508,7 +18718,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-                '${L10n.translate(context, "Export error")}: ${e.toString().split('\n').first}'),
+              '${L10n.translate(context, "Export error")}: ${e.toString().split('\n').first}',
+            ),
             duration: Duration(seconds: 5),
           ),
         );
@@ -18551,7 +18762,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<int> findBestSyncOffset(
-      String videoAudioPath, String trackAudioPath) async {
+    String videoAudioPath,
+    String trackAudioPath,
+  ) async {
     final ReceivePort receivePort = ReceivePort();
     final ReceivePort progressPort = ReceivePort(); // for reporting UI progress
 
@@ -18585,7 +18798,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> applyBestSyncOffset(
-      AudioTrack track, String videoAudioPath) async {
+    AudioTrack track,
+    String videoAudioPath,
+  ) async {
     int syncOffset = await findBestSyncOffset(videoAudioPath, track.file.path);
     final int audioLengthMs = track.audioDuration.inMilliseconds;
     final int offsetLimit = 180000; // 180 seconds
@@ -18593,15 +18808,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (syncOffset >= 0 && syncOffset > offsetLimit) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text(L10n.translate(context,
-                'AI Sync failed: Computed offset exceeds audio length.'))),
+          content: Text(
+            L10n.translate(
+              context,
+              'AI Sync failed: Computed offset exceeds audio length.',
+            ),
+          ),
+        ),
       );
       return;
     } else if (syncOffset < 0 && syncOffset.abs() > audioLengthMs) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text(L10n.translate(context,
-                'AI Sync failed: Computed trim exceeds audio length.'))),
+          content: Text(
+            L10n.translate(
+              context,
+              'AI Sync failed: Computed trim exceeds audio length.',
+            ),
+          ),
+        ),
       );
       return;
     }
@@ -18615,8 +18840,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       } else {
         // Trim the track (shift left)
         // double trimAdjustment = syncOffset.abs() / 1000.0;
-        track.trimStart =
-            Duration(milliseconds: syncOffset.abs()); //trimAdjustment.toInt());
+        track.trimStart = Duration(
+          milliseconds: syncOffset.abs(),
+        ); //trimAdjustment.toInt());
         track.offset = 0.0;
       }
     });
@@ -18624,7 +18850,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // Refresh UI
     setState(() {});
     print(
-        "✅ AI Sync applied. Adjusted Offset: ${track.offset}, Trim Start: ${track.trimStart}");
+      "✅ AI Sync applied. Adjusted Offset: ${track.offset}, Trim Start: ${track.trimStart}",
+    );
   }
 
   // THINGS FOR AI SYNC END-----
@@ -18942,9 +19169,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (removed.isNotEmpty) {
         parts.add('MIDI disconnected: ${removed.join(', ')}');
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(parts.join(' | '))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(parts.join(' | '))));
     } catch (_) {
       // Ignore transient bridge errors and keep polling.
     } finally {
@@ -18956,8 +19183,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _midiDevicePollTimer?.cancel();
     _knownMidiDevicesById = <String, String>{};
     unawaited(_pollMidiDeviceConnections(seedOnly: true));
-    _midiDevicePollTimer =
-        Timer.periodic(const Duration(seconds: 2), (_) async {
+    _midiDevicePollTimer = Timer.periodic(const Duration(seconds: 2), (
+      _,
+    ) async {
       await _pollMidiDeviceConnections();
     });
   }
@@ -19021,8 +19249,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (requestedClip != null) {
-      final identicalIndex =
-          _audioTracks.indexWhere((track) => identical(track, requestedClip));
+      final identicalIndex = _audioTracks.indexWhere(
+        (track) => identical(track, requestedClip),
+      );
       if (identicalIndex >= 0 &&
           identicalIndex < _audioTracks.length &&
           _audioTracks[identicalIndex].isMidi) {
@@ -19196,8 +19425,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       changed = true;
     }
     _midiRecordHasChanges = true;
-    _lastMidiRecordTransportSec =
-        math.max(_lastMidiRecordTransportSec, transportSec);
+    _lastMidiRecordTransportSec = math.max(
+      _lastMidiRecordTransportSec,
+      transportSec,
+    );
     return changed;
   }
 
@@ -19222,8 +19453,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final key = _midiRecordHeldKey(source, channel, pitch);
     final stack = _midiHeldNotesByKey[key];
     if (stack == null || stack.isEmpty) {
-      _lastMidiRecordTransportSec =
-          math.max(_lastMidiRecordTransportSec, transportSec);
+      _lastMidiRecordTransportSec = math.max(
+        _lastMidiRecordTransportSec,
+        transportSec,
+      );
       return false;
     }
     final note = stack.removeLast();
@@ -19250,8 +19483,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (changed) {
       _midiRecordHasChanges = true;
     }
-    _lastMidiRecordTransportSec =
-        math.max(_lastMidiRecordTransportSec, transportSec);
+    _lastMidiRecordTransportSec = math.max(
+      _lastMidiRecordTransportSec,
+      transportSec,
+    );
     return changed;
   }
 
@@ -19448,8 +19683,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!clip.isMidi) return false;
 
     final transportSec = _midiRecordingTransportSeconds();
-    _lastMidiRecordTransportSec =
-        math.max(_lastMidiRecordTransportSec, transportSec);
+    _lastMidiRecordTransportSec = math.max(
+      _lastMidiRecordTransportSec,
+      transportSec,
+    );
     final currentBeat = _transportSecToClipSourceBeat(clip, transportSec);
     final changed = _updateHeldMidiRecordNotes(
       clip,
@@ -19497,22 +19734,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final noteOff = type == 'noteOff';
         if (!noteOn && !noteOff) continue;
 
-        final pitch =
-            (((event['pitch'] as num?)?.toInt() ?? 60).clamp(0, 127)).toInt();
-        final channel =
-            (((event['channel'] as num?)?.toInt() ?? 1).clamp(1, 16)).toInt();
-        final velocity =
-            ((event['velocity'] as num?)?.toDouble() ?? 1.0).clamp(0.0, 1.0);
+        final pitch = (((event['pitch'] as num?)?.toInt() ?? 60).clamp(
+          0,
+          127,
+        )).toInt();
+        final channel = (((event['channel'] as num?)?.toInt() ?? 1).clamp(
+          1,
+          16,
+        )).toInt();
+        final velocity = ((event['velocity'] as num?)?.toDouble() ?? 1.0).clamp(
+          0.0,
+          1.0,
+        );
         final transportSec = (event['transportSec'] as num?)?.toDouble() ??
             _midiRecordingTransportSeconds();
         latestTransportSec = math.max(latestTransportSec, transportSec);
 
         if (noteOn) {
-          if (_consumeSuppressedLiveMidiRecordEvent(
-            'noteOn',
-            channel,
-            pitch,
-          )) {
+          if (_consumeSuppressedLiveMidiRecordEvent('noteOn', channel, pitch)) {
             continue;
           }
           changed = _applyMidiRecordNoteOn(
@@ -19527,11 +19766,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           continue;
         }
 
-        if (_consumeSuppressedLiveMidiRecordEvent(
-          'noteOff',
-          channel,
-          pitch,
-        )) {
+        if (_consumeSuppressedLiveMidiRecordEvent('noteOff', channel, pitch)) {
           continue;
         }
         changed = _applyMidiRecordNoteOff(
@@ -19546,11 +19781,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       final fallbackTransportSec =
           _globalAudioClock.inMilliseconds.toDouble() / 1000.0;
-      final currentTransportSec =
-          math.max(latestTransportSec, fallbackTransportSec);
+      final currentTransportSec = math.max(
+        latestTransportSec,
+        fallbackTransportSec,
+      );
       _lastMidiRecordTransportSec = currentTransportSec;
-      final currentBeat =
-          _transportSecToClipSourceBeat(clip, currentTransportSec);
+      final currentBeat = _transportSecToClipSourceBeat(
+        clip,
+        currentTransportSec,
+      );
       if (_updateHeldMidiRecordNotes(
         clip,
         currentBeat,
@@ -19699,8 +19938,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
     }
 
-    final liveTargetOk =
-        await _armLiveMidiInputTargetForRecording(clip, clipIndex);
+    final liveTargetOk = await _armLiveMidiInputTargetForRecording(
+      clip,
+      clipIndex,
+    );
     _midiHeldNotesByKey.clear();
     _midiRecordNoteWallStartById.clear();
     _suppressedLiveMidiRecordEvents.clear();
@@ -19718,10 +19959,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           })
         : null;
     _midiHeldNoteRefreshTimer?.cancel();
-    _midiHeldNoteRefreshTimer =
-        Timer.periodic(const Duration(milliseconds: 33), (_) {
-      _refreshHeldMidiRecordNotesFromClock();
-    });
+    _midiHeldNoteRefreshTimer = Timer.periodic(
+      const Duration(milliseconds: 33),
+      (_) {
+        _refreshHeldMidiRecordNotesFromClock();
+      },
+    );
 
     if (mounted && _isMidiClipRecording) {
       setState(() {
@@ -19764,10 +20007,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (_liveMidiEventPlaybackSupported) {
       final previewClip = _armedMidiClipOrNull()?.engineClipId ?? -1;
-      await _setLiveMidiInputTargetClipIfNeeded(
-        previewClip,
-        force: true,
-      );
+      await _setLiveMidiInputTargetClipIfNeeded(previewClip, force: true);
     }
 
     _midiHeldNotesByKey.clear();
@@ -19822,9 +20062,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (_inputDevices.isEmpty && !_loadingDevices) {
         await _loadInputDevicesFromJuce(scheduleRecordingPrewarm: true);
       } else if (!_inputDeviceCacheIsFresh() && !_loadingDevices) {
-        unawaited(
-          _loadInputDevicesFromJuce(scheduleRecordingPrewarm: true),
-        );
+        unawaited(_loadInputDevicesFromJuce(scheduleRecordingPrewarm: true));
       }
 
       final routeKnown = _audioRouteInfoIsKnown(_audioRouteInfo);
@@ -19889,10 +20127,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // Background prewarm keeps the common path fast. Native record start still
     // validates and opens inputs, so avoid doing a second synchronous input
     // reopen here on the tap path.
-    await _applyCurrentLiveMonitoringPolicy(
-      info: _audioRouteInfo,
-      force: true,
-    );
+    await _applyCurrentLiveMonitoringPolicy(info: _audioRouteInfo, force: true);
     return true;
   }
 
@@ -19963,8 +20198,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       // 4) Prepare file path (CHANGE → WAV)
       final audioDir = ProjectManager.audioDir(_projectDir);
       if (!await audioDir.exists()) await audioDir.create(recursive: true);
-      final filePath = p.join(audioDir.path,
-          'mixroom_rec_${DateTime.now().millisecondsSinceEpoch}.wav');
+      final filePath = p.join(
+        audioDir.path,
+        'mixroom_rec_${DateTime.now().millisecondsSinceEpoch}.wav',
+      );
 
       // 5) Arm the native recorder.
       final ok = await JuceAudioEngine.startRecording(
@@ -20031,8 +20268,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _recordingPeaks.clear();
 
       _recordingPeakTimer?.cancel();
-      _recordingPeakTimer =
-          Timer.periodic(const Duration(milliseconds: 50), (_) async {
+      _recordingPeakTimer = Timer.periodic(const Duration(milliseconds: 50), (
+        _,
+      ) async {
         if (!_isRecording) return;
 
         final peak = await JuceAudioEngine.getRecordingPeak();
@@ -20192,9 +20430,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _recordingFilePath = null;
         });
 
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               L10n.translate(context, 'Recording failed or no data captured.'),
@@ -20244,8 +20480,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         debugPrint("Error adding recorded track: $e");
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content:
-                Text(L10n.translate(context, 'Failed to add recorded track.')),
+            content: Text(
+              L10n.translate(context, 'Failed to add recorded track.'),
+            ),
           ),
         );
       }
@@ -20282,9 +20519,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool deferFadeSync = false,
   }) async {
     if (_audioTracks.length >= kNumClips) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
           content: Text(
-              "Max number of audio clips reached ($kNumClips). Unable to add more clips.")));
+            "Max number of audio clips reached ($kNumClips). Unable to add more clips.",
+          ),
+        ),
+      );
       return;
     }
 
@@ -20301,9 +20542,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final rowId = _rowIdAt(safeRow);
     final engineClipId = _reserveEngineClipId();
     if (engineClipId < 0) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
           content: Text(
-              "Max number of audio clips reached ($kNumClips). Unable to add more clips.")));
+            "Max number of audio clips reached ($kNumClips). Unable to add more clips.",
+          ),
+        ),
+      );
       return;
     }
     if (showLoadingOverlay) {
@@ -20341,8 +20586,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
           // Keep incrementing if another track already uses this temp path
           while (_audioTracks.any((t) => t.file.path == candidatePath)) {
-            candidatePath =
-                p.join(audioDir.path, '$baseNameNoExt #$suffix.wav');
+            candidatePath = p.join(
+              audioDir.path,
+              '$baseNameNoExt #$suffix.wav',
+            );
             suffix++;
           }
 
@@ -20408,10 +20655,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       newTrack.trimStart = trimStartRequested ?? Duration.zero;
       newTrack.trimEnd = trimEndRequested ?? dur;
 
-      await _syncClipMixToEngineOptimized(
-        newTrack,
-        assumeEngineDefaults: true,
-      );
+      await _syncClipMixToEngineOptimized(newTrack, assumeEngineDefaults: true);
       _startWaveformExtraction(newTrack);
 
       if (notifyUi) {
@@ -20469,9 +20713,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     String? clipId,
   }) async {
     if (_audioTracks.length >= kNumClips) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
           content: Text(
-              "Max number of audio clips reached ($kNumClips). Unable to add more clips.")));
+            "Max number of audio clips reached ($kNumClips). Unable to add more clips.",
+          ),
+        ),
+      );
       return;
     }
 
@@ -20486,9 +20734,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final rowId = _rowIdAt(safeRow);
     final engineClipId = _reserveEngineClipId();
     if (engineClipId < 0) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
           content: Text(
-              "Max number of audio clips reached ($kNumClips). Unable to add more clips.")));
+            "Max number of audio clips reached ($kNumClips). Unable to add more clips.",
+          ),
+        ),
+      );
       return;
     }
     try {
@@ -20752,8 +21004,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final stemToken = _normalizeInstrumentToken(
         p.basenameWithoutExtension(sfzPath),
       );
-      final nameToken =
-          _normalizeInstrumentToken((spec['name'] as String?) ?? '');
+      final nameToken = _normalizeInstrumentToken(
+        (spec['name'] as String?) ?? '',
+      );
       final idToken = _normalizeInstrumentToken((spec['id'] as String?) ?? '');
 
       var score = 0;
@@ -21089,77 +21342,89 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (instrumentId == 'mixroom.drum_808_starter') {
       return <MidiNote>[
         MidiNote(
-            id: '${now}_0',
-            pitch: 49,
-            startBeat: 0.0,
-            lengthBeats: 0.25,
-            velocity: 0.76),
+          id: '${now}_0',
+          pitch: 49,
+          startBeat: 0.0,
+          lengthBeats: 0.25,
+          velocity: 0.76,
+        ),
         MidiNote(
-            id: '${now}_1',
-            pitch: 36,
-            startBeat: 0.0,
-            lengthBeats: 0.25,
-            velocity: 0.98),
+          id: '${now}_1',
+          pitch: 36,
+          startBeat: 0.0,
+          lengthBeats: 0.25,
+          velocity: 0.98,
+        ),
         MidiNote(
-            id: '${now}_2',
-            pitch: 42,
-            startBeat: 0.5,
-            lengthBeats: 0.125,
-            velocity: 0.62),
+          id: '${now}_2',
+          pitch: 42,
+          startBeat: 0.5,
+          lengthBeats: 0.125,
+          velocity: 0.62,
+        ),
         MidiNote(
-            id: '${now}_3',
-            pitch: 38,
-            startBeat: 1.0,
-            lengthBeats: 0.25,
-            velocity: 0.84),
+          id: '${now}_3',
+          pitch: 38,
+          startBeat: 1.0,
+          lengthBeats: 0.25,
+          velocity: 0.84,
+        ),
         MidiNote(
-            id: '${now}_4',
-            pitch: 42,
-            startBeat: 1.5,
-            lengthBeats: 0.125,
-            velocity: 0.58),
+          id: '${now}_4',
+          pitch: 42,
+          startBeat: 1.5,
+          lengthBeats: 0.125,
+          velocity: 0.58,
+        ),
         MidiNote(
-            id: '${now}_5',
-            pitch: 44,
-            startBeat: 1.75,
-            lengthBeats: 0.125,
-            velocity: 0.66),
+          id: '${now}_5',
+          pitch: 44,
+          startBeat: 1.75,
+          lengthBeats: 0.125,
+          velocity: 0.66,
+        ),
         MidiNote(
-            id: '${now}_6',
-            pitch: 36,
-            startBeat: 2.0,
-            lengthBeats: 0.25,
-            velocity: 0.96),
+          id: '${now}_6',
+          pitch: 36,
+          startBeat: 2.0,
+          lengthBeats: 0.25,
+          velocity: 0.96,
+        ),
         MidiNote(
-            id: '${now}_7',
-            pitch: 42,
-            startBeat: 2.5,
-            lengthBeats: 0.125,
-            velocity: 0.6),
+          id: '${now}_7',
+          pitch: 42,
+          startBeat: 2.5,
+          lengthBeats: 0.125,
+          velocity: 0.6,
+        ),
         MidiNote(
-            id: '${now}_8',
-            pitch: 45,
-            startBeat: 2.75,
-            lengthBeats: 0.25,
-            velocity: 0.72),
+          id: '${now}_8',
+          pitch: 45,
+          startBeat: 2.75,
+          lengthBeats: 0.25,
+          velocity: 0.72,
+        ),
         MidiNote(
-            id: '${now}_9',
-            pitch: 38,
-            startBeat: 3.0,
-            lengthBeats: 0.25,
-            velocity: 0.86),
+          id: '${now}_9',
+          pitch: 38,
+          startBeat: 3.0,
+          lengthBeats: 0.25,
+          velocity: 0.86,
+        ),
         MidiNote(
-            id: '${now}_10',
-            pitch: 36,
-            startBeat: 3.25,
-            lengthBeats: 0.25,
-            velocity: 0.92),
+          id: '${now}_10',
+          pitch: 36,
+          startBeat: 3.25,
+          lengthBeats: 0.25,
+          velocity: 0.92,
+        ),
         MidiNote(
-            id: '${now}_11',
-            pitch: 47,
-            startBeat: 3.5,
-            lengthBeats: 0.25,
-            velocity: 0.7),
+          id: '${now}_11',
+          pitch: 47,
+          startBeat: 3.5,
+          lengthBeats: 0.25,
+          velocity: 0.7,
+        ),
       ];
     }
     if (_isSampledInstrumentId(instrumentId)) {
@@ -21310,259 +21575,296 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (instrumentId == 'mixroom.bass_mono') {
       return <MidiNote>[
         MidiNote(
-            id: '${now}_0',
-            pitch: 36,
-            startBeat: 0.0,
-            lengthBeats: 1.0,
-            velocity: 0.9),
+          id: '${now}_0',
+          pitch: 36,
+          startBeat: 0.0,
+          lengthBeats: 1.0,
+          velocity: 0.9,
+        ),
         MidiNote(
-            id: '${now}_1',
-            pitch: 36,
-            startBeat: 1.5,
-            lengthBeats: 0.75,
-            velocity: 0.86),
+          id: '${now}_1',
+          pitch: 36,
+          startBeat: 1.5,
+          lengthBeats: 0.75,
+          velocity: 0.86,
+        ),
         MidiNote(
-            id: '${now}_2',
-            pitch: 38,
-            startBeat: 2.5,
-            lengthBeats: 1.25,
-            velocity: 0.84),
+          id: '${now}_2',
+          pitch: 38,
+          startBeat: 2.5,
+          lengthBeats: 1.25,
+          velocity: 0.84,
+        ),
       ];
     }
     if (instrumentId == 'mixroom.soft_pad') {
       return <MidiNote>[
         MidiNote(
-            id: '${now}_0',
-            pitch: 60,
-            startBeat: 0.0,
-            lengthBeats: 4.0,
-            velocity: 0.72),
+          id: '${now}_0',
+          pitch: 60,
+          startBeat: 0.0,
+          lengthBeats: 4.0,
+          velocity: 0.72,
+        ),
         MidiNote(
-            id: '${now}_1',
-            pitch: 64,
-            startBeat: 0.0,
-            lengthBeats: 4.0,
-            velocity: 0.68),
+          id: '${now}_1',
+          pitch: 64,
+          startBeat: 0.0,
+          lengthBeats: 4.0,
+          velocity: 0.68,
+        ),
         MidiNote(
-            id: '${now}_2',
-            pitch: 67,
-            startBeat: 0.0,
-            lengthBeats: 4.0,
-            velocity: 0.68),
+          id: '${now}_2',
+          pitch: 67,
+          startBeat: 0.0,
+          lengthBeats: 4.0,
+          velocity: 0.68,
+        ),
       ];
     }
     if (instrumentId == 'mixroom.figbug_wavetable') {
       return <MidiNote>[
         MidiNote(
-            id: '${now}_0',
-            pitch: 72,
-            startBeat: 0.0,
-            lengthBeats: 0.75,
-            velocity: 0.85),
+          id: '${now}_0',
+          pitch: 72,
+          startBeat: 0.0,
+          lengthBeats: 0.75,
+          velocity: 0.85,
+        ),
         MidiNote(
-            id: '${now}_1',
-            pitch: 74,
-            startBeat: 1.0,
-            lengthBeats: 0.75,
-            velocity: 0.8),
+          id: '${now}_1',
+          pitch: 74,
+          startBeat: 1.0,
+          lengthBeats: 0.75,
+          velocity: 0.8,
+        ),
         MidiNote(
-            id: '${now}_2',
-            pitch: 77,
-            startBeat: 2.0,
-            lengthBeats: 1.5,
-            velocity: 0.88),
+          id: '${now}_2',
+          pitch: 77,
+          startBeat: 2.0,
+          lengthBeats: 1.5,
+          velocity: 0.88,
+        ),
       ];
     }
     if (instrumentId == 'mixroom.sarah_harmonic') {
       return <MidiNote>[
         MidiNote(
-            id: '${now}_0',
-            pitch: 48,
-            startBeat: 0.0,
-            lengthBeats: 2.0,
-            velocity: 0.7),
+          id: '${now}_0',
+          pitch: 48,
+          startBeat: 0.0,
+          lengthBeats: 2.0,
+          velocity: 0.7,
+        ),
         MidiNote(
-            id: '${now}_1',
-            pitch: 55,
-            startBeat: 0.0,
-            lengthBeats: 2.0,
-            velocity: 0.64),
+          id: '${now}_1',
+          pitch: 55,
+          startBeat: 0.0,
+          lengthBeats: 2.0,
+          velocity: 0.64,
+        ),
         MidiNote(
-            id: '${now}_2',
-            pitch: 60,
-            startBeat: 0.0,
-            lengthBeats: 2.0,
-            velocity: 0.66),
+          id: '${now}_2',
+          pitch: 60,
+          startBeat: 0.0,
+          lengthBeats: 2.0,
+          velocity: 0.66,
+        ),
         MidiNote(
-            id: '${now}_3',
-            pitch: 50,
-            startBeat: 2.0,
-            lengthBeats: 2.0,
-            velocity: 0.72),
+          id: '${now}_3',
+          pitch: 50,
+          startBeat: 2.0,
+          lengthBeats: 2.0,
+          velocity: 0.72,
+        ),
         MidiNote(
-            id: '${now}_4',
-            pitch: 57,
-            startBeat: 2.0,
-            lengthBeats: 2.0,
-            velocity: 0.66),
+          id: '${now}_4',
+          pitch: 57,
+          startBeat: 2.0,
+          lengthBeats: 2.0,
+          velocity: 0.66,
+        ),
         MidiNote(
-            id: '${now}_5',
-            pitch: 62,
-            startBeat: 2.0,
-            lengthBeats: 2.0,
-            velocity: 0.68),
+          id: '${now}_5',
+          pitch: 62,
+          startBeat: 2.0,
+          lengthBeats: 2.0,
+          velocity: 0.68,
+        ),
       ];
     }
     if (instrumentId == 'mixroom.vanilla_poly') {
       return <MidiNote>[
         MidiNote(
-            id: '${now}_0',
-            pitch: 60,
-            startBeat: 0.0,
-            lengthBeats: 0.75,
-            velocity: 0.82),
+          id: '${now}_0',
+          pitch: 60,
+          startBeat: 0.0,
+          lengthBeats: 0.75,
+          velocity: 0.82,
+        ),
         MidiNote(
-            id: '${now}_1',
-            pitch: 64,
-            startBeat: 0.75,
-            lengthBeats: 0.75,
-            velocity: 0.8),
+          id: '${now}_1',
+          pitch: 64,
+          startBeat: 0.75,
+          lengthBeats: 0.75,
+          velocity: 0.8,
+        ),
         MidiNote(
-            id: '${now}_2',
-            pitch: 67,
-            startBeat: 1.5,
-            lengthBeats: 0.75,
-            velocity: 0.78),
+          id: '${now}_2',
+          pitch: 67,
+          startBeat: 1.5,
+          lengthBeats: 0.75,
+          velocity: 0.78,
+        ),
         MidiNote(
-            id: '${now}_3',
-            pitch: 72,
-            startBeat: 2.25,
-            lengthBeats: 1.25,
-            velocity: 0.84),
+          id: '${now}_3',
+          pitch: 72,
+          startBeat: 2.25,
+          lengthBeats: 1.25,
+          velocity: 0.84,
+        ),
       ];
     }
     if (instrumentId == 'mixroom.duck_synth') {
       return <MidiNote>[
         MidiNote(
-            id: '${now}_0',
-            pitch: 43,
-            startBeat: 0.0,
-            lengthBeats: 0.5,
-            velocity: 0.9),
+          id: '${now}_0',
+          pitch: 43,
+          startBeat: 0.0,
+          lengthBeats: 0.5,
+          velocity: 0.9,
+        ),
         MidiNote(
-            id: '${now}_1',
-            pitch: 43,
-            startBeat: 1.0,
-            lengthBeats: 0.5,
-            velocity: 0.86),
+          id: '${now}_1',
+          pitch: 43,
+          startBeat: 1.0,
+          lengthBeats: 0.5,
+          velocity: 0.86,
+        ),
         MidiNote(
-            id: '${now}_2',
-            pitch: 46,
-            startBeat: 2.0,
-            lengthBeats: 0.5,
-            velocity: 0.88),
+          id: '${now}_2',
+          pitch: 46,
+          startBeat: 2.0,
+          lengthBeats: 0.5,
+          velocity: 0.88,
+        ),
         MidiNote(
-            id: '${now}_3',
-            pitch: 43,
-            startBeat: 3.0,
-            lengthBeats: 0.5,
-            velocity: 0.9),
+          id: '${now}_3',
+          pitch: 43,
+          startBeat: 3.0,
+          lengthBeats: 0.5,
+          velocity: 0.9,
+        ),
       ];
     }
     if (instrumentId == 'mixroom.chow_kick') {
       return <MidiNote>[
         MidiNote(
-            id: '${now}_0',
-            pitch: 36,
-            startBeat: 0.0,
-            lengthBeats: 0.25,
-            velocity: 0.95),
+          id: '${now}_0',
+          pitch: 36,
+          startBeat: 0.0,
+          lengthBeats: 0.25,
+          velocity: 0.95,
+        ),
         MidiNote(
-            id: '${now}_1',
-            pitch: 36,
-            startBeat: 1.0,
-            lengthBeats: 0.25,
-            velocity: 0.95),
+          id: '${now}_1',
+          pitch: 36,
+          startBeat: 1.0,
+          lengthBeats: 0.25,
+          velocity: 0.95,
+        ),
         MidiNote(
-            id: '${now}_2',
-            pitch: 36,
-            startBeat: 2.0,
-            lengthBeats: 0.25,
-            velocity: 0.95),
+          id: '${now}_2',
+          pitch: 36,
+          startBeat: 2.0,
+          lengthBeats: 0.25,
+          velocity: 0.95,
+        ),
         MidiNote(
-            id: '${now}_3',
-            pitch: 36,
-            startBeat: 3.0,
-            lengthBeats: 0.25,
-            velocity: 0.95),
+          id: '${now}_3',
+          pitch: 36,
+          startBeat: 3.0,
+          lengthBeats: 0.25,
+          velocity: 0.95,
+        ),
       ];
     }
     if (instrumentId == 'mixroom.warm_keys') {
       return <MidiNote>[
         MidiNote(
-            id: '${now}_0',
-            pitch: 60,
-            startBeat: 0.0,
-            lengthBeats: 1.0,
-            velocity: 0.78),
+          id: '${now}_0',
+          pitch: 60,
+          startBeat: 0.0,
+          lengthBeats: 1.0,
+          velocity: 0.78,
+        ),
         MidiNote(
-            id: '${now}_1',
-            pitch: 64,
-            startBeat: 1.0,
-            lengthBeats: 1.0,
-            velocity: 0.74),
+          id: '${now}_1',
+          pitch: 64,
+          startBeat: 1.0,
+          lengthBeats: 1.0,
+          velocity: 0.74,
+        ),
         MidiNote(
-            id: '${now}_2',
-            pitch: 67,
-            startBeat: 2.0,
-            lengthBeats: 1.0,
-            velocity: 0.74),
+          id: '${now}_2',
+          pitch: 67,
+          startBeat: 2.0,
+          lengthBeats: 1.0,
+          velocity: 0.74,
+        ),
         MidiNote(
-            id: '${now}_3',
-            pitch: 72,
-            startBeat: 3.0,
-            lengthBeats: 1.0,
-            velocity: 0.8),
+          id: '${now}_3',
+          pitch: 72,
+          startBeat: 3.0,
+          lengthBeats: 1.0,
+          velocity: 0.8,
+        ),
       ];
     }
     if (instrumentId == 'mixroom.super_saw') {
       return <MidiNote>[
         MidiNote(
-            id: '${now}_0',
-            pitch: 72,
-            startBeat: 0.0,
-            lengthBeats: 0.5,
-            velocity: 0.86),
+          id: '${now}_0',
+          pitch: 72,
+          startBeat: 0.0,
+          lengthBeats: 0.5,
+          velocity: 0.86,
+        ),
         MidiNote(
-            id: '${now}_1',
-            pitch: 74,
-            startBeat: 0.5,
-            lengthBeats: 0.5,
-            velocity: 0.84),
+          id: '${now}_1',
+          pitch: 74,
+          startBeat: 0.5,
+          lengthBeats: 0.5,
+          velocity: 0.84,
+        ),
         MidiNote(
-            id: '${now}_2',
-            pitch: 76,
-            startBeat: 1.0,
-            lengthBeats: 0.5,
-            velocity: 0.84),
+          id: '${now}_2',
+          pitch: 76,
+          startBeat: 1.0,
+          lengthBeats: 0.5,
+          velocity: 0.84,
+        ),
         MidiNote(
-            id: '${now}_3',
-            pitch: 79,
-            startBeat: 1.5,
-            lengthBeats: 0.5,
-            velocity: 0.88),
+          id: '${now}_3',
+          pitch: 79,
+          startBeat: 1.5,
+          lengthBeats: 0.5,
+          velocity: 0.88,
+        ),
         MidiNote(
-            id: '${now}_4',
-            pitch: 81,
-            startBeat: 2.0,
-            lengthBeats: 0.5,
-            velocity: 0.9),
+          id: '${now}_4',
+          pitch: 81,
+          startBeat: 2.0,
+          lengthBeats: 0.5,
+          velocity: 0.9,
+        ),
         MidiNote(
-            id: '${now}_5',
-            pitch: 79,
-            startBeat: 3.0,
-            lengthBeats: 1.0,
-            velocity: 0.86),
+          id: '${now}_5',
+          pitch: 79,
+          startBeat: 3.0,
+          lengthBeats: 1.0,
+          velocity: 0.86,
+        ),
       ];
     }
     if (instrumentId == 'mixroom.gentle_pluck') {
@@ -21602,461 +21904,531 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (instrumentId == 'mixroom.sub_bass') {
       return <MidiNote>[
         MidiNote(
-            id: '${now}_0',
-            pitch: 36,
-            startBeat: 0.0,
-            lengthBeats: 1.0,
-            velocity: 0.9),
+          id: '${now}_0',
+          pitch: 36,
+          startBeat: 0.0,
+          lengthBeats: 1.0,
+          velocity: 0.9,
+        ),
         MidiNote(
-            id: '${now}_1',
-            pitch: 36,
-            startBeat: 1.25,
-            lengthBeats: 0.75,
-            velocity: 0.88),
+          id: '${now}_1',
+          pitch: 36,
+          startBeat: 1.25,
+          lengthBeats: 0.75,
+          velocity: 0.88,
+        ),
         MidiNote(
-            id: '${now}_2',
-            pitch: 38,
-            startBeat: 2.25,
-            lengthBeats: 0.75,
-            velocity: 0.88),
+          id: '${now}_2',
+          pitch: 38,
+          startBeat: 2.25,
+          lengthBeats: 0.75,
+          velocity: 0.88,
+        ),
         MidiNote(
-            id: '${now}_3',
-            pitch: 34,
-            startBeat: 3.25,
-            lengthBeats: 0.75,
-            velocity: 0.9),
+          id: '${now}_3',
+          pitch: 34,
+          startBeat: 3.25,
+          lengthBeats: 0.75,
+          velocity: 0.9,
+        ),
       ];
     }
     if (instrumentId == 'mixroom.analog_brass') {
       return <MidiNote>[
         MidiNote(
-            id: '${now}_0',
-            pitch: 55,
-            startBeat: 0.0,
-            lengthBeats: 1.5,
-            velocity: 0.8),
+          id: '${now}_0',
+          pitch: 55,
+          startBeat: 0.0,
+          lengthBeats: 1.5,
+          velocity: 0.8,
+        ),
         MidiNote(
-            id: '${now}_1',
-            pitch: 59,
-            startBeat: 0.0,
-            lengthBeats: 1.5,
-            velocity: 0.76),
+          id: '${now}_1',
+          pitch: 59,
+          startBeat: 0.0,
+          lengthBeats: 1.5,
+          velocity: 0.76,
+        ),
         MidiNote(
-            id: '${now}_2',
-            pitch: 62,
-            startBeat: 2.0,
-            lengthBeats: 1.5,
-            velocity: 0.8),
+          id: '${now}_2',
+          pitch: 62,
+          startBeat: 2.0,
+          lengthBeats: 1.5,
+          velocity: 0.8,
+        ),
         MidiNote(
-            id: '${now}_3',
-            pitch: 67,
-            startBeat: 2.0,
-            lengthBeats: 1.5,
-            velocity: 0.76),
+          id: '${now}_3',
+          pitch: 67,
+          startBeat: 2.0,
+          lengthBeats: 1.5,
+          velocity: 0.76,
+        ),
       ];
     }
     if (instrumentId == 'mixroom.drum_acoustic_easy') {
       return <MidiNote>[
         MidiNote(
-            id: '${now}_0',
-            pitch: 36,
-            startBeat: 0.0,
-            lengthBeats: 0.25,
-            velocity: 0.95),
+          id: '${now}_0',
+          pitch: 36,
+          startBeat: 0.0,
+          lengthBeats: 0.25,
+          velocity: 0.95,
+        ),
         MidiNote(
-            id: '${now}_1',
-            pitch: 38,
-            startBeat: 1.0,
-            lengthBeats: 0.25,
-            velocity: 0.86),
+          id: '${now}_1',
+          pitch: 38,
+          startBeat: 1.0,
+          lengthBeats: 0.25,
+          velocity: 0.86,
+        ),
         MidiNote(
-            id: '${now}_2',
-            pitch: 36,
-            startBeat: 2.0,
-            lengthBeats: 0.25,
-            velocity: 0.94),
+          id: '${now}_2',
+          pitch: 36,
+          startBeat: 2.0,
+          lengthBeats: 0.25,
+          velocity: 0.94,
+        ),
         MidiNote(
-            id: '${now}_3',
-            pitch: 38,
-            startBeat: 3.0,
-            lengthBeats: 0.25,
-            velocity: 0.88),
+          id: '${now}_3',
+          pitch: 38,
+          startBeat: 3.0,
+          lengthBeats: 0.25,
+          velocity: 0.88,
+        ),
         MidiNote(
-            id: '${now}_4',
-            pitch: 42,
-            startBeat: 0.0,
-            lengthBeats: 0.125,
-            velocity: 0.62),
+          id: '${now}_4',
+          pitch: 42,
+          startBeat: 0.0,
+          lengthBeats: 0.125,
+          velocity: 0.62,
+        ),
         MidiNote(
-            id: '${now}_5',
-            pitch: 42,
-            startBeat: 0.5,
-            lengthBeats: 0.125,
-            velocity: 0.58),
+          id: '${now}_5',
+          pitch: 42,
+          startBeat: 0.5,
+          lengthBeats: 0.125,
+          velocity: 0.58,
+        ),
         MidiNote(
-            id: '${now}_6',
-            pitch: 42,
-            startBeat: 1.5,
-            lengthBeats: 0.125,
-            velocity: 0.58),
+          id: '${now}_6',
+          pitch: 42,
+          startBeat: 1.5,
+          lengthBeats: 0.125,
+          velocity: 0.58,
+        ),
         MidiNote(
-            id: '${now}_7',
-            pitch: 42,
-            startBeat: 2.5,
-            lengthBeats: 0.125,
-            velocity: 0.58),
+          id: '${now}_7',
+          pitch: 42,
+          startBeat: 2.5,
+          lengthBeats: 0.125,
+          velocity: 0.58,
+        ),
         MidiNote(
-            id: '${now}_8',
-            pitch: 42,
-            startBeat: 3.5,
-            lengthBeats: 0.125,
-            velocity: 0.62),
+          id: '${now}_8',
+          pitch: 42,
+          startBeat: 3.5,
+          lengthBeats: 0.125,
+          velocity: 0.62,
+        ),
       ];
     }
     if (instrumentId == 'mixroom.drum_lofi') {
       return <MidiNote>[
         MidiNote(
-            id: '${now}_0',
-            pitch: 36,
-            startBeat: 0.0,
-            lengthBeats: 0.25,
-            velocity: 0.9),
+          id: '${now}_0',
+          pitch: 36,
+          startBeat: 0.0,
+          lengthBeats: 0.25,
+          velocity: 0.9,
+        ),
         MidiNote(
-            id: '${now}_1',
-            pitch: 36,
-            startBeat: 2.0,
-            lengthBeats: 0.25,
-            velocity: 0.88),
+          id: '${now}_1',
+          pitch: 36,
+          startBeat: 2.0,
+          lengthBeats: 0.25,
+          velocity: 0.88,
+        ),
         MidiNote(
-            id: '${now}_2',
-            pitch: 38,
-            startBeat: 1.0,
-            lengthBeats: 0.25,
-            velocity: 0.8),
+          id: '${now}_2',
+          pitch: 38,
+          startBeat: 1.0,
+          lengthBeats: 0.25,
+          velocity: 0.8,
+        ),
         MidiNote(
-            id: '${now}_3',
-            pitch: 38,
-            startBeat: 3.0,
-            lengthBeats: 0.25,
-            velocity: 0.82),
+          id: '${now}_3',
+          pitch: 38,
+          startBeat: 3.0,
+          lengthBeats: 0.25,
+          velocity: 0.82,
+        ),
         MidiNote(
-            id: '${now}_4',
-            pitch: 42,
-            startBeat: 0.5,
-            lengthBeats: 0.125,
-            velocity: 0.54),
+          id: '${now}_4',
+          pitch: 42,
+          startBeat: 0.5,
+          lengthBeats: 0.125,
+          velocity: 0.54,
+        ),
         MidiNote(
-            id: '${now}_5',
-            pitch: 42,
-            startBeat: 1.5,
-            lengthBeats: 0.125,
-            velocity: 0.52),
+          id: '${now}_5',
+          pitch: 42,
+          startBeat: 1.5,
+          lengthBeats: 0.125,
+          velocity: 0.52,
+        ),
         MidiNote(
-            id: '${now}_6',
-            pitch: 42,
-            startBeat: 2.5,
-            lengthBeats: 0.125,
-            velocity: 0.5),
+          id: '${now}_6',
+          pitch: 42,
+          startBeat: 2.5,
+          lengthBeats: 0.125,
+          velocity: 0.5,
+        ),
         MidiNote(
-            id: '${now}_7',
-            pitch: 42,
-            startBeat: 3.5,
-            lengthBeats: 0.125,
-            velocity: 0.56),
+          id: '${now}_7',
+          pitch: 42,
+          startBeat: 3.5,
+          lengthBeats: 0.125,
+          velocity: 0.56,
+        ),
         MidiNote(
-            id: '${now}_8',
-            pitch: 50,
-            startBeat: 2.75,
-            lengthBeats: 0.25,
-            velocity: 0.64),
+          id: '${now}_8',
+          pitch: 50,
+          startBeat: 2.75,
+          lengthBeats: 0.25,
+          velocity: 0.64,
+        ),
       ];
     }
     if (instrumentId == 'mixroom.drum_house') {
       return <MidiNote>[
         MidiNote(
-            id: '${now}_0',
-            pitch: 36,
-            startBeat: 0.0,
-            lengthBeats: 0.25,
-            velocity: 0.96),
+          id: '${now}_0',
+          pitch: 36,
+          startBeat: 0.0,
+          lengthBeats: 0.25,
+          velocity: 0.96,
+        ),
         MidiNote(
-            id: '${now}_1',
-            pitch: 36,
-            startBeat: 1.0,
-            lengthBeats: 0.25,
-            velocity: 0.96),
+          id: '${now}_1',
+          pitch: 36,
+          startBeat: 1.0,
+          lengthBeats: 0.25,
+          velocity: 0.96,
+        ),
         MidiNote(
-            id: '${now}_2',
-            pitch: 36,
-            startBeat: 2.0,
-            lengthBeats: 0.25,
-            velocity: 0.96),
+          id: '${now}_2',
+          pitch: 36,
+          startBeat: 2.0,
+          lengthBeats: 0.25,
+          velocity: 0.96,
+        ),
         MidiNote(
-            id: '${now}_3',
-            pitch: 36,
-            startBeat: 3.0,
-            lengthBeats: 0.25,
-            velocity: 0.96),
+          id: '${now}_3',
+          pitch: 36,
+          startBeat: 3.0,
+          lengthBeats: 0.25,
+          velocity: 0.96,
+        ),
         MidiNote(
-            id: '${now}_4',
-            pitch: 39,
-            startBeat: 1.0,
-            lengthBeats: 0.25,
-            velocity: 0.84),
+          id: '${now}_4',
+          pitch: 39,
+          startBeat: 1.0,
+          lengthBeats: 0.25,
+          velocity: 0.84,
+        ),
         MidiNote(
-            id: '${now}_5',
-            pitch: 39,
-            startBeat: 3.0,
-            lengthBeats: 0.25,
-            velocity: 0.86),
+          id: '${now}_5',
+          pitch: 39,
+          startBeat: 3.0,
+          lengthBeats: 0.25,
+          velocity: 0.86,
+        ),
         MidiNote(
-            id: '${now}_6',
-            pitch: 42,
-            startBeat: 0.5,
-            lengthBeats: 0.125,
-            velocity: 0.62),
+          id: '${now}_6',
+          pitch: 42,
+          startBeat: 0.5,
+          lengthBeats: 0.125,
+          velocity: 0.62,
+        ),
         MidiNote(
-            id: '${now}_7',
-            pitch: 42,
-            startBeat: 1.5,
-            lengthBeats: 0.125,
-            velocity: 0.62),
+          id: '${now}_7',
+          pitch: 42,
+          startBeat: 1.5,
+          lengthBeats: 0.125,
+          velocity: 0.62,
+        ),
         MidiNote(
-            id: '${now}_8',
-            pitch: 42,
-            startBeat: 2.5,
-            lengthBeats: 0.125,
-            velocity: 0.62),
+          id: '${now}_8',
+          pitch: 42,
+          startBeat: 2.5,
+          lengthBeats: 0.125,
+          velocity: 0.62,
+        ),
         MidiNote(
-            id: '${now}_9',
-            pitch: 46,
-            startBeat: 3.5,
-            lengthBeats: 0.25,
-            velocity: 0.74),
+          id: '${now}_9',
+          pitch: 46,
+          startBeat: 3.5,
+          lengthBeats: 0.25,
+          velocity: 0.74,
+        ),
       ];
     }
     if (instrumentId == 'mixroom.reese_bass') {
       return <MidiNote>[
         MidiNote(
-            id: '${now}_0',
-            pitch: 36,
-            startBeat: 0.0,
-            lengthBeats: 0.75,
-            velocity: 0.9),
+          id: '${now}_0',
+          pitch: 36,
+          startBeat: 0.0,
+          lengthBeats: 0.75,
+          velocity: 0.9,
+        ),
         MidiNote(
-            id: '${now}_1',
-            pitch: 36,
-            startBeat: 1.0,
-            lengthBeats: 0.5,
-            velocity: 0.86),
+          id: '${now}_1',
+          pitch: 36,
+          startBeat: 1.0,
+          lengthBeats: 0.5,
+          velocity: 0.86,
+        ),
         MidiNote(
-            id: '${now}_2',
-            pitch: 39,
-            startBeat: 2.0,
-            lengthBeats: 0.75,
-            velocity: 0.9),
+          id: '${now}_2',
+          pitch: 39,
+          startBeat: 2.0,
+          lengthBeats: 0.75,
+          velocity: 0.9,
+        ),
         MidiNote(
-            id: '${now}_3',
-            pitch: 34,
-            startBeat: 3.0,
-            lengthBeats: 0.75,
-            velocity: 0.88),
+          id: '${now}_3',
+          pitch: 34,
+          startBeat: 3.0,
+          lengthBeats: 0.75,
+          velocity: 0.88,
+        ),
       ];
     }
     if (instrumentId == 'mixroom.cinematic_pad') {
       return <MidiNote>[
         MidiNote(
-            id: '${now}_0',
-            pitch: 48,
-            startBeat: 0.0,
-            lengthBeats: 4.0,
-            velocity: 0.7),
+          id: '${now}_0',
+          pitch: 48,
+          startBeat: 0.0,
+          lengthBeats: 4.0,
+          velocity: 0.7,
+        ),
         MidiNote(
-            id: '${now}_1',
-            pitch: 55,
-            startBeat: 0.0,
-            lengthBeats: 4.0,
-            velocity: 0.64),
+          id: '${now}_1',
+          pitch: 55,
+          startBeat: 0.0,
+          lengthBeats: 4.0,
+          velocity: 0.64,
+        ),
         MidiNote(
-            id: '${now}_2',
-            pitch: 60,
-            startBeat: 0.0,
-            lengthBeats: 4.0,
-            velocity: 0.62),
+          id: '${now}_2',
+          pitch: 60,
+          startBeat: 0.0,
+          lengthBeats: 4.0,
+          velocity: 0.62,
+        ),
       ];
     }
     if (instrumentId == 'mixroom.drum_trap') {
       return <MidiNote>[
         MidiNote(
-            id: '${now}_0',
-            pitch: 36,
-            startBeat: 0.0,
-            lengthBeats: 0.25,
-            velocity: 0.98),
+          id: '${now}_0',
+          pitch: 36,
+          startBeat: 0.0,
+          lengthBeats: 0.25,
+          velocity: 0.98,
+        ),
         MidiNote(
-            id: '${now}_1',
-            pitch: 36,
-            startBeat: 1.75,
-            lengthBeats: 0.25,
-            velocity: 0.92),
+          id: '${now}_1',
+          pitch: 36,
+          startBeat: 1.75,
+          lengthBeats: 0.25,
+          velocity: 0.92,
+        ),
         MidiNote(
-            id: '${now}_2',
-            pitch: 36,
-            startBeat: 2.5,
-            lengthBeats: 0.25,
-            velocity: 0.94),
+          id: '${now}_2',
+          pitch: 36,
+          startBeat: 2.5,
+          lengthBeats: 0.25,
+          velocity: 0.94,
+        ),
         MidiNote(
-            id: '${now}_3',
-            pitch: 39,
-            startBeat: 1.0,
-            lengthBeats: 0.25,
-            velocity: 0.86),
+          id: '${now}_3',
+          pitch: 39,
+          startBeat: 1.0,
+          lengthBeats: 0.25,
+          velocity: 0.86,
+        ),
         MidiNote(
-            id: '${now}_4',
-            pitch: 39,
-            startBeat: 3.0,
-            lengthBeats: 0.25,
-            velocity: 0.88),
+          id: '${now}_4',
+          pitch: 39,
+          startBeat: 3.0,
+          lengthBeats: 0.25,
+          velocity: 0.88,
+        ),
         MidiNote(
-            id: '${now}_5',
-            pitch: 42,
-            startBeat: 0.5,
-            lengthBeats: 0.125,
-            velocity: 0.58),
+          id: '${now}_5',
+          pitch: 42,
+          startBeat: 0.5,
+          lengthBeats: 0.125,
+          velocity: 0.58,
+        ),
         MidiNote(
-            id: '${now}_6',
-            pitch: 42,
-            startBeat: 1.5,
-            lengthBeats: 0.125,
-            velocity: 0.56),
+          id: '${now}_6',
+          pitch: 42,
+          startBeat: 1.5,
+          lengthBeats: 0.125,
+          velocity: 0.56,
+        ),
         MidiNote(
-            id: '${now}_7',
-            pitch: 42,
-            startBeat: 2.5,
-            lengthBeats: 0.125,
-            velocity: 0.6),
+          id: '${now}_7',
+          pitch: 42,
+          startBeat: 2.5,
+          lengthBeats: 0.125,
+          velocity: 0.6,
+        ),
         MidiNote(
-            id: '${now}_8',
-            pitch: 46,
-            startBeat: 3.5,
-            lengthBeats: 0.125,
-            velocity: 0.72),
+          id: '${now}_8',
+          pitch: 46,
+          startBeat: 3.5,
+          lengthBeats: 0.125,
+          velocity: 0.72,
+        ),
         MidiNote(
-            id: '${now}_9',
-            pitch: 46,
-            startBeat: 3.75,
-            lengthBeats: 0.125,
-            velocity: 0.7),
+          id: '${now}_9',
+          pitch: 46,
+          startBeat: 3.75,
+          lengthBeats: 0.125,
+          velocity: 0.7,
+        ),
       ];
     }
     if (instrumentId == 'mixroom.drum_breakbeat') {
       return <MidiNote>[
         MidiNote(
-            id: '${now}_0',
-            pitch: 36,
-            startBeat: 0.0,
-            lengthBeats: 0.25,
-            velocity: 0.94),
+          id: '${now}_0',
+          pitch: 36,
+          startBeat: 0.0,
+          lengthBeats: 0.25,
+          velocity: 0.94,
+        ),
         MidiNote(
-            id: '${now}_1',
-            pitch: 36,
-            startBeat: 2.5,
-            lengthBeats: 0.25,
-            velocity: 0.88),
+          id: '${now}_1',
+          pitch: 36,
+          startBeat: 2.5,
+          lengthBeats: 0.25,
+          velocity: 0.88,
+        ),
         MidiNote(
-            id: '${now}_2',
-            pitch: 39,
-            startBeat: 1.0,
-            lengthBeats: 0.25,
-            velocity: 0.86),
+          id: '${now}_2',
+          pitch: 39,
+          startBeat: 1.0,
+          lengthBeats: 0.25,
+          velocity: 0.86,
+        ),
         MidiNote(
-            id: '${now}_3',
-            pitch: 39,
-            startBeat: 1.75,
-            lengthBeats: 0.25,
-            velocity: 0.8),
+          id: '${now}_3',
+          pitch: 39,
+          startBeat: 1.75,
+          lengthBeats: 0.25,
+          velocity: 0.8,
+        ),
         MidiNote(
-            id: '${now}_4',
-            pitch: 39,
-            startBeat: 3.0,
-            lengthBeats: 0.25,
-            velocity: 0.84),
+          id: '${now}_4',
+          pitch: 39,
+          startBeat: 3.0,
+          lengthBeats: 0.25,
+          velocity: 0.84,
+        ),
         MidiNote(
-            id: '${now}_5',
-            pitch: 42,
-            startBeat: 0.5,
-            lengthBeats: 0.125,
-            velocity: 0.62),
+          id: '${now}_5',
+          pitch: 42,
+          startBeat: 0.5,
+          lengthBeats: 0.125,
+          velocity: 0.62,
+        ),
         MidiNote(
-            id: '${now}_6',
-            pitch: 42,
-            startBeat: 1.5,
-            lengthBeats: 0.125,
-            velocity: 0.6),
+          id: '${now}_6',
+          pitch: 42,
+          startBeat: 1.5,
+          lengthBeats: 0.125,
+          velocity: 0.6,
+        ),
         MidiNote(
-            id: '${now}_7',
-            pitch: 42,
-            startBeat: 2.0,
-            lengthBeats: 0.125,
-            velocity: 0.58),
+          id: '${now}_7',
+          pitch: 42,
+          startBeat: 2.0,
+          lengthBeats: 0.125,
+          velocity: 0.58,
+        ),
         MidiNote(
-            id: '${now}_8',
-            pitch: 46,
-            startBeat: 3.5,
-            lengthBeats: 0.125,
-            velocity: 0.66),
+          id: '${now}_8',
+          pitch: 46,
+          startBeat: 3.5,
+          lengthBeats: 0.125,
+          velocity: 0.66,
+        ),
       ];
     }
     if (instrumentId == 'mixroom.drum_dnb') {
       return <MidiNote>[
         MidiNote(
-            id: '${now}_0',
-            pitch: 36,
-            startBeat: 0.0,
-            lengthBeats: 0.25,
-            velocity: 0.98),
+          id: '${now}_0',
+          pitch: 36,
+          startBeat: 0.0,
+          lengthBeats: 0.25,
+          velocity: 0.98,
+        ),
         MidiNote(
-            id: '${now}_1',
-            pitch: 36,
-            startBeat: 2.75,
-            lengthBeats: 0.25,
-            velocity: 0.92),
+          id: '${now}_1',
+          pitch: 36,
+          startBeat: 2.75,
+          lengthBeats: 0.25,
+          velocity: 0.92,
+        ),
         MidiNote(
-            id: '${now}_2',
-            pitch: 39,
-            startBeat: 1.0,
-            lengthBeats: 0.25,
-            velocity: 0.9),
+          id: '${now}_2',
+          pitch: 39,
+          startBeat: 1.0,
+          lengthBeats: 0.25,
+          velocity: 0.9,
+        ),
         MidiNote(
-            id: '${now}_3',
-            pitch: 39,
-            startBeat: 3.0,
-            lengthBeats: 0.25,
-            velocity: 0.9),
+          id: '${now}_3',
+          pitch: 39,
+          startBeat: 3.0,
+          lengthBeats: 0.25,
+          velocity: 0.9,
+        ),
         MidiNote(
-            id: '${now}_4',
-            pitch: 42,
-            startBeat: 0.5,
-            lengthBeats: 0.125,
-            velocity: 0.64),
+          id: '${now}_4',
+          pitch: 42,
+          startBeat: 0.5,
+          lengthBeats: 0.125,
+          velocity: 0.64,
+        ),
         MidiNote(
-            id: '${now}_5',
-            pitch: 42,
-            startBeat: 1.5,
-            lengthBeats: 0.125,
-            velocity: 0.64),
+          id: '${now}_5',
+          pitch: 42,
+          startBeat: 1.5,
+          lengthBeats: 0.125,
+          velocity: 0.64,
+        ),
         MidiNote(
-            id: '${now}_6',
-            pitch: 42,
-            startBeat: 2.5,
-            lengthBeats: 0.125,
-            velocity: 0.66),
+          id: '${now}_6',
+          pitch: 42,
+          startBeat: 2.5,
+          lengthBeats: 0.125,
+          velocity: 0.66,
+        ),
         MidiNote(
-            id: '${now}_7',
-            pitch: 42,
-            startBeat: 3.5,
-            lengthBeats: 0.125,
-            velocity: 0.66),
+          id: '${now}_7',
+          pitch: 42,
+          startBeat: 3.5,
+          lengthBeats: 0.125,
+          velocity: 0.66,
+        ),
       ];
     }
     return seededPattern(<List<num>>[
@@ -22086,8 +22458,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final out = <String, String>{};
     final trimmed = line.split('//').first.trim();
     if (trimmed.isEmpty) return out;
-    final matches =
-        RegExp(r'([A-Za-z_][A-Za-z0-9_]*)=').allMatches(trimmed).toList();
+    final matches = RegExp(
+      r'([A-Za-z_][A-Za-z0-9_]*)=',
+    ).allMatches(trimmed).toList();
     if (matches.isEmpty) return out;
     for (int i = 0; i < matches.length; i++) {
       final m = matches[i];
@@ -22183,12 +22556,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final line = rawLine.split('//').first.trim();
         if (line.isEmpty) continue;
 
-        final includeMatch =
-            RegExp(r'''^#include\s+["']([^"']+)["']''', caseSensitive: false)
-                .firstMatch(line);
+        final includeMatch = RegExp(
+          r'''^#include\s+["']([^"']+)["']''',
+          caseSensitive: false,
+        ).firstMatch(line);
         if (includeMatch != null) {
-          final includeRaw =
-              _stripSfzQuotes((includeMatch.group(1) ?? '').trim());
+          final includeRaw = _stripSfzQuotes(
+            (includeMatch.group(1) ?? '').trim(),
+          );
           if (includeRaw.isNotEmpty) {
             final includePath = File(normalizedPath).existsSync()
                 ? p.normalize(p.join(dir, includeRaw.replaceAll('\\', '/')))
@@ -22205,9 +22580,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           continue;
         }
 
-        final defineMatch =
-            RegExp(r'^#define\s+\$?([A-Za-z_][A-Za-z0-9_]*)\s+(.+)$')
-                .firstMatch(line);
+        final defineMatch = RegExp(
+          r'^#define\s+\$?([A-Za-z_][A-Za-z0-9_]*)\s+(.+)$',
+        ).firstMatch(line);
         if (defineMatch != null) {
           final key = (defineMatch.group(1) ?? '').trim();
           final value = (defineMatch.group(2) ?? '').trim();
@@ -22247,9 +22622,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (samplePath.startsWith('assets/')) {
       return p.posix.normalize(samplePath);
     }
-    return p.posix.normalize(
-      p.posix.join(sfzDir, defaultPath, samplePath),
-    );
+    return p.posix.normalize(p.posix.join(sfzDir, defaultPath, samplePath));
   }
 
   String? _sampledAliasAssetPathForInstrumentId(String instrumentId) {
@@ -22312,14 +22685,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   double _readSfzNumeric(
-      Map<String, String> values, String key, double fallback) {
+    Map<String, String> values,
+    String key,
+    double fallback,
+  ) {
     final raw = values[key];
     if (raw == null) return fallback;
     return _parseSfzNumberOrNote(raw) ?? fallback;
   }
 
   Future<_SfzDefinition?> _sfzDefinitionForInstrument(
-      String instrumentId) async {
+    String instrumentId,
+  ) async {
     final spec = _instrumentSpecById(instrumentId);
     if (!_isSampledInstrumentSpec(spec)) return null;
     final sfzAssetPath = (spec['sfzAssetPath'] as String?)?.trim() ?? '';
@@ -22410,21 +22787,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final loVel = _readSfzNumeric(r, 'lovel', 0).round().clamp(0, 127);
         final hiVel = _readSfzNumeric(r, 'hivel', 127).round().clamp(0, 127);
         final regionVolDb = _readSfzNumeric(r, 'volume', globalVol);
-        final gainLinear = math
-            .pow(
-              10.0,
-              (regionVolDb.clamp(-24.0, 12.0)) / 20.0,
-            )
-            .toDouble();
-        final attackSec = _readSfzNumeric(r, 'ampeg_attack', globalAttackSec)
-            .clamp(0.0, 4.0)
-            .toDouble();
-        final releaseSec = _readSfzNumeric(r, 'ampeg_release', globalReleaseSec)
-            .clamp(0.02, 12.0)
-            .toDouble();
-        final pitchKeytrack = _readSfzNumeric(r, 'pitch_keytrack', 100.0)
-            .clamp(-1200.0, 1200.0)
-            .toDouble();
+        final gainLinear =
+            math.pow(10.0, (regionVolDb.clamp(-24.0, 12.0)) / 20.0).toDouble();
+        final attackSec = _readSfzNumeric(
+          r,
+          'ampeg_attack',
+          globalAttackSec,
+        ).clamp(0.0, 4.0).toDouble();
+        final releaseSec = _readSfzNumeric(
+          r,
+          'ampeg_release',
+          globalReleaseSec,
+        ).clamp(0.02, 12.0).toDouble();
+        final pitchKeytrack = _readSfzNumeric(
+          r,
+          'pitch_keytrack',
+          100.0,
+        ).clamp(-1200.0, 1200.0).toDouble();
         final pitchOffsetSemitones = (_readSfzNumeric(r, 'transpose', 0.0) +
                 (_readSfzNumeric(r, 'tune', 0.0) / 100.0))
             .clamp(-48.0, 48.0)
@@ -22433,18 +22812,28 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           0,
           _readSfzNumeric(r, 'offset', 0.0).round(),
         );
-        final sampleEndFrameExclusive =
-            math.max(0, _readSfzNumeric(r, 'end', -1.0).round() + 1);
+        final sampleEndFrameExclusive = math.max(
+          0,
+          _readSfzNumeric(r, 'end', -1.0).round() + 1,
+        );
         final loopMode = (r['loop_mode'] ?? '').trim().toLowerCase();
         final oneShot = loopMode == 'one_shot';
-        final seqLength =
-            math.max(1, _readSfzNumeric(r, 'seq_length', 1.0).round());
+        final seqLength = math.max(
+          1,
+          _readSfzNumeric(r, 'seq_length', 1.0).round(),
+        );
         final rawSeqPosition = _readSfzNumeric(r, 'seq_position', 1.0).round();
         final seqPosition = rawSeqPosition.clamp(1, seqLength);
-        final loRand =
-            _readSfzNumeric(r, 'lorand', 0.0).clamp(0.0, 1.0).toDouble();
-        final hiRand =
-            _readSfzNumeric(r, 'hirand', 1.0).clamp(loRand, 1.0).toDouble();
+        final loRand = _readSfzNumeric(
+          r,
+          'lorand',
+          0.0,
+        ).clamp(0.0, 1.0).toDouble();
+        final hiRand = _readSfzNumeric(
+          r,
+          'hirand',
+          1.0,
+        ).clamp(loRand, 1.0).toDouble();
         parsedRegions.add(
           _SfzRegion(
             sampleAssetPath: sampleAssetPath,
@@ -22554,8 +22943,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   int _findWavChunk(Uint8List bytes, String chunkId) {
     for (int i = 12; i + 8 <= bytes.length;) {
       final id = ascii.decode(bytes.sublist(i, i + 4), allowInvalid: true);
-      final size =
-          ByteData.sublistView(bytes, i + 4, i + 8).getUint32(0, Endian.little);
+      final size = ByteData.sublistView(
+        bytes,
+        i + 4,
+        i + 8,
+      ).getUint32(0, Endian.little);
       if (id == chunkId) return i;
       i += 8 + size + (size.isOdd ? 1 : 0);
     }
@@ -22573,9 +22965,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final dataChunkStart = _findWavChunk(bytes, 'data');
     if (fmtChunkStart < 0 || dataChunkStart < 0) return null;
 
-    final fmtSize =
-        ByteData.sublistView(bytes, fmtChunkStart + 4, fmtChunkStart + 8)
-            .getUint32(0, Endian.little);
+    final fmtSize = ByteData.sublistView(
+      bytes,
+      fmtChunkStart + 4,
+      fmtChunkStart + 8,
+    ).getUint32(0, Endian.little);
     if (fmtSize < 16) return null;
     final fmt = ByteData.sublistView(
       bytes,
@@ -22628,11 +23022,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       right[i] = r;
     }
 
-    return _DecodedStereoPcm(
-      sampleRate: sampleRate,
-      left: left,
-      right: right,
-    );
+    return _DecodedStereoPcm(sampleRate: sampleRate, left: left, right: right);
   }
 
   String _sfzSampleCacheFileStem(String assetPath) {
@@ -22641,10 +23031,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       0x811c9dc5,
       (acc, unit) => (((acc ^ unit) * 0x01000193) & 0x7fffffff),
     );
-    final basename = p.posix.basename(assetPath).replaceAll(
-          RegExp(r'[^A-Za-z0-9._-]+'),
-          '_',
-        );
+    final basename = p.posix
+        .basename(assetPath)
+        .replaceAll(RegExp(r'[^A-Za-z0-9._-]+'), '_');
     return '${basename}_$hash';
   }
 
@@ -22781,8 +23170,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final positionHold = (params['grainPositionHold'] ?? 0.0) >= 0.5;
     final rootNote = (params['rootNote'] ?? 60.0).round().clamp(0, 127);
     final sampleLowKey = (params['sampleLowKey'] ?? 0.0).round().clamp(0, 127);
-    final sampleHighKey =
-        (params['sampleHighKey'] ?? 127.0).round().clamp(sampleLowKey, 127);
+    final sampleHighKey = (params['sampleHighKey'] ?? 127.0).round().clamp(
+          sampleLowKey,
+          127,
+        );
     final sampleStartNorm =
         (params['sampleStartNorm'] ?? 0.0).clamp(0.0, 0.98).toDouble();
     final sampleEndNorm = (params['sampleEndNorm'] ?? 1.0)
@@ -22790,8 +23181,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .toDouble();
     final reverseSample = (params['reverseSample'] ?? 0.0) >= 0.5;
     final normalizeSample = (params['normalizeSample'] ?? 0.0) >= 0.5;
-    final filterCutoff =
-        (params['sampleFilterCutoffHz'] ?? 20000.0).clamp(80.0, 20000.0);
+    final filterCutoff = (params['sampleFilterCutoffHz'] ?? 20000.0).clamp(
+      80.0,
+      20000.0,
+    );
 
     final totalMs = math.max(
       minimumDurationMs,
@@ -22843,12 +23236,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         (note.lengthBeats * msPerBeat * sampleRate / 1000.0).round(),
       );
       final renderSamples = sustainSamples + (releaseSec * sampleRate).round();
-      final holdSamples =
-          math.max(2, (grainHoldMs * sampleRate / 1000.0).round());
+      final holdSamples = math.max(
+        2,
+        (grainHoldMs * sampleRate / 1000.0).round(),
+      );
       final grainAttackSamples = math.min(
-          holdSamples ~/ 2, (grainAttackMs * sampleRate / 1000.0).round());
-      final grainSpacingSamples =
-          math.max(1, (holdSamples * grainSpacingPct / 100.0).round());
+        holdSamples ~/ 2,
+        (grainAttackMs * sampleRate / 1000.0).round(),
+      );
+      final grainSpacingSamples = math.max(
+        1,
+        (holdSamples * grainSpacingPct / 100.0).round(),
+      );
       final waveSpacingFrames = holdSamples * waveSpacingPct / 100.0;
       final playbackRate = keyMode == 0
           ? math.pow(2.0, (safePitch - rootNote) / 12.0).toDouble() *
@@ -22997,8 +23396,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     final outputGain = (params['outputGain'] ?? 0.72).clamp(0.2, 2.0);
     final attackOverrideSec = ((params['attackMs'] ?? -1.0) / 1000.0);
-    final decaySec =
-        (((params['decayMs'] ?? 120.0) / 1000.0).clamp(0.0, 2.0)).toDouble();
+    final decaySec = (((params['decayMs'] ?? 120.0) / 1000.0).clamp(
+      0.0,
+      2.0,
+    )).toDouble();
     final sustainLevel =
         (params['sustainLevel'] ?? 0.86).clamp(0.05, 1.0).toDouble();
     final releaseOverrideSec = ((params['releaseMs'] ?? -1.0) / 1000.0);
@@ -23012,13 +23413,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final oneShotMode = (params['samplePlayMode'] ?? 0.0) >= 0.5;
     final rootNote = (params['rootNote'] ?? 60.0).round().clamp(0, 127);
     final sampleLowKey = (params['sampleLowKey'] ?? 0.0).round().clamp(0, 127);
-    final sampleHighKey =
-        (params['sampleHighKey'] ?? 127.0).round().clamp(sampleLowKey, 127);
+    final sampleHighKey = (params['sampleHighKey'] ?? 127.0).round().clamp(
+          sampleLowKey,
+          127,
+        );
     final sliceMode = (params['sliceMode'] ?? 0.0) >= 0.5;
     final sliceCount = (params['sliceCount'] ?? 8.0).round().clamp(2, 32);
     final stretchMode = (params['timeStretchMode'] ?? 0.0) >= 0.5;
-    final filterCutoff =
-        (params['sampleFilterCutoffHz'] ?? 20000.0).clamp(80.0, 20000.0);
+    final filterCutoff = (params['sampleFilterCutoffHz'] ?? 20000.0).clamp(
+      80.0,
+      20000.0,
+    );
     final tailSec = releaseOverrideSec > 0
         ? releaseOverrideSec
         : definition.defaultReleaseSec;
@@ -23049,10 +23454,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       if (!playbackRate.isFinite || playbackRate <= 0.0) continue;
       final baseStart = region.sampleStartFrame
-          .clamp(
-            0,
-            math.max(0, sample.frameCount - 1),
-          )
+          .clamp(0, math.max(0, sample.frameCount - 1))
           .toInt();
       final baseEnd = _sfzRegionFrameLimit(region, sample);
       var sampleStartFrame =
@@ -23063,8 +23465,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           sampleEndFrameExclusive.clamp(sampleStartFrame + 1, baseEnd).toInt();
       if (sliceMode) {
         final sliceIndex = (safePitch - rootNote).clamp(0, sliceCount - 1);
-        final trimFrames =
-            math.max(2, sampleEndFrameExclusive - sampleStartFrame);
+        final trimFrames = math.max(
+          2,
+          sampleEndFrameExclusive - sampleStartFrame,
+        );
         final sliceStart =
             sampleStartFrame + (trimFrames * sliceIndex / sliceCount).floor();
         final sliceEnd = sampleStartFrame +
@@ -23106,10 +23510,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (sample == null || sample.frameCount < 2) continue;
 
       final baseStart = region.sampleStartFrame
-          .clamp(
-            0,
-            math.max(0, sample.frameCount - 1),
-          )
+          .clamp(0, math.max(0, sample.frameCount - 1))
           .toInt();
       final baseEnd = _sfzRegionFrameLimit(region, sample);
       var sampleStartFrame =
@@ -23120,8 +23521,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           sampleEndFrameExclusive.clamp(sampleStartFrame + 1, baseEnd).toInt();
       if (sliceMode) {
         final sliceIndex = (safePitch - rootNote).clamp(0, sliceCount - 1);
-        final trimFrames =
-            math.max(2, sampleEndFrameExclusive - sampleStartFrame);
+        final trimFrames = math.max(
+          2,
+          sampleEndFrameExclusive - sampleStartFrame,
+        );
         final sliceStart =
             sampleStartFrame + (trimFrames * sliceIndex / sliceCount).floor();
         final sliceEnd = sampleStartFrame +
@@ -23156,8 +23559,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         outputSampleRate: sampleRate,
       );
       if (!playbackRate.isFinite || playbackRate <= 0.0) continue;
-      final sampleLimitedDurationSamples =
-          math.max(1, ((usableFrames - 1) / playbackRate).ceil());
+      final sampleLimitedDurationSamples = math.max(
+        1,
+        ((usableFrames - 1) / playbackRate).ceil(),
+      );
       final totalNoteSamples = oneShotMode
           ? sampleLimitedDurationSamples
           : sustainSamples + releaseSamples;
@@ -23213,8 +23618,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             sample.right[nextIndex] * frac;
         if (filterCutoff < 19500.0) {
           final prevIndex = math.max(baseIndex - 1, sampleStartFrame);
-          final nextSmoothIndex =
-              math.min(baseIndex + 1, sampleEndFrameExclusive - 1);
+          final nextSmoothIndex = math.min(
+            baseIndex + 1,
+            sampleEndFrameExclusive - 1,
+          );
           final alpha = (filterCutoff / 20000.0).clamp(0.0, 1.0);
           final smoothL =
               (sample.left[prevIndex] + l + sample.left[nextSmoothIndex]) / 3.0;
@@ -23258,20 +23665,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required List<MidiNote> notes,
     required Map<String, double> params,
   }) async {
-    final normalizedParams =
-        _normalizedInstrumentParamsForPlayback(instrumentId, params);
+    final normalizedParams = _normalizedInstrumentParamsForPlayback(
+      instrumentId,
+      params,
+    );
     if (!await outFile.parent.exists()) {
       await outFile.parent.create(recursive: true);
     }
 
     final noteMaps = notes
-        .map((n) => {
-              'id': n.id,
-              'pitch': n.pitch,
-              'startBeat': n.startBeat,
-              'lengthBeats': n.lengthBeats,
-              'velocity': n.velocity,
-            })
+        .map(
+          (n) => {
+            'id': n.id,
+            'pitch': n.pitch,
+            'startBeat': n.startBeat,
+            'lengthBeats': n.lengthBeats,
+            'velocity': n.velocity,
+          },
+        )
         .toList();
 
     try {
@@ -23310,8 +23721,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
         if (_kAllowSampledNativeRenderFallbackForBeta && Platform.isAndroid) {
           try {
-            final engineInstrumentId =
-                _liveMidiEngineInstrumentId(instrumentId);
+            final engineInstrumentId = _liveMidiEngineInstrumentId(
+              instrumentId,
+            );
             final renderedPath = await JuceAudioEngine.renderInstrumentClip(
               outPath: outFile.path,
               instrumentId: engineInstrumentId,
@@ -23385,19 +23797,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final totalMs = math.max(
-        minimumDurationMs, endBeat * msPerBeat + preset.releaseMs + 120.0);
+      minimumDurationMs,
+      endBeat * msPerBeat + preset.releaseMs + 120.0,
+    );
     final totalSamples = math.max(2048, (totalMs * sampleRate / 1000.0).ceil());
     final left = Float32List(totalSamples);
     final right = Float32List(totalSamples);
 
     final cleanedNotes = notes
-        .map((n) => MidiNote(
-              id: n.id,
-              pitch: n.pitch.clamp(0, 127).toInt(),
-              startBeat: math.max(0.0, n.startBeat),
-              lengthBeats: math.max(0.0625, n.lengthBeats),
-              velocity: n.velocity.clamp(0.0, 1.0).toDouble(),
-            ))
+        .map(
+          (n) => MidiNote(
+            id: n.id,
+            pitch: n.pitch.clamp(0, 127).toInt(),
+            startBeat: math.max(0.0, n.startBeat),
+            lengthBeats: math.max(0.0625, n.lengthBeats),
+            velocity: n.velocity.clamp(0.0, 1.0).toDouble(),
+          ),
+        )
         .toList(growable: false);
 
     for (final note in cleanedNotes) {
@@ -23407,12 +23823,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         1,
         (note.lengthBeats * msPerBeat * sampleRate / 1000.0).round(),
       );
-      final attackSamples =
-          math.max(1, (preset.attackMs * sampleRate / 1000.0).round());
-      final decaySamples =
-          math.max(1, (preset.decayMs * sampleRate / 1000.0).round());
-      final releaseSamples =
-          math.max(1, (preset.releaseMs * sampleRate / 1000.0).round());
+      final attackSamples = math.max(
+        1,
+        (preset.attackMs * sampleRate / 1000.0).round(),
+      );
+      final decaySamples = math.max(
+        1,
+        (preset.decayMs * sampleRate / 1000.0).round(),
+      );
+      final releaseSamples = math.max(
+        1,
+        (preset.releaseMs * sampleRate / 1000.0).round(),
+      );
       final totalNoteSamples = sustainSamples + releaseSamples;
       final freq = 440.0 * math.pow(2.0, (note.pitch - 69) / 12.0);
       final seed = note.pitch * 97 + noteStart * 7 + totalNoteSamples * 13;
@@ -23534,13 +23956,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   List<Map<String, dynamic>> _midiNotesToEnginePayload(List<MidiNote> notes) {
     return notes
-        .map((n) => <String, dynamic>{
-              'id': n.id,
-              'pitch': n.pitch,
-              'startBeat': n.startBeat,
-              'lengthBeats': n.lengthBeats,
-              'velocity': n.velocity,
-            })
+        .map(
+          (n) => <String, dynamic>{
+            'id': n.id,
+            'pitch': n.pitch,
+            'startBeat': n.startBeat,
+            'lengthBeats': n.lengthBeats,
+            'velocity': n.velocity,
+          },
+        )
         .toList();
   }
 
@@ -23654,8 +24078,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required String instrumentName,
     required Map<String, double> instrumentParams,
   }) {
-    final previousLiveInstrumentId =
-        _liveMidiEngineInstrumentId(clip.instrumentId);
+    final previousLiveInstrumentId = _liveMidiEngineInstrumentId(
+      clip.instrumentId,
+    );
     final nextLiveInstrumentId = _liveMidiEngineInstrumentId(instrumentId);
     final preserveHostedState =
         _instrumentIdUsesExternalPlugin(clip.instrumentId) &&
@@ -23736,10 +24161,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return clip.hostedInstrumentStateBase64;
   }
 
-  void _syncHostedInstrumentStateToLane(
-    AudioTrack clip,
-    String stateBase64,
-  ) {
+  void _syncHostedInstrumentStateToLane(AudioTrack clip, String stateBase64) {
     final trimmed = stateBase64.trim();
     if (trimmed.isEmpty || !clip.isMidi) return;
     final row = clip.rowId >= 0 ? _rowIndexForId(clip.rowId) : clip.rowIndex;
@@ -24198,9 +24620,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     String? clipId,
   }) async {
     if (_audioTracks.length >= kNumClips) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
           content: Text(
-              "Max number of audio clips reached ($kNumClips). Unable to add more clips.")));
+            "Max number of audio clips reached ($kNumClips). Unable to add more clips.",
+          ),
+        ),
+      );
       return;
     }
     if (instrumentId.trim().isEmpty) {
@@ -24234,9 +24660,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final rowId = _rowIdAt(safeRow);
     final engineClipId = _allocateEngineClipId();
     if (engineClipId < 0) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
           content: Text(
-              "Max number of audio clips reached ($kNumClips). Unable to add more clips.")));
+            "Max number of audio clips reached ($kNumClips). Unable to add more clips.",
+          ),
+        ),
+      );
       return;
     }
     try {
@@ -24454,8 +24884,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           final msg = _isSampledInstrumentId(instrumentId)
               ? 'Could not load this sampled instrument for live MIDI playback.'
               : 'Could not load this instrument for live MIDI playback.';
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text(msg)));
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(msg)));
         }
         return;
       }
@@ -24705,8 +25136,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   double _effectiveClipPitchSemitones(AudioTrack clip) {
-    return clip.pitchSemitones
-        .clamp(_kClipPitchMinSemitones, _kClipPitchMaxSemitones);
+    return clip.pitchSemitones.clamp(
+      _kClipPitchMinSemitones,
+      _kClipPitchMaxSemitones,
+    );
   }
 
   String _normalizeProjectCrossfadeMode(String raw) {
@@ -24848,10 +25281,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
-  void _indexClipForOperations(
-    AudioTrack clip, {
-    bool markMutation = true,
-  }) {
+  void _indexClipForOperations(AudioTrack clip, {bool markMutation = true}) {
     if (!_clipOperationIndexesInitialized) return;
     final wasIndexed = _indexedClipEndMs.containsKey(clip);
     final oldRowIndex = _indexedClipRowIndex[clip];
@@ -24935,10 +25365,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Map<int, ({double fadeInSec, double fadeOutSec, int fadeCurve})>
-      _resolvedClipFadesByEngineId({
-    Set<int>? clipIndices,
-    Set<int>? rowIds,
-  }) {
+      _resolvedClipFadesByEngineId({Set<int>? clipIndices, Set<int>? rowIds}) {
     final fades =
         <int, ({double fadeInSec, double fadeOutSec, int fadeCurve})>{};
     final candidateClips = _clipsForFadeResolution(
@@ -24948,8 +25375,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     for (final clip in candidateClips) {
       if (clip.engineClipId < 0) continue;
-      fades[clip.engineClipId] =
-          (fadeInSec: 0.0, fadeOutSec: 0.0, fadeCurve: 0);
+      fades[clip.engineClipId] = (
+        fadeInSec: 0.0,
+        fadeOutSec: 0.0,
+        fadeCurve: 0,
+      );
     }
 
     final mode = _normalizeProjectCrossfadeMode(_projectCrossfadeMode);
@@ -25108,8 +25538,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         'rowId': resolvedRowId,
         'startSec': math.max(0.0, clip.offset),
         'lengthSec': math.max(0.0, _clipTimelineDurationSec(clip)),
-        'inFileOffsetSec':
-            math.max(0.0, clip.trimStart.inMilliseconds / 1000.0),
+        'inFileOffsetSec': math.max(
+          0.0,
+          clip.trimStart.inMilliseconds / 1000.0,
+        ),
         'pitchSemitones': _effectiveClipPitchSemitones(clip),
         'reversed': !clip.isMidi && clip.isReversed,
         'tempoRatio': _tempoPlaybackRatioForEngine(clip),
@@ -25126,8 +25558,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       };
 
       if (exportUsesLiveMidiPath) {
-        snapshot['midiInstrumentId'] =
-            _liveMidiEngineInstrumentId(clip.instrumentId);
+        snapshot['midiInstrumentId'] = _liveMidiEngineInstrumentId(
+          clip.instrumentId,
+        );
         snapshot['midiInstrumentName'] = clip.instrumentName;
         snapshot['midiNotes'] = _midiNotesToEnginePayload(clip.midiNotes);
         snapshot['midiParams'] = _normalizedInstrumentParamsForPlayback(
@@ -25152,8 +25585,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required double selectionStartSec,
   }) {
     final snapshots = <Map<String, dynamic>>[];
-    final fadeByClipId =
-        _resolvedClipFadesByEngineId(clipIndices: selectedIndices);
+    final fadeByClipId = _resolvedClipFadesByEngineId(
+      clipIndices: selectedIndices,
+    );
 
     for (int i = 0; i < _audioTracks.length; i++) {
       final clip = _audioTracks[i];
@@ -25163,9 +25597,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       int resolvedRowId = clip.rowId;
       if (resolvedRowId < 0 || _rowIndexForId(resolvedRowId) < 0) {
         if (_rowCount <= 0) continue;
-        resolvedRowId = _rowIdAt(
-          clip.rowIndex.clamp(0, _rowCount - 1).toInt(),
-        );
+        resolvedRowId = _rowIdAt(clip.rowIndex.clamp(0, _rowCount - 1).toInt());
       }
 
       final selected = selectedIndices.contains(i);
@@ -25201,8 +25633,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       };
 
       if (exportUsesLiveMidiPath) {
-        snapshot['midiInstrumentId'] =
-            _liveMidiEngineInstrumentId(clip.instrumentId);
+        snapshot['midiInstrumentId'] = _liveMidiEngineInstrumentId(
+          clip.instrumentId,
+        );
         snapshot['midiInstrumentName'] = clip.instrumentName;
         snapshot['midiNotes'] = _midiNotesToEnginePayload(clip.midiNotes);
         snapshot['midiParams'] = _normalizedInstrumentParamsForPlayback(
@@ -25309,8 +25742,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       rowVolumeAutomation: _rowVolumeAutomation
           .map(_cloneAutomationPoints)
           .toList(growable: false),
-      rowPluginAutomation:
-          _cloneRowPluginAutomationSnapshot(_rowPluginAutomation),
+      rowPluginAutomation: _cloneRowPluginAutomationSnapshot(
+        _rowPluginAutomation,
+      ),
       rowAutomationClips: _cloneRowAutomationClipsSnapshot(_rowAutomationClips),
       loopEnabled: _loopEnabled,
       loopStartMs: _loopStartMs,
@@ -25349,8 +25783,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _audioTracks[i].offset = snapshot.clipOffsetsSec[i];
         }
         if (i < snapshot.clipVolumeAutomation.length) {
-          _audioTracks[i].volumeAutomation =
-              _cloneAutomationPoints(snapshot.clipVolumeAutomation[i]);
+          _audioTracks[i].volumeAutomation = _cloneAutomationPoints(
+            snapshot.clipVolumeAutomation[i],
+          );
         }
       }
 
@@ -25364,9 +25799,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
       _rowAutomationClips
         ..clear()
-        ..addAll(
-          _cloneRowAutomationClipsSnapshot(snapshot.rowAutomationClips),
-        );
+        ..addAll(_cloneRowAutomationClipsSnapshot(snapshot.rowAutomationClips));
 
       _loopEnabled = snapshot.loopEnabled;
       _loopStartMs = snapshot.loopStartMs;
@@ -25394,9 +25827,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         clip.sourceTempoBpm = entry.value.sourceTempoBpm;
         clip.stretchToProjectTempo = entry.value.stretchToProjectTempo;
         clip.tempoStretchPreservePitch = entry.value.tempoStretchPreservePitch;
-        clip.tempoWarpMode = normalizeTempoWarpMode(
-          entry.value.tempoWarpMode,
-        );
+        clip.tempoWarpMode = normalizeTempoWarpMode(entry.value.tempoWarpMode);
       }
     });
     await _syncAllTempoStretchToEngine();
@@ -25439,28 +25870,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     if (event.scrollDelta.dy.abs() < 0.5) return;
-    GestureBinding.instance.pointerSignalResolver.register(
-      event,
-      (resolvedEvent) {
-        if (resolvedEvent is! PointerScrollEvent ||
-            !_tempoPickerController.hasClients) {
-          return;
-        }
-        final direction = resolvedEvent.scrollDelta.dy < 0 ? -1 : 1;
-        final currentItem = _tempoPickerController.selectedItem;
-        final nextItem =
-            (currentItem + direction).clamp(0, _kTempoPickerMaxItem).toInt();
-        if (nextItem == currentItem) return;
-        unawaited(
-          _tempoPickerController.animateToItem(
-            nextItem,
-            duration: const Duration(milliseconds: 90),
-            curve: Curves.easeOutCubic,
-          ),
-        );
-        _setProjectTempoFromUi(_tempoPickerBpmForItem(nextItem));
-      },
-    );
+    GestureBinding.instance.pointerSignalResolver.register(event, (
+      resolvedEvent,
+    ) {
+      if (resolvedEvent is! PointerScrollEvent ||
+          !_tempoPickerController.hasClients) {
+        return;
+      }
+      final direction = resolvedEvent.scrollDelta.dy < 0 ? -1 : 1;
+      final currentItem = _tempoPickerController.selectedItem;
+      final nextItem =
+          (currentItem + direction).clamp(0, _kTempoPickerMaxItem).toInt();
+      if (nextItem == currentItem) return;
+      unawaited(
+        _tempoPickerController.animateToItem(
+          nextItem,
+          duration: const Duration(milliseconds: 90),
+          curve: Curves.easeOutCubic,
+        ),
+      );
+      _setProjectTempoFromUi(_tempoPickerBpmForItem(nextItem));
+    });
   }
 
   String _formatTempoBpm(double bpm) {
@@ -25589,10 +26019,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 width: 34,
                                 height: 34,
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.075),
+                                  color: Colors.white.withValues(
+                                    alpha: 0.075,
+                                  ),
                                   borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
-                                    color: Colors.white.withValues(alpha: 0.10),
+                                    color: Colors.white.withValues(
+                                      alpha: 0.10,
+                                    ),
                                   ),
                                 ),
                                 child: const Icon(
@@ -25622,10 +26056,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             child: Container(
                               height: 156,
                               decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.045),
+                                color: Colors.white.withValues(
+                                  alpha: 0.045,
+                                ),
                                 borderRadius: BorderRadius.circular(16),
                                 border: Border.all(
-                                  color: Colors.white.withValues(alpha: 0.08),
+                                  color: Colors.white.withValues(
+                                    alpha: 0.08,
+                                  ),
                                   strokeAlign: BorderSide.strokeAlignInside,
                                 ),
                               ),
@@ -25638,21 +26076,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 backgroundColor: Colors.transparent,
                                 selectionOverlay: Container(
                                   decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.08),
+                                    color: Colors.white.withValues(
+                                      alpha: 0.08,
+                                    ),
                                     border: Border(
                                       top: BorderSide(
-                                        color: Colors.white
-                                            .withValues(alpha: 0.12),
+                                        color: Colors.white.withValues(
+                                          alpha: 0.12,
+                                        ),
                                       ),
                                       bottom: BorderSide(
-                                        color: Colors.white
-                                            .withValues(alpha: 0.12),
+                                        color: Colors.white.withValues(
+                                          alpha: 0.12,
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
                                 onSelectedItemChanged: (index) {
-                                  setDialogState(() => pendingIndex = index);
+                                  setDialogState(
+                                    () => pendingIndex = index,
+                                  );
                                 },
                                 itemBuilder: (ctx, index) {
                                   if (index < 0 || index >= options.length) {
@@ -25683,33 +26127,42 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               Expanded(
                                 child: TextButton(
                                   style: TextButton.styleFrom(
-                                    foregroundColor:
-                                        Colors.white.withValues(alpha: 0.72),
+                                    foregroundColor: Colors.white.withValues(
+                                      alpha: 0.72,
+                                    ),
                                     textStyle: const TextStyle(
                                       fontFamily: 'Pretendard',
                                       fontWeight: FontWeight.w700,
                                     ),
                                   ),
                                   onPressed: () => Navigator.pop(ctx),
-                                  child: Text(L10n.translate(ctx, 'Cancel')),
+                                  child: Text(
+                                    L10n.translate(ctx, 'Cancel'),
+                                  ),
                                 ),
                               ),
                               const SizedBox(width: 10),
                               Expanded(
                                 child: FilledButton(
                                   style: FilledButton.styleFrom(
-                                    backgroundColor: const Color(0xFF6E7683),
+                                    backgroundColor: const Color(
+                                      0xFF6E7683,
+                                    ),
                                     foregroundColor: Colors.white,
                                     shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(14),
+                                      borderRadius: BorderRadius.circular(
+                                        14,
+                                      ),
                                     ),
                                     textStyle: const TextStyle(
                                       fontFamily: 'Pretendard',
                                       fontWeight: FontWeight.w800,
                                     ),
                                   ),
-                                  onPressed: () =>
-                                      Navigator.pop(ctx, options[pendingIndex]),
+                                  onPressed: () => Navigator.pop(
+                                    ctx,
+                                    options[pendingIndex],
+                                  ),
                                   child: Text(L10n.translate(ctx, 'Done')),
                                 ),
                               ),
@@ -25762,9 +26215,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _promptTempoInput() async {
     final raw = await showDialog<String>(
       context: context,
-      builder: (ctx) => _TempoInputDialog(
-        initialValue: _formatTempoBpm(_tempo),
-      ),
+      builder: (ctx) =>
+          _TempoInputDialog(initialValue: _formatTempoBpm(_tempo)),
     );
     if (raw == null || raw.isEmpty) return;
     final parsed = double.tryParse(raw.replaceAll(',', '.'));
@@ -25772,7 +26224,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text(L10n.translate(context, 'Enter 20.0 to 999.0 BPM'))),
+          content: Text(L10n.translate(context, 'Enter 20.0 to 999.0 BPM')),
+        ),
       );
       return;
     }
@@ -25919,8 +26372,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     ],
                   ),
                   borderRadius: BorderRadius.circular(22),
-                  border:
-                      Border.all(color: Colors.white.withValues(alpha: 0.14)),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.14),
+                  ),
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -26119,8 +26573,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final follows = _audioTracks
         .where((clip) => !clip.isMidi && clip.stretchToProjectTempo)
         .toList();
-    final clipModesAlreadyMatch = follows
-        .every((clip) => clip.tempoStretchPreservePitch == preservePitch);
+    final clipModesAlreadyMatch = follows.every(
+      (clip) => clip.tempoStretchPreservePitch == preservePitch,
+    );
     if (_tempoStretchEnabled == enabled &&
         _tempoStretchPreservePitchDefault == preservePitch &&
         clipModesAlreadyMatch) {
@@ -26459,8 +26914,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     reportProgress(0.08);
     await _flushDeferredAndroidRouteRefreshIfNeeded();
 
-    final pendingMidiRefreshes =
-        _midiClipEngineRefreshChains.values.toList(growable: false);
+    final pendingMidiRefreshes = _midiClipEngineRefreshChains.values.toList(
+      growable: false,
+    );
     if (pendingMidiRefreshes.isNotEmpty) {
       await Future.wait(
         pendingMidiRefreshes.map((future) => future.catchError((_) {})),
@@ -26555,8 +27011,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _ensureClipWaveformForNormalizeVisual(AudioTrack clip) async {
     if (clip.isMidi || !clip.file.existsSync()) return;
-    final durSec = (clip.audioDuration.inMilliseconds / 1000.0)
-        .clamp(0.001, double.infinity);
+    final durSec = (clip.audioDuration.inMilliseconds / 1000.0).clamp(
+      0.001,
+      double.infinity,
+    );
     const int kWaveformSPS = 150;
     const int minPoints = 256;
     const int maxPoints = 20000;
@@ -26639,8 +27097,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
     final clip = _audioTracks[clipIndex];
     if (clip.engineClipId < 0) return;
-    final next =
-        semitones.clamp(_kClipPitchMinSemitones, _kClipPitchMaxSemitones);
+    final next = semitones.clamp(
+      _kClipPitchMinSemitones,
+      _kClipPitchMaxSemitones,
+    );
     clip.pitchSemitones = next;
     _markClipVisualMutation();
     await JuceAudioEngine.setClipPitch(
@@ -26826,8 +27286,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           .putIfAbsent(cacheKey, () => <AudioTrack>{})
           .add(c);
 
-      final durSec = (c.audioDuration.inMilliseconds / 1000.0)
-          .clamp(0.001, double.infinity);
+      final durSec = (c.audioDuration.inMilliseconds / 1000.0).clamp(
+        0.001,
+        double.infinity,
+      );
       const int kWaveformSPS = 150;
       const int minPoints = 256;
       const int maxPoints = 20000;
@@ -27023,8 +27485,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ),
       );
       final failStr = L10n.translate(context, 'Export canceled or failed.');
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(failStr)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(failStr)));
       return;
     }
 
@@ -27154,8 +27617,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         });
       }
       final fail_str = L10n.translate(context, 'Export canceled or failed.');
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(fail_str)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(fail_str)));
     }
   }
 
@@ -27181,7 +27645,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text(L10n.translate(context, 'File is unavailable.'))),
+          content: Text(L10n.translate(context, 'File is unavailable.')),
+        ),
       );
       return false;
     }
@@ -27251,9 +27716,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
-  Future<bool> _ensureAndroidMediaLibraryAccess({
-    String? rationale,
-  }) async {
+  Future<bool> _ensureAndroidMediaLibraryAccess({String? rationale}) async {
     if (!Platform.isAndroid) return true;
 
     final audioStatus = await Permission.audio.request();
@@ -27304,8 +27767,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   bool _hasAndroidSharedStorageSampleBrowserRoot() {
     if (!Platform.isAndroid) return false;
-    return _sampleBrowserRoots
-        .any(SampleBrowserRootDefaults.isAndroidSharedStoragePath);
+    return _sampleBrowserRoots.any(
+      SampleBrowserRootDefaults.isAndroidSharedStoragePath,
+    );
   }
 
   Future<bool> _ensureAndroidSampleBrowserMediaAccessIfNeeded() async {
@@ -27638,11 +28102,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     for (final key in _startedSecurityScopeKeys) {
       try {
         if (key.startsWith('uri:')) {
-          unawaited(_securityScopedResource
-              .stopAccessingSecurityScopedResourceWithURL(key.substring(4)));
+          unawaited(
+            _securityScopedResource.stopAccessingSecurityScopedResourceWithURL(
+              key.substring(4),
+            ),
+          );
         } else {
-          unawaited(_securityScopedResource
-              .stopAccessingSecurityScopedResourceWithFilePath(key));
+          unawaited(
+            _securityScopedResource
+                .stopAccessingSecurityScopedResourceWithFilePath(key),
+          );
         }
       } catch (_) {}
     }
@@ -27704,8 +28173,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<String?> _ensureUserSampleDropFolderPath() async {
     try {
       final documentsDir = await getApplicationDocumentsDirectory();
-      final dropDir =
-          Directory(p.join(documentsDir.path, kUserSampleDropFolderName));
+      final dropDir = Directory(
+        p.join(documentsDir.path, kUserSampleDropFolderName),
+      );
       if (!await dropDir.exists()) {
         await dropDir.create(recursive: true);
       }
@@ -27804,8 +28274,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _sampleBrowserProjectAudioFolderPath != normalizedProjectAudioRoot;
     final userDropChanged =
         _sampleBrowserUserDropFolderPath != normalizedUserDropRoot;
-    final bundledRootsChanged =
-        !setEquals<String>(_sampleBrowserBundledRootFolders, bundledRootSet);
+    final bundledRootsChanged = !setEquals<String>(
+      _sampleBrowserBundledRootFolders,
+      bundledRootSet,
+    );
     if (!rootsChanged &&
         !projectAudioChanged &&
         !userDropChanged &&
@@ -27938,9 +28410,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (projectItems.isNotEmpty && mounted) {
-      _showSmallNotice(
-        'Project bundles can be imported from Home.',
-      );
+      _showSmallNotice('Project bundles can be imported from Home.');
     }
   }
 
@@ -27952,7 +28422,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<List<String>> _collectAiLibraryAudioEntriesForRoot(
-      String rootPath) async {
+    String rootPath,
+  ) async {
     final root = Directory(rootPath);
     if (!await root.exists()) return const <String>[];
 
@@ -28181,8 +28652,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             ? rootName
             : '$rootName/$directory';
         final logicalPath = '$logicalFolder/$fileName';
-        final actualPath = p
-            .normalize(p.join(rootPath, relative.replaceAll('/', p.separator)));
+        final actualPath = p.normalize(
+          p.join(rootPath, relative.replaceAll('/', p.separator)),
+        );
         sampleIndex[logicalPath] = actualPath;
         groupedDisplay
             .putIfAbsent(logicalFolder, () => <String>[])
@@ -28190,8 +28662,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final primaryRole =
             AssistantActionUtils.primarySampleRoleFromText(logicalPath) ??
                 'other';
-        final folderCounts =
-            groupedRoleCounts.putIfAbsent(logicalFolder, () => <String, int>{});
+        final folderCounts = groupedRoleCounts.putIfAbsent(
+          logicalFolder,
+          () => <String, int>{},
+        );
         folderCounts[primaryRole] = (folderCounts[primaryRole] ?? 0) + 1;
         groupedRoleExamples
             .putIfAbsent(logicalFolder, () => <String, String>{})
@@ -28202,8 +28676,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               .putIfAbsent(logicalFolder, () => <int>{})
               .addAll(tempoHints);
         }
-        for (final roleHint
-            in AssistantActionUtils.sampleRoleHintsFromText(logicalPath)) {
+        for (final roleHint in AssistantActionUtils.sampleRoleHintsFromText(
+          logicalPath,
+        )) {
           final bucket = roleHints.putIfAbsent(roleHint, () => <String>[]);
           if (!bucket.contains(logicalPath)) {
             bucket.add(logicalPath);
@@ -28319,7 +28794,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final roles = AssistantActionUtils.sampleRoleHintsFromText(
               logicalPath,
             );
-            final tempos = AssistantActionUtils.tempoHintsFromText(logicalPath);
+            final tempos = AssistantActionUtils.tempoHintsFromText(
+              logicalPath,
+            );
             final digest = crypto.sha256
                 .convert(utf8.encode(logicalPath))
                 .toString()
@@ -28372,19 +28849,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             _rowIdAt(index).toString(): <String, dynamic>{
               if (index < _rowVolumeAutomation.length)
                 'volume': _rowVolumeAutomation[index]
-                    .map((point) => <String, dynamic>{
-                          'time_ms': point.x,
-                          'value': point.volume,
-                        })
+                    .map(
+                      (point) => <String, dynamic>{
+                        'time_ms': point.x,
+                        'value': point.volume,
+                      },
+                    )
                     .toList(growable: false),
               for (final entry in (_rowPluginAutomation[index] ??
                       const <String, List<AutomationPoint>>{})
                   .entries)
                 entry.key: entry.value
-                    .map((point) => <String, dynamic>{
-                          'time_ms': point.x,
-                          'value': point.volume,
-                        })
+                    .map(
+                      (point) => <String, dynamic>{
+                        'time_ms': point.x,
+                        'value': point.volume,
+                      },
+                    )
                     .toList(growable: false),
             },
         },
@@ -28499,9 +28980,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     try {
       final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
       discovered.addAll(
-        manifest
-            .listAssets()
-            .where((path) => path.startsWith(kBundledSamplePackAssetPrefix)),
+        manifest.listAssets().where(
+              (path) => path.startsWith(kBundledSamplePackAssetPrefix),
+            ),
       );
     } catch (_) {
       try {
@@ -28510,7 +28991,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (decoded is Map) {
           discovered.addAll(
             decoded.keys.whereType<String>().where(
-                (path) => path.startsWith(kBundledSamplePackAssetPrefix)),
+                  (path) => path.startsWith(kBundledSamplePackAssetPrefix),
+                ),
           );
         }
       } catch (_) {
@@ -28549,8 +29031,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }) async {
     final displayName = _displayNameForBundledSamplePack(packSlug);
     final packDir = Directory(p.join(samplePacksDir.path, displayName));
-    final manifestFile =
-        File(p.join(packDir.path, kBundledSamplePackManifestFileName));
+    final manifestFile = File(
+      p.join(packDir.path, kBundledSamplePackManifestFileName),
+    );
     String? bundlePackManifest;
     final packManifestAssetPath =
         '$kBundledSamplePackAssetPrefix$packSlug/$kBundledSamplePackManifestFileName';
@@ -28580,8 +29063,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               from: '$kBundledSamplePackAssetPrefix$packSlug',
             );
             if (relative.isEmpty || relative.startsWith('..')) continue;
-            final outPath =
-                p.joinAll(<String>[packDir.path, ...p.posix.split(relative)]);
+            final outPath = p.joinAll(<String>[
+              packDir.path,
+              ...p.posix.split(relative),
+            ]);
             if (!File(outPath).existsSync()) {
               needsRefresh = true;
               break;
@@ -28608,8 +29093,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         from: '$kBundledSamplePackAssetPrefix$packSlug',
       );
       if (relative.isEmpty || relative.startsWith('..')) continue;
-      final outPath =
-          p.joinAll(<String>[packDir.path, ...p.posix.split(relative)]);
+      final outPath = p.joinAll(<String>[
+        packDir.path,
+        ...p.posix.split(relative),
+      ]);
       final outFile = File(outPath);
       await outFile.parent.create(recursive: true);
       final data = await rootBundle.load(assetPath);
@@ -28686,11 +29173,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _securityScopeStartCount = math.max(0, _securityScopeStartCount - 1);
       try {
         if (key.startsWith('uri:')) {
-          unawaited(_securityScopedResource
-              .stopAccessingSecurityScopedResourceWithURL(key.substring(4)));
+          unawaited(
+            _securityScopedResource.stopAccessingSecurityScopedResourceWithURL(
+              key.substring(4),
+            ),
+          );
         } else {
-          unawaited(_securityScopedResource
-              .stopAccessingSecurityScopedResourceWithFilePath(key));
+          unawaited(
+            _securityScopedResource
+                .stopAccessingSecurityScopedResourceWithFilePath(key),
+          );
         }
       } catch (_) {}
     }
@@ -28704,8 +29196,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     };
 
     setState(() {
-      _sampleBrowserRoots
-          .removeWhere((root) => p.normalize(root) == normalizedRoot);
+      _sampleBrowserRoots.removeWhere(
+        (root) => p.normalize(root) == normalizedRoot,
+      );
       _sampleDurationCache.removeWhere((k, _) {
         final normalized = p.normalize(k);
         return normalized == normalizedRoot ||
@@ -28847,6 +29340,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return _sampleDurationCache[filePath];
     }
 
+    final override = widget.sampleDurationOverride;
+    if (override != null) {
+      final duration = await override(filePath);
+      final resolved =
+          duration != null && duration > Duration.zero ? duration : null;
+      _sampleDurationCache[filePath] = resolved;
+      return resolved;
+    }
+
     try {
       await _startSecurityScopedAccessForFile(filePath);
       final escaped = filePath.replaceAll('"', r'\"');
@@ -28949,7 +29451,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-              '${L10n.translate(context, 'Failed to preview sample')}: $e'),
+            '${L10n.translate(context, 'Failed to preview sample')}: $e',
+          ),
         ),
       );
     }
@@ -28985,10 +29488,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return instrumentPickerCategoryForSpec(spec);
   }
 
-  String _instrumentPickerCategoryLabel(
-    BuildContext context,
-    String category,
-  ) {
+  String _instrumentPickerCategoryLabel(BuildContext context, String category) {
     return L10n.translate(context, category);
   }
 
@@ -29047,8 +29547,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Map<String, dynamic> a,
     Map<String, dynamic> b,
   ) {
-    final priorityCompare =
-        _instrumentSortPriority(a).compareTo(_instrumentSortPriority(b));
+    final priorityCompare = _instrumentSortPriority(
+      a,
+    ).compareTo(_instrumentSortPriority(b));
     if (priorityCompare != 0) return priorityCompare;
 
     final aSampled = _isSampledInstrumentSpec(a);
@@ -29067,8 +29568,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .toList(growable: false);
     return <String>[
       'All',
-      ...kInstrumentPickerOrderedCategories
-          .where((category) => available.contains(category)),
+      ...kInstrumentPickerOrderedCategories.where(
+        (category) => available.contains(category),
+      ),
     ];
   }
 
@@ -29285,8 +29787,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             isDense: true,
             filled: true,
             fillColor: Colors.black.withValues(alpha: 0.14),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 10,
+              vertical: 8,
+            ),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide(
@@ -29341,8 +29845,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               }
               final viewport = MediaQuery.of(ctx).size;
               final dialogWidth = math.min(560.0, viewport.width - 48.0);
-              final dialogHeight =
-                  math.min(500.0, math.max(340.0, viewport.height * 0.70));
+              final dialogHeight = math.min(
+                500.0,
+                math.max(340.0, viewport.height * 0.70),
+              );
               final dialogRadius = BorderRadius.circular(24);
               final normalizedQuery = searchQuery.trim().toLowerCase();
               final filtered = catalog.where((spec) {
@@ -29365,8 +29871,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 elevation: 0,
                 shape: RoundedRectangleBorder(borderRadius: dialogRadius),
                 clipBehavior: Clip.antiAlias,
-                insetPadding:
-                    const EdgeInsets.symmetric(horizontal: 22, vertical: 26),
+                insetPadding: const EdgeInsets.symmetric(
+                  horizontal: 22,
+                  vertical: 26,
+                ),
                 child: Material(
                   color: Colors.transparent,
                   child: SizedBox(
@@ -29438,36 +29946,52 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 itemBuilder: (context, index) {
                                   final category = categories[index];
                                   final selected = category == selectedCategory;
-                                  final accent =
-                                      _instrumentPickerAccent(category);
+                                  final accent = _instrumentPickerAccent(
+                                    category,
+                                  );
                                   return InkWell(
                                     onTap: () => setModalState(
-                                        () => selectedCategory = category),
+                                      () => selectedCategory = category,
+                                    ),
                                     borderRadius: BorderRadius.circular(999),
                                     child: AnimatedContainer(
-                                      duration:
-                                          const Duration(milliseconds: 120),
+                                      duration: const Duration(
+                                        milliseconds: 120,
+                                      ),
                                       constraints: const BoxConstraints(
                                         minHeight: 30,
                                         minWidth: 74,
                                       ),
                                       alignment: Alignment.center,
                                       padding: const EdgeInsets.symmetric(
-                                          horizontal: 10, vertical: 4),
+                                        horizontal: 10,
+                                        vertical: 4,
+                                      ),
                                       decoration: BoxDecoration(
                                         color: selected
                                             ? const Color.fromRGBO(
-                                                244, 244, 244, 0.20)
+                                                244,
+                                                244,
+                                                244,
+                                                0.20,
+                                              )
                                             : const Color.fromRGBO(
-                                                80, 91, 107, 0.24),
-                                        borderRadius:
-                                            BorderRadius.circular(999),
+                                                80,
+                                                91,
+                                                107,
+                                                0.24,
+                                              ),
+                                        borderRadius: BorderRadius.circular(
+                                          999,
+                                        ),
                                         border: Border.all(
                                           color: selected
-                                              ? Colors.white
-                                                  .withValues(alpha: 0.20)
-                                              : Colors.white
-                                                  .withValues(alpha: 0.10),
+                                              ? Colors.white.withValues(
+                                                  alpha: 0.20,
+                                                )
+                                              : Colors.white.withValues(
+                                                  alpha: 0.10,
+                                                ),
                                         ),
                                       ),
                                       child: Row(
@@ -29516,8 +30040,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               : 'No instruments in this category.',
                                         ),
                                         style: TextStyle(
-                                          color: const Color(0xFFF4F4F4)
-                                              .withValues(alpha: 0.66),
+                                          color: const Color(
+                                            0xFFF4F4F4,
+                                          ).withValues(alpha: 0.66),
                                           fontSize: 13,
                                           fontFamily: 'Pretendard',
                                         ),
@@ -29525,16 +30050,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     )
                                   : ListView.separated(
                                       padding: const EdgeInsets.symmetric(
-                                          horizontal: 6, vertical: 6),
+                                        horizontal: 6,
+                                        vertical: 6,
+                                      ),
                                       itemCount: filtered.length,
                                       separatorBuilder: (_, __) => Padding(
                                         padding: const EdgeInsets.symmetric(
-                                            horizontal: 8),
+                                          horizontal: 8,
+                                        ),
                                         child: Divider(
                                           height: 1,
                                           thickness: 1,
-                                          color: Colors.white
-                                              .withValues(alpha: 0.07),
+                                          color: Colors.white.withValues(
+                                            alpha: 0.07,
+                                          ),
                                         ),
                                       ),
                                       itemBuilder: (_, index) {
@@ -29663,14 +30192,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       selected = await _pickGranularizerInstrumentSpec();
       if (selected == null) return;
     }
-    final nextLane = _instrumentLaneRowFromSpec(selected).copyWith(
-      rowId: currentLane.rowId,
-    );
+    final nextLane = _instrumentLaneRowFromSpec(
+      selected,
+    ).copyWith(rowId: currentLane.rowId);
     final nextInstrumentName = nextLane.instrumentName.trim().isEmpty
         ? _instrumentNameFromId(nextLane.instrumentId)
         : nextLane.instrumentName.trim();
-    final nextInstrumentParams =
-        Map<String, double>.from(nextLane.instrumentParams);
+    final nextInstrumentParams = Map<String, double>.from(
+      nextLane.instrumentParams,
+    );
 
     final laneChanged = currentLane.instrumentId != nextLane.instrumentId ||
         currentLane.instrumentName != nextInstrumentName ||
@@ -29737,8 +30267,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           newInstrumentName: nextInstrumentName,
           newInstrumentParams: nextInstrumentParams,
           newHostedInstrumentStateBase64: newHostedInstrumentStateBase64,
-          applyToClip: (target, notesToApply, nextInstrumentId,
-              nextInstrumentName, nextParams, hostedInstrumentStateBase64) {
+          applyToClip: (
+            target,
+            notesToApply,
+            nextInstrumentId,
+            nextInstrumentName,
+            nextParams,
+            hostedInstrumentStateBase64,
+          ) {
             _applyMidiClipStateLocally(
               target,
               notes: notesToApply,
@@ -29833,9 +30369,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _trackUiClick(
       controlId: action,
       surface: 'add_actions',
-      extra: <String, Object?>{
-        'action_id': action,
-      },
+      extra: <String, Object?>{'action_id': action},
     );
     if (mounted) {
       setState(() {
@@ -29858,7 +30392,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     if (action == 'sample_browser') {
       await _openSampleBrowser(
-          promptFolderIfEmpty: _sampleBrowserRoots.isEmpty);
+        promptFolderIfEmpty: _sampleBrowserRoots.isEmpty,
+      );
       return;
     }
     if (action == 'instrument') {
@@ -30101,9 +30636,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       tile = MultiHalo(
         highlighter: _mixHighlighter,
         haloKeys: <HaloKey>[
-          HaloKey(id == 'instrument'
-              ? 'tutorial:add_instrument'
-              : 'tutorial:add_audio'),
+          HaloKey(
+            id == 'instrument'
+                ? 'tutorial:add_instrument'
+                : 'tutorial:add_audio',
+          ),
         ],
         borderRadius: BorderRadius.circular(12),
         child: tile,
@@ -30174,8 +30711,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // --- Master FX ---
     final masterFx = await JuceAudioEngine.getMasterEffects();
     for (int i = 0; i < masterFx.length; i++) {
-      _masterFxBypassSnapshot
-          .add(await JuceAudioEngine.getMasterEffectBypassState(i));
+      _masterFxBypassSnapshot.add(
+        await JuceAudioEngine.getMasterEffectBypassState(i),
+      );
     }
   }
 
@@ -30196,7 +30734,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
         // --- Automation (flat unity) ---
         await JuceAudioEngine.setTrackAutomationPoints(
-            row, _toMaps([AutomationPoint(x: 0.0, volume: 0.75)]));
+          row,
+          _toMaps([AutomationPoint(x: 0.0, volume: 0.75)]),
+        );
         await JuceAudioEngine.clearTrackEffectAutomationForRow(row);
       }
     }
@@ -30396,11 +30936,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _tabletRightPanelTab != 'export' &&
         _containedExportPanelStage != _ContainedExportPanelStage.exporting;
     final surface = masterPanelActive
-        ? Color.lerp(
-            _kTabletDawPanelFill,
-            const Color(0xFF123D62),
-            0.26,
-          )!
+        ? Color.lerp(_kTabletDawPanelFill, const Color(0xFF123D62), 0.26)!
         : _kTabletDawPanelFill;
     final rowCount = math.min(_rowCount, 6);
 
@@ -30420,8 +30956,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           height: TabletDawPanelLayout.rightPanelHeaderExportButtonSize,
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final compact =
-                  TabletDawPanelLayout.usesCompactRightPanelHeader(panelWidth);
+              final compact = TabletDawPanelLayout.usesCompactRightPanelHeader(
+                panelWidth,
+              );
               final gap = TabletDawPanelLayout.rightPanelHeaderGap(
                 compact: compact,
               );
@@ -30444,9 +30981,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               return Row(
                 children: [
                   if (showSelector) ...[
-                    Expanded(
-                      child: _buildTabletRightPanelSelector(),
-                    ),
+                    Expanded(child: _buildTabletRightPanelSelector()),
                     SizedBox(width: gap),
                   ],
                   _buildTopCircleButtonShell(
@@ -30483,9 +31018,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         _containedExportPanelStage !=
                             _ContainedExportPanelStage.idle,
                     size: exportButtonSize,
-                    child: Center(
-                      child: _buildDawTopShareIcon(),
-                    ),
+                    child: Center(child: _buildDawTopShareIcon()),
                   ),
                 ],
               );
@@ -30565,12 +31098,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         group == null ? null : _trackGroupById(group.id);
                     final newGain = latestGroup?.gain ??
                         (row < _rowGain.length ? _rowGain[row] : v);
-                    unawaited(_commitRowGainFromUi(
-                      row,
-                      oldGain,
-                      newGain,
-                      source: 'right_panel_mixer_gain',
-                    ));
+                    unawaited(
+                      _commitRowGainFromUi(
+                        row,
+                        oldGain,
+                        newGain,
+                        source: 'right_panel_mixer_gain',
+                      ),
+                    );
                   },
                 ),
                 const SizedBox(height: 9),
@@ -30598,12 +31133,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         group == null ? null : _trackGroupById(group.id);
                     final newPan = latestGroup?.pan ??
                         (row < _rowPan.length ? _rowPan[row] : v);
-                    unawaited(_commitRowPanFromUi(
-                      row,
-                      oldPan,
-                      newPan,
-                      source: 'right_panel_mixer_pan',
-                    ));
+                    unawaited(
+                      _commitRowPanFromUi(
+                        row,
+                        oldPan,
+                        newPan,
+                        source: 'right_panel_mixer_pan',
+                      ),
+                    );
                   },
                 ),
               ],
@@ -30876,9 +31413,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.075),
                 borderRadius: BorderRadius.circular(13),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.10),
-                ),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -30963,11 +31498,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
             ),
-            child: Icon(
-              icon,
-              size: 16,
-              color: const Color(0xFFF4F4F4),
-            ),
+            child: Icon(icon, size: 16, color: const Color(0xFFF4F4F4)),
           ),
         ),
       );
@@ -31097,7 +31628,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 const SizedBox(height: 12),
                 TextFormField(
                   key: ValueKey(
-                      'tablet_audio_clip_name_${clip.engineClipId}_${clip.label}'),
+                    'tablet_audio_clip_name_${clip.engineClipId}_${clip.label}',
+                  ),
                   focusNode: _tabletAudioClipNameFocusNode,
                   initialValue: _audioClipDisplayName(clip),
                   readOnly: !_tabletAudioClipOptionsRenaming,
@@ -31188,13 +31720,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   _handleToggleClipNormalize(index, !clip.normalizeVolume),
                 ),
                 child: Ink(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: (clip.normalizeVolume
                             ? const Color(0xFFD7DBE2)
                             : Colors.white)
-                        .withValues(alpha: clip.normalizeVolume ? 0.34 : 0.08),
+                        .withValues(
+                      alpha: clip.normalizeVolume ? 0.34 : 0.08,
+                    ),
                     borderRadius: BorderRadius.circular(999),
                     border: Border.all(
                       color: Colors.white.withValues(
@@ -31282,9 +31818,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       icon: Icons.remove_rounded,
                       onTap: () {
                         _tabletAudioClipOptionsPitchStart ??= pitch;
-                        unawaited(applyPitch(pitch - 0.5).then(
-                          (_) => _commitTabletAudioClipPitch(index),
-                        ));
+                        unawaited(
+                          applyPitch(
+                            pitch - 0.5,
+                          ).then((_) => _commitTabletAudioClipPitch(index)),
+                        );
                       },
                     ),
                     const SizedBox(width: 7),
@@ -31293,8 +31831,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         data: SliderTheme.of(context).copyWith(
                           trackHeight: 5,
                           activeTrackColor: accent,
-                          inactiveTrackColor:
-                              Colors.white.withValues(alpha: 0.16),
+                          inactiveTrackColor: Colors.white.withValues(
+                            alpha: 0.16,
+                          ),
                           thumbColor: const Color(0xFFF4F4F4),
                           overlayShape: SliderComponentShape.noOverlay,
                         ),
@@ -31320,9 +31859,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       icon: Icons.add_rounded,
                       onTap: () {
                         _tabletAudioClipOptionsPitchStart ??= pitch;
-                        unawaited(applyPitch(pitch + 0.5).then(
-                          (_) => _commitTabletAudioClipPitch(index),
-                        ));
+                        unawaited(
+                          applyPitch(
+                            pitch + 0.5,
+                          ).then((_) => _commitTabletAudioClipPitch(index)),
+                        );
                       },
                     ),
                   ],
@@ -31350,9 +31891,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       clipTempoModeButton(
                         label: 'Off',
                         selected: !clip.stretchToProjectTempo,
-                        onTap: () => unawaited(
-                          _handleDisableClipTempoFollow(index),
-                        ),
+                        onTap: () =>
+                            unawaited(_handleDisableClipTempoFollow(index)),
                       ),
                       clipTempoModeButton(
                         label: 'Resample',
@@ -31646,8 +32186,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               });
               _scheduleAutomationTargetsRefreshForRow(row);
             },
-            removeEffectFromRow:
-                (row, effectIndex, name, applyingPreset) async {
+            removeEffectFromRow: (
+              row,
+              effectIndex,
+              name,
+              applyingPreset,
+            ) async {
               if (applyingPreset) {
                 await JuceAudioEngine.removeTrackEffect(row, effectIndex);
                 _syncTabletRowFxSelectionAfterRemove(row, effectIndex);
@@ -31893,8 +32437,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       return LayoutBuilder(
         builder: (context, constraints) {
-          final contentWidth =
-              math.min(150.0, math.max(112.0, constraints.maxWidth - 26.0));
+          final contentWidth = math.min(
+            150.0,
+            math.max(112.0, constraints.maxWidth - 26.0),
+          );
           return ListView(
             physics: const ClampingScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(10, 20, 10, 12),
@@ -31942,13 +32488,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         label: L10n.translate(context, 'Export progress'),
                         value: progressLabel,
                         child: Container(
-                          key: const ValueKey(
-                            'tablet_export_progress_track',
-                          ),
+                          key: const ValueKey('tablet_export_progress_track'),
                           height: 8,
                           decoration: BoxDecoration(
-                            color:
-                                const Color(0xFFF4F4F4).withValues(alpha: 0.22),
+                            color: const Color(
+                              0xFFF4F4F4,
+                            ).withValues(alpha: 0.22),
                             borderRadius: BorderRadius.circular(999),
                           ),
                           child: Align(
@@ -31964,8 +32509,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   borderRadius: BorderRadius.circular(999),
                                   boxShadow: <BoxShadow>[
                                     BoxShadow(
-                                      color: const Color(0xFF2596F9)
-                                          .withValues(alpha: 0.30),
+                                      color: const Color(
+                                        0xFF2596F9,
+                                      ).withValues(alpha: 0.30),
                                       blurRadius: 10,
                                     ),
                                   ],
@@ -32007,8 +32553,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       return LayoutBuilder(
         builder: (context, constraints) {
-          final contentWidth =
-              math.min(250.0, math.max(128.0, constraints.maxWidth - 22.0));
+          final contentWidth = math.min(
+            250.0,
+            math.max(128.0, constraints.maxWidth - 22.0),
+          );
           final buttonsCanFit = contentWidth >= 238.0;
           final openButton = exportPanelButton(
             label: success._openSavedLabel(context),
@@ -32307,8 +32855,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             ),
             child: Row(
               children: [
-                Icon(icon,
-                    color: Colors.white.withValues(alpha: 0.44), size: 16),
+                Icon(
+                  icon,
+                  color: Colors.white.withValues(alpha: 0.44),
+                  size: 16,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -32446,8 +32997,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         SliderTheme(
                           data: SliderTheme.of(context).copyWith(
                             activeTrackColor: exportBlue,
-                            inactiveTrackColor:
-                                Colors.white.withValues(alpha: 0.14),
+                            inactiveTrackColor: Colors.white.withValues(
+                              alpha: 0.14,
+                            ),
                             thumbColor: Colors.white,
                             overlayColor: exportBlue.withValues(alpha: 0.16),
                             trackHeight: 4,
@@ -32460,8 +33012,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             label:
                                 '${settings.normalizeTargetDb.toStringAsFixed(1)} dB',
                             onChanged: (value) => applySettings(
-                              normalizeTargetDb:
-                                  double.parse(value.toStringAsFixed(1)),
+                              normalizeTargetDb: double.parse(
+                                value.toStringAsFixed(1),
+                              ),
                             ),
                           ),
                         ),
@@ -32471,8 +33024,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           children: _kExportNormalizeTargetsDb
                               .map(
                                 (preset) => ChoiceChip(
-                                  label:
-                                      Text('${preset.toStringAsFixed(1)} dB'),
+                                  label: Text(
+                                    '${preset.toStringAsFixed(1)} dB',
+                                  ),
                                   selected:
                                       (settings.normalizeTargetDb - preset)
                                               .abs() <
@@ -32482,10 +33036,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     fontSize: 11,
                                     fontWeight: FontWeight.w700,
                                   ),
-                                  backgroundColor:
-                                      Colors.white.withValues(alpha: 0.05),
-                                  selectedColor:
-                                      exportBlue.withValues(alpha: 0.26),
+                                  backgroundColor: Colors.white.withValues(
+                                    alpha: 0.05,
+                                  ),
+                                  selectedColor: exportBlue.withValues(
+                                    alpha: 0.26,
+                                  ),
                                   side: BorderSide(
                                     color: Colors.white.withValues(alpha: 0.16),
                                   ),
@@ -32700,9 +33256,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 _audioExportSettings,
               );
               unawaited(
-                _exportAndNavigate(
-                  selectedSettingsOverride: selectedSettings,
-                ),
+                _exportAndNavigate(selectedSettingsOverride: selectedSettings),
               );
             },
           ),
@@ -32831,9 +33385,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   ? (hoveredOrPressed ? 0.32 : 0.28)
                   : (hoveredOrPressed ? 0.31 : 0.24);
               final borderColor = expanded
-                  ? const Color(0xFF1194FF).withValues(
-                      alpha: hoveredOrPressed ? 0.44 : 0.34,
-                    )
+                  ? const Color(
+                      0xFF1194FF,
+                    ).withValues(alpha: hoveredOrPressed ? 0.44 : 0.34)
                   : Colors.white.withValues(
                       alpha: hoveredOrPressed ? 0.18 : 0.10,
                     );
@@ -32881,12 +33435,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               11,
                             ),
                             decoration: BoxDecoration(
-                              color: Color.fromRGBO(
-                                95,
-                                108,
-                                126,
-                                surfaceAlpha,
-                              ),
+                              color: Color.fromRGBO(95, 108, 126, surfaceAlpha),
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(color: borderColor),
                               boxShadow: <BoxShadow>[
@@ -32903,10 +33452,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       : hoveredOrPressed
                                           ? 15
                                           : 12,
-                                  offset: Offset(
-                                    0,
-                                    hoveredOrPressed ? 7 : 6,
-                                  ),
+                                  offset: Offset(0, hoveredOrPressed ? 7 : 6),
                                 ),
                               ],
                             ),
@@ -32924,14 +33470,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             alpha:
                                                 hoveredOrPressed ? 0.14 : 0.10,
                                           ),
-                                          borderRadius:
-                                              BorderRadius.circular(10),
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
                                         ),
                                         child: Icon(
                                           Icons.surround_sound_outlined,
                                           size: compact ? 16 : 18,
-                                          color: Colors.white
-                                              .withValues(alpha: 0.90),
+                                          color: Colors.white.withValues(
+                                            alpha: 0.90,
+                                          ),
                                         ),
                                       ),
                                       SizedBox(width: gap),
@@ -32943,8 +33491,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         overflow: TextOverflow.ellipsis,
                                         style: TextStyle(
                                           fontFamily: 'Pretendard',
-                                          color: Colors.white
-                                              .withValues(alpha: 0.92),
+                                          color: Colors.white.withValues(
+                                            alpha: 0.92,
+                                          ),
                                           fontSize: compact ? 12 : 13,
                                           fontWeight: FontWeight.w800,
                                           height: 1.0,
@@ -32958,13 +33507,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         vertical: 3.5,
                                       ),
                                       decoration: BoxDecoration(
-                                        color:
-                                            levelColor.withValues(alpha: 0.17),
-                                        borderRadius:
-                                            BorderRadius.circular(999),
+                                        color: levelColor.withValues(
+                                          alpha: 0.17,
+                                        ),
+                                        borderRadius: BorderRadius.circular(
+                                          999,
+                                        ),
                                         border: Border.all(
                                           color: levelColor.withValues(
-                                              alpha: 0.48),
+                                            alpha: 0.48,
+                                          ),
                                         ),
                                       ),
                                       child: Text(
@@ -33009,8 +33561,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   alignment: Alignment.center,
                                   decoration: BoxDecoration(
                                     color: expanded
-                                        ? const Color(0xFFF4F4F4)
-                                            .withValues(alpha: 0.90)
+                                        ? const Color(
+                                            0xFFF4F4F4,
+                                          ).withValues(alpha: 0.90)
                                         : const Color.fromRGBO(
                                             63,
                                             84,
@@ -33020,15 +33573,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     borderRadius: BorderRadius.circular(999),
                                     border: Border.all(
                                       color: expanded
-                                          ? const Color(0xFF1194FF)
-                                              .withValues(alpha: 0.30)
-                                          : Colors.white
-                                              .withValues(alpha: 0.16),
+                                          ? const Color(
+                                              0xFF1194FF,
+                                            ).withValues(alpha: 0.30)
+                                          : Colors.white.withValues(
+                                              alpha: 0.16,
+                                            ),
                                     ),
                                     boxShadow: <BoxShadow>[
                                       BoxShadow(
-                                        color: Colors.black
-                                            .withValues(alpha: 0.24),
+                                        color: Colors.black.withValues(
+                                          alpha: 0.24,
+                                        ),
                                         blurRadius: 10,
                                         offset: const Offset(0, 4),
                                       ),
@@ -33040,7 +33596,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         : Icons.keyboard_arrow_up_rounded,
                                     color: expanded
                                         ? const Color(0xFF15436C)
-                                        : Colors.white.withValues(alpha: 0.88),
+                                        : Colors.white.withValues(
+                                            alpha: 0.88,
+                                          ),
                                     size: 23,
                                   ),
                                 ),
@@ -33310,10 +33868,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             ),
           );
         },
-        child: KeyedSubtree(
-          key: ValueKey<String>(bodyKey),
-          child: panelBody(),
-        ),
+        child: KeyedSubtree(key: ValueKey<String>(bodyKey), child: panelBody()),
       );
     }
 
@@ -33355,9 +33910,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             );
             child = MultiHalo(
               highlighter: _mixHighlighter,
-              haloKeys: const <HaloKey>[
-                HaloKey('tutorial:master_button'),
-              ],
+              haloKeys: const <HaloKey>[HaloKey('tutorial:master_button')],
               borderRadius: BorderRadius.circular(16),
               child: child,
             );
@@ -33548,10 +34101,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       begin: Alignment.topCenter,
                                       end: Alignment.bottomCenter,
                                       colors: <Color>[
-                                        const Color(0xFF0E4D72)
-                                            .withValues(alpha: 0.20),
-                                        const Color(0xFF071B2A)
-                                            .withValues(alpha: 0.10),
+                                        const Color(
+                                          0xFF0E4D72,
+                                        ).withValues(alpha: 0.20),
+                                        const Color(
+                                          0xFF071B2A,
+                                        ).withValues(alpha: 0.10),
                                         Colors.transparent,
                                       ],
                                       stops: const <double>[0.0, 0.46, 1.0],
@@ -33566,7 +34121,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 Expanded(
                                   child: Padding(
                                     padding: const EdgeInsets.symmetric(
-                                        horizontal: 2),
+                                      horizontal: 2,
+                                    ),
                                     child: animatedPanelBody(),
                                   ),
                                 ),
@@ -33797,12 +34353,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         const SizedBox(width: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 2),
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: levelColor.withOpacity(0.17),
                             borderRadius: BorderRadius.circular(999),
-                            border:
-                                Border.all(color: levelColor.withOpacity(0.48)),
+                            border: Border.all(
+                              color: levelColor.withOpacity(0.48),
+                            ),
                           ),
                           child: Text(
                             levelLabel,
@@ -33843,12 +34402,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 final newGain = _rowGain[row];
                 if ((newGain - oldGain).abs() < 0.00001) return;
 
-                unawaited(_commitRowGainFromUi(
-                  row,
-                  oldGain,
-                  newGain,
-                  source: 'row_gain_staging',
-                ));
+                unawaited(
+                  _commitRowGainFromUi(
+                    row,
+                    oldGain,
+                    newGain,
+                    source: 'row_gain_staging',
+                  ),
+                );
               },
             ),
           ],
@@ -33895,7 +34456,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 2),
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: levelColor.withOpacity(0.17),
                         borderRadius: BorderRadius.circular(999),
@@ -33980,8 +34543,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final prevDb = _rowPeakHoldDb[row] ?? currentPeakDb;
     final lastUpdate = _rowPeakHoldLastUpdate[row] ?? now;
     final freezeUntil = _rowPeakHoldFreezeUntil[row] ?? now;
-    final dt = (now.difference(lastUpdate).inMicroseconds / 1000000.0)
-        .clamp(0.0, 0.25);
+    final dt = (now.difference(lastUpdate).inMicroseconds / 1000000.0).clamp(
+      0.0,
+      0.25,
+    );
 
     double heldDb = prevDb;
     if (!currentPeakDb.isFinite || currentPeakDb <= -120.0) {
@@ -34060,8 +34625,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             onChange: onMasterFxGraphChanged,
           ),
         );
-        _recordProducerManualEdit(
-            'master_fx_bypass', {'index': i, 'bypassed': bp});
+        _recordProducerManualEdit('master_fx_bypass', {
+          'index': i,
+          'bypassed': bp,
+        });
       }, //JuceAudioEngine.bypassMasterEffect(i, bp),
       // reorderMasterEffects: (from, to) => JuceAudioEngine.reorderMasterEffects(from, to),
       // removeMasterEffect: (i) => JuceAudioEngine.removeMasterEffect(i),
@@ -34078,10 +34645,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
         _scheduleAutomationTargetsRefreshForAllRows();
         _recordProducerManualEdit('master_fx_insert', {'effect': pathOrName});
-        _trackPluginInserted(
-          pluginName: pathOrName,
-          scope: 'master',
-        );
+        _trackPluginInserted(pluginName: pathOrName, scope: 'master');
       },
 
       // need name of effects so undo action can add it back later
@@ -34098,23 +34662,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ),
         );
         _scheduleAutomationTargetsRefreshForAllRows();
-        _recordProducerManualEdit(
-            'master_fx_remove', {'index': effectIndex, 'effect': name});
-        _trackPluginRemoved(
-          pluginName: name,
-          scope: 'master',
-        );
+        _recordProducerManualEdit('master_fx_remove', {
+          'index': effectIndex,
+          'effect': name,
+        });
+        _trackPluginRemoved(pluginName: name, scope: 'master');
       },
 
       reorderMasterEffects: (from, to) async {
-        await _undoManager.execute(ReorderMasterEffectAction(
-          from: from,
-          to: to,
-          onChange: onMasterFxGraphChanged,
-        ));
+        await _undoManager.execute(
+          ReorderMasterEffectAction(
+            from: from,
+            to: to,
+            onChange: onMasterFxGraphChanged,
+          ),
+        );
         _scheduleAutomationTargetsRefreshForAllRows();
-        _recordProducerManualEdit(
-            'master_fx_reorder', {'from': from, 'to': to});
+        _recordProducerManualEdit('master_fx_reorder', {
+          'from': from,
+          'to': to,
+        });
       },
       scanPlugins: _cachedDesktopPluginsForPicker,
       onTogglePluginFavorite: _toggleDesktopPluginFavorite,
@@ -34123,9 +34690,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           : null,
       openMasterPluginEditor: PlatformCapabilities.current.isDesktop &&
               _platformCapabilities.nativePluginEditor
-          ? (effectIndex) => JuceAudioEngine.openMasterPluginEditor(
-                effectIndex,
-              )
+          ? (effectIndex) => JuceAudioEngine.openMasterPluginEditor(effectIndex)
           : null,
       getMasterPluginParameters: (i) =>
           JuceAudioEngine.getMasterPluginParameters(i),
@@ -34258,10 +34823,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     ),
                   ),
                 ),
-              Material(
-                type: MaterialType.transparency,
-                child: child,
-              ),
+              Material(type: MaterialType.transparency, child: child),
             ],
           ),
         ),
@@ -34330,7 +34892,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 .min(
                   520.0,
                   math.max(
-                      _kDesktopChatHistoryMinHeight, anchoredAvailableHeight),
+                    _kDesktopChatHistoryMinHeight,
+                    anchoredAvailableHeight,
+                  ),
                 )
                 .toDouble()
             : _kChatHistoryHeight;
@@ -34341,7 +34905,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             : _kChatHistoryHeight;
     final chatHistoryMaxHeight = tabletDaw
         ? math.min(
-            520.0, math.max(chatHistoryMinHeight, anchoredAvailableHeight))
+            520.0,
+            math.max(chatHistoryMinHeight, anchoredAvailableHeight),
+          )
         : PlatformCapabilities.current.isDesktop
             ? math.min(
                 _kDesktopChatHistoryMaxHeight,
@@ -34441,8 +35007,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     width: 42,
                                     height: 4,
                                     decoration: BoxDecoration(
-                                      color:
-                                          Colors.white.withValues(alpha: 0.42),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.42,
+                                      ),
                                       borderRadius: BorderRadius.circular(999),
                                     ),
                                   ),
@@ -34520,10 +35087,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     blendMode: BlendMode.dstIn,
                                     shaderCallback: (Rect bounds) {
                                       final fadeStartStop = bounds.height > 0
-                                          ? math.min(0.022, 4 / bounds.height)
+                                          ? math.min(
+                                              0.022,
+                                              4 / bounds.height,
+                                            )
                                           : 0.022;
                                       final fadeEndStop = bounds.height > 0
-                                          ? math.min(0.08, 18 / bounds.height)
+                                          ? math.min(
+                                              0.08,
+                                              18 / bounds.height,
+                                            )
                                           : 0.08;
                                       return LinearGradient(
                                         begin: Alignment.topCenter,
@@ -34652,7 +35225,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                         ),
                                                         foregroundColor:
                                                             const Color(
-                                                                0xFFF7FAFF),
+                                                          0xFFF7FAFF,
+                                                        ),
                                                         onPressed: () {
                                                           _setChatScrollHintEnabled(
                                                             false,
@@ -34793,8 +35367,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                         behavior:
                                                             HitTestBehavior
                                                                 .translucent,
-                                                        onSecondaryTapDown:
-                                                            (_) {
+                                                        onSecondaryTapDown: (
+                                                          _,
+                                                        ) {
                                                           unawaited(
                                                             _copyChatMessageToClipboard(
                                                               message,
@@ -34879,7 +35454,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             theme: const ChatTheme(
                                               colors: ChatColors(
                                                 primary: Color.fromRGBO(
-                                                    25, 94, 160, 0.42),
+                                                  25,
+                                                  94,
+                                                  160,
+                                                  0.42,
+                                                ),
                                                 onPrimary: Colors.white,
                                                 surface: Colors.transparent,
                                                 onSurface: Colors.white,
@@ -34987,9 +35566,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   static const double _kTabletChatKeyboardGap = 4.0;
 
-  double _tabletChatKeyboardLiftFromInset({
-    required double keyboardInset,
-  }) {
+  double _tabletChatKeyboardLiftFromInset({required double keyboardInset}) {
     // iOS includes the prediction/suggestion bar in viewInsets.bottom.
     // The chatbar already has 10 px of app chrome below it in the bottom row,
     // so lift by the system obstruction minus that padding plus a small gap.
@@ -35040,9 +35617,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final tabletDaw = _usesTabletDesktopDawShell(overlayContext);
     final rawKeyboardLift = chatKeyboardActive
         ? (tabletDaw
-            ? _tabletChatKeyboardLiftFromInset(
-                keyboardInset: keyboardInset,
-              )
+            ? _tabletChatKeyboardLiftFromInset(keyboardInset: keyboardInset)
             : math.max(
                 0.0,
                 keyboardInset -
@@ -35112,17 +35687,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ? _buildDawConnectedSurface(
             borderRadius: buttonRadius,
             active: active,
-            child: SizedBox(
-              width: size,
-              height: size,
-              child: child,
-            ),
+            child: SizedBox(width: size, height: size, child: child),
           )
-        : SizedBox(
-            width: size,
-            height: size,
-            child: child,
-          );
+        : SizedBox(width: size, height: size, child: child);
     final Widget body = AnimatedContainer(
       duration: const Duration(milliseconds: 140),
       curve: Curves.easeOutCubic,
@@ -35199,11 +35766,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 splashColor: Colors.white.withValues(alpha: 0.18),
                 highlightColor: Colors.white.withValues(alpha: 0.10),
                 hoverColor: Colors.white.withValues(alpha: 0.08),
-                child: SizedBox(
-                  width: size,
-                  height: size,
-                  child: body,
-                ),
+                child: SizedBox(width: size, height: size, child: body),
               ),
             )
           : GestureDetector(
@@ -35567,14 +36130,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               ),
                               decoration: BoxDecoration(
                                 color: isSelected
-                                    ? const Color(0xFF258AE6)
-                                        .withValues(alpha: 0.16)
+                                    ? const Color(
+                                        0xFF258AE6,
+                                      ).withValues(alpha: 0.16)
                                     : Colors.transparent,
                                 borderRadius: BorderRadius.circular(13),
                                 border: isSelected
                                     ? Border.all(
-                                        color: const Color(0xFF258AE6)
-                                            .withValues(alpha: 0.20),
+                                        color: const Color(
+                                          0xFF258AE6,
+                                        ).withValues(alpha: 0.20),
                                       )
                                     : null,
                               ),
@@ -35760,7 +36325,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           fontFamily: 'Pretendard',
                           color: selected
                               ? const Color(0xFF15436C)
-                              : const Color(0xFFF4F4F4).withValues(alpha: 0.78),
+                              : const Color(
+                                  0xFFF4F4F4,
+                                ).withValues(alpha: 0.78),
                           fontSize: compact ? 10.5 : 11.5,
                           fontWeight:
                               selected ? FontWeight.w900 : FontWeight.w700,
@@ -35797,11 +36364,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               height: 32,
               color: Colors.white.withValues(alpha: 0.16),
             ),
-            segment(
-              'FX',
-              'fx',
-              selectedRadius: BorderRadius.zero,
-            ),
+            segment('FX', 'fx', selectedRadius: BorderRadius.zero),
             Container(
               width: 1,
               height: 32,
@@ -35832,8 +36395,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final settingsSize = compact ? 40.0 : 48.0;
     final gap = compact ? 6.0 : 9.0;
     final trailingInset = compact ? 0.0 : 10.0;
-    final titleSurfaceWidth =
-        math.max(0.0, width - actionSlotWidth - gap - trailingInset);
+    final titleSurfaceWidth = math.max(
+      0.0,
+      width - actionSlotWidth - gap - trailingInset,
+    );
     final titleInset = compact ? 8.0 : 12.0;
     final macBackPillDownNudge = macDesktop
         ? ((headerHeight - _kMacDawBackPillHeight) *
@@ -35976,9 +36541,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           decoration: BoxDecoration(
             color: _kTabletDawPanelFill,
             border: Border(
-              right: BorderSide(
-                color: Colors.white.withValues(alpha: 0.08),
-              ),
+              right: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
             ),
             boxShadow: const <BoxShadow>[
               BoxShadow(
@@ -36010,13 +36573,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final pillHeight = heightOverride ?? 48.0;
     final pillRadius = BorderRadius.circular(embedded ? 0 : pillHeight / 2.0);
     final segmentBasisWidth = math.max(0.0, pillWidth - 2.0);
-    final magnetWidth =
-        TabletDawPanelLayout.topControlMagnetWidth(segmentBasisWidth);
+    final magnetWidth = TabletDawPanelLayout.topControlMagnetWidth(
+      segmentBasisWidth,
+    );
     final toolWidth = TabletDawPanelLayout.topControlToolWidth(
       segmentBasisWidth,
     );
-    final quantizeWidth =
-        TabletDawPanelLayout.topControlQuantizeWidth(segmentBasisWidth);
+    final quantizeWidth = TabletDawPanelLayout.topControlQuantizeWidth(
+      segmentBasisWidth,
+    );
     Widget divider() {
       return Container(
         width: 1,
@@ -36057,8 +36622,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     ),
                   )
                 : Border.all(
-                    color:
-                        Colors.white.withValues(alpha: embedded ? 0.09 : 0.12),
+                    color: Colors.white.withValues(
+                      alpha: embedded ? 0.09 : 0.12,
+                    ),
                   ),
             boxShadow: embedded
                 ? const <BoxShadow>[]
@@ -36290,8 +36856,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final tempoPillWidth = TabletDawPanelLayout.topBarTempoPillWidth(
           compactTablet: compactTablet,
         );
-        final minAnalyzerWidth =
-            TabletDawPanelLayout.topBarMinAnalyzerWidth(compact: compact);
+        final minAnalyzerWidth = TabletDawPanelLayout.topBarMinAnalyzerWidth(
+          compact: compact,
+        );
         final fixedWithoutAnalyzer =
             (showControlPill ? controlPillWidth + gap : 0.0) + tempoPillWidth;
         final analyzerCanFit = !availableWidth.isFinite ||
@@ -36538,8 +37105,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final analyzerSize = PlatformCapabilities.current.isDesktop
         ? const Size(276, 58)
         : const Size(252, 48);
-    final tabletProjectHeaderWidth =
-        math.max(0.0, tabletSidePanelWidth - topBarPadding.left);
+    final tabletProjectHeaderWidth = math.max(
+      0.0,
+      tabletSidePanelWidth - topBarPadding.left,
+    );
     final currentLabel = _formatDuration(currentClock);
     final totalLabel = _formatDuration(_audioOnlyOverallDuration);
     return Halo(
@@ -36554,9 +37123,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               : CrossAxisAlignment.center,
           children: [
             usesTabletDawLayout
-                ? _buildTabletProjectHeader(
-                    width: tabletProjectHeaderWidth,
-                  )
+                ? _buildTabletProjectHeader(width: tabletProjectHeaderWidth)
                 : isMacDesktop
                     ? Padding(
                         padding: const EdgeInsets.only(top: 18),
@@ -36682,9 +37249,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               _containedExportPanelStage !=
                                   _ContainedExportPanelStage.idle,
                           size: layoutSpec.topBarActionButtonSize,
-                          child: Center(
-                            child: _buildDawTopShareIcon(),
-                          ),
+                          child: Center(child: _buildDawTopShareIcon()),
                         ),
                       )
                     else
@@ -36706,9 +37271,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           active:
                               _isExportSheetOpen || connectedTopPanelVisible,
                           size: layoutSpec.topBarActionButtonSize,
-                          child: Center(
-                            child: _buildDawTopShareIcon(),
-                          ),
+                          child: Center(child: _buildDawTopShareIcon()),
                         ),
                       ),
                   ],
@@ -36755,9 +37318,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final trackTop = (state.hitHeight - state.trackHeight) / 2.0;
         final active = state.dragging;
         final resizing = state.resizeStartActive || state.resizeEndActive;
-        final thumbColor = const Color(0xFFE4E7EA).withValues(
-          alpha: active ? 0.72 : 0.40,
-        );
+        final thumbColor = const Color(
+          0xFFE4E7EA,
+        ).withValues(alpha: active ? 0.72 : 0.40);
         final activeColor = const Color(0xFF7FC9E5);
         final resizeColor = const Color(0xFFFFC66D);
         final stateColor = resizing ? resizeColor : activeColor;
@@ -36858,7 +37421,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         decoration: BoxDecoration(
                           color: active
                               ? stateColor.withValues(alpha: 0.12)
-                              : const Color(0xFF0A1521).withValues(alpha: 0.17),
+                              : const Color(
+                                  0xFF0A1521,
+                                ).withValues(alpha: 0.17),
                           borderRadius: BorderRadius.circular(999),
                           border: Border.all(
                             color: active
@@ -36904,13 +37469,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             Expanded(
                               child: Center(
                                 child: Container(
-                                  width:
-                                      math.max(12.0, state.thumbWidth * 0.34),
+                                  width: math.max(
+                                    12.0,
+                                    state.thumbWidth * 0.34,
+                                  ),
                                   height: 2,
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF15436C).withValues(
-                                      alpha: active ? 0.34 : 0.20,
-                                    ),
+                                    color: const Color(
+                                      0xFF15436C,
+                                    ).withValues(alpha: active ? 0.34 : 0.20),
                                     borderRadius: BorderRadius.circular(99),
                                   ),
                                 ),
@@ -37002,9 +37569,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           PlatformCapabilities.current.isDesktop
               ? DesktopPanelShell(
                   availableBounds: desktopAvailableRect,
-                  layout: _desktopWindowLayoutFor(
-                    _kDesktopPanelSampleBrowser,
-                  ),
+                  layout: _desktopWindowLayoutFor(_kDesktopPanelSampleBrowser),
                   fullscreen: _sampleBrowserExpanded,
                   onFullscreenChanged: (expanded) {
                     setState(() {
@@ -37018,9 +37583,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     );
                   },
                   onResetLayout: () {
-                    _resetDesktopWindowLayout(
-                      _kDesktopPanelSampleBrowser,
-                    );
+                    _resetDesktopWindowLayout(_kDesktopPanelSampleBrowser);
                   },
                   topContextMenuHeight: 52,
                   dragHandleHeight: 52,
@@ -37033,9 +37596,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     fixedRootFolders: _fixedSampleBrowserRootFolders,
                     auditioningPath: _auditioningSamplePath,
                     onAuditionTap: _auditionSampleFile,
-                    onInsertSample: (filePath) => _insertAudioFileAtTimeline(
-                      filePath,
-                    ),
+                    onInsertSample: (filePath) =>
+                        _insertAudioFileAtTimeline(filePath),
                     onAddFolder: _addSampleBrowserRootFolder,
                     onRemoveFolder: _removeSampleBrowserRoot,
                     resolveDuration: _resolveSampleDuration,
@@ -37067,9 +37629,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     fixedRootFolders: _fixedSampleBrowserRootFolders,
                     auditioningPath: _auditioningSamplePath,
                     onAuditionTap: _auditionSampleFile,
-                    onInsertSample: (filePath) => _insertAudioFileAtTimeline(
-                      filePath,
-                    ),
+                    onInsertSample: (filePath) =>
+                        _insertAudioFileAtTimeline(filePath),
                     onAddFolder: _addSampleBrowserRootFolder,
                     onRemoveFolder: _removeSampleBrowserRoot,
                     resolveDuration: _resolveSampleDuration,
@@ -37178,7 +37739,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 if (PlatformCapabilities.current.isDesktop) {
                   return DesktopPanelShell(
                     availableBounds: desktopAvailableRect,
-                    layout: _desktopWindowLayoutFor(_kDesktopPanelPianoRoll),
+                    layout: _desktopWindowLayoutFor(
+                      _kDesktopPanelPianoRoll,
+                    ),
                     fullscreen: _pianoRollFullscreen,
                     onFullscreenChanged: (v) {
                       setState(() => _pianoRollFullscreen = v);
@@ -37324,8 +37887,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             fontSize: 10.5,
                             fontWeight: FontWeight.w400,
                             color: _showTempoRollDown
-                                ? const Color(0xFFF4F4F4)
-                                    .withValues(alpha: 0.68)
+                                ? const Color(
+                                    0xFFF4F4F4,
+                                  ).withValues(alpha: 0.68)
                                 : subLabelColor,
                             height: 1.0,
                             fontFeatures: const <FontFeature>[
@@ -37365,8 +37929,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             fontSize: 10.5,
                             fontWeight: FontWeight.w400,
                             color: _showTempoRollDown
-                                ? const Color(0xFFF4F4F4)
-                                    .withValues(alpha: 0.68)
+                                ? const Color(
+                                    0xFFF4F4F4,
+                                  ).withValues(alpha: 0.68)
                                 : subLabelColor,
                             height: 1.0,
                           ),
@@ -37413,15 +37978,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           controlType: 'toggle',
                           value: !_showMasterRack,
                         );
-                        final bool willOpen =
-                            _toggleTopPopup(_TopPopupType.master);
+                        final bool willOpen = _toggleTopPopup(
+                          _TopPopupType.master,
+                        );
                         if (willOpen) {
                           _handleDawOnboardingMasterOpened();
                         }
                       }
                     : () {
                         _showSmallNotice(
-                            'External plugins are not available on this platform.');
+                          'External plugins are not available on this platform.',
+                        );
                       },
                 child: _buildToolbarSegment(
                   active: isMasterConnected,
@@ -37602,8 +38169,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   fontWeight: FontWeight.w600,
                                 ),
                                 decoration: _projectSettingsFieldDecoration(
-                                  labelText:
-                                      L10n.translate(context, 'Project Name'),
+                                  labelText: L10n.translate(
+                                    context,
+                                    'Project Name',
+                                  ),
                                 ),
                               ),
                               const SizedBox(height: 10),
@@ -37695,7 +38264,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     foregroundColor: const Color(0xFFF4F4F4),
                                     elevation: 0,
                                     padding: const EdgeInsets.symmetric(
-                                        vertical: 14),
+                                      vertical: 14,
+                                    ),
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(999),
                                     ),
@@ -37722,15 +38292,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     style: OutlinedButton.styleFrom(
                                       foregroundColor: const Color(0xFFF4F4F4),
                                       side: BorderSide(
-                                        color: Colors.white
-                                            .withValues(alpha: 0.18),
+                                        color: Colors.white.withValues(
+                                          alpha: 0.18,
+                                        ),
                                       ),
                                       padding: const EdgeInsets.symmetric(
                                         vertical: 14,
                                       ),
                                       shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(999),
+                                        borderRadius: BorderRadius.circular(
+                                          999,
+                                        ),
                                       ),
                                     ),
                                     child: Text(
@@ -37755,8 +38327,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     unawaited(_closeProjectSettings());
                                   },
                                   style: TextButton.styleFrom(
-                                    foregroundColor:
-                                        Colors.white.withValues(alpha: 0.82),
+                                    foregroundColor: Colors.white.withValues(
+                                      alpha: 0.82,
+                                    ),
                                   ),
                                   child: Text(L10n.translate(context, 'Close')),
                                 ),
@@ -37778,9 +38351,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   int get _activePluginRestoreNoticeCount {
     return _hostedPluginRestoreEntries.values
-        .where(
-          (entry) => entry.status != _HostedPluginRestoreStatus.loaded,
-        )
+        .where((entry) => entry.status != _HostedPluginRestoreStatus.loaded)
         .length;
   }
 
@@ -37841,10 +38412,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               children: [
                 Text(
                   L10n.translate(context, label),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                  ),
+                  style: const TextStyle(color: Colors.white, fontSize: 15),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -37927,9 +38495,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               value: _metronomeEnabled,
               activeTrackColor: const Color(0xFF1F89E3),
               onChanged: (v) {
-                _setStateAndRefreshProjectSettings(
-                  () => _metronomeEnabled = v,
-                );
+                _setStateAndRefreshProjectSettings(() => _metronomeEnabled = v);
                 JuceAudioEngine.setMetronomeEnabled(v);
                 _scheduleProjectAutosave();
               },
@@ -37941,13 +38507,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Widget _buildCrossfadeModeSelector() {
-    const modes = <String>[
-      'off',
-      'cut',
-      'linear',
-      'equal_power',
-      's_curve',
-    ];
+    const modes = <String>['off', 'cut', 'linear', 'equal_power', 's_curve'];
     final current = _normalizeProjectCrossfadeMode(_projectCrossfadeMode);
     const accent = Color(0xFF7DB7FF);
 
@@ -38186,10 +38746,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           Expanded(
             child: Text(
               L10n.translate(context, 'Show Producer Capture UI'),
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 15,
-              ),
+              style: TextStyle(color: Colors.white, fontSize: 15),
             ),
           ),
           const SizedBox(width: 12),
@@ -38199,7 +38756,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             activeTrackColor: const Color(0xFF1F89E3),
             onChanged: (v) {
               _setStateAndRefreshProjectSettings(
-                  () => _showProducerCaptureUi = v);
+                () => _showProducerCaptureUi = v,
+              );
               _scheduleProjectAutosave();
             },
           ),
@@ -38216,14 +38774,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         children: [
           Expanded(
             child: Text(
-              L10n.translate(
-                context,
-                'Use Computer Keyboard as MIDI Input',
-              ),
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 15,
-              ),
+              L10n.translate(context, 'Use Computer Keyboard as MIDI Input'),
+              style: const TextStyle(color: Colors.white, fontSize: 15),
             ),
           ),
           const SizedBox(width: 12),
@@ -38233,7 +38785,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             activeTrackColor: const Color(0xFF1F89E3),
             onChanged: (v) {
               _setStateAndRefreshProjectSettings(
-                  () => _desktopKeyboardMidiEnabled = v);
+                () => _desktopKeyboardMidiEnabled = v,
+              );
               unawaited(
                 JuceAudioEngine.setDesktopKeyboardMidiForwardingEnabled(v),
               );
@@ -38259,14 +38812,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  L10n.translate(
-                    context,
-                    'Spacebar Stop Returns to Start',
-                  ),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                  ),
+                  L10n.translate(context, 'Spacebar Stop Returns to Start'),
+                  style: const TextStyle(color: Colors.white, fontSize: 15),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -38343,8 +38890,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               ),
               const SizedBox(width: 12),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(999),
@@ -38486,8 +39035,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             return _buildDesktopPopupSurface(
               width: 780,
               height: 560,
-              outerPadding:
-                  const EdgeInsets.symmetric(horizontal: 30, vertical: 24),
+              outerPadding: const EdgeInsets.symmetric(
+                horizontal: 30,
+                vertical: 24,
+              ),
               padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -38569,14 +39120,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     duration: const Duration(milliseconds: 180),
                     child: rescanning
                         ? Padding(
-                            key: const ValueKey<String>('plugin-scan-progress'),
+                            key: const ValueKey<String>(
+                              'plugin-scan-progress',
+                            ),
                             padding: const EdgeInsets.only(top: 10),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(999),
                               child: LinearProgressIndicator(
                                 minHeight: 4,
-                                backgroundColor:
-                                    Colors.white.withValues(alpha: 0.10),
+                                backgroundColor: Colors.white.withValues(
+                                  alpha: 0.10,
+                                ),
                                 valueColor: const AlwaysStoppedAnimation<Color>(
                                   Color(0xFF78D8FF),
                                 ),
@@ -38624,21 +39178,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       'Search plugins',
                                     ),
                                     hintStyle: TextStyle(
-                                      color:
-                                          Colors.white.withValues(alpha: 0.45),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.45,
+                                      ),
                                     ),
-                                    prefixIcon:
-                                        const Icon(Icons.search_rounded),
+                                    prefixIcon: const Icon(
+                                      Icons.search_rounded,
+                                    ),
                                     prefixIconConstraints:
                                         const BoxConstraints.tightFor(
                                       width: 38,
                                       height: 40,
                                     ),
                                     filled: true,
-                                    fillColor:
-                                        Colors.white.withValues(alpha: 0.05),
-                                    contentPadding:
-                                        const EdgeInsets.only(right: 10),
+                                    fillColor: Colors.white.withValues(
+                                      alpha: 0.05,
+                                    ),
+                                    contentPadding: const EdgeInsets.only(
+                                      right: 10,
+                                    ),
                                     border: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(12),
                                       borderSide: BorderSide(
@@ -38717,22 +39275,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   children: [
                                     Text(
                                       L10n.translate(
-                                        context,
-                                        switch (filter) {
-                                          _DesktopPluginBrowserFilter.all =>
-                                            'Visible',
-                                          _DesktopPluginBrowserFilter
-                                                .instruments =>
-                                            'Instruments',
-                                          _DesktopPluginBrowserFilter.effects =>
-                                            'Effects',
-                                          _DesktopPluginBrowserFilter
-                                                .favorites =>
-                                            'Favorites',
-                                          _DesktopPluginBrowserFilter.hidden =>
-                                            'Hidden',
-                                        },
-                                      ),
+                                          context,
+                                          switch (filter) {
+                                            _DesktopPluginBrowserFilter.all =>
+                                              'Visible',
+                                            _DesktopPluginBrowserFilter
+                                                  .instruments =>
+                                              'Instruments',
+                                            _DesktopPluginBrowserFilter
+                                                  .effects =>
+                                              'Effects',
+                                            _DesktopPluginBrowserFilter
+                                                  .favorites =>
+                                              'Favorites',
+                                            _DesktopPluginBrowserFilter
+                                                  .hidden =>
+                                              'Hidden',
+                                          }),
                                       style: const TextStyle(
                                         color: Colors.white,
                                         fontSize: 13,
@@ -38742,8 +39301,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     const SizedBox(width: 8),
                                     Icon(
                                       Icons.keyboard_arrow_down_rounded,
-                                      color:
-                                          Colors.white.withValues(alpha: 0.68),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.68,
+                                      ),
                                       size: 18,
                                     ),
                                   ],
@@ -38771,8 +39331,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     Text(
                                       'Detached',
                                       style: TextStyle(
-                                        color: Colors.white
-                                            .withValues(alpha: 0.72),
+                                        color: Colors.white.withValues(
+                                          alpha: 0.72,
+                                        ),
                                         fontSize: 12,
                                         fontWeight: FontWeight.w600,
                                       ),
@@ -38812,8 +39373,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     currentPlugins = _desktopScannedPlugins;
                                   });
                                 },
-                                icon:
-                                    const Icon(Icons.create_new_folder_rounded),
+                                icon: const Icon(
+                                  Icons.create_new_folder_rounded,
+                                ),
                                 label: const Text('Folder'),
                               ),
                             ),
@@ -38836,26 +39398,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     vertical: 5,
                                   ),
                                   decoration: BoxDecoration(
-                                    color:
-                                        Colors.white.withValues(alpha: 0.055),
+                                    color: Colors.white.withValues(
+                                      alpha: 0.055,
+                                    ),
                                     borderRadius: BorderRadius.circular(999),
                                     border: Border.all(
-                                      color:
-                                          Colors.white.withValues(alpha: 0.08),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.08,
+                                      ),
                                     ),
                                   ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       ConstrainedBox(
-                                        constraints:
-                                            const BoxConstraints(maxWidth: 260),
+                                        constraints: const BoxConstraints(
+                                          maxWidth: 260,
+                                        ),
                                         child: Text(
                                           path,
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
-                                            color: Colors.white
-                                                .withValues(alpha: 0.72),
+                                            color: Colors.white.withValues(
+                                              alpha: 0.72,
+                                            ),
                                             fontSize: 11.4,
                                           ),
                                         ),
@@ -38875,8 +39441,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         child: Icon(
                                           Icons.close_rounded,
                                           size: 14,
-                                          color: Colors.white
-                                              .withValues(alpha: 0.62),
+                                          color: Colors.white.withValues(
+                                            alpha: 0.62,
+                                          ),
                                         ),
                                       ),
                                     ],
@@ -39017,8 +39584,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               : Icons.star_border_rounded,
                                           color: favorite
                                               ? const Color(0xFFF6C55D)
-                                              : Colors.white
-                                                  .withValues(alpha: 0.72),
+                                              : Colors.white.withValues(
+                                                  alpha: 0.72,
+                                                ),
                                         ),
                                       ),
                                       IconButton(
@@ -39041,8 +39609,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           hidden
                                               ? Icons.visibility_off_rounded
                                               : Icons.visibility_rounded,
-                                          color: Colors.white
-                                              .withValues(alpha: 0.72),
+                                          color: Colors.white.withValues(
+                                            alpha: 0.72,
+                                          ),
                                         ),
                                       ),
                                     ],
@@ -39116,8 +39685,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
             return _buildDesktopPopupSurface(
               width: 620,
-              outerPadding:
-                  const EdgeInsets.symmetric(horizontal: 36, vertical: 28),
+              outerPadding: const EdgeInsets.symmetric(
+                horizontal: 36,
+                vertical: 28,
+              ),
               padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -39176,10 +39747,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         'CPU',
                         '${(diagnostics.cpuUsage * 100).toStringAsFixed(1)}%',
                       ),
-                      _buildDiagnosticsStatCard(
-                        'RT Status',
-                        realtimeStatus,
-                      ),
+                      _buildDiagnosticsStatCard('RT Status', realtimeStatus),
                       _buildDiagnosticsStatCard(
                         'RT Max',
                         callbackMax <= 0
@@ -39368,8 +39936,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       builder: (dialogContext) {
         return _buildDesktopPopupSurface(
           width: 560,
-          outerPadding:
-              const EdgeInsets.symmetric(horizontal: 36, vertical: 28),
+          outerPadding: const EdgeInsets.symmetric(
+            horizontal: 36,
+            vertical: 28,
+          ),
           padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -39399,12 +39969,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               ),
               const SizedBox(height: 8),
               if (_hostedPluginRestoreEntries.values
-                  .where((entry) =>
-                      entry.status != _HostedPluginRestoreStatus.loaded)
+                  .where(
+                    (entry) =>
+                        entry.status != _HostedPluginRestoreStatus.loaded,
+                  )
                   .isNotEmpty) ...[
                 ..._hostedPluginRestoreEntries.values
-                    .where((entry) =>
-                        entry.status != _HostedPluginRestoreStatus.loaded)
+                    .where(
+                  (entry) => entry.status != _HostedPluginRestoreStatus.loaded,
+                )
                     .map((entry) {
                   final isProblem = entry.isProblem;
                   final isLoading =
@@ -39466,7 +40039,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               Text(
                                 entry.detail,
                                 style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.72),
+                                  color: Colors.white.withValues(
+                                    alpha: 0.72,
+                                  ),
                                   fontSize: 12.8,
                                   height: 1.35,
                                 ),
@@ -39481,8 +40056,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 const SizedBox(height: 4),
               ],
               if (_projectLoadIssues.isEmpty &&
-                  _hostedPluginRestoreEntries.values.every((entry) =>
-                      entry.status == _HostedPluginRestoreStatus.loaded))
+                  _hostedPluginRestoreEntries.values.every(
+                    (entry) =>
+                        entry.status == _HostedPluginRestoreStatus.loaded,
+                  ))
                 Text(
                   'No recovery or missing-asset notices for this session.',
                   style: TextStyle(
@@ -39527,10 +40104,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   );
                 }),
               if (PlatformCapabilities.current.isDesktop &&
-                  _projectLoadIssues.any((issue) =>
-                      issue.type == _ProjectLoadIssueType.missingPlugin ||
-                      issue.type ==
-                          _ProjectLoadIssueType.partialPluginRestore)) ...[
+                  _projectLoadIssues.any(
+                    (issue) =>
+                        issue.type == _ProjectLoadIssueType.missingPlugin ||
+                        issue.type ==
+                            _ProjectLoadIssueType.partialPluginRestore,
+                  )) ...[
                 const SizedBox(height: 8),
                 Align(
                   alignment: Alignment.centerRight,
@@ -39628,8 +40207,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               ),
               const SizedBox(width: 12),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(999),
@@ -39723,7 +40304,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   List<_InputChannelRouteOption> _buildInputChannelRouteOptions(
-      int numInputChannels) {
+    int numInputChannels,
+  ) {
     if (numInputChannels <= 0) return const <_InputChannelRouteOption>[];
 
     final options = <_InputChannelRouteOption>[
@@ -39736,7 +40318,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   _InputChannelRouteOption? _findSelectedInputChannelRouteOption(
-      List<_InputChannelRouteOption> options) {
+    List<_InputChannelRouteOption> options,
+  ) {
     for (final option in options) {
       if (option.channelStart == _selectedChannelStart &&
           option.channelCount == _selectedChannelCount) {
@@ -39753,10 +40336,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
 
-    _selectedChannelStart =
-        _selectedChannelStart.clamp(0, (_numInputChannels - 1).clamp(0, 999));
+    _selectedChannelStart = _selectedChannelStart.clamp(
+      0,
+      (_numInputChannels - 1).clamp(0, 999),
+    );
     _selectedChannelCount = _selectedChannelCount.clamp(
-        1, (_numInputChannels - _selectedChannelStart).clamp(1, 999));
+      1,
+      (_numInputChannels - _selectedChannelStart).clamp(1, 999),
+    );
 
     final options = _buildInputChannelRouteOptions(_numInputChannels);
     final selected = _findSelectedInputChannelRouteOption(options);
@@ -39885,7 +40472,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _allowedBluetoothMicKeys
         ..clear()
         ..addAll(
-            prefs.getStringList(_kAllowedBluetoothMicKeysPref) ?? const []);
+          prefs.getStringList(_kAllowedBluetoothMicKeysPref) ?? const [],
+        );
     });
   }
 
@@ -40032,9 +40620,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await JuceAudioEngine.setLiveInputMonitoringEnabled(shouldEnable);
   }
 
-  Future<void> _refreshAudioRouteInfo({
-    bool refreshNativeRoute = false,
-  }) async {
+  Future<void> _refreshAudioRouteInfo({bool refreshNativeRoute = false}) async {
     if (!_supportsNativeBluetoothMonitorPolicy()) return;
     if (refreshNativeRoute) {
       await _requestAndroidRouteRefresh(reason: 'editorRouteInfo');
@@ -40211,8 +40797,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   void _startRecordingRoutePolicyPolling() {
     _recordingRoutePolicyTimer?.cancel();
     if (!_supportsNativeBluetoothMonitorPolicy()) return;
-    _recordingRoutePolicyTimer =
-        Timer.periodic(const Duration(seconds: 1), (_) {
+    _recordingRoutePolicyTimer = Timer.periodic(const Duration(seconds: 1), (
+      _,
+    ) {
       if (!_isRecording || _isMidiClipRecording) {
         _recordingRoutePolicyTimer?.cancel();
         _recordingRoutePolicyTimer = null;
@@ -40305,10 +40892,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       if (notifyOnFailure && mounted) {
         _showSmallNotice(
-          L10n.translate(
-            context,
-            'Could not apply audio device settings',
-          ),
+          L10n.translate(context, 'Could not apply audio device settings'),
         );
       }
       return false;
@@ -40437,12 +41021,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
 
-    unawaited(_prepareRecordingInputs(
-      desiredInputChannels: desiredInputChannels,
-      selectedDevice: selectedDevice,
-      reason: reason,
-      rescheduleOnConfigChange: true,
-    ));
+    unawaited(
+      _prepareRecordingInputs(
+        desiredInputChannels: desiredInputChannels,
+        selectedDevice: selectedDevice,
+        reason: reason,
+        rescheduleOnConfigChange: true,
+      ),
+    );
   }
 
   Future<void> _loadInputDevicesFromJuce({
@@ -40554,10 +41140,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _lastAudioRouteInfoRefreshElapsed = Duration.zero;
       _audioRouteInfo = AudioRouteInfo.unknown;
       if (Platform.isAndroid) {
-        unawaited(JuceAudioEngine.prepareRecordingInputs(
-          0,
-          reason: 'loadInputDevices:error',
-        ));
+        unawaited(
+          JuceAudioEngine.prepareRecordingInputs(
+            0,
+            reason: 'loadInputDevices:error',
+          ),
+        );
       }
     }
   }
@@ -40597,10 +41185,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             ),
           ),
           const SizedBox(height: 6),
-          Text(
-            helperText,
-            style: const TextStyle(color: Colors.white70),
-          ),
+          Text(helperText, style: const TextStyle(color: Colors.white70)),
           const SizedBox(height: 10),
           Align(
             alignment: Alignment.centerLeft,
@@ -40629,8 +41214,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // --- Preserve input selection if possible ---
     if (_selectedInput != null) {
       try {
-        newSelectedInput =
-            inputs.firstWhere((d) => d.deviceId == _selectedInput!.deviceId);
+        newSelectedInput = inputs.firstWhere(
+          (d) => d.deviceId == _selectedInput!.deviceId,
+        );
       } catch (_) {
         newSelectedInput = inputs.isNotEmpty ? inputs.first : null;
       }
@@ -40641,8 +41227,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // --- Preserve output selection if possible ---
     if (_selectedOutput != null) {
       try {
-        newSelectedOutput =
-            outputs.firstWhere((d) => d.deviceId == _selectedOutput!.deviceId);
+        newSelectedOutput = outputs.firstWhere(
+          (d) => d.deviceId == _selectedOutput!.deviceId,
+        );
       } catch (_) {
         newSelectedOutput = outputs.isNotEmpty ? outputs.first : null;
       }
@@ -40710,11 +41297,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               .map(
                 (d) => Align(
                   alignment: Alignment.centerLeft,
-                  child: Text(
-                    d,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  child: Text(d, maxLines: 1, overflow: TextOverflow.ellipsis),
                 ),
               )
               .toList(growable: false);
@@ -40776,12 +41359,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             }
           });
           if (_isValidRowIndex(_selectedRow)) {
-            unawaited(JuceAudioEngine.setRowMonitorTarget(
-              row: _selectedRow,
-              inputDeviceName: name,
-              channelStart: _selectedChannelStart,
-              channelCount: _selectedChannelCount,
-            ));
+            unawaited(
+              JuceAudioEngine.setRowMonitorTarget(
+                row: _selectedRow,
+                inputDeviceName: name,
+                channelStart: _selectedChannelStart,
+                channelCount: _selectedChannelCount,
+              ),
+            );
           }
           _scheduleRecordingInputPrewarm(reason: 'selectInputDevice');
           unawaited(_refreshAndroidOutputRouteLabel());
@@ -40851,12 +41436,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   }
                 });
                 if (_isValidRowIndex(_selectedRow)) {
-                  unawaited(JuceAudioEngine.setRowMonitorTarget(
-                    row: _selectedRow,
-                    inputDeviceName: _selectedDevice ?? '',
-                    channelStart: option.channelStart,
-                    channelCount: option.channelCount,
-                  ));
+                  unawaited(
+                    JuceAudioEngine.setRowMonitorTarget(
+                      row: _selectedRow,
+                      inputDeviceName: _selectedDevice ?? '',
+                      channelStart: option.channelStart,
+                      channelCount: option.channelCount,
+                    ),
+                  );
                 }
                 _scheduleRecordingInputPrewarm(reason: 'selectInputChannels');
               },
@@ -40998,8 +41585,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     return;
                   }
                   _setStateAndRefreshProjectSettings(() {
-                    _midiInputChannelFilter =
-                        _normalizeMidiInputChannelFilter(channel);
+                    _midiInputChannelFilter = _normalizeMidiInputChannelFilter(
+                      channel,
+                    );
                   });
                   await JuceAudioEngine.setMidiInputChannelFilter(
                     _midiInputChannelFilter,
@@ -41160,8 +41748,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     // Non-Android fallback path uses WebRTC device enumeration.
     if (_outputs.isEmpty) {
-      return Text(L10n.translate(context, 'No selectable output devices'),
-          style: const TextStyle(color: Colors.white54));
+      return Text(
+        L10n.translate(context, 'No selectable output devices'),
+        style: const TextStyle(color: Colors.white54),
+      );
     }
 
     return DropdownButtonFormField<MediaDeviceInfo>(
@@ -41175,8 +41765,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       items: _outputs.map((d) {
         return DropdownMenuItem(
           value: d,
-          child: Text(d.label.isNotEmpty ? d.label : d.deviceId,
-              style: const TextStyle(color: Colors.white)),
+          child: Text(
+            d.label.isNotEmpty ? d.label : d.deviceId,
+            style: const TextStyle(color: Colors.white),
+          ),
         );
       }).toList(),
       onChanged: (d) {
@@ -41517,10 +42109,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           ),
                           onChanged: (value) {
                             unawaited(
-                              _setRoutingSheetMonitoring(value)
-                                  .whenComplete(() {
-                                setSheetState(() {});
-                              }),
+                              _setRoutingSheetMonitoring(value).whenComplete(
+                                () {
+                                  setSheetState(() {});
+                                },
+                              ),
                             );
                           },
                         ),
@@ -41668,7 +42261,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   unawaited(_resetBluetoothMicOptIns());
                 },
                 child: Text(
-                    L10n.translate(context, 'Reset Bluetooth mic approvals')),
+                  L10n.translate(context, 'Reset Bluetooth mic approvals'),
+                ),
               ),
             ),
           ],
@@ -41681,8 +42275,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(L10n.translate(context, 'Tempo (BPM)'),
-            style: const TextStyle(color: Colors.white70)),
+        Text(
+          L10n.translate(context, 'Tempo (BPM)'),
+          style: const TextStyle(color: Colors.white70),
+        ),
         const SizedBox(height: 8),
         Container(
           height: 120,
@@ -41706,9 +42302,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   bpm >= _kTempoPickerMinBpm;
                   bpm--)
                 Center(
-                  child: Text("$bpm",
-                      style:
-                          const TextStyle(color: Colors.white, fontSize: 20)),
+                  child: Text(
+                    "$bpm",
+                    style: const TextStyle(color: Colors.white, fontSize: 20),
+                  ),
                 ),
             ],
           ),
@@ -41717,8 +42314,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
-  Widget _tempoTimePill(
-      {required int tempo, required String current, required String total}) {
+  Widget _tempoTimePill({
+    required int tempo,
+    required String current,
+    required String total,
+  }) {
     return LayoutBuilder(
       builder: (context, c) {
         final double pillWidth = c.maxWidth;
@@ -41774,17 +42374,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               children: [
                 // ---- Left column: TEMPO ----
                 Padding(
-                  padding:
-                      const EdgeInsets.only(left: 4), // keep visually centered
+                  padding: const EdgeInsets.only(
+                    left: 4,
+                  ), // keep visually centered
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text('$tempo',
-                          style: bigNum, textAlign: TextAlign.center),
+                      Text(
+                        '$tempo',
+                        style: bigNum,
+                        textAlign: TextAlign.center,
+                      ),
                       const SizedBox(height: 4),
-                      Text(L10n.translate(context, 'TEMPO'),
-                          style: smallLabel, textAlign: TextAlign.center),
+                      Text(
+                        L10n.translate(context, 'TEMPO'),
+                        style: smallLabel,
+                        textAlign: TextAlign.center,
+                      ),
                     ],
                   ),
                 ),
@@ -41797,7 +42404,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.only(
-                        right: 0), // ✅ fixes shadow/clipping on last digit
+                      right: 0,
+                    ), // ✅ fixes shadow/clipping on last digit
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -41935,9 +42543,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   : const Color.fromRGBO(244, 244, 244, 0.075),
               borderRadius: BorderRadius.circular(15),
               border: Border.all(
-                color: Colors.white.withValues(
-                  alpha: selected ? 0.22 : 0.09,
-                ),
+                color: Colors.white.withValues(alpha: selected ? 0.22 : 0.09),
               ),
             ),
             child: Text(
@@ -41946,15 +42552,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               overflow: TextOverflow.visible,
               style: TextStyle(
                 fontFamily: 'Pretendard',
-                color: const Color(0xFFF4F4F4).withValues(
-                  alpha: selected ? 1.0 : 0.74,
-                ),
+                color: const Color(
+                  0xFFF4F4F4,
+                ).withValues(alpha: selected ? 1.0 : 0.74),
                 fontSize: 12,
                 fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
                 height: 1.0,
-                fontFeatures: const <FontFeature>[
-                  FontFeature.tabularFigures(),
-                ],
+                fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
               ),
             ),
           ),
@@ -42066,27 +42670,31 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     color: Colors.white.withValues(alpha: 0.08),
                                     border: Border(
                                       top: BorderSide(
-                                        color: Colors.white
-                                            .withValues(alpha: 0.18),
+                                        color: Colors.white.withValues(
+                                          alpha: 0.18,
+                                        ),
                                       ),
                                       bottom: BorderSide(
-                                        color: Colors.white
-                                            .withValues(alpha: 0.18),
+                                        color: Colors.white.withValues(
+                                          alpha: 0.18,
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
                                 onSelectedItemChanged: (index) {
                                   _setProjectTempoFromUi(
-                                      _tempoPickerBpmForItem(index));
+                                    _tempoPickerBpmForItem(index),
+                                  );
                                 },
                                 itemBuilder: (context, index) {
                                   if (index < 0 ||
                                       index > _kTempoPickerMaxItem) {
                                     return null;
                                   }
-                                  final bpm =
-                                      _tempoPickerBpmForItem(index).round();
+                                  final bpm = _tempoPickerBpmForItem(
+                                    index,
+                                  ).round();
                                   return Center(
                                     child: Text(
                                       '$bpm',
@@ -42142,11 +42750,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             onTap: _showProjectKeyPicker,
                             child: Container(
                               height: 38,
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 12),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                              ),
                               decoration: BoxDecoration(
-                                color:
-                                    const Color.fromRGBO(244, 244, 244, 0.12),
+                                color: const Color.fromRGBO(
+                                  244,
+                                  244,
+                                  244,
+                                  0.12,
+                                ),
                                 borderRadius: BorderRadius.circular(18),
                                 border: Border.all(
                                   color: Colors.white.withValues(alpha: 0.12),
@@ -42314,8 +42927,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                 softWrap: false,
                                                 style: TextStyle(
                                                   color: isSelected
-                                                      ? const Color(0xFFF4F4F4)
-                                                      : const Color(0xB8F4F4F4),
+                                                      ? const Color(
+                                                          0xFFF4F4F4,
+                                                        )
+                                                      : const Color(
+                                                          0xB8F4F4F4,
+                                                        ),
                                                   fontSize: 14,
                                                   fontWeight: isSelected
                                                       ? FontWeight.w600
@@ -42334,8 +42951,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 return Stack(
                                   children: [
                                     AnimatedPositioned(
-                                      duration:
-                                          const Duration(milliseconds: 220),
+                                      duration: const Duration(
+                                        milliseconds: 220,
+                                      ),
                                       curve: Curves.easeOutCubic,
                                       left: bubbleMargin +
                                           (bubbleWidth * selectedIndex),
@@ -42346,8 +42964,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         child: DecoratedBox(
                                           decoration: BoxDecoration(
                                             color: selectedChipColor,
-                                            borderRadius:
-                                                BorderRadius.circular(16),
+                                            borderRadius: BorderRadius.circular(
+                                              16,
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -42367,7 +42986,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         ),
                                         buildModeOption(
                                           label: L10n.translate(
-                                              context, 'Resample'),
+                                            context,
+                                            'Resample',
+                                          ),
                                           optionIndex: 1,
                                           onTap: () => unawaited(
                                             _setTempoStretchUiMode(
@@ -42378,7 +42999,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         ),
                                         buildModeOption(
                                           label: L10n.translate(
-                                              context, 'Stretch'),
+                                            context,
+                                            'Stretch',
+                                          ),
                                           optionIndex: 2,
                                           onTap: () => unawaited(
                                             _setTempoStretchUiMode(
@@ -42507,14 +43130,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // Last-resort token overlap (handles strings like "add reverb on track 1").
     final tokens = needle
         .split(' ')
-        .where((t) =>
-            t.isNotEmpty &&
-            t != 'plugin' &&
-            t != 'effect' &&
-            t != 'track' &&
-            t != 'row' &&
-            t != 'add' &&
-            t != 'remove')
+        .where(
+          (t) =>
+              t.isNotEmpty &&
+              t != 'plugin' &&
+              t != 'effect' &&
+              t != 'track' &&
+              t != 'row' &&
+              t != 'add' &&
+              t != 'remove',
+        )
         .toList(growable: false);
     if (tokens.isEmpty) return null;
     String? best;
@@ -42589,9 +43214,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       for (int i = 0; i < effects.length; i++) MapEntry(i, effects[i]),
     ];
     indexed.sort((a, b) {
-      final rank = _aiEffectChainRank(a.value).compareTo(
-        _aiEffectChainRank(b.value),
-      );
+      final rank = _aiEffectChainRank(
+        a.value,
+      ).compareTo(_aiEffectChainRank(b.value));
       if (rank != 0) return rank;
       return a.key.compareTo(b.key);
     });
@@ -42638,8 +43263,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     List<String> requiredEffectIds,
   ) async {
     final effectIds = await JuceAudioEngine.getTrackEffectIdsForRow(row);
-    final instanceIds =
-        await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
+    final instanceIds = await JuceAudioEngine.getTrackEffectInstanceIdsForRow(
+      row,
+    );
     if (effectIds.length != instanceIds.length ||
         instanceIds.any((value) => value.trim().isEmpty)) {
       throw StateError('v3_phone_cleanup_effect_identity_missing');
@@ -42648,8 +43274,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final selectedIndexes = <int>[];
     final selectedInstanceIds = <String>[];
     for (final requiredEffectId in requiredEffectIds) {
-      final index =
-          List<int>.generate(effectIds.length, (value) => value).firstWhere(
+      final index = List<int>.generate(
+        effectIds.length,
+        (value) => value,
+      ).firstWhere(
         (candidate) =>
             !selectedIndexes.contains(candidate) &&
             effectIds[candidate] == requiredEffectId,
@@ -42804,29 +43432,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     int? pick(List<String> keys, {bool preferOneBased = false}) {
       for (final key in keys) {
-        final parsed =
-            _parseRowIndexValue(data[key], preferOneBased: preferOneBased) ??
-                _parseRowIndexValue(
-                  target[key],
-                  preferOneBased: preferOneBased,
-                );
+        final parsed = _parseRowIndexValue(data[key],
+                preferOneBased: preferOneBased) ??
+            _parseRowIndexValue(target[key], preferOneBased: preferOneBased);
         if (parsed != null) return parsed;
       }
       return null;
     }
 
-    int? row = pick(
-      const ['row_index', 'track_index', 'target_row_index'],
-      preferOneBased: false,
-    );
-    row ??= pick(
-      const ['row', 'target_row'],
-      preferOneBased: false,
-    );
-    row ??= pick(
-      const ['row_number', 'track_number', 'track'],
-      preferOneBased: true,
-    );
+    int? row = pick(const [
+      'row_index',
+      'track_index',
+      'target_row_index',
+    ], preferOneBased: false);
+    row ??= pick(const ['row', 'target_row'], preferOneBased: false);
+    row ??= pick(const [
+      'row_number',
+      'track_number',
+      'track',
+    ], preferOneBased: true);
     if (row != null) return row;
 
     if (fallbackClipIndex != null &&
@@ -42883,8 +43507,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return selected.first;
     }
 
-    final rowIndex =
-        _resolveActionRowIndexFromData(data, includeSelectionFallback: false);
+    final rowIndex = _resolveActionRowIndexFromData(
+      data,
+      includeSelectionFallback: false,
+    );
     final fileContains =
         (target['file_name_contains'] ?? data['file_name_contains'])
             ?.toString()
@@ -42902,9 +43528,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (rowIndex != null && clip.rowIndex != rowIndex) continue;
       if (fileContains != null &&
           fileContains.isNotEmpty &&
-          !_displayNameForFilePath(clip.file.path)
-              .toLowerCase()
-              .contains(fileContains)) {
+          !_displayNameForFilePath(
+            clip.file.path,
+          ).toLowerCase().contains(fileContains)) {
         continue;
       }
       if (labelContains != null &&
@@ -42946,8 +43572,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     final target = _actionTarget(data);
     final out = LinkedHashSet<int>();
-    final rowIndex =
-        _resolveActionRowIndexFromData(data, includeSelectionFallback: false);
+    final rowIndex = _resolveActionRowIndexFromData(
+      data,
+      includeSelectionFallback: false,
+    );
 
     void add(int? idx) {
       if (idx != null && isValidIndex(idx)) {
@@ -43081,8 +43709,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Map<String, dynamic> data, {
     int? fallbackClipIndex,
   }) {
-    final row = _resolveActionRowIndexFromData(data,
-        fallbackClipIndex: fallbackClipIndex);
+    final row = _resolveActionRowIndexFromData(
+      data,
+      fallbackClipIndex: fallbackClipIndex,
+    );
     if (row == null || _rowCount <= 0) return null;
     return row.clamp(0, _rowCount - 1);
   }
@@ -43421,7 +44051,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     final selectedAudioCandidates = _timelineSelectedClipIndices
         .where(
-            (i) => i >= 0 && i < _audioTracks.length && !_audioTracks[i].isMidi)
+          (i) => i >= 0 && i < _audioTracks.length && !_audioTracks[i].isMidi,
+        )
         .toList(growable: false);
     final selectedPick = _pickPreferredClipIndex(selectedAudioCandidates);
     if (selectedPick != null) return selectedPick;
@@ -43637,11 +44268,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     int? chatFlowId,
     List<Map<String, dynamic>>? v3RuntimeExpectations,
     Map<String, List<String>>? v3ExecutionSummariesByCommandId,
+    AiV3WorkflowRuntime? v3WorkflowRuntime,
   }) async {
     _assistantActionNoticeCaptureDepth += 1;
-    final batchExecutionNotices =
-        v3RuntimeExpectations == null &&
-            _deferredAssistantExecutionNotices == null;
+    final batchExecutionNotices = v3RuntimeExpectations == null &&
+        _deferredAssistantExecutionNotices == null;
     if (batchExecutionNotices) {
       _assistantActionExecutionBatchDepth += 1;
     }
@@ -43650,10 +44281,50 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       var hadFailure = false;
       for (final action in actions) {
         final type = action.type.trim().toLowerCase();
-        final data = _toActionMap(action.data);
+        var data = _toActionMap(action.data);
+        String? resolvedResourceClipId;
+        AiV3ResourceKind? resolvedResourceKind;
         try {
           if (chatFlowId != null) {
             _throwIfChatFlowStopped(chatFlowId);
+          }
+          final unresolvedTarget = _actionTarget(data);
+          final rawResourceRef = unresolvedTarget['resource_ref'];
+          if (rawResourceRef != null) {
+            final expectedKind = switch ((type, data['operation'])) {
+              ('clip_edit', 'pitch_shift') => AiV3ResourceKind.audioClip,
+              ('midi_compose', 'transpose_notes') => AiV3ResourceKind.midiClip,
+              _ => null,
+            };
+            if (expectedKind == null || v3WorkflowRuntime == null) {
+              throw StateError('v3_resource_action_unsupported');
+            }
+            late final AiV3ResourceRef resourceRef;
+            try {
+              resourceRef = AiV3ResourceRef.fromJson(rawResourceRef);
+            } on FormatException {
+              throw StateError('v3_resource_ref_invalid');
+            }
+            final binding = v3WorkflowRuntime.resolve(
+              resourceRef,
+              expectedKind: expectedKind,
+            );
+            final clipId = binding.stableId;
+            if (clipId is! String) {
+              throw StateError('v3_resource_binding_invalid');
+            }
+            final clipIndex = _clipIndexForPersistentId(clipId);
+            if (!_isValidClipIndex(clipIndex) ||
+                _audioTracks[clipIndex].isMidi !=
+                    (expectedKind == AiV3ResourceKind.midiClip)) {
+              throw StateError('v3_resource_binding_unavailable');
+            }
+            resolvedResourceClipId = clipId;
+            resolvedResourceKind = expectedKind;
+            data = <String, dynamic>{
+              ...data,
+              'target': <String, dynamic>{'scope': 'clip', 'clip_id': clipId},
+            };
           }
           switch (type) {
             case 'tutorial':
@@ -43664,12 +44335,46 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               break;
             case 'clip_edit':
               await _applyClipEditAction(data);
+              if (resolvedResourceClipId != null &&
+                  v3RuntimeExpectations != null) {
+                final finalPitch = _toActionDouble(
+                  data['new_pitch_semitones'] ?? data['pitch_semitones'],
+                );
+                if (finalPitch == null) {
+                  throw StateError('v3_resource_pitch_missing');
+                }
+                _addAiV3Expectation(v3RuntimeExpectations, <String, dynamic>{
+                  'kind': 'clip_pitch',
+                  'clip_id': resolvedResourceClipId,
+                  'value': finalPitch,
+                });
+              }
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
               }
               break;
             case 'project_edit':
+              final previousTempo = _tempo;
+              final projectTarget = _actionTarget(data);
+              final requestedTempo = data['operation'] == 'set_tempo'
+                  ? _toActionDouble(
+                      data['tempo_bpm'] ??
+                          projectTarget['tempo_bpm'] ??
+                          data['bpm'] ??
+                          projectTarget['bpm'],
+                    )
+                  : null;
               await _applyProjectEditAction(data);
+              if (requestedTempo != null &&
+                  requestedTempo.isFinite &&
+                  requestedTempo > 0.0 &&
+                  v3RuntimeExpectations != null) {
+                _composeAiV3RuntimeExpectationsForTempo(
+                  v3RuntimeExpectations,
+                  previousBpm: previousTempo,
+                  nextBpm: _clampTempo(requestedTempo),
+                );
+              }
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
               }
@@ -43726,9 +44431,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   deletedRowId == null || deletedRowIndex == null
                       ? const <String>{}
                       : _audioTracks
-                          .where((clip) =>
-                              clip.rowId == deletedRowId ||
-                              clip.rowIndex == deletedRowIndex)
+                          .where(
+                            (clip) =>
+                                clip.rowId == deletedRowId ||
+                                clip.rowIndex == deletedRowIndex,
+                          )
                           .map((clip) => clip.clipId)
                           .toSet();
               await _applyRowDeleteAction(data);
@@ -43816,23 +44523,79 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             case 'v3_clip_glue':
               final glueExpectation = await _applyAiV3ClipGlueAction(data);
               if (v3RuntimeExpectations != null) {
-                _addAiV3Expectation(
-                  v3RuntimeExpectations,
-                  glueExpectation,
-                );
+                _addAiV3Expectation(v3RuntimeExpectations, glueExpectation);
               }
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
               }
               break;
             case 'v3_clip_separate_stems':
-              final stemExpectation =
-                  await _applyAiV3ClipSeparateStemsAction(data);
+              final stemExpectation = await _applyAiV3ClipSeparateStemsAction(
+                data,
+                workflowRuntime: v3WorkflowRuntime,
+              );
+              final commandId = data['command_id']?.toString().trim() ?? '';
+              if (commandId.isEmpty || v3WorkflowRuntime == null) {
+                if (data['command_id'] != null) {
+                  throw StateError('v3_resource_producer_context_missing');
+                }
+              } else {
+                for (final pathKey in const <String>[
+                  'vocals_file',
+                  'instrumental_file',
+                ]) {
+                  v3WorkflowRuntime.trackGeneratedArtifact(
+                    stemExpectation[pathKey]?.toString() ?? '',
+                  );
+                }
+                final outputs = <String, (AiV3ResourceKind, Object?)>{
+                  'vocals_clip': (
+                    AiV3ResourceKind.audioClip,
+                    stemExpectation['vocals_clip_id'],
+                  ),
+                  'instrumental_clip': (
+                    AiV3ResourceKind.audioClip,
+                    stemExpectation['instrumental_clip_id'],
+                  ),
+                  'vocals_row': (
+                    AiV3ResourceKind.audioRow,
+                    stemExpectation['vocals_row_id'],
+                  ),
+                  'instrumental_row': (
+                    AiV3ResourceKind.audioRow,
+                    stemExpectation['instrumental_row_id'],
+                  ),
+                };
+                for (final output in outputs.entries) {
+                  final stableId = output.value.$2;
+                  if (stableId == null) {
+                    throw StateError('v3_resource_binding_missing_output');
+                  }
+                  v3WorkflowRuntime.bind(
+                    ref: AiV3ResourceRef(
+                      commandId: commandId,
+                      output: output.key,
+                    ),
+                    kind: output.value.$1,
+                    stableId: stableId,
+                  );
+                }
+              }
               if (v3RuntimeExpectations != null) {
-                _addAiV3Expectation(
-                  v3RuntimeExpectations,
-                  stemExpectation,
-                );
+                _addAiV3Expectation(v3RuntimeExpectations, stemExpectation);
+                for (final clipId in <Object?>[
+                  stemExpectation['vocals_clip_id'],
+                  stemExpectation['instrumental_clip_id'],
+                ]) {
+                  if (clipId is! String || clipId.isEmpty) {
+                    throw StateError('v3_resource_binding_missing_output');
+                  }
+                  _addAiV3Expectation(v3RuntimeExpectations, <String, dynamic>{
+                    'kind': 'clip_pitch',
+                    'clip_id': clipId,
+                    'value': 0.0,
+                  });
+                }
               }
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
@@ -43877,16 +44640,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               }
               break;
             case 'v3_phone_mic_cleanup':
-              final cleanupExpectation =
-                  await _applyAiV3PhoneMicCleanupAction(data);
+              final cleanupExpectation = await _applyAiV3PhoneMicCleanupAction(
+                data,
+              );
               if (v3RuntimeExpectations != null &&
-                  !v3RuntimeExpectations.any((expectation) =>
-                      expectation['kind'] == 'row_deleted' &&
-                      expectation['row_id'] == cleanupExpectation['row_id'])) {
-                _addAiV3Expectation(
-                  v3RuntimeExpectations,
-                  cleanupExpectation,
-                );
+                  !v3RuntimeExpectations.any(
+                    (expectation) =>
+                        expectation['kind'] == 'row_deleted' &&
+                        expectation['row_id'] == cleanupExpectation['row_id'],
+                  )) {
+                _addAiV3Expectation(v3RuntimeExpectations, cleanupExpectation);
               }
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
@@ -43909,11 +44672,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 );
               }).toList(growable: false);
               final report = await applyMixingResult(
-                MixingResult(
-                  actions: mixActions,
-                  summary: '',
-                  isNoOp: false,
-                ),
+                MixingResult(actions: mixActions, summary: '', isNoOp: false),
                 emitActionSummaries: false,
                 stageEffectEnsures: true,
               );
@@ -43956,7 +44715,80 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               }
               break;
             case 'midi_compose':
+              final operation = data['operation']?.toString() ?? '';
+              final producerCommandId =
+                  data['command_id']?.toString().trim() ?? '';
+              final beforeMidiClipIds = operation == 'create_clip' &&
+                      producerCommandId.isNotEmpty &&
+                      v3WorkflowRuntime != null
+                  ? _audioTracks
+                      .where((clip) => clip.isMidi)
+                      .map((clip) => clip.clipId)
+                      .toSet()
+                  : const <String>{};
               await _applyMidiComposeAction(data, chatFlowId: chatFlowId);
+              if (beforeMidiClipIds.isNotEmpty ||
+                  (operation == 'create_clip' &&
+                      producerCommandId.isNotEmpty &&
+                      v3WorkflowRuntime != null)) {
+                final created = _audioTracks
+                    .where(
+                      (clip) =>
+                          clip.isMidi &&
+                          !beforeMidiClipIds.contains(clip.clipId),
+                    )
+                    .toList(growable: false);
+                if (created.length != 1) {
+                  throw StateError('v3_resource_binding_missing_output');
+                }
+                final createdClipId = created.single.clipId;
+                v3WorkflowRuntime!.bind(
+                  ref: AiV3ResourceRef(
+                    commandId: producerCommandId,
+                    output: 'midi_clip',
+                  ),
+                  kind: AiV3ResourceKind.midiClip,
+                  stableId: createdClipId,
+                );
+                if (v3RuntimeExpectations != null) {
+                  final expectation = v3RuntimeExpectations
+                      .where(
+                        (candidate) =>
+                            candidate['kind'] == 'midi_clip_created' &&
+                            candidate['producer_command_id'] ==
+                                producerCommandId,
+                      )
+                      .firstOrNull;
+                  if (expectation == null) {
+                    throw StateError('v3_resource_expectation_missing');
+                  }
+                  expectation['runtime_clip_id'] = createdClipId;
+                }
+              }
+              if (operation == 'transpose_notes' &&
+                  resolvedResourceClipId != null &&
+                  resolvedResourceKind == AiV3ResourceKind.midiClip &&
+                  v3RuntimeExpectations != null) {
+                final expectedNotes = (data['expected_notes'] as List?)
+                    ?.whereType<Map>()
+                    .map((note) => Map<String, dynamic>.from(note))
+                    .toList(growable: false);
+                if (expectedNotes == null) {
+                  throw StateError('v3_resource_midi_notes_missing');
+                }
+                for (final expectation in v3RuntimeExpectations.where(
+                  (candidate) =>
+                      candidate['kind'] == 'midi_clip_created' &&
+                      candidate['runtime_clip_id'] == resolvedResourceClipId,
+                )) {
+                  expectation['notes'] = expectedNotes;
+                }
+                _addAiV3Expectation(v3RuntimeExpectations, <String, dynamic>{
+                  'kind': 'midi_notes',
+                  'clip_id': resolvedResourceClipId,
+                  'value': expectedNotes,
+                });
+              }
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
               }
@@ -44126,7 +44958,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           final row = _resolveRowIndexFromActionTarget(data);
           if (row == null) {
             _insertAssistantChatText(
-                "I couldn't resolve which row to ungroup.");
+              "I couldn't resolve which row to ungroup.",
+            );
             return;
           }
           await _removeRowFromGroup(row);
@@ -44578,7 +45411,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (_rowCount >= _effectiveMaxRows) {
       _insertAssistantChatText(
-          "I couldn't create another row because the row limit is reached.");
+        "I couldn't create another row because the row limit is reached.",
+      );
       return null;
     }
 
@@ -44807,10 +45641,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     };
   }
 
-  double? _rowMixDoubleFrom(
-    Map<String, dynamic> data,
-    List<String> keys,
-  ) {
+  double? _rowMixDoubleFrom(Map<String, dynamic> data, List<String> keys) {
     final target = _actionTarget(data);
     for (final key in keys) {
       final parsed = _toActionDouble(data[key] ?? target[key]);
@@ -44834,26 +45665,32 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required double oldGain,
     required String operation,
   }) {
-    final absoluteDb = _rowMixDoubleFrom(
-      data,
-      const ['gain_db', 'db', 'decibels'],
-    );
-    final absoluteLinear = _rowMixDoubleFrom(
-      data,
-      const ['value', 'gain', 'linear_gain', 'gain_linear'],
-    );
-    final percent = _rowMixDoubleFrom(
-      data,
-      const ['percent', 'gain_percent', 'volume_percent'],
-    );
-    final deltaDb = _rowMixDoubleFrom(
-      data,
-      const ['delta_db', 'db_delta', 'gain_delta_db'],
-    );
-    final deltaLinear = _rowMixDoubleFrom(
-      data,
-      const ['delta', 'gain_delta', 'volume_delta'],
-    );
+    final absoluteDb = _rowMixDoubleFrom(data, const [
+      'gain_db',
+      'db',
+      'decibels',
+    ]);
+    final absoluteLinear = _rowMixDoubleFrom(data, const [
+      'value',
+      'gain',
+      'linear_gain',
+      'gain_linear',
+    ]);
+    final percent = _rowMixDoubleFrom(data, const [
+      'percent',
+      'gain_percent',
+      'volume_percent',
+    ]);
+    final deltaDb = _rowMixDoubleFrom(data, const [
+      'delta_db',
+      'db_delta',
+      'gain_delta_db',
+    ]);
+    final deltaLinear = _rowMixDoubleFrom(data, const [
+      'delta',
+      'gain_delta',
+      'volume_delta',
+    ]);
     final direction = _rowMixDirection(data);
 
     if (operation == 'set_gain') {
@@ -44924,15 +45761,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     final signed = _rowMixDoubleFrom(data, const ['pan_signed']);
     if (signed != null) {
-      return (((signed.clamp(-1.0, 1.0) + 1.0) * 0.5).clamp(0.0, 1.0))
-          .toDouble();
+      return (((signed.clamp(-1.0, 1.0) + 1.0) * 0.5).clamp(
+        0.0,
+        1.0,
+      )).toDouble();
     }
 
     final pan = _rowMixDoubleFrom(data, const ['pan']);
     if (pan != null) {
       if (pan < 0.0) {
-        return (((pan.clamp(-1.0, 1.0) + 1.0) * 0.5).clamp(0.0, 1.0))
-            .toDouble();
+        return (((pan.clamp(-1.0, 1.0) + 1.0) * 0.5).clamp(
+          0.0,
+          1.0,
+        )).toDouble();
       }
       return pan.clamp(0.0, 1.0).toDouble();
     }
@@ -44949,10 +45790,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return null;
   }
 
-  Map<String, dynamic> _rowMixTargetData(
-    Map<String, dynamic> data,
-    int row,
-  ) {
+  Map<String, dynamic> _rowMixTargetData(Map<String, dynamic> data, int row) {
     final target = <String, dynamic>{..._actionTarget(data), 'row_index': row};
     final out = <String, dynamic>{
       'row': row,
@@ -45127,7 +45965,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       case 'restart':
         if (_recordButtonVisuallyActive) {
           _insertAssistantChatText(
-              'Stop recording before restarting playback.');
+            'Stop recording before restarting playback.',
+          );
           return;
         }
         await _restartAudio(_safeAudioEditorStateSetter);
@@ -45222,9 +46061,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       case 'toggle_loop':
         final next = !_loopEnabled;
         _toggleLoopFromBottomBar();
-        _insertSystemChatText(
-          next ? '• Loop enabled •' : '• Loop disabled •',
-        );
+        _insertSystemChatText(next ? '• Loop enabled •' : '• Loop disabled •');
         return;
       default:
         _insertAssistantChatText("I couldn't apply that transport command.");
@@ -45469,11 +46306,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _applyEffectEditAction(<String, dynamic>{
       'operation': 'add',
       'effect_name': effectId,
-      'target': <String, dynamic>{
-        ...target,
-        'scope': 'row',
-        'row_index': row,
-      },
+      'target': <String, dynamic>{...target, 'scope': 'row', 'row_index': row},
     });
     final parameters = Map<String, dynamic>.from(rawParameters);
     if (parameters.isEmpty) return const <Map<String, dynamic>>[];
@@ -45527,8 +46360,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         effectId.isEmpty) {
       throw StateError('v3_effect_instance_target_invalid');
     }
-    final instanceIds =
-        await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
+    final instanceIds = await JuceAudioEngine.getTrackEffectInstanceIdsForRow(
+      row,
+    );
     final effectIds = await JuceAudioEngine.getTrackEffectIdsForRow(row);
     final index = instanceIds.indexOf(instanceId);
     if (index < 0 ||
@@ -45553,8 +46387,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (requested is! bool) {
           throw StateError('v3_effect_bypass_value_invalid');
         }
-        final current =
-            await JuceAudioEngine.getRowEffectBypassState(row, index);
+        final current = await JuceAudioEngine.getRowEffectBypassState(
+          row,
+          index,
+        );
         if (current == requested) return;
         await _undoManager.execute(
           BypassEffectInstanceAction(
@@ -45682,8 +46518,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           throw StateError('v3_phone_cleanup_effect_insert_failed');
         }
       }
-      final bypassed =
-          await JuceAudioEngine.getRowEffectBypassState(row, index);
+      final bypassed = await JuceAudioEngine.getRowEffectBypassState(
+        row,
+        index,
+      );
       if (bypassed) {
         final instanceIds =
             await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
@@ -45708,8 +46546,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
       }
     }
-    final cleanupInstanceIds =
-        await _ensureAiV3PhoneMicCleanupOrder(row, effectIds);
+    final cleanupInstanceIds = await _ensureAiV3PhoneMicCleanupOrder(
+      row,
+      effectIds,
+    );
 
     final beforePresets = <String, String>{
       for (final clipId in currentClipIds)
@@ -45729,14 +46569,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     final chain = await _aiV3NativeRowEffectChain(row);
     final requiredInChain = chain
-        .where((effect) =>
-            cleanupInstanceIds.contains(effect['effect_instance_id']))
+        .where(
+          (effect) => cleanupInstanceIds.contains(effect['effect_instance_id']),
+        )
         .map((effect) => effect['effect_id'].toString())
         .toList(growable: false);
     if (!listEquals(requiredInChain, effectIds) ||
-        chain.any((effect) =>
-            cleanupInstanceIds.contains(effect['effect_instance_id']) &&
-            effect['bypassed'] == true)) {
+        chain.any(
+          (effect) =>
+              cleanupInstanceIds.contains(effect['effect_instance_id']) &&
+              effect['bypassed'] == true,
+        )) {
       throw StateError('v3_phone_cleanup_effect_readback_failed');
     }
     final presets = <String, String>{
@@ -45796,8 +46639,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (currentClips != null) {
       final remapped = <String, List<AutomationClipSnapshot>>{};
       for (final entry in currentClips.entries) {
-        remapped[remappedTargetId(entry.key)] =
-            _copyAutomationClipList(entry.value);
+        remapped[remappedTargetId(entry.key)] = _copyAutomationClipList(
+          entry.value,
+        );
       }
       _rowAutomationClips[row] = remapped;
     }
@@ -45893,7 +46737,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         isMaster ? null : groupBusRow ?? _resolveRowIndexFromActionTarget(data);
     if (!isMaster && row == null) {
       _insertAssistantChatText(
-          "I couldn't resolve which track plugin to edit.");
+        "I couldn't resolve which track plugin to edit.",
+      );
       return;
     }
     final groupBusName =
@@ -46007,7 +46852,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
       final alreadyIndex = effects.indexWhere(
-          (e) => e.trim().toLowerCase() == effectName.toLowerCase());
+        (e) => e.trim().toLowerCase() == effectName.toLowerCase(),
+      );
       if (alreadyIndex != -1) {
         final reorderActions = isMaster
             ? await _ensureAiCanonicalChainOrderOnMaster(
@@ -46057,7 +46903,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
       final reorderActions = isMaster
-          ? await _ensureAiCanonicalChainOrderOnMaster(executeWithoutAdd: false)
+          ? await _ensureAiCanonicalChainOrderOnMaster(
+              executeWithoutAdd: false,
+            )
           : await _ensureAiCanonicalChainOrderOnRow(
               row!,
               executeWithoutAdd: false,
@@ -46067,10 +46915,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           await _undoManager.executeWithoutAdd(reorderAction);
         }
         await _undoManager.addWithoutExecute(
-          CompoundUndoAction(
-            'Add $effectName',
-            <EditorUndoAction>[action, ...reorderActions],
-          ),
+          CompoundUndoAction('Add $effectName', <EditorUndoAction>[
+            action,
+            ...reorderActions,
+          ]),
         );
       } else {
         await _undoManager.addWithoutExecute(action);
@@ -46106,7 +46954,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final effectName = effects[effectIndex];
       final currentState = isMaster
           ? await JuceAudioEngine.getMasterEffectBypassState(effectIndex)
-          : await JuceAudioEngine.getRowEffectBypassState(row!, effectIndex);
+          : await JuceAudioEngine.getRowEffectBypassState(
+              row!,
+              effectIndex,
+            );
       final nextState = switch (operation) {
         'bypass' => true,
         'unbypass' => false,
@@ -46170,30 +47021,35 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       final targets = drilldown
           ? AssistantActionUtils.compactTutorialPlaybackTargets(sequence)
-          : <String>[sequence.isEmpty ? 'tutorial:timeline' : sequence.last];
+          : <String>[
+              sequence.isEmpty ? 'tutorial:timeline' : sequence.last,
+            ];
       if (targets.isEmpty) continue;
 
       final baseDurationMs = (_toActionInt(step['duration_ms']) ??
               _toActionInt(data['duration_ms']) ??
               3200)
           .clamp(1200, 18000);
-      final previewDurationMs =
-          AssistantActionUtils.tutorialPreviewDurationMs(baseDurationMs);
+      final previewDurationMs = AssistantActionUtils.tutorialPreviewDurationMs(
+        baseDurationMs,
+      );
       final previewPauseMs = (_toActionInt(step['pause_ms']) ??
-              AssistantActionUtils.tutorialPreviewPauseMs(previewDurationMs))
+              AssistantActionUtils.tutorialPreviewPauseMs(
+                previewDurationMs,
+              ))
           .clamp(480, 1400);
-      final finalDurationMs =
-          AssistantActionUtils.tutorialFinalDurationMs(baseDurationMs);
+      final finalDurationMs = AssistantActionUtils.tutorialFinalDurationMs(
+        baseDurationMs,
+      );
 
       for (int j = 0; j < targets.length; j++) {
         final key = targets[j];
         final isLastOverall = i == steps.length - 1 && j == targets.length - 1;
         final durationMs = isLastOverall ? finalDurationMs : previewDurationMs;
         _mixHighlighter.clear();
-        _mixHighlighter.trigger(
-          [HaloKey(key)],
-          duration: Duration(milliseconds: durationMs),
-        );
+        _mixHighlighter.trigger([
+          HaloKey(key),
+        ], duration: Duration(milliseconds: durationMs));
         if (isLastOverall) continue;
         final pauseMs = previewPauseMs;
         await Future<void>.delayed(Duration(milliseconds: pauseMs));
@@ -46299,11 +47155,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _applyAutoBpmAlignAction(Map<String, dynamic> data) async {
     final target = _actionTarget(data);
-    final clipIndices =
-        _resolveClipIndicesFromActionTarget(data, requireAudio: true);
+    final clipIndices = _resolveClipIndicesFromActionTarget(
+      data,
+      requireAudio: true,
+    );
     if (clipIndices.isEmpty) {
       _insertAssistantChatText(
-          "I couldn't resolve which audio clips to align. Select clips and ask again.");
+        "I couldn't resolve which audio clips to align. Select clips and ask again.",
+      );
       return;
     }
 
@@ -46313,7 +47172,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       fallback: false,
     );
     final explicitProjectTempo = _toActionDouble(
-        data['project_tempo_bpm'] ?? target['project_tempo_bpm']);
+      data['project_tempo_bpm'] ?? target['project_tempo_bpm'],
+    );
 
     if (explicitProjectTempo != null && explicitProjectTempo.isFinite) {
       final clampedTempo = _clampTempo(explicitProjectTempo);
@@ -46339,7 +47199,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
     }
     _showSmallNotice(
-        'Tempo-aligned ${clipIndices.length} clip${clipIndices.length == 1 ? '' : 's'}.');
+      'Tempo-aligned ${clipIndices.length} clip${clipIndices.length == 1 ? '' : 's'}.',
+    );
   }
 
   double? _estimateFirstSoundLocalMs(
@@ -46449,11 +47310,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _applyAlignFirstSoundAction(Map<String, dynamic> data) async {
-    final clipIndices =
-        _resolveClipIndicesFromActionTarget(data, requireAudio: true);
+    final clipIndices = _resolveClipIndicesFromActionTarget(
+      data,
+      requireAudio: true,
+    );
     if (clipIndices.isEmpty) {
       _insertAssistantChatText(
-          "I couldn't resolve which audio clips to align. Select clips and ask again.");
+        "I couldn't resolve which audio clips to align. Select clips and ask again.",
+      );
       return;
     }
 
@@ -46514,7 +47378,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (changed <= 0) {
       _insertAssistantChatText(
-          'No clear first-sound boundary was detected for the target clip(s).');
+        'No clear first-sound boundary was detected for the target clip(s).',
+      );
       return;
     }
 
@@ -46682,8 +47547,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (samples.isEmpty) return null;
 
     final localDurationMs = samples.length * 1000.0 / sampleRate;
-    final timelineDurationMs =
-        _clipTimelineDurationMs(clip).clamp(1.0, 1.0e12).toDouble();
+    final timelineDurationMs = _clipTimelineDurationMs(
+      clip,
+    ).clamp(1.0, 1.0e12).toDouble();
     final timelineScale =
         localDurationMs > 0.0 ? timelineDurationMs / localDurationMs : 1.0;
     final timelineStartMs = _clipTimelineStartMs(clip);
@@ -46716,10 +47582,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return out;
   }
 
-  Float32List _downsampleMonoSamples(
-    Float32List samples, {
-    int factor = 4,
-  }) {
+  Float32List _downsampleMonoSamples(Float32List samples, {int factor = 4}) {
     if (factor <= 1 || samples.isEmpty) return Float32List.fromList(samples);
     final outLength = (samples.length / factor).floor();
     if (outLength <= 0) return Float32List(0);
@@ -46763,7 +47626,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     final minLag = math.max(2, (sampleRate / maxHz).floor());
     final maxLag = math.min(
-        windowLength - 2, math.max(minLag + 1, (sampleRate / minHz).ceil()));
+      windowLength - 2,
+      math.max(minLag + 1, (sampleRate / minHz).ceil()),
+    );
     if (maxLag <= minLag) return null;
 
     double bestCorr = 0.0;
@@ -46801,10 +47666,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     if (bestLag <= 0 || bestCorr < 0.38) return null;
 
-    return _PitchEstimate(
-      frequencyHz: sampleRate / bestLag,
-      clarity: bestCorr,
-    );
+    return _PitchEstimate(frequencyHz: sampleRate / bestLag, clarity: bestCorr);
   }
 
   List<MidiNote> _basicPitchEventsToMidiNotes(
@@ -46900,8 +47762,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       rawMidi[i] = midiValue.round().clamp(0, 127).toInt();
     }
 
-    final smoothedMidi =
-        List<int?>.filled(rawMidi.length, null, growable: false);
+    final smoothedMidi = List<int?>.filled(
+      rawMidi.length,
+      null,
+      growable: false,
+    );
     for (int i = 0; i < rawMidi.length; i++) {
       final current = rawMidi[i];
       if (current == null) continue;
@@ -46932,8 +47797,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
 
       final startSample = noteStartFrame! * hopSize;
-      final endSample =
-          math.min(analysisSamples.length, lastFrame * hopSize + frameSize);
+      final endSample = math.min(
+        analysisSamples.length,
+        lastFrame * hopSize + frameSize,
+      );
       final localStartMs = startSample * 1000.0 / analysisSampleRate;
       final localEndMs = endSample * 1000.0 / analysisSampleRate;
       final localDurationMs = localEndMs - localStartMs;
@@ -46957,7 +47824,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final timelineEndMs =
           segment.timelineStartMs + localEndMs * segment.timelineMsPerLocalMs;
       final startBeat = math.max(
-          0.0, (timelineStartMs - segment.timelineStartMs) / msPerBeat);
+        0.0,
+        (timelineStartMs - segment.timelineStartMs) / msPerBeat,
+      );
       final lengthBeats = math.max(
         0.0625,
         (timelineEndMs - timelineStartMs) / msPerBeat,
@@ -47021,8 +47890,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final prev = merged.last;
         final prevEnd = prev.startBeat + prev.lengthBeats;
         if (prev.pitch == note.pitch && note.startBeat - prevEnd <= 0.125) {
-          prev.lengthBeats = math.max(prev.lengthBeats,
-              note.startBeat + note.lengthBeats - prev.startBeat);
+          prev.lengthBeats = math.max(
+            prev.lengthBeats,
+            note.startBeat + note.lengthBeats - prev.startBeat,
+          );
           prev.velocity = math.max(prev.velocity, note.velocity);
           continue;
         }
@@ -47049,14 +47920,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final segment = await _decodeTrimmedClipMono16k(clip);
     if (segment == null) return const <MidiNote>[];
     try {
-      final events = await BasicPitchTranscriber.instance
-          .transcribeMono16k(segment.samples);
+      final events = await BasicPitchTranscriber.instance.transcribeMono16k(
+        segment.samples,
+      );
       final notes = _basicPitchEventsToMidiNotes(segment, events);
       if (notes.isNotEmpty) {
         return notes;
       }
-      aiDebugLog('basic-pitch',
-          'transcription returned no notes -> heuristic fallback');
+      aiDebugLog(
+        'basic-pitch',
+        'transcription returned no notes -> heuristic fallback',
+      );
     } catch (error) {
       aiDebugLog('basic-pitch', 'transcription failed error=$error');
     }
@@ -47086,8 +47960,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       final endExclusive = (!active) ? i : i + 1;
       final startSample = startFrame * hopSize;
-      final endSample =
-          math.min(totalSamples, (endExclusive - 1) * hopSize + frameSize);
+      final endSample = math.min(
+        totalSamples,
+        (endExclusive - 1) * hopSize + frameSize,
+      );
       final startMs = startSample * 1000.0 / sampleRate;
       final endMs = endSample * 1000.0 / sampleRate;
       if (endMs - startMs >= minDurationMs) {
@@ -47144,10 +48020,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (mergedLocal.isEmpty) return const <MapEntry<double, double>>[];
 
     final timelineRanges = mergedLocal
-        .map((r) => MapEntry(
-              segment.timelineStartMs + r.key * segment.timelineMsPerLocalMs,
-              segment.timelineStartMs + r.value * segment.timelineMsPerLocalMs,
-            ))
+        .map(
+          (r) => MapEntry(
+            segment.timelineStartMs + r.key * segment.timelineMsPerLocalMs,
+            segment.timelineStartMs + r.value * segment.timelineMsPerLocalMs,
+          ),
+        )
         .toList(growable: false);
     return _mergeTimelineRangesMs(
       timelineRanges,
@@ -47375,10 +48253,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           final startMs = segmentStartSample * 1000.0 / segment.sampleRate;
           final endMs = segmentEndSample * 1000.0 / segment.sampleRate;
           local.add(
-            MapEntry(
-              math.max(0.0, startMs - prePadMs),
-              endMs + postPadMs,
-            ),
+            MapEntry(math.max(0.0, startMs - prePadMs), endMs + postPadMs),
           );
         }
       }
@@ -47399,10 +48274,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     final timeline = mergedLocal
         .take(maxRanges)
-        .map((r) => MapEntry(
-              segment.timelineStartMs + r.key * segment.timelineMsPerLocalMs,
-              segment.timelineStartMs + r.value * segment.timelineMsPerLocalMs,
-            ))
+        .map(
+          (r) => MapEntry(
+            segment.timelineStartMs + r.key * segment.timelineMsPerLocalMs,
+            segment.timelineStartMs + r.value * segment.timelineMsPerLocalMs,
+          ),
+        )
         .toList(growable: false);
 
     return _mergeTimelineRangesMs(
@@ -47442,8 +48319,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (activeRms.length < 3) return const <MapEntry<double, double>>[];
 
     final speechTargetRms = _quantile(activeRms, 0.68);
-    final quietThreshold =
-        math.max(noiseFloor * 2.0, speechTargetRms * quietRatio);
+    final quietThreshold = math.max(
+      noiseFloor * 2.0,
+      speechTargetRms * quietRatio,
+    );
     final quietMask = List<bool>.generate(
       rms.length,
       (i) => activeMask[i] && rms[i] < quietThreshold,
@@ -47472,10 +48351,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     final timeline = mergedLocal
         .take(maxRanges)
-        .map((r) => MapEntry(
-              segment.timelineStartMs + r.key * segment.timelineMsPerLocalMs,
-              segment.timelineStartMs + r.value * segment.timelineMsPerLocalMs,
-            ))
+        .map(
+          (r) => MapEntry(
+            segment.timelineStartMs + r.key * segment.timelineMsPerLocalMs,
+            segment.timelineStartMs + r.value * segment.timelineMsPerLocalMs,
+          ),
+        )
         .toList(growable: false);
 
     return _mergeTimelineRangesMs(
@@ -47716,11 +48597,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required String operation,
   }) async {
     final target = _actionTarget(data);
-    final clipIndices =
-        _resolveClipIndicesFromActionTarget(data, requireAudio: true);
+    final clipIndices = _resolveClipIndicesFromActionTarget(
+      data,
+      requireAudio: true,
+    );
     if (clipIndices.isEmpty) {
       _insertAssistantChatText(
-          "I couldn't resolve which audio clip to edit. Select a clip and ask again.");
+        "I couldn't resolve which audio clip to edit. Select a clip and ask again.",
+      );
       return;
     }
 
@@ -47755,25 +48639,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
         final detected = await _detectDialogCoughRangesForClip(
           clip,
-          thresholdStd: (_toActionDouble(data['artifact_threshold_std'] ??
-                      target['artifact_threshold_std'] ??
-                      data['transient_threshold_std'] ??
-                      target['transient_threshold_std']) ??
+          thresholdStd: (_toActionDouble(
+                    data['artifact_threshold_std'] ??
+                        target['artifact_threshold_std'] ??
+                        data['transient_threshold_std'] ??
+                        target['transient_threshold_std'],
+                  ) ??
                   2.2)
               .clamp(0.8, 4.8)
               .toDouble(),
           minDurationMs: (_toActionDouble(
-                      data['min_event_ms'] ?? target['min_event_ms']) ??
+                    data['min_event_ms'] ?? target['min_event_ms'],
+                  ) ??
                   40.0)
               .clamp(15.0, 1200.0)
               .toDouble(),
           maxDurationMs: (_toActionDouble(
-                      data['max_event_ms'] ?? target['max_event_ms']) ??
+                    data['max_event_ms'] ?? target['max_event_ms'],
+                  ) ??
                   650.0)
               .clamp(80.0, 2500.0)
               .toDouble(),
           minHighFreqRatio: (_toActionDouble(
-                      data['min_hf_ratio'] ?? target['min_hf_ratio']) ??
+                    data['min_hf_ratio'] ?? target['min_hf_ratio'],
+                  ) ??
                   0.42)
               .clamp(0.2, 0.9)
               .toDouble(),
@@ -47811,13 +48700,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             clip,
             active,
             anchorMs,
-            prePadMs: (_toActionDouble(data['phrase_pre_pad_ms'] ??
-                        target['phrase_pre_pad_ms']) ??
+            prePadMs: (_toActionDouble(
+                      data['phrase_pre_pad_ms'] ?? target['phrase_pre_pad_ms'],
+                    ) ??
                     35.0)
                 .clamp(0.0, 400.0)
                 .toDouble(),
-            postPadMs: (_toActionDouble(data['phrase_post_pad_ms'] ??
-                        target['phrase_post_pad_ms']) ??
+            postPadMs: (_toActionDouble(
+                      data['phrase_post_pad_ms'] ??
+                          target['phrase_post_pad_ms'],
+                    ) ??
                     70.0)
                 .clamp(0.0, 500.0)
                 .toDouble(),
@@ -47843,12 +48735,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final ranges = await _detectDialogPauseRemovalRangesForClip(
           clip,
           minPauseMs: (_toActionDouble(
-                      data['min_pause_ms'] ?? target['min_pause_ms']) ??
+                    data['min_pause_ms'] ?? target['min_pause_ms'],
+                  ) ??
                   260.0)
               .clamp(80.0, 6000.0)
               .toDouble(),
           keepPauseMs: (_toActionDouble(
-                      data['keep_pause_ms'] ?? target['keep_pause_ms']) ??
+                    data['keep_pause_ms'] ?? target['keep_pause_ms'],
+                  ) ??
                   90.0)
               .clamp(20.0, 1400.0)
               .toDouble(),
@@ -47877,12 +48771,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ranges = await _detectDialogQuietRangesForClip(
             clip,
             quietRatio: (_toActionDouble(
-                        data['quiet_ratio'] ?? target['quiet_ratio']) ??
+                      data['quiet_ratio'] ?? target['quiet_ratio'],
+                    ) ??
                     0.62)
                 .clamp(0.2, 0.95)
                 .toDouble(),
             minDurationMs: (_toActionDouble(
-                        data['min_quiet_ms'] ?? target['min_quiet_ms']) ??
+                      data['min_quiet_ms'] ?? target['min_quiet_ms'],
+                    ) ??
                     180.0)
                 .clamp(40.0, 3000.0)
                 .toDouble(),
@@ -47925,18 +48821,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       switch (operation) {
         case 'dialog_cleanup':
           _insertAssistantChatText(
-              'No clear cough/noise events were detected in the target clip.');
+            'No clear cough/noise events were detected in the target clip.',
+          );
           break;
         case 'dialog_remove_range':
           _insertAssistantChatText(
-              "I couldn't resolve a dialog segment to remove. Provide a time range or place the playhead near the sentence.");
+            "I couldn't resolve a dialog segment to remove. Provide a time range or place the playhead near the sentence.",
+          );
           break;
         case 'dialog_tighten_pauses':
           _insertAssistantChatText('No long pauses were found to tighten.');
           break;
         case 'dialog_lift_quiet':
           _insertAssistantChatText(
-              'No quiet speech ranges were found to lift.');
+            'No quiet speech ranges were found to lift.',
+          );
           break;
         default:
           break;
@@ -47946,20 +48845,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (operation == 'dialog_lift_quiet' && liftedSegments > 0) {
       _showSmallNotice(
-          'Boosted $liftedSegments quiet segment${liftedSegments == 1 ? '' : 's'} on $touchedClips clip${touchedClips == 1 ? '' : 's'}.');
+        'Boosted $liftedSegments quiet segment${liftedSegments == 1 ? '' : 's'} on $touchedClips clip${touchedClips == 1 ? '' : 's'}.',
+      );
       return;
     }
 
     _showSmallNotice(
-        'Edited $deletedSegments dialog segment${deletedSegments == 1 ? '' : 's'} on $touchedClips clip${touchedClips == 1 ? '' : 's'}.');
+      'Edited $deletedSegments dialog segment${deletedSegments == 1 ? '' : 's'} on $touchedClips clip${touchedClips == 1 ? '' : 's'}.',
+    );
   }
 
   Future<void> _applyClipEditAction(Map<String, dynamic> data) async {
     final rawOperation =
         (data['operation'] ?? '').toString().trim().toLowerCase();
-    final operation = _normalizeClipEditOperation(
-      rawOperation,
-    );
+    final operation = _normalizeClipEditOperation(rawOperation);
 
     if (operation == 'auto_bpm_align') {
       await _applyAutoBpmAlignAction(data);
@@ -47972,11 +48871,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (operation == 'auto_trim') {
-      final clipIndices =
-          _resolveClipIndicesFromActionTarget(data, requireAudio: true);
+      final clipIndices = _resolveClipIndicesFromActionTarget(
+        data,
+        requireAudio: true,
+      );
       if (clipIndices.isEmpty) {
         _insertAssistantChatText(
-            "I couldn't resolve which audio clips to trim. Select clips and ask again.");
+          "I couldn't resolve which audio clips to trim. Select clips and ask again.",
+        );
         return;
       }
 
@@ -47986,8 +48888,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _toActionDouble(data['threshold_ratio'])?.clamp(0.001, 1.0) ?? 0.08;
       final paddingMs =
           _toActionDouble(data['padding_ms'])?.clamp(0.0, 500.0) ?? 8.0;
-      final preserveContentPosition =
-          _toActionBool(data['preserve_content_position'], fallback: true);
+      final preserveContentPosition = _toActionBool(
+        data['preserve_content_position'],
+        fallback: true,
+      );
 
       bool anyApplied = false;
       for (final clipIndex in clipIndices) {
@@ -48026,29 +48930,37 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       if (!anyApplied) {
         _insertAssistantChatText(
-            'No silence boundaries were detected for the target clip(s).');
+          'No silence boundaries were detected for the target clip(s).',
+        );
       }
       return;
     }
 
     if (operation == 'trim') {
       final target = _actionTarget(data);
-      final clipIndices =
-          _resolveClipIndicesFromActionTarget(data, requireAudio: true);
+      final clipIndices = _resolveClipIndicesFromActionTarget(
+        data,
+        requireAudio: true,
+      );
       if (clipIndices.isEmpty) {
         _insertAssistantChatText(
-            "I couldn't resolve which audio clips to trim. Select clips and ask again.");
+          "I couldn't resolve which audio clips to trim. Select clips and ask again.",
+        );
         return;
       }
 
-      final explicitTrimStartMs =
-          _toActionDouble(data['trim_start_ms'] ?? target['trim_start_ms']);
-      final explicitTrimEndMs =
-          _toActionDouble(data['trim_end_ms'] ?? target['trim_end_ms']);
+      final explicitTrimStartMs = _toActionDouble(
+        data['trim_start_ms'] ?? target['trim_start_ms'],
+      );
+      final explicitTrimEndMs = _toActionDouble(
+        data['trim_end_ms'] ?? target['trim_end_ms'],
+      );
       final deltaTrimStartMs = _toActionDouble(
-          data['delta_trim_start_ms'] ?? target['delta_trim_start_ms']);
+        data['delta_trim_start_ms'] ?? target['delta_trim_start_ms'],
+      );
       final deltaTrimEndMs = _toActionDouble(
-          data['delta_trim_end_ms'] ?? target['delta_trim_end_ms']);
+        data['delta_trim_end_ms'] ?? target['delta_trim_end_ms'],
+      );
       final hasExplicitTrimValues = explicitTrimStartMs != null ||
           explicitTrimEndMs != null ||
           deltaTrimStartMs != null ||
@@ -48082,17 +48994,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             data['threshold_ratio'] ?? target['threshold_ratio'],
           )?.clamp(0.001, 1.0) ??
           0.08;
-      final paddingMs =
-          _toActionDouble(data['padding_ms'] ?? target['padding_ms'])
-                  ?.clamp(0.0, 500.0) ??
-              8.0;
+      final paddingMs = _toActionDouble(
+            data['padding_ms'] ?? target['padding_ms'],
+          )?.clamp(0.0, 500.0) ??
+          8.0;
       final preserveContentPosition = _toActionBool(
         data['preserve_content_position'] ??
             target['preserve_content_position'],
         fallback: true,
       );
       final fallbackTrimNudgeMs = (_toActionDouble(
-                  data['fallback_trim_ms'] ?? target['fallback_trim_ms']) ??
+                data['fallback_trim_ms'] ?? target['fallback_trim_ms'],
+              ) ??
               120.0)
           .clamp(10.0, 2000.0)
           .toDouble();
@@ -48181,11 +49094,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _showSmallNotice('Trim made no changes.');
         } else {
           _insertAssistantChatText(
-              'Could not trim the target clip(s). Try selecting the clip and asking again.');
+            'Could not trim the target clip(s). Try selecting the clip and asking again.',
+          );
         }
       } else {
         _showSmallNotice(
-            'Trimmed ${clipIndices.length} clip${clipIndices.length == 1 ? '' : 's'}.');
+          'Trimmed ${clipIndices.length} clip${clipIndices.length == 1 ? '' : 's'}.',
+        );
       }
       return;
     }
@@ -48194,10 +49109,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         operation == 'dialog_remove_range' ||
         operation == 'dialog_tighten_pauses' ||
         operation == 'dialog_lift_quiet') {
-      await _applyDialogClipEditOperation(
-        data,
-        operation: operation,
-      );
+      await _applyDialogClipEditOperation(data, operation: operation);
       return;
     }
 
@@ -48268,10 +49180,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final midiActionData = <String, dynamic>{
               ...data,
               'operation': 'chop_notes',
-              'target': <String, dynamic>{
-                ...target,
-                'clip_index': clipIndex,
-              },
+              'target': <String, dynamic>{...target, 'clip_index': clipIndex},
             };
             await _applyMidiComposeAction(midiActionData);
             break;
@@ -48286,11 +49195,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
       case 'glue':
         {
-          final clipIndices =
-              _resolveClipIndicesFromActionTarget(data, requireAudio: true);
+          final clipIndices = _resolveClipIndicesFromActionTarget(
+            data,
+            requireAudio: true,
+          );
           if (clipIndices.length < 2) {
             _insertAssistantChatText(
-                "I couldn't resolve which audio clips to glue. Select two or more clips and ask again.");
+              "I couldn't resolve which audio clips to glue. Select two or more clips and ask again.",
+            );
             return;
           }
           await _handleGlueClips(clipIndices);
@@ -48429,7 +49341,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           }
           if (clipIndices.isEmpty) {
             _insertAssistantChatText(
-                "I couldn't resolve which clips to move. Please ask again with a track name if you want a specific target.");
+              "I couldn't resolve which clips to move. Please ask again with a track name if you want a specific target.",
+            );
             return;
           }
 
@@ -48554,13 +49467,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   : ((factor != null) ? (oldDurationMs * factor) : null));
           if (durationMs == null || clip.isMidi) {
             _insertAssistantChatText(
-                "I couldn't resolve the new clip length to stretch.");
+              "I couldn't resolve the new clip length to stretch.",
+            );
             return;
           }
-          final newStartMs =
-              _toActionDouble(data['new_start_ms'] ?? data['start_ms']);
-          final preservePitch =
-              _toActionBool(data['preserve_pitch'], fallback: true);
+          final newStartMs = _toActionDouble(
+            data['new_start_ms'] ?? data['start_ms'],
+          );
+          final preservePitch = _toActionBool(
+            data['preserve_pitch'],
+            fallback: true,
+          );
           final changed = await _applyExactClipStretch(
             clipIndex,
             durationMs,
@@ -48568,17 +49485,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             preservePitch: preservePitch,
           );
           _showSmallNotice(
-              changed ? 'Stretched clip.' : 'Stretch made no changes.');
+            changed ? 'Stretched clip.' : 'Stretch made no changes.',
+          );
           break;
         }
       case 'pitch_shift':
         {
           final target = _actionTarget(data);
-          final clipIndices =
-              _resolveClipIndicesFromActionTarget(data, requireAudio: true);
+          final clipIndices = _resolveClipIndicesFromActionTarget(
+            data,
+            requireAudio: true,
+          );
           if (clipIndices.isEmpty) {
             _insertAssistantChatText(
-                "I couldn't resolve which audio clips to pitch shift. Select clips and ask again.");
+              "I couldn't resolve which audio clips to pitch shift. Select clips and ask again.",
+            );
             return;
           }
 
@@ -48609,7 +49530,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               ((mode == 'set' || mode == 'absolute') ? null : semitones);
           if (setPitch == null && deltaPitch == null) {
             _insertAssistantChatText(
-                "I couldn't resolve how many semitones to pitch shift.");
+              "I couldn't resolve how many semitones to pitch shift.",
+            );
             return;
           }
 
@@ -48655,11 +49577,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
       case 'tempo_follow':
         {
-          final targets =
-              _resolveClipIndicesFromActionTarget(data, requireAudio: true);
+          final targets = _resolveClipIndicesFromActionTarget(
+            data,
+            requireAudio: true,
+          );
           if (targets.isEmpty) {
             _insertAssistantChatText(
-                "I couldn't resolve which audio clips to tempo-align.");
+              "I couldn't resolve which audio clips to tempo-align.",
+            );
             return;
           }
           final mode = data['mode']?.toString().trim();
@@ -48679,13 +49604,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             }
           }
           _showSmallNotice(
-              'Tempo mode updated for ${targets.length} clip${targets.length == 1 ? '' : 's'}.');
+            'Tempo mode updated for ${targets.length} clip${targets.length == 1 ? '' : 's'}.',
+          );
           break;
         }
       case 'set_source_tempo':
         {
-          final targets =
-              _resolveClipIndicesFromActionTarget(data, requireAudio: true);
+          final targets = _resolveClipIndicesFromActionTarget(
+            data,
+            requireAudio: true,
+          );
           final sourceTempo = _toActionDouble(data['source_tempo_bpm']);
           if (targets.isEmpty ||
               sourceTempo == null ||
@@ -48698,7 +49626,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             await _setClipSourceTempo(idx, sourceTempo);
           }
           _showSmallNotice(
-              'Source tempo updated for ${targets.length} clip${targets.length == 1 ? '' : 's'}.');
+            'Source tempo updated for ${targets.length} clip${targets.length == 1 ? '' : 's'}.',
+          );
           break;
         }
       case 'tempo_detect_set_project':
@@ -48708,8 +49637,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           final clip = _audioTracks[clipIndex];
           if (clip.isMidi) return;
           await _setProjectTempoFromDetectedClip(clipIndex);
-          final preservePitch =
-              _toActionBool(data['preserve_pitch'], fallback: true);
+          final preservePitch = _toActionBool(
+            data['preserve_pitch'],
+            fallback: true,
+          );
           await _setClipTempoFollowMode(
             clipIndex,
             preservePitch: preservePitch,
@@ -48729,7 +49660,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           }
           await _handleDeleteClips(clipIndices);
           _showSmallNotice(
-              'Deleted ${clipIndices.length} clip${clipIndices.length == 1 ? '' : 's'}.');
+            'Deleted ${clipIndices.length} clip${clipIndices.length == 1 ? '' : 's'}.',
+          );
         }
         break;
       case 'duplicate':
@@ -48746,7 +49678,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               .toList(growable: false);
           if (validClipIndices.isEmpty) {
             _insertAssistantChatText(
-                "I couldn't resolve which clips to duplicate.");
+              "I couldn't resolve which clips to duplicate.",
+            );
             return;
           }
           final sourceClips = validClipIndices
@@ -48815,9 +49748,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           );
           final duplicateCount = validClipIndices.length * repeatCount;
           if (_audioTracks.length + duplicateCount > kNumClips) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
                 content: Text(
-                    "Max number of audio clips reached ($kNumClips). Unable to add more clips.")));
+                  "Max number of audio clips reached ($kNumClips). Unable to add more clips.",
+                ),
+              ),
+            );
             return;
           }
 
@@ -48831,8 +49768,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               final offsetDeltaMs = (clip.offset * 1000.0) - anchorStartMs;
               final rowDelta = clip.rowIndex - anchorClip.rowIndex;
               final pasteRow = _rowCount > 0
-                  ? (baseRow + rowDelta + (rowStep * copyIndex))
-                      .clamp(0, _rowCount - 1)
+                  ? (baseRow + rowDelta + (rowStep * copyIndex)).clamp(
+                      0,
+                      _rowCount - 1,
+                    )
                   : math.max(0, baseRow + rowDelta + (rowStep * copyIndex));
               final pasteMs = math.max(0.0, groupStartMs + offsetDeltaMs);
               actions.add(
@@ -48870,7 +49809,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
       default:
         _insertAssistantChatText(
-            'Unsupported clip edit operation "$operation".');
+          'Unsupported clip edit operation "$operation".',
+        );
         break;
     }
   }
@@ -48888,7 +49828,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
         if (rawTempo == null || !rawTempo.isFinite || rawTempo <= 0.0) {
           _insertAssistantChatText(
-              "I couldn't resolve the target project tempo.");
+            "I couldn't resolve the target project tempo.",
+          );
           return;
         }
         final nextTempo = _clampTempo(rawTempo);
@@ -48926,7 +49867,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       default:
         _insertAssistantChatText(
-            'Unsupported project edit operation "$operation".');
+          'Unsupported project edit operation "$operation".',
+        );
         return;
     }
   }
@@ -48976,8 +49918,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     for (final item in itemMaps) {
       final target = _actionTarget(item);
       if (operation == 'replace_audio_clips') {
-        final targetClipIndices =
-            _resolveClipIndicesFromActionTarget(item, requireAudio: true);
+        final targetClipIndices = _resolveClipIndicesFromActionTarget(
+          item,
+          requireAudio: true,
+        );
         total += math.max(1, targetClipIndices.length);
         continue;
       }
@@ -49086,8 +50030,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       throw StateError('v3_sample_replace_capacity');
     }
 
-    final replacementFile =
-        await _prepareAiV3LibraryReplacementFile(libraryPath);
+    final replacementFile = await _prepareAiV3LibraryReplacementFile(
+      libraryPath,
+    );
     final current = _audioTracks[clipIndex];
     if (_normalizedClipPath(current.file.path) ==
         _normalizedClipPath(replacementFile.path)) {
@@ -49095,10 +50040,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final beforePayload = _persistedClipPayload(current);
-    final oldVisibleDurationMs =
-        math.max(1, _clipTimelineDurationMs(current).round());
-    final replacementDuration =
-        await _resolveSampleDuration(replacementFile.path);
+    final oldVisibleDurationMs = math.max(
+      1,
+      _clipTimelineDurationMs(current).round(),
+    );
+    final replacementDuration = await _resolveSampleDuration(
+      replacementFile.path,
+    );
     if (replacementDuration == null || replacementDuration <= Duration.zero) {
       throw StateError('v3_sample_replace_audio_unreadable');
     }
@@ -49352,10 +50300,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             .toList(growable: true)
           ..insert(
             firstSourcePosition
-                .clamp(
-                  0,
-                  beforeClipOrder.length - sourceIds.length,
-                )
+                .clamp(0, beforeClipOrder.length - sourceIds.length)
                 .toInt(),
             resultId,
           );
@@ -49608,8 +50553,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required bool separated,
   }) async {
     final vocalsId = _normalizePersistedClipId(vocalsPayload['clipId']);
-    final instrumentalId =
-        _normalizePersistedClipId(instrumentalPayload['clipId']);
+    final instrumentalId = _normalizePersistedClipId(
+      instrumentalPayload['clipId'],
+    );
     if (sourceRowId < 0 ||
         vocalsId.isEmpty ||
         instrumentalId.isEmpty ||
@@ -49633,8 +50579,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       int? vocalsRowId;
       int? instrumentalRowId;
       try {
-        final preferredVocalsRowId =
-            _toActionInt(vocalsPayload['generatedRowId']);
+        final preferredVocalsRowId = _toActionInt(
+          vocalsPayload['generatedRowId'],
+        );
         vocalsRowId = await _createAiRow(
           name: (vocalsPayload['label'] ?? 'Separated Vocals').toString(),
           midi: false,
@@ -49647,8 +50594,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             vocalsRowId != preferredVocalsRowId) {
           throw StateError('v3_clip_stems_vocals_row_identity_mismatch');
         }
-        final preferredInstrumentalRowId =
-            _toActionInt(instrumentalPayload['generatedRowId']);
+        final preferredInstrumentalRowId = _toActionInt(
+          instrumentalPayload['generatedRowId'],
+        );
         instrumentalRowId = await _createAiRow(
           name: (instrumentalPayload['label'] ?? 'Separated Instrumental')
               .toString(),
@@ -49660,9 +50608,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
         if (preferredInstrumentalRowId != null &&
             instrumentalRowId != preferredInstrumentalRowId) {
-          throw StateError(
-            'v3_clip_stems_instrumental_row_identity_mismatch',
-          );
+          throw StateError('v3_clip_stems_instrumental_row_identity_mismatch');
         }
         final vocalsRow = _rowIndexForId(vocalsRowId);
         final instrumentalRow = _rowIndexForId(instrumentalRowId);
@@ -49797,8 +50743,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<Map<String, dynamic>> _applyAiV3ClipSeparateStemsAction(
-    Map<String, dynamic> data,
-  ) async {
+    Map<String, dynamic> data, {
+    AiV3WorkflowRuntime? workflowRuntime,
+  }) async {
     final target = _actionTarget(data);
     final clipId = (target['clip_id'] ?? data['clip_id']).toString().trim();
     final clipIndex = _clipIndexForPersistentId(clipId);
@@ -49833,8 +50780,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         '${DateTime.now().microsecondsSinceEpoch}_${const Uuid().v4()}';
     final dryInput = File(p.join(audioDir.path, '.stem_input_$nonce.wav'));
     final vocalsFile = File(p.join(audioDir.path, 'stem_vocals_$nonce.wav'));
-    final instrumentalFile =
-        File(p.join(audioDir.path, 'stem_instrumental_$nonce.wav'));
+    final instrumentalFile = File(
+      p.join(audioDir.path, 'stem_instrumental_$nonce.wav'),
+    );
+    workflowRuntime
+      ?..trackGeneratedArtifact(vocalsFile.path)
+      ..trackGeneratedArtifact(instrumentalFile.path);
     final snapshotJson = _buildGlueExportClipSnapshotJson(
       selectedIndices: <int>{clipIndex},
       selectionStartSec: source.offset,
@@ -49857,8 +50808,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (!await rendered.exists() || await rendered.length() <= 44) {
         throw StateError('v3_clip_stems_render_failed');
       }
-      final decoded =
-          _decodePcmWav(ByteData.sublistView(await rendered.readAsBytes()));
+      final decoded = _decodePcmWav(
+        ByteData.sublistView(await rendered.readAsBytes()),
+      );
       if (decoded == null || decoded.frameCount <= 0) {
         throw StateError('v3_clip_stems_render_unreadable');
       }
@@ -49972,6 +50924,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       rethrow;
     }
+    final vocalsIndex = _clipIndexForPersistentId(
+      vocalsPayload['clipId'].toString(),
+    );
+    final instrumentalIndex = _clipIndexForPersistentId(
+      instrumentalPayload['clipId'].toString(),
+    );
+    if (!_isValidClipIndex(vocalsIndex) ||
+        !_isValidClipIndex(instrumentalIndex)) {
+      throw StateError('v3_clip_stems_result_state_invalid');
+    }
     return <String, dynamic>{
       'kind': 'stems_separated',
       'source_clip_id': clipId,
@@ -49980,6 +50942,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       'before_row_ids': beforeRowIds,
       'vocals_clip_id': vocalsPayload['clipId'],
       'instrumental_clip_id': instrumentalPayload['clipId'],
+      'vocals_row_id': _audioTracks[vocalsIndex].rowId,
+      'instrumental_row_id': _audioTracks[instrumentalIndex].rowId,
       'vocals_label': vocalsPayload['label'],
       'instrumental_label': instrumentalPayload['label'],
       'vocals_file': vocalsFile.path,
@@ -50023,8 +50987,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (_findInstrumentSpecById(instrumentId) == null) {
           throw StateError('v3_audio_to_midi_instrument_unavailable');
         }
-        final preferredResultRowId =
-            _toActionInt(resultPayload['generatedRowId']);
+        final preferredResultRowId = _toActionInt(
+          resultPayload['generatedRowId'],
+        );
         resultRowId = await _createAiRow(
           name: (resultPayload['label'] ?? 'Audio MIDI').toString(),
           midi: true,
@@ -50050,8 +51015,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (resultClipIndex < 0) {
           throw StateError('v3_audio_to_midi_clip_create_failed');
         }
-        final completeResultPayload =
-            _persistedClipPayload(_audioTracks[resultClipIndex]);
+        final completeResultPayload = _persistedClipPayload(
+          _audioTracks[resultClipIndex],
+        );
         resultPayload
           ..clear()
           ..addAll(completeResultPayload)
@@ -50243,7 +51209,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       try {
         events = override != null
             ? await override(mono16k: mono16k)
-            : await BasicPitchTranscriber.instance.transcribeMono16k(mono16k);
+            : await BasicPitchTranscriber.instance.transcribeMono16k(
+                mono16k,
+              );
       } catch (_) {
         throw StateError('v3_audio_to_midi_transcription_failed');
       }
@@ -50262,7 +51230,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final clipLengthBeats = expectedDurationMs * _tempo / 60000.0;
       final converted = _basicPitchEventsToMidiNotes(segment, events)
           .where(
-              (note) => note.startBeat >= 0 && note.startBeat < clipLengthBeats)
+            (note) => note.startBeat >= 0 && note.startBeat < clipLengthBeats,
+          )
           .take(1024)
           .map((note) {
             final copy = note.copy();
@@ -50328,12 +51297,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       'start': source.offset,
       'length': expectedDurationMs / 1000.0,
       'notes': notes
-          .map((note) => <String, dynamic>{
-                'pitch': note.pitch,
-                'start_beat': note.startBeat,
-                'length_beats': note.lengthBeats,
-                'velocity': note.velocity,
-              })
+          .map(
+            (note) => <String, dynamic>{
+              'pitch': note.pitch,
+              'start_beat': note.startBeat,
+              'length_beats': note.lengthBeats,
+              'velocity': note.velocity,
+            },
+          )
           .toList(growable: false),
       'analysis_model': 'basic_pitch_nmp.onnx',
       'analysis_elapsed_ms': analysisStopwatch.elapsedMilliseconds,
@@ -50348,7 +51319,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         operation != 'insert_audio_clip' &&
         operation != 'replace_audio_clips') {
       _insertAssistantChatText(
-          'Unsupported sample insert operation "$operation".');
+        'Unsupported sample insert operation "$operation".',
+      );
       return;
     }
 
@@ -50365,7 +51337,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (itemMaps.isEmpty) {
       _insertAssistantChatText(
-          "I couldn't resolve which library samples to insert.");
+        "I couldn't resolve which library samples to insert.",
+      );
       return;
     }
 
@@ -50421,8 +51394,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           }
 
           if (operation == 'replace_audio_clips') {
-            final targetClipIndices =
-                _resolveClipIndicesFromActionTarget(item, requireAudio: true);
+            final targetClipIndices = _resolveClipIndicesFromActionTarget(
+              item,
+              requireAudio: true,
+            );
             if (targetClipIndices.isEmpty) {
               failed++;
               processedUnits += 1;
@@ -50527,8 +51502,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 libraryPath,
                 bpm: _tempo,
               );
-          final baseRow =
-              await _resolveAudioInsertionRowIndexFromActionTarget(item);
+          final baseRow = await _resolveAudioInsertionRowIndexFromActionTarget(
+            item,
+          );
           final rowStep = _toActionInt(
                 item['delta_rows'] ??
                     target['delta_rows'] ??
@@ -50673,9 +51649,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (inserted <= 0 && replaced <= 0) {
-      _insertAssistantChatText(operation == 'replace_audio_clips'
-          ? "I couldn't resolve any library samples or target clips to replace."
-          : "I couldn't resolve any library samples to insert.");
+      _insertAssistantChatText(
+        operation == 'replace_audio_clips'
+            ? "I couldn't resolve any library samples or target clips to replace."
+            : "I couldn't resolve any library samples to insert.",
+      );
       return;
     }
     if (batchCancelled) {
@@ -50691,13 +51669,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (failed > 0) {
       if (replaced > 0 && inserted > 0) {
         _showSmallNotice(
-            'Inserted $inserted sample clip${inserted == 1 ? '' : 's'} and replaced $replaced clip${replaced == 1 ? '' : 's'} ($failed skipped).');
+          'Inserted $inserted sample clip${inserted == 1 ? '' : 's'} and replaced $replaced clip${replaced == 1 ? '' : 's'} ($failed skipped).',
+        );
       } else if (replaced > 0) {
         _showSmallNotice(
-            'Replaced $replaced clip${replaced == 1 ? '' : 's'} ($failed skipped).');
+          'Replaced $replaced clip${replaced == 1 ? '' : 's'} ($failed skipped).',
+        );
       } else {
         _showSmallNotice(
-            'Inserted $inserted sample clip${inserted == 1 ? '' : 's'} ($failed skipped).');
+          'Inserted $inserted sample clip${inserted == 1 ? '' : 's'} ($failed skipped).',
+        );
       }
       return;
     }
@@ -50708,9 +51689,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     if (replaced > 0) {
-      _showSmallNotice(
-        'Replaced $replaced clip${replaced == 1 ? '' : 's'}.',
-      );
+      _showSmallNotice('Replaced $replaced clip${replaced == 1 ? '' : 's'}.');
       return;
     }
     _showSmallNotice(
@@ -50726,10 +51705,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return math.max(minMs, _maxAutomationTimelineMs()).toDouble();
   }
 
-  double _clampAutomationLengthMs(
-    double rawLengthMs, {
-    double minMs = 50.0,
-  }) {
+  double _clampAutomationLengthMs(double rawLengthMs, {double minMs = 50.0}) {
     return sanitizeAutomationLengthMs(rawLengthMs, minMs: minMs);
   }
 
@@ -51120,10 +52096,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final numeric = _toActionDouble(raw);
         return ((numeric ?? fallback) >= 0.5 ? 1.0 : 0.0);
       case 'choice':
-        return _normalizedChoiceAutomationValue(
-          paramMap,
-          fallback: fallback,
-        );
+        return _normalizedChoiceAutomationValue(paramMap, fallback: fallback);
       default:
         final valueNormalized = _normalizedParamMapValue(
           paramMap['valueNormalized'],
@@ -51168,10 +52141,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     List<AutomationPoint> points,
   ) {
     return points
-        .map((p) => <String, dynamic>{
-              'x': p.x,
-              'value': p.volume.clamp(0.0, 1.0),
-            })
+        .map(
+          (p) => <String, dynamic>{'x': p.x, 'value': p.volume.clamp(0.0, 1.0)},
+        )
         .toList(growable: false);
   }
 
@@ -51181,12 +52153,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _rowMixAutomationTargetId('gain'),
       _rowMixAutomationTargetId('pan'),
     };
-    ids.addAll(
-      _rowAutomationTargets[row]?.keys ?? const <String>{},
-    );
-    ids.addAll(
-      _rowPluginAutomation[row]?.keys ?? const <String>{},
-    );
+    ids.addAll(_rowAutomationTargets[row]?.keys ?? const <String>{});
+    ids.addAll(_rowPluginAutomation[row]?.keys ?? const <String>{});
     return ids;
   }
 
@@ -51197,12 +52165,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     };
     for (int row = 0; row < _rowCount; row++) {
       ids.addAll(
-        (_rowAutomationTargets[row]?.keys ?? const <String>{})
-            .where(_isMasterAutomationTarget),
+        (_rowAutomationTargets[row]?.keys ?? const <String>{}).where(
+          _isMasterAutomationTarget,
+        ),
       );
       ids.addAll(
-        (_rowPluginAutomation[row]?.keys ?? const <String>{})
-            .where(_isMasterAutomationTarget),
+        (_rowPluginAutomation[row]?.keys ?? const <String>{}).where(
+          _isMasterAutomationTarget,
+        ),
       );
     }
     return ids;
@@ -51350,9 +52320,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (masterEffectIds.length != masterEffects.length) {
       masterEffectIds = List<String>.from(masterEffects);
     }
-    final signature = _automationDiscoverySignature(
-      <List<String>>[masterEffects, masterEffectIds],
-    );
+    final signature = _automationDiscoverySignature(<List<String>>[
+      masterEffects,
+      masterEffectIds,
+    ]);
     final cached = _masterAutomationDiscoveryCache;
     if (cached != null && cached.signature == signature) {
       return _cloneDiscoveredAutomationTargets(cached.targets);
@@ -51388,8 +52359,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         (value) => value + 1,
         ifAbsent: () => 0,
       );
-      final effectKey =
-          _pluginAutomationEffectKey(effectIdentity, effectOrdinal);
+      final effectKey = _pluginAutomationEffectKey(
+        effectIdentity,
+        effectOrdinal,
+      );
       for (final p in params) {
         final type = (p['type'] ?? '').toString().trim().toLowerCase();
         if (type != 'float' && type != 'bool' && type != 'choice') continue;
@@ -51405,8 +52378,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final max =
             type == 'float' ? ((p['max'] as num?)?.toDouble() ?? 1.0) : 1.0;
         final unit = (p['unit'] ?? '').toString().trim();
-        final targetId =
-            _masterAutomationTargetIdFromEffectKey(effectKey, rawId);
+        final targetId = _masterAutomationTargetIdFromEffectKey(
+          effectKey,
+          rawId,
+        );
         final label = displayEffectName.isEmpty
             ? 'Master • $rawName'
             : 'Master • $displayEffectName • $rawName';
@@ -51419,8 +52394,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           max: max,
           fallback: fallbackNormalized,
         );
-        final defaultNormalized =
-            _normalizedParamMapValue(p['defaultNormalized']);
+        final defaultNormalized = _normalizedParamMapValue(
+          p['defaultNormalized'],
+        );
         final displayLabels = _automationDisplayLabelsFromParamMap(p);
 
         discovered.add(
@@ -51549,7 +52525,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       discoveredByParam
           .putIfAbsent(
-              '$scope\u0000$paramLower', () => <_AutomationTargetMeta>[])
+            '$scope\u0000$paramLower',
+            () => <_AutomationTargetMeta>[],
+          )
           .add(meta);
     }
 
@@ -51564,9 +52542,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (effectIds.length != effects.length) {
       effectIds = List<String>.from(effects);
     }
-    final rowSignature = _automationDiscoverySignature(
-      <List<String>>[effects, effectIds, effectInstanceIds],
-    );
+    final rowSignature = _automationDiscoverySignature(<List<String>>[
+      effects,
+      effectIds,
+      effectInstanceIds,
+    ]);
     final cachedRowDiscovery =
         rowId >= 0 ? _rowAutomationDiscoveryCache[rowId] : null;
     if (cachedRowDiscovery != null &&
@@ -51629,8 +52609,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           final max =
               type == 'float' ? ((p['max'] as num?)?.toDouble() ?? 1.0) : 1.0;
           final unit = (p['unit'] ?? '').toString().trim();
-          final targetId =
-              _pluginAutomationTargetIdFromEffectKey(effectKey, rawId);
+          final targetId = _pluginAutomationTargetIdFromEffectKey(
+            effectKey,
+            rawId,
+          );
           final label = displayEffectName.isEmpty
               ? rawName
               : '$displayEffectName • $rawName';
@@ -51643,8 +52625,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             max: max,
             fallback: fallbackNormalized,
           );
-          final defaultNormalized =
-              _normalizedParamMapValue(p['defaultNormalized']);
+          final defaultNormalized = _normalizedParamMapValue(
+            p['defaultNormalized'],
+          );
           final displayLabels = _automationDisplayLabelsFromParamMap(p);
 
           final entry = _DiscoveredAutomationTarget(
@@ -51735,8 +52718,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final previousLabelLower = previousMeta.label.trim().toLowerCase();
       if (previousLabelLower.isNotEmpty) {
         final byLabel = candidates
-            .where((candidate) =>
-                candidate.label.trim().toLowerCase() == previousLabelLower)
+            .where(
+              (candidate) =>
+                  candidate.label.trim().toLowerCase() == previousLabelLower,
+            )
             .toList(growable: false);
         if (byLabel.length == 1) {
           return byLabel.first;
@@ -51857,8 +52842,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _stabilizeAutomationTargetsAfterProjectLoad() async {
     for (int attempt = 0; attempt < 4; attempt++) {
-      final hasPending = List<int>.generate(_rowCount, (index) => index)
-          .any(_hasPendingAutomationTargetRemap);
+      final hasPending = List<int>.generate(
+        _rowCount,
+        (index) => index,
+      ).any(_hasPendingAutomationTargetRemap);
       if (!hasPending) return;
       await Future.delayed(const Duration(milliseconds: 120));
       await _refreshAutomationTargetsForAllRows();
@@ -51869,22 +52856,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (row < 0 || row >= _rowCount) return const <Map<String, dynamic>>[];
     final targets = _rowAutomationTargets[row] ??
         <String, _AutomationTargetMeta>{
-          'volume': _volumeAutomationTargetMeta()
+          'volume': _volumeAutomationTargetMeta(),
         };
-    final values =
-        targets.values.where(_isAutomationTargetVisibleInMenu).toList(
-              growable: false,
-            )..sort((a, b) {
-            if (a.isVolume && !b.isVolume) return -1;
-            if (!a.isVolume && b.isVolume) return 1;
-            if (a.isOrphan && !b.isOrphan) return 1;
-            if (!a.isOrphan && b.isOrphan) return -1;
-            return a.label.toLowerCase().compareTo(b.label.toLowerCase());
-          });
+    final values = targets.values
+        .where(_isAutomationTargetVisibleInMenu)
+        .toList(growable: false)
+      ..sort((a, b) {
+        if (a.isVolume && !b.isVolume) return -1;
+        if (!a.isVolume && b.isVolume) return 1;
+        if (a.isOrphan && !b.isOrphan) return 1;
+        if (!a.isOrphan && b.isOrphan) return -1;
+        return a.label.toLowerCase().compareTo(b.label.toLowerCase());
+      });
     return values.map((target) {
       final map = target.toUiMap();
-      map['hasAutomationData'] =
-          _hasUserAutomationDataForTarget(row, target.targetId);
+      map['hasAutomationData'] = _hasUserAutomationDataForTarget(
+        row,
+        target.targetId,
+      );
       return map;
     }).toList(growable: false);
   }
@@ -51905,7 +52894,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (row < 0 || row >= _rowCount) return;
     final targets = _rowAutomationTargets[row] ??
         <String, _AutomationTargetMeta>{
-          'volume': _volumeAutomationTargetMeta()
+          'volume': _volumeAutomationTargetMeta(),
         };
     final selectedMeta = targets[targetId];
     if (selectedMeta == null ||
@@ -51957,9 +52946,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (target != null) {
       normalized = target.initialNormalized.clamp(0.0, 1.0).toDouble();
     }
-    return <AutomationPoint>[
-      AutomationPoint(x: 0.0, volume: normalized),
-    ];
+    return <AutomationPoint>[AutomationPoint(x: 0.0, volume: normalized)];
   }
 
   List<AutomationClipSnapshot> _clipsForAutomationTarget(
@@ -51980,20 +52967,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }) {
     final safeLength = lengthMs.clamp(50.0, double.infinity).toDouble();
     final sanitized = points
-        .map((p) => AutomationPoint(
-              x: (p.x.isFinite ? p.x : 0.0).clamp(0.0, safeLength).toDouble(),
-              volume: (p.volume.isFinite ? p.volume : fallbackValue)
-                  .clamp(0.0, 1.0)
-                  .toDouble(),
-            ))
+        .map(
+          (p) => AutomationPoint(
+            x: (p.x.isFinite ? p.x : 0.0).clamp(0.0, safeLength).toDouble(),
+            volume: (p.volume.isFinite ? p.volume : fallbackValue)
+                .clamp(0.0, 1.0)
+                .toDouble(),
+          ),
+        )
         .toList(growable: false)
       ..sort((a, b) => a.x.compareTo(b.x));
 
     if (sanitized.isEmpty) {
       final fallback = fallbackValue.clamp(0.0, 1.0).toDouble();
-      return <AutomationPoint>[
-        AutomationPoint(x: 0.0, volume: fallback),
-      ];
+      return <AutomationPoint>[AutomationPoint(x: 0.0, volume: fallback)];
     }
     return sanitized;
   }
@@ -52144,14 +53131,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     for (int sourceRow = 0; sourceRow < _rowCount; sourceRow++) {
-      final explicit =
-          _storedAutomationPointsForTargetOrNull(sourceRow, targetId);
-      if (explicit == null) continue;
-      return _sanitizeAutomationPointsForTarget(
+      final explicit = _storedAutomationPointsForTargetOrNull(
         sourceRow,
         targetId,
-        explicit,
       );
+      if (explicit == null) continue;
+      return _sanitizeAutomationPointsForTarget(sourceRow, targetId, explicit);
     }
 
     return _sanitizeAutomationPointsForTarget(
@@ -52301,11 +53286,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }) async {
     if (row < 0 || row >= _rowCount) return;
     if (targetId == 'volume') {
-      await _setRowAutomationWithUndo(
-        row,
-        newPoints,
-        stableRowId: stableRowId,
-      );
+      await _setRowAutomationWithUndo(row, newPoints, stableRowId: stableRowId);
       return;
     }
 
@@ -52313,8 +53294,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         (oldPointsOverride ?? _pointsForAutomationTarget(row, targetId))
             .map((p) => p.copy())
             .toList(growable: false);
-    final safePoints =
-        _sanitizeAutomationPointsForTarget(row, targetId, newPoints);
+    final safePoints = _sanitizeAutomationPointsForTarget(
+      row,
+      targetId,
+      newPoints,
+    );
 
     await _undoManager.execute(
       SetTargetAutomationPointsAction(
@@ -52327,7 +53311,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         applyToState: (r, laneId, points) {
           setState(() {
             final rowMap = _rowPluginAutomation.putIfAbsent(
-                r, () => <String, List<AutomationPoint>>{});
+              r,
+              () => <String, List<AutomationPoint>>{},
+            );
             rowMap[laneId] =
                 points.map((p) => p.copy()).toList(growable: false);
           });
@@ -52411,15 +53397,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         parsed.add(AutomationPoint(x: timeMs, volume: value));
         previousTimeMs = timeMs;
       }
-      finalPoints = _sanitizeAutomationPointsForTarget(
-        row,
-        targetId,
-        parsed,
-      );
+      finalPoints = _sanitizeAutomationPointsForTarget(row, targetId, parsed);
     } else if (operation == 'clear') {
       if (targetId == 'volume') {
-        final maxMs =
-            math.max(1.0, _audioOnlyOverallDuration.inMilliseconds.toDouble());
+        final maxMs = math.max(
+          1.0,
+          _audioOnlyOverallDuration.inMilliseconds.toDouble(),
+        );
         finalPoints = <AutomationPoint>[
           AutomationPoint(x: 0.0, volume: 1.0),
           AutomationPoint(x: maxMs, volume: 1.0),
@@ -52455,10 +53439,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       'row_id': rowId,
       'automation_target_id': targetId,
       'points': finalPoints
-          .map((point) => <String, dynamic>{
-                'x': point.x,
-                'value': point.volume,
-              })
+          .map(
+            (point) => <String, dynamic>{'x': point.x, 'value': point.volume},
+          )
           .toList(growable: false),
     };
   }
@@ -52482,8 +53465,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _rowAutomationTargets[row] ?? const <String, _AutomationTargetMeta>{};
     rowPlugin.forEach((targetId, points) {
       if (targetId == 'volume') return;
-      final safePoints =
-          _sanitizeAutomationPointsForTarget(row, targetId, points);
+      final safePoints = _sanitizeAutomationPointsForTarget(
+        row,
+        targetId,
+        points,
+      );
       if (safePoints.isEmpty) return;
       final target =
           targets[targetId] ?? _fallbackAutomationTargetMeta(targetId);
@@ -52549,9 +53535,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             unit: lane.unit,
             min: lane.min,
             max: lane.max,
-            points: lane.points.map((point) => point.copy()).toList(
-                  growable: false,
-                ),
+            points: lane.points
+                .map((point) => point.copy())
+                .toList(growable: false),
           ),
         )
         .toList(growable: false);
@@ -52573,8 +53559,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final maxMs = _maxAutomationTimelineMs();
-    final safeLane =
-        _sanitizeAutomationPointsForTarget(row, targetId, lanePoints);
+    final safeLane = _sanitizeAutomationPointsForTarget(
+      row,
+      targetId,
+      lanePoints,
+    );
     final times = <double>{0.0, maxMs};
     for (final point in safeLane) {
       times.add(point.x.clamp(0.0, maxMs).toDouble());
@@ -52632,11 +53621,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final grouped = <String, List<AutomationClipSnapshot>>{};
     for (final clip in clips) {
       final targetId = clip.targetId.trim().isEmpty ? 'volume' : clip.targetId;
-      grouped.putIfAbsent(targetId, () => <AutomationClipSnapshot>[]).add(
-            clip.copyWith(
-              targetId: targetId,
-            ),
-          );
+      grouped
+          .putIfAbsent(targetId, () => <AutomationClipSnapshot>[])
+          .add(clip.copyWith(targetId: targetId));
     }
 
     for (final entry in grouped.entries) {
@@ -52704,11 +53691,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (row < 0 || row >= _rowCount) return;
 
     await _restoreRowSnapshot(
-      RowEffectsSnapshot(
-        row,
-        entry.effects.effects,
-        rowId: _rowIdAt(row),
-      ),
+      RowEffectsSnapshot(row, entry.effects.effects, rowId: _rowIdAt(row)),
     );
 
     final preservedVolume = _rowVolumeAutomation[row]
@@ -52726,9 +53709,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           unit: lane.unit,
           min: lane.min,
           max: lane.max,
-          points: lane.points.map((point) => point.copy()).toList(
-                growable: false,
-              ),
+          points:
+              lane.points.map((point) => point.copy()).toList(growable: false),
         ),
       ),
     ];
@@ -52778,9 +53760,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               unit: lane.unit,
               min: lane.min,
               max: lane.max,
-              points: lane.points.map((point) => point.copy()).toList(
-                    growable: false,
-                  ),
+              points: lane.points
+                  .map((point) => point.copy())
+                  .toList(growable: false),
             ),
           )
           .toList(growable: false),
@@ -52835,16 +53817,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               unit: lane.unit,
               min: lane.min,
               max: lane.max,
-              points: lane.points.map((point) => point.copy()).toList(
-                    growable: false,
-                  ),
+              points: lane.points
+                  .map((point) => point.copy())
+                  .toList(growable: false),
             ),
           )
           .toList(growable: false),
-      automationClips:
-          clipboard.automationClips.map((clip) => clip.copyWith()).toList(
-                growable: false,
-              ),
+      automationClips: clipboard.automationClips
+          .map((clip) => clip.copyWith())
+          .toList(growable: false),
       selectedAutomationTargetId: clipboard.selectedAutomationTargetId,
     );
 
@@ -52881,8 +53862,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         descriptionText: 'Clear track effects',
         before: before,
         after: _CopiedRowEffectsEntry(
-          effects: RowEffectsSnapshot(row, const <EffectSnapshot>[],
-              rowId: _rowIdAt(row)),
+          effects: RowEffectsSnapshot(
+            row,
+            const <EffectSnapshot>[],
+            rowId: _rowIdAt(row),
+          ),
           automationLanes: const <AutomationLaneSnapshot>[],
           automationClips: const <AutomationClipSnapshot>[],
           selectedAutomationTargetId: 'volume',
@@ -52995,8 +53979,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final oldClips = _copyAutomationClipList(
       oldClipsOverride ?? _clipsForAutomationTarget(row, targetId),
     );
-    final safeClips =
-        _sanitizeAutomationClipsForTarget(row, targetId, newClips);
+    final safeClips = _sanitizeAutomationClipsForTarget(
+      row,
+      targetId,
+      newClips,
+    );
     if (safeClips.isNotEmpty) {
       await _ensureAutomationClipDisplayRowExists(row);
     }
@@ -53010,7 +53997,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         applyToState: (r, laneId, clips) {
           setState(() {
             final rowMap = _rowAutomationClips.putIfAbsent(
-                r, () => <String, List<AutomationClipSnapshot>>{});
+              r,
+              () => <String, List<AutomationClipSnapshot>>{},
+            );
             rowMap[laneId] = _copyAutomationClipList(clips);
           });
         },
@@ -53047,8 +54036,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .map(HaloKey.new)
         .toList(growable: false);
     if (mapped.isEmpty) return;
-    _mixHighlighter.trigger(mapped,
-        duration: const Duration(milliseconds: 800));
+    _mixHighlighter.trigger(
+      mapped,
+      duration: const Duration(milliseconds: 800),
+    );
   }
 
   String? _findAutomationTargetIdForEffectParameter({
@@ -53156,11 +54147,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (targetId != 'volume' &&
         !_hasExplicitAutomationForTarget(row, targetId)) {
-      await _setAutomationTargetPointsWithUndo(
-        row,
-        targetId,
-        <AutomationPoint>[AutomationPoint(x: 0.0, volume: normalized)],
-      );
+      await _setAutomationTargetPointsWithUndo(row, targetId, <AutomationPoint>[
+        AutomationPoint(x: 0.0, volume: normalized),
+      ]);
     }
     if (!mounted) return;
     _openTimelineAutomationLaneForTarget(row: row, targetId: targetId);
@@ -53180,11 +54169,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .toDouble();
 
     if (!_hasExplicitAutomationForTarget(row, targetId)) {
-      await _setAutomationTargetPointsWithUndo(
-        row,
-        targetId,
-        <AutomationPoint>[AutomationPoint(x: 0.0, volume: normalized)],
-      );
+      await _setAutomationTargetPointsWithUndo(row, targetId, <AutomationPoint>[
+        AutomationPoint(x: 0.0, volume: normalized),
+      ]);
     }
     if (!mounted) return;
     _timelineController.showMasterAutomationLane(targetId);
@@ -53320,13 +54307,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final sorted = params
             .map((param) => Map<String, dynamic>.from(param))
             .toList(growable: true)
-          ..sort((a, b) => ((a['name'] ?? a['id']) as String)
-              .toLowerCase()
-              .compareTo(((b['name'] ?? b['id']) as String).toLowerCase()));
+          ..sort(
+            (a, b) =>
+                ((a['name'] ?? a['id']) as String).toLowerCase().compareTo(
+                      ((b['name'] ?? b['id']) as String).toLowerCase(),
+                    ),
+          );
         return _buildDesktopPopupSurface(
           width: 460,
-          outerPadding:
-              const EdgeInsets.symmetric(horizontal: 34, vertical: 30),
+          outerPadding: const EdgeInsets.symmetric(
+            horizontal: 34,
+            vertical: 30,
+          ),
           padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -53360,8 +54352,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   child: ListView.separated(
                     shrinkWrap: true,
                     itemCount: sorted.length,
-                    separatorBuilder: (_, __) =>
-                        Divider(color: Colors.white.withValues(alpha: 0.08)),
+                    separatorBuilder: (_, __) => Divider(
+                      color: Colors.white.withValues(alpha: 0.08),
+                    ),
                     itemBuilder: (context, index) {
                       final param = sorted[index];
                       final name = (param['name'] ?? param['id'] ?? 'Parameter')
@@ -53443,24 +54436,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           final effectIndex = (event['effectIndex'] as num?)?.toInt() ?? -1;
           if (row >= 0 && effectIndex >= 0) {
             if (paramId.isNotEmpty && paramName.isNotEmpty) {
-              unawaited(
-                () async {
-                  final effectNames =
-                      await JuceAudioEngine.getTrackEffectsForRow(row);
-                  if (!mounted) return;
-                  final effectName =
-                      effectIndex >= 0 && effectIndex < effectNames.length
-                          ? effectNames[effectIndex]
-                          : 'Plugin';
-                  await _requestRowEffectAutomationClip(
-                    row,
-                    effectIndex,
-                    effectName,
-                    paramId,
-                    paramName,
-                  );
-                }(),
-              );
+              unawaited(() async {
+                final effectNames = await JuceAudioEngine.getTrackEffectsForRow(
+                  row,
+                );
+                if (!mounted) return;
+                final effectName =
+                    effectIndex >= 0 && effectIndex < effectNames.length
+                        ? effectNames[effectIndex]
+                        : 'Plugin';
+                await _requestRowEffectAutomationClip(
+                  row,
+                  effectIndex,
+                  effectName,
+                  paramId,
+                  paramName,
+                );
+              }());
             } else {
               unawaited(
                 _showHostedPluginAutomationChooser(
@@ -53475,22 +54467,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           final effectIndex = (event['effectIndex'] as num?)?.toInt() ?? -1;
           if (effectIndex >= 0) {
             if (paramId.isNotEmpty && paramName.isNotEmpty) {
-              unawaited(
-                () async {
-                  final effectNames = await JuceAudioEngine.getMasterEffects();
-                  if (!mounted) return;
-                  final effectName =
-                      effectIndex >= 0 && effectIndex < effectNames.length
-                          ? effectNames[effectIndex]
-                          : 'Plugin';
-                  await _requestMasterEffectAutomationClip(
-                    effectIndex,
-                    effectName,
-                    paramId,
-                    paramName,
-                  );
-                }(),
-              );
+              unawaited(() async {
+                final effectNames = await JuceAudioEngine.getMasterEffects();
+                if (!mounted) return;
+                final effectName =
+                    effectIndex >= 0 && effectIndex < effectNames.length
+                        ? effectNames[effectIndex]
+                        : 'Plugin';
+                await _requestMasterEffectAutomationClip(
+                  effectIndex,
+                  effectName,
+                  paramId,
+                  paramName,
+                );
+              }());
             } else {
               unawaited(
                 _showHostedPluginAutomationChooser(
@@ -53576,16 +54566,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (parsed.isMixParameter) {
         switch (parsed.mixParamId.trim().toLowerCase()) {
           case 'gain':
-            _triggerMasterHalos(<String>[
-              'master:gain',
-              'master:param:gain',
-            ]);
+            _triggerMasterHalos(<String>['master:gain', 'master:param:gain']);
             break;
           case 'pan':
-            _triggerMasterHalos(<String>[
-              'master:pan',
-              'master:param:pan',
-            ]);
+            _triggerMasterHalos(<String>['master:pan', 'master:param:pan']);
             break;
         }
         return;
@@ -53619,16 +54603,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _masterRackContentKey.currentState?.showVolumeTab();
       switch (parsed.mixParamId.trim().toLowerCase()) {
         case 'gain':
-          _triggerMasterHalos(<String>[
-            'master:gain',
-            'master:param:gain',
-          ]);
+          _triggerMasterHalos(<String>['master:gain', 'master:param:gain']);
           break;
         case 'pan':
-          _triggerMasterHalos(<String>[
-            'master:pan',
-            'master:param:pan',
-          ]);
+          _triggerMasterHalos(<String>['master:pan', 'master:param:pan']);
           break;
       }
       return;
@@ -53719,9 +54697,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final sanitized = sanitizeAutomationPointsPreservingFutureTimes(points);
 
     if (sanitized.isEmpty) {
-      return <AutomationPoint>[
-        AutomationPoint(x: 0.0, volume: 1.0),
-      ];
+      return <AutomationPoint>[AutomationPoint(x: 0.0, volume: 1.0)];
     }
 
     return sanitized;
@@ -53826,9 +54802,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       if (parsed.legacyEffectIndex >= 0) {
         final byLegacyIndex = pluginTargets
-            .where((meta) =>
-                meta.effectIndex == parsed.legacyEffectIndex &&
-                meta.paramId.trim().toLowerCase() == parsedParamLower)
+            .where(
+              (meta) =>
+                  meta.effectIndex == parsed.legacyEffectIndex &&
+                  meta.paramId.trim().toLowerCase() == parsedParamLower,
+            )
             .toList(growable: false);
         if (byLegacyIndex.length == 1) {
           return byLegacyIndex.first.targetId;
@@ -53852,10 +54830,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         pickTargetId(target['lane_id']);
     if (explicit != null) return explicit;
 
-    final effectIndex = _toActionInt(data['effect_index'] ??
-        target['effect_index'] ??
-        data['effect'] ??
-        target['effect']);
+    final effectIndex = _toActionInt(
+      data['effect_index'] ??
+          target['effect_index'] ??
+          data['effect'] ??
+          target['effect'],
+    );
     final paramId = (data['param_id'] ??
             target['param_id'] ??
             data['parameter_id'] ??
@@ -53912,10 +54892,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (resolvedEffectIndex != null) {
       final scoped = targets.values
-          .where((meta) =>
-              !meta.isVolume &&
-              scopeAllowsTarget(meta) &&
-              meta.effectIndex == resolvedEffectIndex)
+          .where(
+            (meta) =>
+                !meta.isVolume &&
+                scopeAllowsTarget(meta) &&
+                meta.effectIndex == resolvedEffectIndex,
+          )
           .toList(growable: false);
       if (scoped.isNotEmpty) {
         if (paramId.isNotEmpty) {
@@ -54167,10 +55149,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final clips = _clipsForAutomationTarget(row, targetId);
     if (clips.isEmpty) return null;
     final target = _actionTarget(data);
-    final explicitIndex = _toActionInt(data['clip_index'] ??
-        target['clip_index'] ??
-        data['automation_clip_index'] ??
-        target['automation_clip_index']);
+    final explicitIndex = _toActionInt(
+      data['clip_index'] ??
+          target['clip_index'] ??
+          data['automation_clip_index'] ??
+          target['automation_clip_index'],
+    );
     if (explicitIndex != null &&
         explicitIndex >= 0 &&
         explicitIndex < clips.length) {
@@ -54197,8 +55181,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .toString()
         .trim();
     if (explicitPatternId.isNotEmpty) {
-      final idx = clips
-          .indexWhere((clip) => clip.patternId.trim() == explicitPatternId);
+      final idx = clips.indexWhere(
+        (clip) => clip.patternId.trim() == explicitPatternId,
+      );
       if (idx >= 0) return idx;
     }
 
@@ -54319,8 +55304,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final safeStart = startMs.clamp(0.0, maxMs).toDouble();
     final safeLength = lengthMs.clamp(1.0, math.max(1.0, maxMs - safeStart));
     final safeEnd = (safeStart + safeLength).clamp(safeStart, maxMs).toDouble();
-    final sortedExisting =
-        _sanitizeAutomationPointsForTarget(row, targetId, existing);
+    final sortedExisting = _sanitizeAutomationPointsForTarget(
+      row,
+      targetId,
+      existing,
+    );
     final next = <AutomationPoint>[];
 
     if (replaceExisting) {
@@ -54373,7 +55361,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
     if (row == null) {
       _insertAssistantChatText(
-          "I couldn't resolve which track automation to edit.");
+        "I couldn't resolve which track automation to edit.",
+      );
       return;
     }
 
@@ -54398,17 +55387,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (pluginIntent) {
         if (!hasPluginTargets) {
           _insertAssistantChatText(
-              "That track has no automatable plugin parameters yet. Add an effect first.");
+            "That track has no automatable plugin parameters yet. Add an effect first.",
+          );
         } else {
           _insertAssistantChatText(
-              "I couldn't resolve which plugin parameter to automate. Specify plugin + parameter (for example: effect_name + param_name).");
+            "I couldn't resolve which plugin parameter to automate. Specify plugin + parameter (for example: effect_name + param_name).",
+          );
         }
       } else if (wantsMasterScope) {
         _insertAssistantChatText(
-            "I couldn't resolve which master parameter to automate. Specify master gain, master pan, or the master effect + parameter.");
+          "I couldn't resolve which master parameter to automate. Specify master gain, master pan, or the master effect + parameter.",
+        );
       } else {
         _insertAssistantChatText(
-            "I couldn't resolve which automation target to edit.");
+          "I couldn't resolve which automation target to edit.",
+        );
       }
       return;
     }
@@ -54548,11 +55541,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final clips = _copyAutomationClipList(
         _clipsForAutomationTarget(row, targetId),
       ).toList(growable: true);
-      final index = _resolveAutomationClipIndexFromAction(
-        row,
-        targetId,
-        data,
-      );
+      final index = _resolveAutomationClipIndexFromAction(row, targetId, data);
       if (index == null || index < 0 || index >= clips.length) {
         _insertAssistantChatText(
           "I couldn't resolve which automation clip to edit.",
@@ -54596,10 +55585,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           final explicitStart = _toActionDouble(
             data['start_ms'] ?? target['start_ms'] ?? data['paste_start_ms'],
           );
-          final deltaMs = _toActionDouble(
-                data['delta_ms'] ?? target['delta_ms'],
-              ) ??
-              0.0;
+          final deltaMs =
+              _toActionDouble(data['delta_ms'] ?? target['delta_ms']) ?? 0.0;
           final lengthMs = _toActionDouble(
             data['length_ms'] ?? target['length_ms'] ?? data['duration_ms'],
           );
@@ -54650,19 +55637,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             normalizedTemplate == 'duck_to_kick' ||
             normalizedTemplate == 'kick_duck');
     if (isKickSyncedSidechainTemplate) {
-      final sourceClipIndex =
-          _resolveKickSourceClipIndexFromAction(data, targetRow: row);
+      final sourceClipIndex = _resolveKickSourceClipIndexFromAction(
+        data,
+        targetRow: row,
+      );
       if (sourceClipIndex == null ||
           sourceClipIndex < 0 ||
           sourceClipIndex >= _audioTracks.length) {
         _insertAssistantChatText(
-            "I couldn't find a kick source clip for sidechain automation.");
+          "I couldn't find a kick source clip for sidechain automation.",
+        );
         return;
       }
       final sourceClip = _audioTracks[sourceClipIndex];
       if (sourceClip.isMidi) {
         _insertAssistantChatText(
-            'Kick-synced sidechain needs an audio source clip.');
+          'Kick-synced sidechain needs an audio source clip.',
+        );
         return;
       }
 
@@ -54704,16 +55695,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               220.0)
           .clamp(80.0, 1200.0)
           .toDouble();
-      final maxEvents = (_toActionInt(
-                data['max_events'] ?? target['max_events'],
-              ) ??
-              256)
-          .clamp(1, 2048);
-      final offsetMs = (_toActionDouble(
-                data['offset_ms'] ?? target['offset_ms'],
-              ) ??
-              0.0)
-          .toDouble();
+      final maxEvents =
+          (_toActionInt(data['max_events'] ?? target['max_events']) ?? 256)
+              .clamp(1, 2048);
+      final offsetMs =
+          (_toActionDouble(data['offset_ms'] ?? target['offset_ms']) ?? 0.0)
+              .toDouble();
       final fromMs = _toActionDouble(data['from_ms'] ?? target['from_ms']);
       final toMs = _toActionDouble(data['to_ms'] ?? target['to_ms']);
 
@@ -54726,7 +55713,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       if (eventMs.isEmpty) {
         _insertAssistantChatText(
-            'No kick transients were detected for automatic sidechain.');
+          'No kick transients were detected for automatic sidechain.',
+        );
         return;
       }
 
@@ -54739,7 +55727,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       if (eventMs.isEmpty) {
         _insertAssistantChatText(
-            'Kick transients were found, but none were in the requested time range.');
+          'Kick transients were found, but none were in the requested time range.',
+        );
         return;
       }
 
@@ -54777,8 +55766,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               .toDouble();
       final recoveryMs =
           (lengthMs * releaseRatio).clamp(attackMs + 1.0, lengthMs).toDouble();
-      final midValue =
-          (duckValue + (recoverValue - duckValue) * 0.58).clamp(0.0, 1.0);
+      final midValue = (duckValue + (recoverValue - duckValue) * 0.58).clamp(
+        0.0,
+        1.0,
+      );
       final replaceExisting = _toActionBool(
         data['replace_existing'] ?? target['replace_existing'],
         fallback: false,
@@ -54786,15 +55777,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       final maxTimelineMs = _maxAutomationTimelineMs();
       int created = 0;
-      var nextPoints = _pointsForAutomationTarget(row, targetId)
-          .map((point) => point.copy())
-          .toList(growable: false);
+      var nextPoints = _pointsForAutomationTarget(
+        row,
+        targetId,
+      ).map((point) => point.copy()).toList(growable: false);
       if (replaceExisting && eventMs.isNotEmpty) {
-        final regionStart =
-            ((eventMs.first + offsetMs) - lengthMs * 0.25).clamp(
-          0.0,
-          maxTimelineMs,
-        );
+        final regionStart = ((eventMs.first + offsetMs) - lengthMs * 0.25)
+            .clamp(0.0, maxTimelineMs);
         final regionEnd = ((eventMs.last + offsetMs) + lengthMs * 1.1).clamp(
           regionStart,
           maxTimelineMs,
@@ -54810,17 +55799,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       for (final onsetMs in eventMs) {
         final startMs = (onsetMs + offsetMs).clamp(0.0, maxTimelineMs);
         if (startMs + 4.0 >= maxTimelineMs) continue;
-        final clippedLength =
-            math.min(lengthMs, math.max(40.0, maxTimelineMs - startMs));
+        final clippedLength = math.min(
+          lengthMs,
+          math.max(40.0, maxTimelineMs - startMs),
+        );
         if (clippedLength <= 40.0) continue;
 
         final points = <AutomationPoint>[
           AutomationPoint(x: 0.0, volume: recoverValue),
           AutomationPoint(
-              x: attackMs.clamp(1.0, clippedLength), volume: duckValue),
+            x: attackMs.clamp(1.0, clippedLength),
+            volume: duckValue,
+          ),
           AutomationPoint(
-              x: recoveryMs.clamp(attackMs + 1.0, clippedLength),
-              volume: midValue.toDouble()),
+            x: recoveryMs.clamp(attackMs + 1.0, clippedLength),
+            volume: midValue.toDouble(),
+          ),
           AutomationPoint(x: clippedLength, volume: recoverValue),
         ];
 
@@ -54838,7 +55832,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       if (created <= 0) {
         _insertAssistantChatText(
-            "I couldn't place sidechain automation in the current timeline range.");
+          "I couldn't place sidechain automation in the current timeline range.",
+        );
         return;
       }
 
@@ -54895,12 +55890,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           valueMode: pointValueMode,
           fallback: targetId == 'volume' ? 0.75 : 0.5,
         );
-        clipPoints.add(
-          AutomationPoint(
-            x: x,
-            volume: normalized,
-          ),
-        );
+        clipPoints.add(AutomationPoint(x: x, volume: normalized));
       }
       final points = clipPoints.isNotEmpty
           ? clipPoints
@@ -54926,8 +55916,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (operation == 'clear') {
       if (targetId == 'volume') {
-        final maxMs =
-            math.max(1.0, _audioOnlyOverallDuration.inMilliseconds.toDouble());
+        final maxMs = math.max(
+          1.0,
+          _audioOnlyOverallDuration.inMilliseconds.toDouble(),
+        );
         await _setRowAutomationWithUndo(row, <AutomationPoint>[
           AutomationPoint(x: 0.0, volume: 1.0),
           AutomationPoint(x: maxMs, volume: 1.0),
@@ -54966,11 +55958,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           .trim()
           .toLowerCase();
 
-      final existingValue = _resolvedAutomationValueAtMs(
-        row,
-        targetId,
-        fromMs,
-      );
+      final existingValue = _resolvedAutomationValueAtMs(row, targetId, fromMs);
       final parsedStartValue = _normalizedActionValueForTarget(
         data['start_value'] ?? data['from_value'],
         targetMeta,
@@ -54987,9 +55975,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 ? (parsedStartValue + 0.35).clamp(0.0, 1.0).toDouble()
                 : parsedStartValue,
       );
-      final next = _pointsForAutomationTarget(row, targetId)
-          .map((p) => p.copy())
-          .toList(growable: true);
+      final next = _pointsForAutomationTarget(
+        row,
+        targetId,
+      ).map((p) => p.copy()).toList(growable: true);
       next.add(AutomationPoint(x: fromMs, volume: parsedStartValue));
       next.add(AutomationPoint(x: toMs, volume: parsedEndValue));
       await _setAutomationTargetPointsWithUndo(row, targetId, next);
@@ -55043,11 +56032,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             .toString()
             .trim()
             .toLowerCase();
-        final base = _resolvedAutomationValueAtMs(
-          row,
-          targetId,
-          fromMs,
-        );
+        final base = _resolvedAutomationValueAtMs(row, targetId, fromMs);
         final v0 = _normalizedActionValueForTarget(
           data['start_value'] ?? data['from_value'] ?? data['value'],
           targetMeta,
@@ -55065,15 +56050,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   : v0,
         );
         await _setAutomationTargetPointsWithUndo(
-            row, targetId, <AutomationPoint>[
-          AutomationPoint(x: fromMs, volume: v0),
-          AutomationPoint(x: toMs, volume: v1),
-        ]);
+          row,
+          targetId,
+          <AutomationPoint>[
+            AutomationPoint(x: fromMs, volume: v0),
+            AutomationPoint(x: toMs, volume: v1),
+          ],
+        );
         _showSmallNotice('Set automation points.');
         return;
       }
       _insertAssistantChatText(
-          "I need automation points to apply (time/value pairs).");
+        "I need automation points to apply (time/value pairs).",
+      );
       return;
     }
 
@@ -55119,10 +56108,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final target = _actionTarget(data);
     final operation = (data['operation'] ?? '').toString().trim().toLowerCase();
 
-    final beatsPerChord = _toActionDouble(data['beats_per_chord'] ??
-            target['beats_per_chord'] ??
-            data['chord_length_beats'] ??
-            target['chord_length_beats']) ??
+    final beatsPerChord = _toActionDouble(
+          data['beats_per_chord'] ??
+              target['beats_per_chord'] ??
+              data['chord_length_beats'] ??
+              target['chord_length_beats'],
+        ) ??
         4.0;
     final notesPerChord =
         (_toActionInt(data['notes_per_chord'] ?? target['notes_per_chord']) ??
@@ -55183,10 +56174,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final progressionTokens = _progressionTokensFromActionData(data);
-    final requestedNotesPerChord = _toActionInt(
-          data['notes_per_chord'] ?? target['notes_per_chord'],
-        ) ??
-        0;
+    final requestedNotesPerChord =
+        _toActionInt(data['notes_per_chord'] ?? target['notes_per_chord']) ?? 0;
     final likelyHarmony = progressionTokens.isNotEmpty ||
         requestedNotesPerChord > 1 ||
         _notesContainPolyphony(notes);
@@ -55270,9 +56259,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return _toActionBool(
           data['create_new_clip'] ?? target['create_new_clip'],
         ) ||
-        _toActionBool(
-          data['prefer_new_clip'] ?? target['prefer_new_clip'],
-        );
+        _toActionBool(data['prefer_new_clip'] ?? target['prefer_new_clip']);
   }
 
   bool _shouldPreserveExistingMidiNotes(
@@ -55478,11 +56465,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     int? subdivision,
   }) {
     final target = _actionTarget(data);
-    final safeSubdivision = subdivision ??
-        _midiSubdivisionFromActionData(
-          data,
-          fallback: 16,
-        );
+    final safeSubdivision =
+        subdivision ?? _midiSubdivisionFromActionData(data, fallback: 16);
     final stepBeats = _toActionDouble(
       data['step_beats'] ??
           target['step_beats'] ??
@@ -55569,8 +56553,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       (data['operation'] ?? '').toString().trim().toLowerCase(),
     );
     final target = _actionTarget(data);
-    final forceCreateNewClip =
-        _shouldCreateFreshMidiClip(data, target, operation);
+    final forceCreateNewClip = _shouldCreateFreshMidiClip(
+      data,
+      target,
+      operation,
+    );
 
     if (operation == 'convert_audio_to_midi') {
       final sourceClipIndex = _resolveSingleClipIndexWithFallback(
@@ -55581,24 +56568,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           sourceClipIndex < 0 ||
           sourceClipIndex >= _audioTracks.length) {
         _insertAssistantChatText(
-            "I couldn't resolve which audio clip to convert to MIDI.");
+          "I couldn't resolve which audio clip to convert to MIDI.",
+        );
         return;
       }
-      await _convertAudioClipToMidi(
-        sourceClipIndex,
-        data,
-        target,
-        chatFlowId,
-      );
+      await _convertAudioClipToMidi(sourceClipIndex, data, target, chatFlowId);
       return;
     }
 
     int? clipIndex;
     if (!forceCreateNewClip) {
-      clipIndex = _resolveSingleClipIndexWithFallback(
-        data,
-        requireMidi: true,
-      );
+      clipIndex = _resolveSingleClipIndexWithFallback(data, requireMidi: true);
       if (clipIndex == null) {
         final rowHint = _resolveRowIndexFromActionTarget(data);
         if (rowHint != null) {
@@ -55619,7 +56599,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           clipIndex < 0 ||
           clipIndex >= _audioTracks.length) {
         _insertAssistantChatText(
-            "I couldn't resolve which MIDI clip to chop. Select a MIDI clip and ask again.");
+          "I couldn't resolve which MIDI clip to chop. Select a MIDI clip and ask again.",
+        );
         return;
       }
       final clip = _audioTracks[clipIndex];
@@ -55671,12 +56652,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           newInstrumentName: oldInstrumentName,
           newInstrumentParams: oldParams,
           newHostedInstrumentStateBase64: oldHostedInstrumentStateBase64,
-          applyToClip: (target,
-              notesToApply,
-              nextInstrumentId,
-              nextInstrumentName,
-              nextParams,
-              hostedInstrumentStateBase64) async {
+          applyToClip: (
+            target,
+            notesToApply,
+            nextInstrumentId,
+            nextInstrumentName,
+            nextParams,
+            hostedInstrumentStateBase64,
+          ) async {
             target.midiNotes = notesToApply.map((n) => n.copy()).toList();
             _assignMidiClipInstrument(
               target,
@@ -55723,7 +56706,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           clipIndex < 0 ||
           clipIndex >= _audioTracks.length) {
         _insertAssistantChatText(
-            "I couldn't resolve which MIDI clip to transpose. Select a MIDI clip and ask again.");
+          "I couldn't resolve which MIDI clip to transpose. Select a MIDI clip and ask again.",
+        );
         return;
       }
       final clip = _audioTracks[clipIndex];
@@ -55733,7 +56717,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       if (clip.midiNotes.isEmpty) {
         _insertAssistantChatText(
-            'The target MIDI clip has no notes to transpose.');
+          'The target MIDI clip has no notes to transpose.',
+        );
         return;
       }
 
@@ -55751,13 +56736,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final oldInstrumentName = clip.instrumentName;
       final oldHostedInstrumentStateBase64 = clip.hostedInstrumentStateBase64;
       final nextNotes = oldNotes
-          .map((n) => MidiNote(
-                id: n.id,
-                pitch: (n.pitch + semitones).clamp(0, 127).toInt(),
-                startBeat: n.startBeat,
-                lengthBeats: n.lengthBeats,
-                velocity: n.velocity,
-              ))
+          .map(
+            (n) => MidiNote(
+              id: n.id,
+              pitch: (n.pitch + semitones).clamp(0, 127).toInt(),
+              startBeat: n.startBeat,
+              lengthBeats: n.lengthBeats,
+              velocity: n.velocity,
+            ),
+          )
           .toList(growable: false);
 
       await _undoManager.execute(
@@ -55774,12 +56761,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           newInstrumentName: oldInstrumentName,
           newInstrumentParams: oldParams,
           newHostedInstrumentStateBase64: oldHostedInstrumentStateBase64,
-          applyToClip: (target,
-              notesToApply,
-              nextInstrumentId,
-              nextInstrumentName,
-              nextParams,
-              hostedInstrumentStateBase64) async {
+          applyToClip: (
+            target,
+            notesToApply,
+            nextInstrumentId,
+            nextInstrumentName,
+            nextParams,
+            hostedInstrumentStateBase64,
+          ) async {
             target.midiNotes = notesToApply.map((n) => n.copy()).toList();
             _assignMidiClipInstrument(
               target,
@@ -55822,8 +56811,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
 
-    final preserveExistingNotes =
-        _shouldPreserveExistingMidiNotes(data, target, operation);
+    final preserveExistingNotes = _shouldPreserveExistingMidiNotes(
+      data,
+      target,
+      operation,
+    );
     var notes = _midiNotesFromActionData(data);
     if (notes.isEmpty) {
       notes = _fallbackMidiNotesFromProgression(data);
@@ -55860,13 +56852,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       if (clip.midiNotes.isEmpty) {
         _insertAssistantChatText(
-            'The target MIDI clip has no notes to extend yet.');
+          'The target MIDI clip has no notes to extend yet.',
+        );
         return;
       }
       final targetLengthBeats = _resolveMidiTargetLengthBeats(data, target);
       if (targetLengthBeats == null) {
         _insertAssistantChatText(
-            'I need a target MIDI length in measures or beats for that edit.');
+          'I need a target MIDI length in measures or beats for that edit.',
+        );
         return;
       }
       final oldNotes = clip.midiNotes.map((n) => n.copy()).toList();
@@ -55900,12 +56894,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           newInstrumentName: oldInstrumentName,
           newInstrumentParams: oldParams,
           newHostedInstrumentStateBase64: oldHostedInstrumentStateBase64,
-          applyToClip: (targetClip,
-              notesToApply,
-              nextInstrumentId,
-              nextInstrumentName,
-              nextParams,
-              hostedInstrumentStateBase64) async {
+          applyToClip: (
+            targetClip,
+            notesToApply,
+            nextInstrumentId,
+            nextInstrumentName,
+            nextParams,
+            hostedInstrumentStateBase64,
+          ) async {
             targetClip.midiNotes = notesToApply.map((n) => n.copy()).toList();
             _assignMidiClipInstrument(
               targetClip,
@@ -55920,7 +56916,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             targetClip.tempoStretchPreservePitch = true;
             final updatedLive = await _updateMidiClipEventsLive(targetClip);
             if (updatedLive) {
-              final clipIdx = _clipIndexForEngineId(targetClip.engineClipId);
+              final clipIdx = _clipIndexForEngineId(
+                targetClip.engineClipId,
+              );
               if (clipIdx >= 0) {
                 await _syncClipTimingToEngine(clipIdx);
               }
@@ -55947,7 +56945,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     if (notes.isEmpty) {
       _insertAssistantChatText(
-          "I need MIDI notes (or a chord progression) to write this part.");
+        "I need MIDI notes (or a chord progression) to write this part.",
+      );
       return;
     }
 
@@ -56011,8 +57010,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         restoreTrack: _addClipFromUndoPayload,
         instrumentId: instrumentId,
         instrumentName: instrumentName.isEmpty ? instrumentId : instrumentName,
-        instrumentParams:
-            _instrumentParamsFromSpec(_instrumentSpecById(instrumentId)),
+        instrumentParams: _instrumentParamsFromSpec(
+          _instrumentSpecById(instrumentId),
+        ),
         midiNotes: notes,
         row: row,
         timeMs: math.max(0.0, startMs),
@@ -56086,10 +57086,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         };
     final preserveOwnedState = preserveClipState || hasExactFinalLength;
     final oldClipOwnedState = preserveOwnedState
-        ? ownedState(
-            trimEnd: oldTrimEnd,
-            audioDuration: oldAudioDuration,
-          )
+        ? ownedState(trimEnd: oldTrimEnd, audioDuration: oldAudioDuration)
         : null;
     final newClipOwnedState = preserveOwnedState
         ? ownedState(
@@ -56100,8 +57097,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     List<MidiNote> nextNotes = notes.map((n) => n.copy()).toList();
     if (append) {
-      final explicitAppendStartBeat =
-          _toActionDouble(data['append_start_beat']);
+      final explicitAppendStartBeat = _toActionDouble(
+        data['append_start_beat'],
+      );
       double appendStartBeat = explicitAppendStartBeat ?? 0.0;
       final appendAtEnd = _toActionBool(
         data['append_at_end'],
@@ -56115,13 +57113,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       nextNotes = [
         ...oldNotes.map((n) => n.copy()),
-        ...notes.map((n) => MidiNote(
-              id: 'ai_note_${DateTime.now().microsecondsSinceEpoch}_${n.pitch}',
-              pitch: n.pitch,
-              startBeat: n.startBeat + appendStartBeat,
-              lengthBeats: n.lengthBeats,
-              velocity: n.velocity,
-            )),
+        ...notes.map(
+          (n) => MidiNote(
+            id: 'ai_note_${DateTime.now().microsecondsSinceEpoch}_${n.pitch}',
+            pitch: n.pitch,
+            startBeat: n.startBeat + appendStartBeat,
+            lengthBeats: n.lengthBeats,
+            velocity: n.velocity,
+          ),
+        ),
       ];
     }
 
@@ -56152,8 +57152,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           }
           await _syncClipTimingToEngine(index);
         },
-        applyToClip: (target, notesToApply, nextInstrumentId,
-            nextInstrumentName, nextParams, hostedInstrumentStateBase64) async {
+        applyToClip: (
+          target,
+          notesToApply,
+          nextInstrumentId,
+          nextInstrumentName,
+          nextParams,
+          hostedInstrumentStateBase64,
+        ) async {
           target.midiNotes = notesToApply.map((n) => n.copy()).toList();
           _assignMidiClipInstrument(
             target,
@@ -56190,9 +57196,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         },
       ),
     );
-    _showSmallNotice(
-      append ? 'Appended MIDI notes.' : 'Updated MIDI notes.',
-    );
+    _showSmallNotice(append ? 'Appended MIDI notes.' : 'Updated MIDI notes.');
   }
 
   Future<_RowLayoutSnapshotAction?> _ensureDedicatedOutputRowBelow({
@@ -56243,7 +57247,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final sourceRow = sourceClip.rowIndex;
     if (sourceRow < 0 || sourceRow >= _effectiveMaxRows) {
       _insertAssistantChatText(
-          'I need an available row below that clip to place the MIDI result.');
+        'I need an available row below that clip to place the MIDI result.',
+      );
       return;
     }
 
@@ -56254,7 +57259,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     if (notes.isEmpty) {
       _insertAssistantChatText(
-          "I couldn't extract stable notes from that audio clip.");
+        "I couldn't extract stable notes from that audio clip.",
+      );
       return;
     }
 
@@ -56289,7 +57295,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         await rowLayoutAction.undo();
       }
       _insertAssistantChatText(
-          'I could not create a dedicated row below that clip for the MIDI result.');
+        'I could not create a dedicated row below that clip for the MIDI result.',
+      );
       return;
     }
     final targetRow = (sourceRow + 1).clamp(0, _rowCount - 1).toInt();
@@ -56306,8 +57313,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _addMidiTrack(
         instrumentId: instrumentId,
         instrumentName: instrumentName,
-        instrumentParams:
-            _instrumentParamsFromSpec(_instrumentSpecById(instrumentId)),
+        instrumentParams: _instrumentParamsFromSpec(
+          _instrumentSpecById(instrumentId),
+        ),
         midiNotes: midiNotes,
         row: row,
         timeMs: timeMs,
@@ -56320,8 +57328,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       instrumentName: instrumentName.isEmpty
           ? _instrumentNameFromId(instrumentId)
           : instrumentName,
-      instrumentParams:
-          _instrumentParamsFromSpec(_instrumentSpecById(instrumentId)),
+      instrumentParams: _instrumentParamsFromSpec(
+        _instrumentSpecById(instrumentId),
+      ),
       midiNotes: notes,
       row: targetRow,
       timeMs: startMs,
@@ -56338,13 +57347,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       if (rowLayoutAction != null) {
         await _undoManager.addWithoutExecute(
-          CompoundUndoAction(
-            'Convert audio to MIDI',
-            <EditorUndoAction>[
-              rowLayoutAction,
-              addMidiAction,
-            ],
-          ),
+          CompoundUndoAction('Convert audio to MIDI', <EditorUndoAction>[
+            rowLayoutAction,
+            addMidiAction,
+          ]),
         );
       } else {
         await _undoManager.addWithoutExecute(addMidiAction);
@@ -56357,7 +57363,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         await rowLayoutAction.undo();
       }
       _insertAssistantChatText(
-          "I couldn't place the MIDI clip for that audio.");
+        "I couldn't place the MIDI clip for that audio.",
+      );
     }
   }
 
@@ -56392,7 +57399,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     _showSmallNotice(
       L10n.translate(
-          context, 'Select an audio clip first, then open Pitch Lab.'),
+        context,
+        'Select an audio clip first, then open Pitch Lab.',
+      ),
     );
   }
 
@@ -56408,7 +57417,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (sourceRow < 0 || sourceRow >= _effectiveMaxRows) {
       _showSmallNotice(
         L10n.translate(
-            context, 'Select an audio clip on a timeline row first.'),
+          context,
+          'Select an audio clip on a timeline row first.',
+        ),
       );
       return;
     }
@@ -56447,7 +57458,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         });
         _showSmallNotice(
           L10n.translate(
-              context, 'Could not extract stable notes from this clip.'),
+            context,
+            'Could not extract stable notes from this clip.',
+          ),
         );
         return;
       }
@@ -56586,9 +57599,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return null;
     }
 
-    final sourceTimelineDurationMs = _clipTimelineDurationMs(sourceClip)
-        .clamp(1.0, 12.0 * 60.0 * 1000.0)
-        .toDouble();
+    final sourceTimelineDurationMs = _clipTimelineDurationMs(
+      sourceClip,
+    ).clamp(1.0, 12.0 * 60.0 * 1000.0).toDouble();
     var outputDurationMs = sourceTimelineDurationMs;
     for (final pair in changedPairs) {
       final editedRange = _pitchLabNoteLocalRangeMs(pair.edited);
@@ -56609,15 +57622,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     for (final pair in changedPairs.take(160)) {
       final originalRange = _pitchLabNoteLocalRangeMs(pair.original);
       final editedRange = _pitchLabNoteLocalRangeMs(pair.edited);
-      renderSegments.add(
-        <String, double>{
-          'originalStartMs': originalRange.startMs,
-          'originalEndMs': originalRange.endMs,
-          'targetStartMs': editedRange.startMs,
-          'targetEndMs': editedRange.endMs,
-          'semitones': (pair.edited.pitch - pair.original.pitch).toDouble(),
-        },
-      );
+      renderSegments.add(<String, double>{
+        'originalStartMs': originalRange.startMs,
+        'originalEndMs': originalRange.endMs,
+        'targetStartMs': editedRange.startMs,
+        'targetEndMs': editedRange.endMs,
+        'semitones': (pair.edited.pitch - pair.original.pitch).toDouble(),
+      });
     }
 
     final renderedPath = await JuceAudioEngine.renderPitchLabAudio(
@@ -56662,7 +57673,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (sourceClip.isMidi) return;
     if (_pitchLabAudioOriginalNotes.isEmpty) {
       _showSmallNotice(
-          L10n.translate(context, 'No notes are ready to render.'));
+        L10n.translate(context, 'No notes are ready to render.'),
+      );
       return;
     }
 
@@ -56859,9 +57871,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     final originalRange = _pitchLabNoteLocalRangeMs(originalNote);
     final editedRange = _pitchLabNoteLocalRangeMs(editedNote);
-    final sourceTimelineDurationMs = _clipTimelineDurationMs(sourceClip)
-        .clamp(1.0, 12.0 * 60.0 * 1000.0)
-        .toDouble();
+    final sourceTimelineDurationMs = _clipTimelineDurationMs(
+      sourceClip,
+    ).clamp(1.0, 12.0 * 60.0 * 1000.0).toDouble();
     final sourceStartMs =
         originalRange.startMs.clamp(0.0, sourceTimelineDurationMs).toDouble();
     final sourceEndMs = originalRange.endMs
@@ -56886,10 +57898,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         sourceTimelineDurationMs: sourceTimelineDurationMs,
         outputDurationMs: outputDurationMs,
         suppressedRanges: <Map<String, double>>[
-          <String, double>{
-            'startMs': 0.0,
-            'endMs': sourceTimelineDurationMs,
-          },
+          <String, double>{'startMs': 0.0, 'endMs': sourceTimelineDurationMs},
         ],
         segments: <Map<String, double>>[
           <String, double>{
@@ -57018,13 +58027,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       if (rowLayoutAction != null) {
         await _undoManager.addWithoutExecute(
-          CompoundUndoAction(
-            'Render Pitch Lab audio',
-            <EditorUndoAction>[
-              rowLayoutAction,
-              addAction,
-            ],
-          ),
+          CompoundUndoAction('Render Pitch Lab audio', <EditorUndoAction>[
+            rowLayoutAction,
+            addAction,
+          ]),
         );
       } else {
         await _undoManager.addWithoutExecute(addAction);
@@ -57048,10 +58054,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
-  String _safeSamplerStem({
-    required String label,
-    required String identity,
-  }) {
+  String _safeSamplerStem({required String label, required String identity}) {
     final safeLabel = label
         .toLowerCase()
         .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
@@ -57168,12 +58171,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return _samplerParamsForSource(base: clip.instrumentParams);
   }
 
-  Map<String, double> _samplerParamsForSource({
-    Map<String, double>? base,
-  }) {
-    final params = <String, double>{
-      if (base != null) ...base,
-    };
+  Map<String, double> _samplerParamsForSource({Map<String, double>? base}) {
+    final params = <String, double>{if (base != null) ...base};
     params.putIfAbsent('attackMs', () => 2.0);
     params.putIfAbsent('decayMs', () => 120.0);
     params.putIfAbsent('sustainLevel', () => 0.86);
@@ -57200,9 +58199,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Map<String, double> _granularizerParamsForSource({
     Map<String, double>? base,
   }) {
-    final params = <String, double>{
-      if (base != null) ...base,
-    };
+    final params = <String, double>{if (base != null) ...base};
     params['granularMode'] = 1.0;
     params.putIfAbsent('attackMs', () => 4.0);
     params.putIfAbsent('decayMs', () => 80.0);
@@ -57326,8 +58323,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       newInstrumentName: newInstrumentName,
       newInstrumentParams: newParams,
       newHostedInstrumentStateBase64: '',
-      applyToClip: (target, notesToApply, nextInstrumentId, nextInstrumentName,
-          nextParams, hostedInstrumentStateBase64) {
+      applyToClip: (
+        target,
+        notesToApply,
+        nextInstrumentId,
+        nextInstrumentName,
+        nextParams,
+        hostedInstrumentStateBase64,
+      ) {
         _applyMidiClipStateLocally(
           target,
           notes: notesToApply,
@@ -57582,13 +58585,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       if (rowLayoutAction != null) {
         await _undoManager.addWithoutExecute(
-          CompoundUndoAction(
-            'Create sampler',
-            <EditorUndoAction>[
-              rowLayoutAction,
-              addMidiAction,
-            ],
-          ),
+          CompoundUndoAction('Create sampler', <EditorUndoAction>[
+            rowLayoutAction,
+            addMidiAction,
+          ]),
         );
       } else {
         await _undoManager.addWithoutExecute(addMidiAction);
@@ -57620,11 +58620,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _applyStemSeparateAction(Map<String, dynamic> data) async {
     final target = _actionTarget(data);
-    final clipIndices =
-        _resolveClipIndicesFromActionTarget(data, requireAudio: true);
+    final clipIndices = _resolveClipIndicesFromActionTarget(
+      data,
+      requireAudio: true,
+    );
     if (clipIndices.isEmpty) {
       _insertAssistantChatText(
-          "I couldn't resolve which audio clip to separate.");
+        "I couldn't resolve which audio clip to separate.",
+      );
       return;
     }
 
@@ -57643,11 +58646,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final targets = explicitMany
         ? clipIndices
         : <int>[
-            _resolveSingleClipIndexWithFallback(
-                  data,
-                  requireAudio: true,
-                ) ??
-                clipIndices.first
+            _resolveSingleClipIndexWithFallback(data, requireAudio: true) ??
+                clipIndices.first,
           ];
 
     int success = 0;
@@ -57677,7 +58677,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final row = _resolveRowIndexFromActionTarget(data);
     if (row == null) {
       _insertAssistantChatText(
-          "I couldn't resolve which track role to update.");
+        "I couldn't resolve which track role to update.",
+      );
       return;
     }
 
@@ -57693,13 +58694,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _scheduleProjectAutosave();
       }
       if (cleared) {
-        _showSmallNotice(
-          'Cleared role override for ${_rowDisplayName(row)}.',
-        );
+        _showSmallNotice('Cleared role override for ${_rowDisplayName(row)}.');
       } else {
-        _showSmallNotice(
-          '${_rowDisplayName(row)} had no role override set.',
-        );
+        _showSmallNotice('${_rowDisplayName(row)} had no role override set.');
       }
       return;
     }
@@ -57708,14 +58705,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final role = (data['role'] ?? target['role'] ?? '').toString().trim();
     if (role.isEmpty) {
       _insertAssistantChatText(
-          'I need a role value to apply (vocals, drums, bass, guitar, synth, other).');
+        'I need a role value to apply (vocals, drums, bass, guitar, synth, other).',
+      );
       return;
     }
 
     final applied = _chatPipeline.setRoleOverride(rowIndex: row, role: role);
     if (!applied) {
       _insertAssistantChatText(
-          'Unsupported role "$role". Use vocals, drums, bass, guitar, synth, or other.');
+        'Unsupported role "$role". Use vocals, drums, bass, guitar, synth, or other.',
+      );
       return;
     }
 
@@ -57726,9 +58725,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       });
       _scheduleProjectAutosave();
     }
-    _showSmallNotice(
-      '${_rowDisplayName(row)} role override set to $roleText.',
-    );
+    _showSmallNotice('${_rowDisplayName(row)} role override set to $roleText.');
   }
 
   Future<void> _applyAudioEnhancementAction(Map<String, dynamic> data) async {
@@ -57739,7 +58736,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         operation != 'voice_clean' &&
         operation != 'cleanup') {
       _insertAssistantChatText(
-          'Unsupported audio enhancement operation "$operation".');
+        'Unsupported audio enhancement operation "$operation".',
+      );
       return;
     }
 
@@ -57751,15 +58749,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       clipIndices = <int>[_timelinePrimarySelectedClipIndex];
     }
     clipIndices = clipIndices
-        .where((index) =>
-            index >= 0 &&
-            index < _audioTracks.length &&
-            !_audioTracks[index].isMidi)
+        .where(
+          (index) =>
+              index >= 0 &&
+              index < _audioTracks.length &&
+              !_audioTracks[index].isMidi,
+        )
         .toSet()
         .toList(growable: false);
     if (clipIndices.isEmpty) {
       _insertAssistantChatText(
-          'Select an audio recording first, then ask me to clean it up.');
+        'Select an audio recording first, then ask me to clean it up.',
+      );
       return;
     }
 
@@ -57915,7 +58916,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_audioTracks.length + 2 > kNumClips) {
       if (showInlineFailureNotice) {
         _showSmallNotice(
-            "Max number of audio clips reached ($kNumClips). Unable to add more clips.");
+          "Max number of audio clips reached ($kNumClips). Unable to add more clips.",
+        );
       }
       return false;
     }
@@ -57934,8 +58936,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final stem = p.basenameWithoutExtension(source.path);
     final ts = DateTime.now().millisecondsSinceEpoch;
     final vocalFile = File(p.join(audioDir.path, '${stem}_vocals_$ts.wav'));
-    final instrumentalFile =
-        File(p.join(audioDir.path, '${stem}_instrumental_$ts.wav'));
+    final instrumentalFile = File(
+      p.join(audioDir.path, '${stem}_instrumental_$ts.wav'),
+    );
 
     if (showInlineFailureNotice) {
       _showSmallNotice('Splitting stems...');
@@ -58457,8 +59460,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             ); // need this so that you can make a compound undo action while preserving execute order
             groupedActions.add(finalAct);
 
-            _mixHighlighter
-                .trigger([HaloKey('row:$row'), HaloKey('row:$row:mixer')]);
+            _mixHighlighter.trigger([
+              HaloKey('row:$row'),
+              HaloKey('row:$row:mixer'),
+            ]);
 
             final summary =
                 '• Adjusted Gain from ${_gainToDb(oldGain)} to ${_gainToDb(newGain)} on ${targetDisplayNameForRow(row)} •';
@@ -58496,8 +59501,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               final deltaSigned = (a.data['delta'] as num).toDouble();
 
               final oldPanSigned = (oldPan01 * 2.0) - 1.0;
-              final newPanSigned =
-                  (oldPanSigned + deltaSigned).clamp(-1.0, 1.0);
+              final newPanSigned = (oldPanSigned + deltaSigned).clamp(
+                -1.0,
+                1.0,
+              );
               newPan01 = ((newPanSigned + 1.0) * 0.5).clamp(0.0, 1.0);
             }
 
@@ -58627,10 +59634,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 fallbackRows: rowCandidates,
               );
               for (final row in rowTargets) {
-                final effects =
-                    await JuceAudioEngine.getTrackEffectsForRow(row);
-                final idx = effects
-                    .indexWhere((e) => e.toLowerCase().contains(contains));
+                final effects = await JuceAudioEngine.getTrackEffectsForRow(
+                  row,
+                );
+                final idx = effects.indexWhere(
+                  (e) => e.toLowerCase().contains(contains),
+                );
                 if (idx == -1) continue;
                 final effectName = effects[idx];
                 final beforeCount = effects.length;
@@ -58649,7 +59658,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     await JuceAudioEngine.getTrackEffectsForRow(row);
                 final removed = afterEffects.length < beforeCount ||
                     !afterEffects.any(
-                        (e) => e.toLowerCase() == effectName.toLowerCase());
+                      (e) => e.toLowerCase() == effectName.toLowerCase(),
+                    );
                 if (!removed) continue;
                 groupedActions.add(act);
                 _mixHighlighter.trigger([
@@ -58671,8 +59681,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             EditorUndoAction? appliedAction;
             for (final row in rowCandidates) {
               final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
-              final idx =
-                  effects.indexWhere((e) => e.toLowerCase().contains(contains));
+              final idx = effects.indexWhere(
+                (e) => e.toLowerCase().contains(contains),
+              );
               if (idx == -1) continue;
               final effectName = effects[idx];
               final beforeCount = effects.length;
@@ -58687,11 +59698,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 },
               );
               await _undoManager.executeWithoutAdd(act);
-              final afterEffects =
-                  await JuceAudioEngine.getTrackEffectsForRow(row);
+              final afterEffects = await JuceAudioEngine.getTrackEffectsForRow(
+                row,
+              );
               final removed = afterEffects.length < beforeCount ||
-                  !afterEffects
-                      .any((e) => e.toLowerCase() == effectName.toLowerCase());
+                  !afterEffects.any(
+                    (e) => e.toLowerCase() == effectName.toLowerCase(),
+                  );
               if (!removed) {
                 continue;
               }
@@ -58728,8 +59741,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final contains =
                 (a.data['effect_name_contains'] as String).toLowerCase();
             final effects = await JuceAudioEngine.getMasterEffects();
-            final idx =
-                effects.indexWhere((e) => e.toLowerCase().contains(contains));
+            final idx = effects.indexWhere(
+              (e) => e.toLowerCase().contains(contains),
+            );
             if (idx == -1) continue;
 
             final finalAct = RemoveMasterEffectAction(
@@ -58777,8 +59791,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             var appliedCount = 0;
             for (final row in rowTargets) {
               final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
-              final already =
-                  effects.indexWhere((e) => e.toLowerCase().contains(contains));
+              final already = effects.indexWhere(
+                (e) => e.toLowerCase().contains(contains),
+              );
               if (already != -1) {
                 appliedCount += 1;
                 groupedActions.addAll(
@@ -58797,8 +59812,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 },
               );
               await _undoManager.executeWithoutAdd(act);
-              final afterEffects =
-                  await JuceAudioEngine.getTrackEffectsForRow(row);
+              final afterEffects = await JuceAudioEngine.getTrackEffectsForRow(
+                row,
+              );
               final inserted = afterEffects.length > beforeCount &&
                   afterEffects.any(
                     (e) =>
@@ -58833,8 +59849,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           EditorUndoAction? appliedAction;
           for (final row in rowCandidates) {
             final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
-            final already =
-                effects.indexWhere((e) => e.toLowerCase().contains(contains));
+            final already = effects.indexWhere(
+              (e) => e.toLowerCase().contains(contains),
+            );
             if (already != -1) {
               appliedRow = row;
               break;
@@ -58850,8 +59867,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               },
             );
             await _undoManager.executeWithoutAdd(act);
-            final afterEffects =
-                await JuceAudioEngine.getTrackEffectsForRow(row);
+            final afterEffects = await JuceAudioEngine.getTrackEffectsForRow(
+              row,
+            );
             final inserted = afterEffects.length > beforeCount &&
                 afterEffects.any(
                   (e) =>
@@ -58896,8 +59914,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final contains =
                 (a.data['effect_name_contains'] as String).toLowerCase();
             final effects = await JuceAudioEngine.getMasterEffects();
-            final already =
-                effects.indexWhere((e) => e.toLowerCase().contains(contains));
+            final already = effects.indexWhere(
+              (e) => e.toLowerCase().contains(contains),
+            );
             if (already != -1) {
               groupedActions.addAll(
                 await _ensureAiCanonicalChainOrderOnMaster(),
@@ -58927,9 +59946,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
             await _undoManager.executeWithoutAdd(finalAct);
             groupedActions.add(finalAct);
-            groupedActions.addAll(
-              await _ensureAiCanonicalChainOrderOnMaster(),
-            );
+            groupedActions.addAll(await _ensureAiCanonicalChainOrderOnMaster());
 
             emitActionSummary('• Added $effectName to Master Bus •');
             continue;
@@ -58995,8 +60012,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 if (a.data.containsKey('value_norm') &&
                     pMin != null &&
                     pMax != null) {
-                  final vn =
-                      (a.data['value_norm'] as num).toDouble().clamp(0.0, 1.0);
+                  final vn = (a.data['value_norm'] as num).toDouble().clamp(
+                        0.0,
+                        1.0,
+                      );
                   next = pMin + (pMax - pMin) * vn;
                 } else {
                   next = (a.data['value'] as num).toDouble();
@@ -59080,8 +60099,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   (_toActionDouble(picked['interval']) ?? 0.0).abs();
               final currentInstanceIds =
                   await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
-              final currentIndex =
-                  currentInstanceIds.indexOf(resolved.effectInstanceId!);
+              final currentIndex = currentInstanceIds.indexOf(
+                resolved.effectInstanceId!,
+              );
               if (currentIndex < 0) {
                 throw StateError('mix_effect_identity_missing');
               }
@@ -59096,8 +60116,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   .where((parameter) => parameter['id'] == paramId)
                   .firstOrNull;
               final appliedValue = _toActionDouble(appliedParameter?['value']);
-              final normalizedValue =
-                  _toActionDouble(appliedParameter?['valueNormalized']);
+              final normalizedValue = _toActionDouble(
+                appliedParameter?['valueNormalized'],
+              );
               if (appliedValue == null ||
                   normalizedValue == null ||
                   (appliedValue - next).abs() >
@@ -59134,7 +60155,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 HaloKey('row:$row:fx_list'),
                 HaloKey('row:$row:fx_index:$currentIndex'),
                 HaloKey(
-                    'row:$row:fx_index:$currentIndex:param:$paramId'), // TODO: put paramName instead of paramId maybe
+                  'row:$row:fx_index:$currentIndex:param:$paramId',
+                ), // TODO: put paramName instead of paramId maybe
               ]);
 
               emitActionSummary(
@@ -59193,8 +60215,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               if (a.data.containsKey('value_norm') &&
                   pMin != null &&
                   pMax != null) {
-                final vn =
-                    (a.data['value_norm'] as num).toDouble().clamp(0.0, 1.0);
+                final vn = (a.data['value_norm'] as num).toDouble().clamp(
+                      0.0,
+                      1.0,
+                    );
                 next = pMin + (pMax - pMin) * vn;
               } else {
                 next = (a.data['value'] as num).toDouble();
@@ -59265,8 +60289,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 .where((parameter) => parameter['id'] == paramId)
                 .firstOrNull;
             final appliedValue = _toActionDouble(appliedParameter?['value']);
-            final normalizedValue =
-                _toActionDouble(appliedParameter?['valueNormalized']);
+            final normalizedValue = _toActionDouble(
+              appliedParameter?['valueNormalized'],
+            );
             if (appliedValue == null ||
                 normalizedValue == null ||
                 (appliedValue - next).abs() >
@@ -59450,7 +60475,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   String? _aiObservabilityString(
-      Map<String, dynamic> observability, String key) {
+    Map<String, dynamic> observability,
+    String key,
+  ) {
     final value = observability[key]?.toString().trim() ?? '';
     return value.isEmpty ? null : value;
   }
@@ -59633,10 +60660,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     String? fallbackErrorCode,
   }) async {
     final observability = _aiObservabilityFromMeta(meta);
-    final runtimeConfigFingerprint =
-        _aiObservabilityString(observability, 'runtime_config_fingerprint');
-    final hasSystemPromptOverride =
-        _aiObservabilityBool(observability, 'has_system_prompt_override');
+    final runtimeConfigFingerprint = _aiObservabilityString(
+      observability,
+      'runtime_config_fingerprint',
+    );
+    final hasSystemPromptOverride = _aiObservabilityBool(
+      observability,
+      'has_system_prompt_override',
+    );
     final modelName = _aiObservabilityString(observability, 'effective_model');
     final latencyMs = _aiFirstInt(<Object?>[
       observability['provider_roundtrip_ms'],
@@ -59688,10 +60719,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }) async {
     final observability = _aiObservabilityFromMeta(meta);
     final modelName = _aiObservabilityString(observability, 'effective_model');
-    final runtimeConfigFingerprint =
-        _aiObservabilityString(observability, 'runtime_config_fingerprint');
-    final hasSystemPromptOverride =
-        _aiObservabilityBool(observability, 'has_system_prompt_override');
+    final runtimeConfigFingerprint = _aiObservabilityString(
+      observability,
+      'runtime_config_fingerprint',
+    );
+    final hasSystemPromptOverride = _aiObservabilityBool(
+      observability,
+      'has_system_prompt_override',
+    );
     final event = AnalyticsEvents.aiPromptCycleCompleted(
       projectId: projectId,
       aiFeature: aiFeature,
@@ -59701,35 +60736,49 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       runtimeConfigFingerprint: runtimeConfigFingerprint,
       hasSystemPromptOverride: hasSystemPromptOverride,
       projectStatsMs: _aiObservabilityInt(observability, 'project_stats_ms'),
-      proxyRoundtripMs:
-          _aiObservabilityInt(observability, 'proxy_roundtrip_ms'),
+      proxyRoundtripMs: _aiObservabilityInt(
+        observability,
+        'proxy_roundtrip_ms',
+      ),
       responseParseMs: _aiObservabilityInt(observability, 'response_parse_ms'),
       mixPlanMs: _aiObservabilityInt(observability, 'mix_plan_ms'),
-      mixModelHeuristicMs:
-          _aiObservabilityInt(observability, 'mix_model_heuristic_ms'),
+      mixModelHeuristicMs: _aiObservabilityInt(
+        observability,
+        'mix_model_heuristic_ms',
+      ),
       mixModelOnnxMs: _aiObservabilityInt(observability, 'mix_model_onnx_ms'),
       applyMixMs: applyMixMs,
       promptCycleTotalMs: promptCycleTotalMs,
       openAiApiMs: _aiObservabilityInt(observability, 'openai_api_ms'),
-      providerRoundtripMs:
-          _aiObservabilityInt(observability, 'provider_roundtrip_ms'),
-      responseNormalizeMs:
-          _aiObservabilityInt(observability, 'response_normalize_ms'),
-      proxyHandlerMsTotal:
-          _aiObservabilityInt(observability, 'proxy_handler_ms_total'),
+      providerRoundtripMs: _aiObservabilityInt(
+        observability,
+        'provider_roundtrip_ms',
+      ),
+      responseNormalizeMs: _aiObservabilityInt(
+        observability,
+        'response_normalize_ms',
+      ),
+      proxyHandlerMsTotal: _aiObservabilityInt(
+        observability,
+        'proxy_handler_ms_total',
+      ),
       tokensPrompt: _aiUsagePromptTokens(meta),
       tokensCompletion: _aiUsageCompletionTokens(meta),
       tokensTotal: _aiUsageTotalTokens(meta),
       cachedPromptTokens: _aiUsageCachedPromptTokens(meta),
       estimatedCostUsd: _aiUsageEstimatedCostUsd(meta),
-      mixMagnitudeModelSource:
-          _aiObservabilityString(observability, 'mix_magnitude_model_source'),
+      mixMagnitudeModelSource: _aiObservabilityString(
+        observability,
+        'mix_magnitude_model_source',
+      ),
       mixMagnitudeModelBundleVersion: _aiObservabilityString(
         observability,
         'mix_magnitude_model_bundle_version',
       ),
-      mixApplyModelVersion:
-          _aiObservabilityString(observability, 'mix_apply_model_version'),
+      mixApplyModelVersion: _aiObservabilityString(
+        observability,
+        'mix_apply_model_version',
+      ),
       mixMagnitudeRegressorVersion: _aiObservabilityString(
         observability,
         'mix_magnitude_regressor_version',
@@ -59750,10 +60799,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }) async {
     final observability = _aiObservabilityFromMeta(meta);
     final modelName = _aiObservabilityString(observability, 'effective_model');
-    final runtimeConfigFingerprint =
-        _aiObservabilityString(observability, 'runtime_config_fingerprint');
-    final hasSystemPromptOverride =
-        _aiObservabilityBool(observability, 'has_system_prompt_override');
+    final runtimeConfigFingerprint = _aiObservabilityString(
+      observability,
+      'runtime_config_fingerprint',
+    );
+    final hasSystemPromptOverride = _aiObservabilityBool(
+      observability,
+      'has_system_prompt_override',
+    );
     await AnalyticsService.instance.track(
       AnalyticsEvents.aiPromptCycleFailed(
         projectId: projectId,
@@ -59765,36 +60818,52 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         runtimeConfigFingerprint: runtimeConfigFingerprint,
         hasSystemPromptOverride: hasSystemPromptOverride,
         projectStatsMs: _aiObservabilityInt(observability, 'project_stats_ms'),
-        proxyRoundtripMs:
-            _aiObservabilityInt(observability, 'proxy_roundtrip_ms'),
-        responseParseMs:
-            _aiObservabilityInt(observability, 'response_parse_ms'),
+        proxyRoundtripMs: _aiObservabilityInt(
+          observability,
+          'proxy_roundtrip_ms',
+        ),
+        responseParseMs: _aiObservabilityInt(
+          observability,
+          'response_parse_ms',
+        ),
         mixPlanMs: _aiObservabilityInt(observability, 'mix_plan_ms'),
-        mixModelHeuristicMs:
-            _aiObservabilityInt(observability, 'mix_model_heuristic_ms'),
+        mixModelHeuristicMs: _aiObservabilityInt(
+          observability,
+          'mix_model_heuristic_ms',
+        ),
         mixModelOnnxMs: _aiObservabilityInt(observability, 'mix_model_onnx_ms'),
         applyMixMs: applyMixMs,
         promptCycleTotalMs: promptCycleTotalMs,
         openAiApiMs: _aiObservabilityInt(observability, 'openai_api_ms'),
-        providerRoundtripMs:
-            _aiObservabilityInt(observability, 'provider_roundtrip_ms'),
-        responseNormalizeMs:
-            _aiObservabilityInt(observability, 'response_normalize_ms'),
-        proxyHandlerMsTotal:
-            _aiObservabilityInt(observability, 'proxy_handler_ms_total'),
+        providerRoundtripMs: _aiObservabilityInt(
+          observability,
+          'provider_roundtrip_ms',
+        ),
+        responseNormalizeMs: _aiObservabilityInt(
+          observability,
+          'response_normalize_ms',
+        ),
+        proxyHandlerMsTotal: _aiObservabilityInt(
+          observability,
+          'proxy_handler_ms_total',
+        ),
         tokensPrompt: _aiUsagePromptTokens(meta),
         tokensCompletion: _aiUsageCompletionTokens(meta),
         tokensTotal: _aiUsageTotalTokens(meta),
         cachedPromptTokens: _aiUsageCachedPromptTokens(meta),
         estimatedCostUsd: _aiUsageEstimatedCostUsd(meta),
-        mixMagnitudeModelSource:
-            _aiObservabilityString(observability, 'mix_magnitude_model_source'),
+        mixMagnitudeModelSource: _aiObservabilityString(
+          observability,
+          'mix_magnitude_model_source',
+        ),
         mixMagnitudeModelBundleVersion: _aiObservabilityString(
           observability,
           'mix_magnitude_model_bundle_version',
         ),
-        mixApplyModelVersion:
-            _aiObservabilityString(observability, 'mix_apply_model_version'),
+        mixApplyModelVersion: _aiObservabilityString(
+          observability,
+          'mix_apply_model_version',
+        ),
         mixMagnitudeRegressorVersion: _aiObservabilityString(
           observability,
           'mix_magnitude_regressor_version',
@@ -60089,8 +61158,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     aiDebugBlock('prompt-debug', 'AI prompt cycle', b.toString());
   }
 
-  Map<String, dynamic>? _pickParam(List<Map<String, dynamic>> params,
-      {String? exactName, List<String>? containsAny}) {
+  Map<String, dynamic>? _pickParam(
+    List<Map<String, dynamic>> params, {
+    String? exactName,
+    List<String>? containsAny,
+  }) {
     final lowerExact = exactName?.toLowerCase();
 
     Map<String, dynamic>? best;
@@ -60195,9 +61267,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (effectIndex >= 0 &&
             effectIndex < effectIds.length &&
             effectIds[effectIndex].trim().isNotEmpty) {
-          final rawParameters =
-              await JuceAudioEngine.getMasterPluginParameters(effectIndex)
-                  .timeout(_kAiMixEffectProbeTimeout);
+          final rawParameters = await JuceAudioEngine.getMasterPluginParameters(
+            effectIndex,
+          ).timeout(_kAiMixEffectProbeTimeout);
           final parameters = exposedEffectParameters(
             effects[effectIndex],
             rawParameters,
@@ -60230,9 +61302,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final maxRows = math.max(_rowCount, 1);
 
     final rowGain = List<double>.generate(
-        maxRows, (i) => i < _rowGain.length ? _rowGain[i] : _kGainUiUnity);
+      maxRows,
+      (i) => i < _rowGain.length ? _rowGain[i] : _kGainUiUnity,
+    );
     final rowPan = List<double>.generate(
-        maxRows, (i) => i < _rowPan.length ? _rowPan[i] : 0.5);
+      maxRows,
+      (i) => i < _rowPan.length ? _rowPan[i] : 0.5,
+    );
     final rowAutomation = List<List<AutomationPoint>>.generate(maxRows, (i) {
       if (i < _rowVolumeAutomation.length) {
         return _rowVolumeAutomation[i]
@@ -60242,8 +61318,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return [AutomationPoint(x: 0.0, volume: 1.0)];
     });
 
-    final builder =
-        ProjectStateBuilder(classifier: _classifier, maxRows: maxRows);
+    final builder = ProjectStateBuilder(
+      classifier: _classifier,
+      maxRows: maxRows,
+    );
     final aiTrackGroups = await _trackGroupsForAiProjectState();
     final projectState = await builder.build(
       audioTracks: _audioTracks,
@@ -60278,11 +61356,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       'captured_at': DateTime.now().toUtc().toIso8601String(),
       'tempo_bpm': _tempo,
       'project_state': projectState.toJson(),
-      'master': {
-        'gain': _masterGain,
-        'pan': _masterPan,
-        'effects': masterFx,
-      },
+      'master': {'gain': _masterGain, 'pan': _masterPan, 'effects': masterFx},
     };
   }
 
@@ -60291,10 +61365,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     unawaited(
       _producerCollector.recordManualEdit(
         kind: kind,
-        payload: {
-          ...payload,
-          'at': DateTime.now().toUtc().toIso8601String(),
-        },
+        payload: {...payload, 'at': DateTime.now().toUtc().toIso8601String()},
         projectId: _projectId,
         projectName: _projectName,
         projectDir: _projectDir,
@@ -60454,10 +61525,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         const SizedBox(height: 7),
                         for (final line in detailLines)
                           Padding(
-                            padding: const EdgeInsets.only(
-                              left: 22,
-                              bottom: 5,
-                            ),
+                            padding: const EdgeInsets.only(left: 22, bottom: 5),
                             child: Text(
                               line,
                               style: TextStyle(
@@ -60639,9 +61707,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (displayText.isEmpty) return;
     _insertSystemChatText(
       displayText,
-      metadata: const <String, dynamic>{
-        'source': 'ai_chat_failure',
-      },
+      metadata: const <String, dynamic>{'source': 'ai_chat_failure'},
     );
   }
 
@@ -60723,8 +61789,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // Ordering note for source-coverage tests:
     // _insertAssistantChatText(reply.message);
     // await _applyAssistantActions(reply.assistantActions);
-    final assistantMessagesBefore =
-        _chatTextMessageCount(authorId: 'assistant');
+    final assistantMessagesBefore = _chatTextMessageCount(
+      authorId: 'assistant',
+    );
 
     var actionsApplied = true;
     if (reply.hasAssistantActions) {
@@ -60770,10 +61837,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               'effects': _aiV3RowEffectsJson(index),
               'automation': index < _rowVolumeAutomation.length
                   ? _rowVolumeAutomation[index]
-                      .map((point) => <String, dynamic>{
-                            'x': point.x,
-                            'value': point.volume,
-                          })
+                      .map(
+                        (point) => <String, dynamic>{
+                          'x': point.x,
+                          'value': point.volume,
+                        },
+                      )
                       .toList(growable: false)
                   : const <Map<String, dynamic>>[],
             },
@@ -60819,12 +61888,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               if (_audioTracks[index].isMidi)
                 'midi_notes': _audioTracks[index]
                     .midiNotes
-                    .map((note) => <String, dynamic>{
-                          'pitch': note.pitch,
-                          'start_beat': note.startBeat,
-                          'length_beats': note.lengthBeats,
-                          'velocity': note.velocity,
-                        })
+                    .map(
+                      (note) => <String, dynamic>{
+                        'pitch': note.pitch,
+                        'start_beat': note.startBeat,
+                        'length_beats': note.lengthBeats,
+                        'velocity': note.velocity,
+                      },
+                    )
                     .toList(growable: false),
             },
         ],
@@ -60964,9 +62035,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     final actions = rawActions
         .whereType<Map>()
-        .map((value) => AssistantAction.fromJson(
-              Map<String, dynamic>.from(value),
-            ))
+        .map(
+          (value) => AssistantAction.fromJson(Map<String, dynamic>.from(value)),
+        )
         .where((action) => action.type.isNotEmpty)
         .toList(growable: false);
     if (actions.length != rawActions.length) {
@@ -60976,6 +62047,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     final expectations = await _captureAiV3Expectations(actions);
+    final workflowRuntime = AiV3WorkflowRuntime();
     final executionSummariesByCommandId = <String, List<String>>{};
     final deferredActionNotices = <String>[];
     final deferredExecutionNotices = <String>[];
@@ -61005,6 +62077,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             chatFlowId: chatFlowId,
             v3RuntimeExpectations: expectations,
             v3ExecutionSummariesByCommandId: executionSummariesByCommandId,
+            v3WorkflowRuntime: workflowRuntime,
           );
           if (!applied) throw StateError('v3_action_not_fully_applied');
         }),
@@ -61019,7 +62092,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         rollback: (action) => action.undo(),
         commit: (captured) async {
           final persistentActions = captured
-              .where((action) => action is! _AiV3TransportRollbackAction)
+              .where(
+                (action) => action is! _AiV3TransportRollbackAction,
+              )
               .toList(growable: false);
           if (persistentActions.isEmpty) return;
           await _undoManager.addWithoutExecute(
@@ -61081,6 +62156,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         Map<String, dynamic>> catch (error, stackTrace) {
       releaseTransactionNoticeCapture();
       if (executionStopwatch.isRunning) executionStopwatch.stop();
+      final artifactCleanupComplete =
+          await workflowRuntime.deleteGeneratedArtifacts();
       try {
         await _refreshAiV3ExpectedEffectSnapshots(expectations);
       } catch (refreshError) {
@@ -61099,12 +62176,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           'observed_mutations': error.observed,
           'verification': 'failed',
           'rollback': error.rollbackIncomplete ? 'incomplete' : 'complete',
+          'artifact_cleanup':
+              artifactCleanupComplete ? 'complete' : 'incomplete',
           'execution_elapsed_ms': executionStopwatch.elapsedMilliseconds,
         },
       );
       _reportAiChatFailure(error, stackTrace, stage: 'v3_execution');
       _insertAiFailureSystemText(
-        error.rollbackIncomplete
+        error.rollbackIncomplete || !artifactCleanupComplete
             ? 'The changes failed and could not be fully rolled back. Review the project state.'
             : _aiV3RolledBackFailureMessage(error.cause),
       );
@@ -61166,12 +62245,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final simulatedMidiNotes = <String, List<Map<String, dynamic>>>{
       for (final clip in _audioTracks)
         clip.clipId: clip.midiNotes
-            .map((note) => <String, dynamic>{
-                  'pitch': note.pitch,
-                  'start_beat': note.startBeat,
-                  'length_beats': note.lengthBeats,
-                  'velocity': note.velocity,
-                })
+            .map(
+              (note) => <String, dynamic>{
+                'pitch': note.pitch,
+                'start_beat': note.startBeat,
+                'length_beats': note.lengthBeats,
+                'velocity': note.velocity,
+              },
+            )
             .toList(growable: false),
     };
     final originalClipRowIdByClipId = <String, int>{
@@ -61266,7 +62347,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             expectedDeletedRows += 1;
             final deletedRowIndex = _rowIndexForId(rowId);
             final deletedClipIds = simulatedAliveClipIds
-                .where((clipId) => originalClipRowIdByClipId[clipId] == rowId)
+                .where(
+                  (clipId) => originalClipRowIdByClipId[clipId] == rowId,
+                )
                 .toSet();
             expectedDeletedClips += deletedClipIds.length;
             simulatedAliveClipIds.removeAll(deletedClipIds);
@@ -61294,8 +62377,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               'group_id': data['group_id'],
               'name': data['name'],
               'member_row_ids': List<int>.from(data['row_ids'] as List),
-              'expected_row_order':
-                  List<int>.from(data['expected_row_order'] as List),
+              'expected_row_order': List<int>.from(
+                data['expected_row_order'] as List,
+              ),
             });
           } else if (operation == 'remove_row') {
             expectations.add(<String, dynamic>{
@@ -61417,7 +62501,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           final targetClipId = target['clip_id']?.toString().trim() ?? '';
           final index = targetClipId.isEmpty
               ? _toActionInt(target['clip_index'])
-              : _audioTracks.indexWhere((clip) => clip.clipId == targetClipId);
+              : _audioTracks.indexWhere(
+                  (clip) => clip.clipId == targetClipId,
+                );
           if (index == null || index < 0 || index >= _audioTracks.length) break;
           final clip = _audioTracks[index];
           final simulated = simulatedClipBounds[clip.clipId];
@@ -61432,18 +62518,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               'start': nextStart,
               'end': nextStart + (clipEnd - clipStart),
             };
-            expectations.removeWhere((expectation) =>
-                (expectation['kind'] == 'clip_start' ||
-                    expectation['kind'] == 'clip_bounds') &&
-                expectation['clip_id'] == clip.clipId);
+            expectations.removeWhere(
+              (expectation) =>
+                  (expectation['kind'] == 'clip_start' ||
+                      expectation['kind'] == 'clip_bounds') &&
+                  expectation['clip_id'] == clip.clipId,
+            );
             expectations.add(<String, dynamic>{
               'kind': 'clip_bounds',
               'clip_id': clip.clipId,
               'start': nextStart,
               'end': nextStart + (clipEnd - clipStart),
             });
-            final alignmentOffset =
-                _toActionDouble(data['new_alignment_offset_ms']);
+            final alignmentOffset = _toActionDouble(
+              data['new_alignment_offset_ms'],
+            );
             if (alignmentOffset != null) {
               _addAiV3Expectation(expectations, <String, dynamic>{
                 'kind': 'clip_alignment_offset',
@@ -61462,20 +62551,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               'start': expectedStart,
               'end': expectedEnd,
             };
-            expectations.removeWhere((expectation) =>
-                (expectation['kind'] == 'clip_start' ||
-                    expectation['kind'] == 'clip_bounds') &&
-                expectation['clip_id'] == clip.clipId);
+            expectations.removeWhere(
+              (expectation) =>
+                  (expectation['kind'] == 'clip_start' ||
+                      expectation['kind'] == 'clip_bounds') &&
+                  expectation['clip_id'] == clip.clipId,
+            );
             expectations.add(<String, dynamic>{
               'kind': 'clip_bounds',
               'clip_id': clip.clipId,
               'start': expectedStart,
               'end': expectedEnd,
             });
-            final expectedTrimStart =
-                _toActionDouble(data['expected_trim_start_ms']);
-            final expectedTrimEnd =
-                _toActionDouble(data['expected_trim_end_ms']);
+            final expectedTrimStart = _toActionDouble(
+              data['expected_trim_start_ms'],
+            );
+            final expectedTrimEnd = _toActionDouble(
+              data['expected_trim_end_ms'],
+            );
             if (expectedTrimStart != null && expectedTrimEnd != null) {
               _addAiV3Expectation(expectations, <String, dynamic>{
                 'kind': 'clip_trim',
@@ -61491,22 +62584,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               'start': clipStart,
               'end': cut,
             };
-            expectations.removeWhere((expectation) =>
-                (expectation['kind'] == 'clip_start' ||
-                    expectation['kind'] == 'clip_bounds') &&
-                expectation['clip_id'] == clip.clipId);
+            expectations.removeWhere(
+              (expectation) =>
+                  (expectation['kind'] == 'clip_start' ||
+                      expectation['kind'] == 'clip_bounds') &&
+                  expectation['clip_id'] == clip.clipId,
+            );
             expectations.add(<String, dynamic>{
               'kind': 'clip_bounds',
               'clip_id': clip.clipId,
               'start': clipStart,
               'end': cut,
             });
-            expectations.add(_aiV3CreatedClipExpectation(
-              clip: clip,
-              row: clip.rowIndex,
-              start: cut,
-              length: clipEnd - cut,
-            ));
+            expectations.add(
+              _aiV3CreatedClipExpectation(
+                clip: clip,
+                row: clip.rowIndex,
+                start: cut,
+                length: clipEnd - cut,
+              ),
+            );
             expectedNewClips += 1;
             recordCreatedClipForRow(clip.rowId, 1);
           } else if (operation == 'duplicate') {
@@ -61516,21 +62613,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final start =
                 (_toActionDouble(data['paste_start_ms']) ?? clipStart * 1000) /
                     1000.0;
-            expectations.add(_aiV3CreatedClipExpectation(
-              clip: clip,
-              row: destinationRow,
-              start: start,
-              length: clipEnd - clipStart,
-            ));
+            expectations.add(
+              _aiV3CreatedClipExpectation(
+                clip: clip,
+                row: destinationRow,
+                start: start,
+                length: clipEnd - clipStart,
+              ),
+            );
             expectedNewClips += 1;
             recordCreatedClipForRow(rowIdForIndex(destinationRow), 1);
           } else if (operation == 'delete') {
             clipBoundsMutationIds.add(clip.clipId);
-            expectations.removeWhere((expectation) =>
-                (expectation['kind'] == 'clip_start' ||
-                    expectation['kind'] == 'clip_bounds' ||
-                    expectation['kind'] == 'midi_notes') &&
-                expectation['clip_id'] == clip.clipId);
+            expectations.removeWhere(
+              (expectation) =>
+                  (expectation['kind'] == 'clip_start' ||
+                      expectation['kind'] == 'clip_bounds' ||
+                      expectation['kind'] == 'midi_notes') &&
+                  expectation['clip_id'] == clip.clipId,
+            );
             expectations.add(<String, dynamic>{
               'kind': 'clip_absent',
               'clip_id': clip.clipId,
@@ -61558,9 +62659,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               'start': clipStart,
               'end': clipStart + durationSeconds,
             };
-            expectations.removeWhere((expectation) =>
-                expectation['kind'] == 'clip_bounds' &&
-                expectation['clip_id'] == clip.clipId);
+            expectations.removeWhere(
+              (expectation) =>
+                  expectation['kind'] == 'clip_bounds' &&
+                  expectation['clip_id'] == clip.clipId,
+            );
             expectations.add(<String, dynamic>{
               'kind': 'clip_bounds',
               'clip_id': clip.clipId,
@@ -61578,12 +62681,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               'kind': 'clip_stretch',
               'clip_id': clip.clipId,
               'length': durationSeconds,
-              'preserve_pitch':
-                  _toActionBool(data['preserve_pitch'], fallback: true),
-              'warp_mode': _toActionBool(
+              'preserve_pitch': _toActionBool(
                 data['preserve_pitch'],
                 fallback: true,
-              )
+              ),
+              'warp_mode': _toActionBool(data['preserve_pitch'], fallback: true)
                   ? kTempoWarpModeComplex
                   : kTempoWarpModeRepitch,
             });
@@ -61604,9 +62706,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 'start': clipStart,
                 'end': clipStart + expectedLength,
               };
-              expectations.removeWhere((expectation) =>
-                  expectation['kind'] == 'clip_bounds' &&
-                  expectation['clip_id'] == clip.clipId);
+              expectations.removeWhere(
+                (expectation) =>
+                    expectation['kind'] == 'clip_bounds' &&
+                    expectation['clip_id'] == clip.clipId,
+              );
               if (!projectTempoChanges) {
                 expectations.add(<String, dynamic>{
                   'kind': 'clip_bounds',
@@ -61642,9 +62746,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               'start': clipStart,
               'end': clipStart + expectedLength,
             };
-            expectations.removeWhere((expectation) =>
-                expectation['kind'] == 'clip_bounds' &&
-                expectation['clip_id'] == clip.clipId);
+            expectations.removeWhere(
+              (expectation) =>
+                  expectation['kind'] == 'clip_bounds' &&
+                  expectation['clip_id'] == clip.clipId,
+            );
             if (!projectTempoChanges) {
               expectations.add(<String, dynamic>{
                 'kind': 'clip_bounds',
@@ -61706,11 +62812,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               final currentNotes =
                   simulatedMidiNotes[clipId] ?? const <Map<String, dynamic>>[];
               final nextNotes = currentNotes
-                  .map((note) => <String, dynamic>{
-                        ...note,
-                        'pitch': ((note['pitch'] as num).toInt() + semitones)
-                            .clamp(0, 127),
-                      })
+                  .map(
+                    (note) => <String, dynamic>{
+                      ...note,
+                      'pitch': ((note['pitch'] as num).toInt() + semitones)
+                          .clamp(0, 127),
+                    },
+                  )
                   .toList(growable: false);
               simulatedMidiNotes[clipId] = nextNotes;
               _addAiV3Expectation(expectations, <String, dynamic>{
@@ -61724,12 +62832,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             if (clipId.isNotEmpty && simulatedAliveClipIds.contains(clipId)) {
               final nextNotes = (data['notes'] as List? ?? const <Object>[])
                   .whereType<Map>()
-                  .map((note) => <String, dynamic>{
-                        'pitch': _toActionInt(note['pitch']),
-                        'start_beat': _toActionDouble(note['start_beat']),
-                        'length_beats': _toActionDouble(note['length_beats']),
-                        'velocity': _toActionDouble(note['velocity']),
-                      })
+                  .map(
+                    (note) => <String, dynamic>{
+                      'pitch': _toActionInt(note['pitch']),
+                      'start_beat': _toActionDouble(note['start_beat']),
+                      'length_beats': _toActionDouble(note['length_beats']),
+                      'velocity': _toActionDouble(note['velocity']),
+                    },
+                  )
                   .toList(growable: false);
               simulatedMidiNotes[clipId] = nextNotes;
               _addAiV3Expectation(expectations, <String, dynamic>{
@@ -61737,8 +62847,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 'clip_id': clipId,
                 'value': nextNotes,
               });
-              final finalLengthBeats =
-                  _toActionDouble(data['final_length_beats']);
+              final finalLengthBeats = _toActionDouble(
+                data['final_length_beats'],
+              );
               final bounds = simulatedClipBounds[clipId];
               if (finalLengthBeats != null &&
                   finalLengthBeats.isFinite &&
@@ -61773,6 +62884,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final lengthBeats = _toActionDouble(data['length_beats']) ?? 0.0;
             expectations.add(<String, dynamic>{
               'kind': 'midi_clip_created',
+              if ((data['command_id']?.toString().trim() ?? '').isNotEmpty)
+                'producer_command_id': data['command_id'].toString().trim(),
               'before_clip_ids':
                   _audioTracks.map((clip) => clip.clipId).toList(),
               'row': targetRow,
@@ -61783,12 +62896,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       .toString(),
               'notes': (data['notes'] as List? ?? const <Object>[])
                   .whereType<Map>()
-                  .map((note) => <String, dynamic>{
-                        'pitch': _toActionInt(note['pitch']),
-                        'start_beat': _toActionDouble(note['start_beat']),
-                        'length_beats': _toActionDouble(note['length_beats']),
-                        'velocity': _toActionDouble(note['velocity']),
-                      })
+                  .map(
+                    (note) => <String, dynamic>{
+                      'pitch': _toActionInt(note['pitch']),
+                      'start_beat': _toActionDouble(note['start_beat']),
+                      'length_beats': _toActionDouble(note['length_beats']),
+                      'velocity': _toActionDouble(note['velocity']),
+                    },
+                  )
                   .toList(growable: false),
             });
             expectedNewClips += 1;
@@ -61805,9 +62920,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final resolvedPath = await _resolveAiLibrarySamplePath(logicalPath);
             final sourcePath = resolvedPath ?? logicalPath;
             sampleItems.add(<String, dynamic>{
-              'row': _toActionInt(
-                item['row_index'] ?? itemTarget['row_index'],
-              ),
+              'row': _toActionInt(item['row_index'] ?? itemTarget['row_index']),
               'start': (_toActionDouble(item['start_ms']) ?? 0.0) / 1000.0,
               'file': sourcePath.isEmpty
                   ? sourcePath
@@ -61842,9 +62955,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             throw StateError('v3_effect_instance_expectation_row_missing');
           }
           var chainExpectation = expectations
-              .where((candidate) =>
-                  candidate['kind'] == 'effect_chain_exact' &&
-                  candidate['row'] == row)
+              .where(
+                (candidate) =>
+                    candidate['kind'] == 'effect_chain_exact' &&
+                    candidate['row'] == row,
+              )
               .firstOrNull;
           if (chainExpectation == null) {
             chainExpectation = <String, dynamic>{
@@ -61896,14 +63011,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   target['automation_target_id']?.toString() ?? 'volume',
               'points': (data['points'] as List? ?? const <Object>[])
                   .whereType<Map>()
-                  .map((point) => <String, dynamic>{
-                        'x': _toActionDouble(
-                          point['time_ms'] ?? point['x_ms'] ?? point['x'],
-                        ),
-                        'value': _toActionDouble(
-                          point['value'] ?? point['volume'],
-                        ),
-                      })
+                  .map(
+                    (point) => <String, dynamic>{
+                      'x': _toActionDouble(
+                        point['time_ms'] ?? point['x_ms'] ?? point['x'],
+                      ),
+                      'value': _toActionDouble(
+                        point['value'] ?? point['volume'],
+                      ),
+                    },
+                  )
                   .toList(growable: false),
             });
           }
@@ -62030,6 +63147,76 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         expectation['row_id'] = _rowIdAt(row);
       }
       _addAiV3Expectation(expectations, expectation);
+    }
+  }
+
+  void _composeAiV3RuntimeExpectationsForTempo(
+    List<Map<String, dynamic>> expectations, {
+    required double previousBpm,
+    required double nextBpm,
+  }) {
+    if ((previousBpm - nextBpm).abs() < 0.0001) return;
+
+    for (final expectation in expectations) {
+      final rawSourcePayload = expectation['source_payload'];
+      if (rawSourcePayload is Map) {
+        final sourcePayload = Map<String, dynamic>.from(rawSourcePayload);
+        final offset = _toActionDouble(sourcePayload['offset']);
+        if (offset != null) {
+          sourcePayload['offset'] = remapTimelineSecondsForTempoChange(
+            offset,
+            previousBpm: previousBpm,
+            nextBpm: nextBpm,
+          );
+        }
+        final rawAutomation = sourcePayload['automation'];
+        if (rawAutomation is List) {
+          sourcePayload['automation'] = rawAutomation.map((rawPoint) {
+            if (rawPoint is! Map) return rawPoint;
+            final point = Map<String, dynamic>.from(rawPoint);
+            final x = _toActionDouble(point['x']);
+            if (x != null) {
+              point['x'] = remapTimelineMillisecondsForTempoChange(
+                x,
+                previousBpm: previousBpm,
+                nextBpm: nextBpm,
+              );
+            }
+            return point;
+          }).toList(growable: false);
+        }
+        expectation['source_payload'] = sourcePayload;
+      }
+
+      if (expectation['kind'] == 'stems_separated') {
+        final start = _toActionDouble(expectation['start']);
+        if (start != null) {
+          expectation['start'] = remapTimelineSecondsForTempoChange(
+            start,
+            previousBpm: previousBpm,
+            nextBpm: nextBpm,
+          );
+        }
+      }
+
+      if (expectation['kind'] == 'midi_clip_created') {
+        final start = _toActionDouble(expectation['start']);
+        final length = _toActionDouble(expectation['length']);
+        if (start != null) {
+          expectation['start'] = remapTimelineSecondsForTempoChange(
+            start,
+            previousBpm: previousBpm,
+            nextBpm: nextBpm,
+          );
+        }
+        if (length != null) {
+          expectation['length'] = remapTimelineSecondsForTempoChange(
+            length,
+            previousBpm: previousBpm,
+            nextBpm: nextBpm,
+          );
+        }
+      }
     }
   }
 
@@ -62185,16 +63372,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               return effectIdentity.contains(normalizedNeedle);
             });
           }
-          expectations.removeWhere((expectation) =>
-              expectation['kind'] == 'mix_effect_presence' &&
-              expectation['master'] == false &&
-              expectation['row'] == row &&
-              expectation['needle'] == needle);
-          if (type == 'ensure_effect') {
-            expectations.removeWhere((expectation) =>
-                expectation['kind'] == 'mix_effects_empty' &&
+          expectations.removeWhere(
+            (expectation) =>
+                expectation['kind'] == 'mix_effect_presence' &&
                 expectation['master'] == false &&
-                expectation['row'] == row);
+                expectation['row'] == row &&
+                expectation['needle'] == needle,
+          );
+          if (type == 'ensure_effect') {
+            expectations.removeWhere(
+              (expectation) =>
+                  expectation['kind'] == 'mix_effects_empty' &&
+                  expectation['master'] == false &&
+                  expectation['row'] == row,
+            );
           }
           expectations.add(<String, dynamic>{
             'kind': 'mix_effect_presence',
@@ -62222,14 +63413,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               return effectIdentity.contains(normalizedNeedle);
             });
           }
-          expectations.removeWhere((expectation) =>
-              expectation['kind'] == 'mix_effect_presence' &&
-              expectation['master'] == true &&
-              expectation['needle'] == needle);
+          expectations.removeWhere(
+            (expectation) =>
+                expectation['kind'] == 'mix_effect_presence' &&
+                expectation['master'] == true &&
+                expectation['needle'] == needle,
+          );
           if (type == 'ensure_master_effect') {
-            expectations.removeWhere((expectation) =>
-                expectation['kind'] == 'mix_effects_empty' &&
-                expectation['master'] == true);
+            expectations.removeWhere(
+              (expectation) =>
+                  expectation['kind'] == 'mix_effects_empty' &&
+                  expectation['master'] == true,
+            );
           }
           expectations.add(<String, dynamic>{
             'kind': 'mix_effect_presence',
@@ -62240,12 +63435,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           break;
         case 'hard_reset_row_fx':
           if (row != null) {
-            expectations.removeWhere((expectation) =>
-                (expectation['kind'] == 'mix_effect_presence' ||
-                    expectation['kind'] == 'mix_effect_parameter_resolved' ||
-                    expectation['kind'] == 'mix_effects_empty') &&
-                expectation['master'] == false &&
-                expectation['row'] == row);
+            expectations.removeWhere(
+              (expectation) =>
+                  (expectation['kind'] == 'mix_effect_presence' ||
+                      expectation['kind'] == 'mix_effect_parameter_resolved' ||
+                      expectation['kind'] == 'mix_effects_empty') &&
+                  expectation['master'] == false &&
+                  expectation['row'] == row,
+            );
             expectations.add(<String, dynamic>{
               'kind': 'mix_effects_empty',
               'row': row,
@@ -62254,11 +63451,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           }
           break;
         case 'hard_reset_master_fx':
-          expectations.removeWhere((expectation) =>
-              (expectation['kind'] == 'mix_effect_presence' ||
-                  expectation['kind'] == 'mix_effect_parameter_resolved' ||
-                  expectation['kind'] == 'mix_effects_empty') &&
-              expectation['master'] == true);
+          expectations.removeWhere(
+            (expectation) =>
+                (expectation['kind'] == 'mix_effect_presence' ||
+                    expectation['kind'] == 'mix_effect_parameter_resolved' ||
+                    expectation['kind'] == 'mix_effects_empty') &&
+                expectation['master'] == true,
+          );
           expectations.add(const <String, dynamic>{
             'kind': 'mix_effects_empty',
             'master': true,
@@ -62279,20 +63478,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (row < 0 || row >= _rows.length) return const <Map<String, dynamic>>[];
     return (_rowEffectSnapshotsByRowId[_rows[row].rowId]?.effects ??
             const <EffectSnapshot>[])
-        .map((effect) => <String, dynamic>{
-              'effect_id': effect.effectId,
-              'display_name': effect.displayName,
-              'bypassed': effect.bypassed,
-              'params': effect.params,
-            })
+        .map(
+          (effect) => <String, dynamic>{
+            'effect_id': effect.effectId,
+            'display_name': effect.displayName,
+            'bypassed': effect.bypassed,
+            'params': effect.params,
+          },
+        )
         .toList(growable: false);
   }
 
   Future<List<Map<String, dynamic>>> _aiV3NativeRowEffectChain(int row) async {
     final names = await JuceAudioEngine.getTrackEffectsForRow(row);
     final effectIds = await JuceAudioEngine.getTrackEffectIdsForRow(row);
-    final instanceIds =
-        await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
+    final instanceIds = await JuceAudioEngine.getTrackEffectInstanceIdsForRow(
+      row,
+    );
     if (effectIds.length != names.length ||
         instanceIds.length != names.length ||
         instanceIds.any((value) => value.trim().isEmpty)) {
@@ -62304,13 +63506,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         names[index],
         await JuceAudioEngine.getTrackPluginParameters(row, index),
       )
-          .map((parameter) => <String, dynamic>{
-                'id': parameter['id'],
-                'name': parameter['name'],
-                'type': parameter['type'],
-                'value': parameter['value'],
-                'valueNormalized': parameter['valueNormalized'],
-              })
+          .map(
+            (parameter) => <String, dynamic>{
+              'id': parameter['id'],
+              'name': parameter['name'],
+              'type': parameter['type'],
+              'value': parameter['value'],
+              'valueNormalized': parameter['valueNormalized'],
+            },
+          )
           .toList(growable: false);
       result.add(<String, dynamic>{
         'effect_instance_id': instanceIds[index],
@@ -62325,12 +63529,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   List<Map<String, dynamic>> _aiV3MasterEffectsJson() =>
       _masterEffectSnapshot.effects
-          .map((effect) => <String, dynamic>{
-                'effect_id': effect.effectId,
-                'display_name': effect.displayName,
-                'bypassed': effect.bypassed,
-                'params': effect.params,
-              })
+          .map(
+            (effect) => <String, dynamic>{
+              'effect_id': effect.effectId,
+              'display_name': effect.displayName,
+              'bypassed': effect.bypassed,
+              'params': effect.params,
+            },
+          )
           .toList(growable: false);
 
   Future<void> _refreshAiV3ExpectedEffectSnapshots(
@@ -62387,12 +63593,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (clip.isMidi) 'instrument_id': clip.instrumentId,
         if (clip.isMidi)
           'midi_notes': clip.midiNotes
-              .map((note) => <String, dynamic>{
-                    'pitch': note.pitch,
-                    'start_beat': note.startBeat,
-                    'length_beats': note.lengthBeats,
-                    'velocity': note.velocity,
-                  })
+              .map(
+                (note) => <String, dynamic>{
+                  'pitch': note.pitch,
+                  'start_beat': note.startBeat,
+                  'length_beats': note.lengthBeats,
+                  'velocity': note.velocity,
+                },
+              )
               .toList(growable: false),
       };
 
@@ -62538,8 +63746,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           break;
         case 'group_collapsed':
           final group = _trackGroups
-              .where((candidate) =>
-                  candidate.id == expectation['group_id'].toString())
+              .where(
+                (candidate) =>
+                    candidate.id == expectation['group_id'].toString(),
+              )
               .firstOrNull;
           if (group == null ||
               group.collapsed != (expectation['collapsed'] == true)) {
@@ -62562,8 +63772,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               jsonEncode(expectation['effect_chain'])) {
             return false;
           }
-          final expectedPresets =
-              Map<String, dynamic>.from(expectation['clip_presets'] as Map);
+          final expectedPresets = Map<String, dynamic>.from(
+            expectation['clip_presets'] as Map,
+          );
           for (final entry in expectedPresets.entries) {
             final clipIndex = _clipIndexForPersistentId(entry.key);
             if (!_isValidClipIndex(clipIndex) ||
@@ -62695,8 +63906,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   _aiV3ExpectationRow(expectation),
                 );
           final needle = expectation['needle'].toString().toLowerCase();
-          final present =
-              effects.any((effect) => effect.toLowerCase().contains(needle));
+          final present = effects.any(
+            (effect) => effect.toLowerCase().contains(needle),
+          );
           if (present != (expectation['present'] == true)) return false;
           break;
         case 'mix_effects_empty':
@@ -62761,8 +63973,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final row = _aiV3ExpectationRow(expectation);
             final instanceIds =
                 await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
-            final effectIds =
-                await JuceAudioEngine.getTrackEffectIdsForRow(row);
+            final effectIds = await JuceAudioEngine.getTrackEffectIdsForRow(
+              row,
+            );
             final expectedInstanceId =
                 expectation['effect_instance_id']?.toString();
             effectIndex = instanceIds.indexOf(expectedInstanceId ?? '');
@@ -62779,11 +63992,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   effectIndex,
                 );
           final parameterId = expectation['parameter_id']?.toString() ?? '';
-          final parameter = parameters.cast<Map<String, dynamic>>().where(
-            (candidate) {
-              return candidate['id']?.toString() == parameterId;
-            },
-          ).firstOrNull;
+          final parameter = parameters.cast<Map<String, dynamic>>().where((
+            candidate,
+          ) {
+            return candidate['id']?.toString() == parameterId;
+          }).firstOrNull;
           final actual = parameter?['valueNormalized'];
           final parameterMin = _toActionDouble(parameter?['min']);
           final parameterMax = _toActionDouble(parameter?['max']);
@@ -62981,25 +64194,32 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           final before = (expectation['before_clip_ids'] as List)
               .map((id) => '$id')
               .toSet();
-          final candidates = _audioTracks.where((clip) =>
-              !before.contains(clip.clipId) &&
-              clip.isMidi &&
-              clip.rowIndex == expectation['row'] &&
-              (clip.offset - (expectation['start'] as num).toDouble()).abs() <=
-                  0.002 &&
-              (_clipTimelineDurationMs(clip) / 1000.0 -
-                          (expectation['length'] as num).toDouble())
-                      .abs() <=
-                  0.002 &&
-              clip.instrumentId == expectation['instrument_id']);
+          final candidates = _audioTracks.where(
+            (clip) =>
+                !before.contains(clip.clipId) &&
+                (expectation['runtime_clip_id'] == null ||
+                    clip.clipId == expectation['runtime_clip_id']) &&
+                clip.isMidi &&
+                clip.rowIndex == expectation['row'] &&
+                (clip.offset - (expectation['start'] as num).toDouble())
+                        .abs() <=
+                    0.002 &&
+                (_clipTimelineDurationMs(clip) / 1000.0 -
+                            (expectation['length'] as num).toDouble())
+                        .abs() <=
+                    0.002 &&
+                clip.instrumentId == expectation['instrument_id'],
+          );
           if (candidates.length != 1) return false;
           final actualNotes = candidates.single.midiNotes
-              .map((note) => <String, dynamic>{
-                    'pitch': note.pitch,
-                    'start_beat': note.startBeat,
-                    'length_beats': note.lengthBeats,
-                    'velocity': note.velocity,
-                  })
+              .map(
+                (note) => <String, dynamic>{
+                  'pitch': note.pitch,
+                  'start_beat': note.startBeat,
+                  'length_beats': note.lengthBeats,
+                  'velocity': note.velocity,
+                },
+              )
               .toList(growable: false);
           if (jsonEncode(actualNotes) != jsonEncode(expectation['notes'])) {
             return false;
@@ -63030,9 +64250,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             return false;
           }
           final matches = _audioTracks
-              .where(
-                (clip) => clip.clipId == expectation['result_clip_id'],
-              )
+              .where((clip) => clip.clipId == expectation['result_clip_id'])
               .toList(growable: false);
           if (matches.length != 1) return false;
           final clip = matches.single;
@@ -63065,25 +64283,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           break;
         case 'stems_separated':
           final sourceMatches = _audioTracks
-              .where(
-                (clip) => clip.clipId == expectation['source_clip_id'],
-              )
+              .where((clip) => clip.clipId == expectation['source_clip_id'])
               .toList(growable: false);
           if (sourceMatches.length != 1 ||
               !_aiV3ClipMatchesPersistedPayload(
                 sourceMatches.single,
-                Map<String, dynamic>.from(
-                  expectation['source_payload'] as Map,
-                ),
+                Map<String, dynamic>.from(expectation['source_payload'] as Map),
               ) ||
               _rowCount != expectation['expected_row_count'] ||
               _audioTracks.length != expectation['expected_clip_count']) {
             return false;
           }
           final vocalsMatches = _audioTracks
-              .where(
-                (clip) => clip.clipId == expectation['vocals_clip_id'],
-              )
+              .where((clip) => clip.clipId == expectation['vocals_clip_id'])
               .toList(growable: false);
           final instrumentalMatches = _audioTracks
               .where(
@@ -63107,14 +64319,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               .where(beforeRowIds.contains)
               .toList(growable: false);
           final vocalsFile = File(expectation['vocals_file'].toString());
-          final instrumentalFile =
-              File(expectation['instrumental_file'].toString());
+          final instrumentalFile = File(
+            expectation['instrumental_file'].toString(),
+          );
           bool neutral(AudioTrack clip) =>
               !clip.isMidi &&
               clip.gain == kDefaultGainUi &&
               !clip.normalizeVolume &&
               (clip.normalizeGain - 1.0).abs() <= epsilon &&
-              clip.pitchSemitones.abs() <= epsilon &&
               !clip.isReversed &&
               !clip.stretchToProjectTempo &&
               clip.volumeAutomation.every(
@@ -63155,22 +64367,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           break;
         case 'audio_converted_to_midi':
           final sourceMatches = _audioTracks
-              .where(
-                (clip) => clip.clipId == expectation['source_clip_id'],
-              )
+              .where((clip) => clip.clipId == expectation['source_clip_id'])
               .toList(growable: false);
           final resultMatches = _audioTracks
-              .where(
-                (clip) => clip.clipId == expectation['result_clip_id'],
-              )
+              .where((clip) => clip.clipId == expectation['result_clip_id'])
               .toList(growable: false);
           if (sourceMatches.length != 1 ||
               resultMatches.length != 1 ||
               !_aiV3ClipMatchesPersistedPayload(
                 sourceMatches.single,
-                Map<String, dynamic>.from(
-                  expectation['source_payload'] as Map,
-                ),
+                Map<String, dynamic>.from(expectation['source_payload'] as Map),
               ) ||
               _rowCount != expectation['expected_row_count'] ||
               _audioTracks.length != expectation['expected_clip_count']) {
@@ -63189,12 +64395,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               .where(beforeRowIds.contains)
               .toList(growable: false);
           final actualNotes = result.midiNotes
-              .map((note) => <String, dynamic>{
-                    'pitch': note.pitch,
-                    'start_beat': note.startBeat,
-                    'length_beats': note.lengthBeats,
-                    'velocity': note.velocity,
-                  })
+              .map(
+                (note) => <String, dynamic>{
+                  'pitch': note.pitch,
+                  'start_beat': note.startBeat,
+                  'length_beats': note.lengthBeats,
+                  'velocity': note.velocity,
+                },
+              )
               .toList(growable: false);
           if (!_isValidRowIndex(sourceRow) ||
               !result.isMidi ||
@@ -63225,11 +64433,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               .toList(growable: true);
           for (final raw in expectation['items'] as List) {
             final item = Map<String, dynamic>.from(raw as Map);
-            final index = unmatched.indexWhere((clip) =>
-                clip.rowIndex == item['row'] &&
-                (clip.offset - (item['start'] as num).toDouble()).abs() <=
-                    0.002 &&
-                clip.file.path == item['file']);
+            final index = unmatched.indexWhere(
+              (clip) =>
+                  clip.rowIndex == item['row'] &&
+                  (clip.offset - (item['start'] as num).toDouble()).abs() <=
+                      0.002 &&
+                  clip.file.path == item['file'],
+            );
             if (index < 0) return false;
             unmatched.removeAt(index);
           }
@@ -63245,12 +64455,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           if (index < 0) return false;
           final actual = _audioTracks[index]
               .midiNotes
-              .map((note) => <String, dynamic>{
-                    'pitch': note.pitch,
-                    'start_beat': note.startBeat,
-                    'length_beats': note.lengthBeats,
-                    'velocity': note.velocity,
-                  })
+              .map(
+                (note) => <String, dynamic>{
+                  'pitch': note.pitch,
+                  'start_beat': note.startBeat,
+                  'length_beats': note.lengthBeats,
+                  'velocity': note.velocity,
+                },
+              )
               .toList(growable: false);
           if (jsonEncode(actual) != jsonEncode(expectation['value']))
             return false;
@@ -63295,9 +64507,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return true;
   }
 
-  List<AudioTrack> _aiV3MatchingCreatedClips(
-    Map<String, dynamic> expectation,
-  ) {
+  List<AudioTrack> _aiV3MatchingCreatedClips(Map<String, dynamic> expectation) {
     final before = (expectation['before_clip_ids'] as List? ?? const <Object>[])
         .map((value) => value.toString())
         .toSet();
@@ -63320,12 +64530,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (expectedMidi) {
         if (clip.instrumentId != expectedInstrument) return false;
         final actualNotes = clip.midiNotes
-            .map((note) => <String, dynamic>{
-                  'pitch': note.pitch,
-                  'start_beat': note.startBeat,
-                  'length_beats': note.lengthBeats,
-                  'velocity': note.velocity,
-                })
+            .map(
+              (note) => <String, dynamic>{
+                'pitch': note.pitch,
+                'start_beat': note.startBeat,
+                'length_beats': note.lengthBeats,
+                'velocity': note.velocity,
+              },
+            )
             .toList(growable: false);
         if (jsonEncode(actualNotes) != jsonEncode(expectedMidiNotes)) {
           return false;
@@ -63502,9 +64714,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               : <String, dynamic>{
                   'effect_chain': await _aiV3NativeRowEffectChain(row),
                   'clip_presets': <String, String>{
-                    for (final clipId in (expectation['clip_presets'] as Map)
-                        .keys
-                        .map((value) => value.toString()))
+                    for (final clipId
+                        in (expectation['clip_presets'] as Map).keys.map(
+                              (value) => value.toString(),
+                            ))
                       if (_clipIndexForPersistentId(clipId) >= 0)
                         clipId: _audioTracks[_clipIndexForPersistentId(clipId)]
                             .audioEnhancementPreset,
@@ -63646,9 +64859,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ];
           break;
         case 'clip_created':
-          item['value'] = _aiV3MatchingCreatedClips(expectation)
-              .map((clip) => clip.clipId)
-              .toList(growable: false);
+          item['value'] = _aiV3MatchingCreatedClips(
+            expectation,
+          ).map((clip) => clip.clipId).toList(growable: false);
           break;
         case 'midi_clip_created':
           final before = (expectation['before_clip_ids'] as List)
@@ -63656,16 +64869,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               .toSet();
           item['value'] = _audioTracks
               .where((clip) => !before.contains(clip.clipId) && clip.isMidi)
-              .map((clip) => <String, dynamic>{
-                    'clip_id': clip.clipId,
-                    'row': clip.rowIndex,
-                    'start': clip.offset,
-                    'length': _clipTimelineDurationMs(clip) / 1000.0,
-                    'instrument_id': clip.instrumentId,
-                    'notes': clip.midiNotes
-                        .map((note) => note.toJson())
-                        .toList(growable: false),
-                  })
+              .map(
+                (clip) => <String, dynamic>{
+                  'clip_id': clip.clipId,
+                  'row': clip.rowIndex,
+                  'start': clip.offset,
+                  'length': _clipTimelineDurationMs(clip) / 1000.0,
+                  'instrument_id': clip.instrumentId,
+                  'notes': clip.midiNotes
+                      .map((note) => note.toJson())
+                      .toList(growable: false),
+                },
+              )
               .toList(growable: false);
           break;
         case 'sample_replaced':
@@ -63696,10 +64911,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   'audio_enhancement_preset':
                       matches.single.audioEnhancementPreset,
                   'automation': matches.single.volumeAutomation
-                      .map((point) => <String, dynamic>{
-                            'x': point.x,
-                            'volume': point.volume,
-                          })
+                      .map(
+                        (point) => <String, dynamic>{
+                          'x': point.x,
+                          'volume': point.volume,
+                        },
+                      )
                       .toList(growable: false),
                 };
           break;
@@ -63745,7 +64962,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   'vocals_row_id': _audioTracks[vocalsIndex].rowId,
                   'instrumental_row_id': _audioTracks[instrumentalIndex].rowId,
                   'start': _audioTracks[vocalsIndex].offset,
-                  'length': _clipTimelineDurationSec(_audioTracks[vocalsIndex]),
+                  'length': _clipTimelineDurationSec(
+                    _audioTracks[vocalsIndex],
+                  ),
                   'selected':
                       _timelinePrimarySelectedClipIndex == instrumentalIndex,
                 };
@@ -63761,7 +64980,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   'result_row_id': _audioTracks[resultIndex].rowId,
                   'instrument_id': _audioTracks[resultIndex].instrumentId,
                   'start': _audioTracks[resultIndex].offset,
-                  'length': _clipTimelineDurationSec(_audioTracks[resultIndex]),
+                  'length': _clipTimelineDurationSec(
+                    _audioTracks[resultIndex],
+                  ),
                   'note_count': _audioTracks[resultIndex].midiNotes.length,
                   'analysis_model': expectation['analysis_model'],
                   'analysis_elapsed_ms': expectation['analysis_elapsed_ms'],
@@ -63774,12 +64995,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               .toSet();
           item['value'] = _audioTracks
               .where((clip) => !before.contains(clip.clipId) && !clip.isMidi)
-              .map((clip) => <String, dynamic>{
-                    'clip_id': clip.clipId,
-                    'row': clip.rowIndex,
-                    'start': clip.offset,
-                    'file': clip.file.path,
-                  })
+              .map(
+                (clip) => <String, dynamic>{
+                  'clip_id': clip.clipId,
+                  'row': clip.rowIndex,
+                  'start': clip.offset,
+                  'file': clip.file.path,
+                },
+              )
               .toList(growable: false);
           break;
         case 'clip_absent':
@@ -63795,13 +65018,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               ? null
               : _audioTracks[index]
                   .midiNotes
-                  .map((note) => <String, dynamic>{
-                        'id': note.id,
-                        'pitch': note.pitch,
-                        'start_beat': note.startBeat,
-                        'length_beats': note.lengthBeats,
-                        'velocity': note.velocity,
-                      })
+                  .map(
+                    (note) => <String, dynamic>{
+                      'id': note.id,
+                      'pitch': note.pitch,
+                      'start_beat': note.startBeat,
+                      'length_beats': note.lengthBeats,
+                      'velocity': note.velocity,
+                    },
+                  )
                   .toList(growable: false);
           break;
         case 'effect':
@@ -63812,8 +65037,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           }
           final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
           final needle = expectation['value'].toString().toLowerCase();
-          final effectIndex =
-              effects.indexWhere((effect) => effect.toLowerCase() == needle);
+          final effectIndex = effects.indexWhere(
+            (effect) => effect.toLowerCase() == needle,
+          );
           item['effects'] = effects;
           item['value'] = effectIndex < 0
               ? null
@@ -63834,10 +65060,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   targetId,
                   _pointsForAutomationTarget(row, targetId),
                 )
-                  .map((point) => <String, dynamic>{
-                        'x': point.x,
-                        'value': point.volume,
-                      })
+                  .map(
+                    (point) => <String, dynamic>{
+                      'x': point.x,
+                      'value': point.volume,
+                    },
+                  )
                   .toList(growable: false)
               : null;
           break;
@@ -63851,8 +65079,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Object? stableValue(Object? value) {
       if (value is Map) {
         final entries = value.entries.toList()
-          ..sort((left, right) =>
-              left.key.toString().compareTo(right.key.toString()));
+          ..sort(
+            (left, right) =>
+                left.key.toString().compareTo(right.key.toString()),
+          );
         return <String, dynamic>{
           for (final entry in entries)
             entry.key.toString(): stableValue(entry.value),
@@ -63906,10 +65136,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           'group_id': index < _rows.length ? _rows[index].groupId : null,
           'automation': index < _rowVolumeAutomation.length
               ? _rowVolumeAutomation[index]
-                  .map((point) => <String, dynamic>{
-                        'x': point.x,
-                        'value': point.volume,
-                      })
+                  .map(
+                    (point) => <String, dynamic>{
+                      'x': point.x,
+                      'value': point.volume,
+                    },
+                  )
                   .toList(growable: false)
               : const <Map<String, dynamic>>[],
           'effects': index < _rows.length
@@ -63923,40 +65155,44 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       'clips': _audioTracks
           .asMap()
           .entries
-          .map((entry) => <String, dynamic>{
-                'clip_index': entry.key,
-                'clip_id': entry.value.clipId,
-                'engine_clip_id': entry.value.engineClipId,
-                'row_index': entry.value.rowIndex,
-                'row_id': entry.value.rowId,
-                'kind': entry.value.clipKind.wireName,
-                'offset': entry.value.offset,
-                'trim_start_ms': entry.value.trimStart.inMilliseconds,
-                'trim_end_ms': entry.value.trimEnd.inMilliseconds,
-                'gain': entry.value.gain,
-                'pitch_semitones': entry.value.pitchSemitones,
-                'reversed': entry.value.isReversed,
-                'stretch_to_tempo': entry.value.stretchToProjectTempo,
-                'instrument_id': entry.value.instrumentId,
-                'instrument_params': stableValue(entry.value.instrumentParams),
-                'midi_notes': entry.value.midiNotes
-                    .map((note) => note.toJson())
-                    .toList(growable: false),
-              })
+          .map(
+            (entry) => <String, dynamic>{
+              'clip_index': entry.key,
+              'clip_id': entry.value.clipId,
+              'engine_clip_id': entry.value.engineClipId,
+              'row_index': entry.value.rowIndex,
+              'row_id': entry.value.rowId,
+              'kind': entry.value.clipKind.wireName,
+              'offset': entry.value.offset,
+              'trim_start_ms': entry.value.trimStart.inMilliseconds,
+              'trim_end_ms': entry.value.trimEnd.inMilliseconds,
+              'gain': entry.value.gain,
+              'pitch_semitones': entry.value.pitchSemitones,
+              'reversed': entry.value.isReversed,
+              'stretch_to_tempo': entry.value.stretchToProjectTempo,
+              'instrument_id': entry.value.instrumentId,
+              'instrument_params': stableValue(entry.value.instrumentParams),
+              'midi_notes': entry.value.midiNotes
+                  .map((note) => note.toJson())
+                  .toList(growable: false),
+            },
+          )
           .toList(growable: false),
       'groups': _trackGroups
-          .map((group) => <String, dynamic>{
-                'id': group.id,
-                'name': group.name,
-                'color': group.color,
-                'row_ids': List<int>.from(group.rowIds),
-                'gain': group.gain,
-                'pan': group.pan,
-                'muted': group.muted,
-                'soloed': group.soloed,
-                'collapsed': group.collapsed,
-                'effects': group.effects.map(effect).toList(growable: false),
-              })
+          .map(
+            (group) => <String, dynamic>{
+              'id': group.id,
+              'name': group.name,
+              'color': group.color,
+              'row_ids': List<int>.from(group.rowIds),
+              'gain': group.gain,
+              'pan': group.pan,
+              'muted': group.muted,
+              'soloed': group.soloed,
+              'collapsed': group.collapsed,
+              'effects': group.effects.map(effect).toList(growable: false),
+            },
+          )
           .toList(growable: false),
       'master_effects':
           _masterEffectSnapshot.effects.map(effect).toList(growable: false),
@@ -64137,10 +65373,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
   }
 
-  Future<void> _removeChatMessage(
-    Message message, {
-    bool animated = true,
-  }) {
+  Future<void> _removeChatMessage(Message message, {bool animated = true}) {
     return _enqueueChatMutation(() async {
       final controller = _chatController;
       if (controller is InMemoryChatController) {
@@ -64187,7 +65420,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Map<String, dynamic> json,
   ) async {
     final history = ProjectChatHistory.fromJson(
-        json['assistantChat'] ?? json['chatHistory']);
+      json['assistantChat'] ?? json['chatHistory'],
+    );
     _assistantConversationSessionId = history.stateSessionId.trim();
     await _setChatMessages(
       history.toChatMessages().cast<Message>(),
@@ -64202,9 +65436,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
 
-    _scheduleProjectAutosave(
-      debounce: const Duration(milliseconds: 700),
-    );
+    _scheduleProjectAutosave(debounce: const Duration(milliseconds: 700));
   }
 
   Future<void> _persistChatHistoryOnly() async {
@@ -64464,9 +65696,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             decoration: BoxDecoration(
               color: const Color.fromRGBO(244, 244, 244, 0.08),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.07),
-              ),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
             ),
             child: Row(
               children: [
@@ -64546,8 +65776,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     ),
                   ),
                   child: Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
                     child: Text(
                       L10n.translate(dialogContext, 'View Plans'),
                       style: const TextStyle(
@@ -64626,8 +65858,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     L10n.translate(dialogContext, 'Window'),
                                     style: TextStyle(
                                       fontFamily: 'Pretendard',
-                                      color:
-                                          Colors.white.withValues(alpha: 0.62),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.62,
+                                      ),
                                       fontSize: 11.5,
                                       fontWeight: FontWeight.w700,
                                     ),
@@ -64652,8 +65885,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     textAlign: TextAlign.right,
                                     style: TextStyle(
                                       fontFamily: 'Pretendard',
-                                      color:
-                                          Colors.white.withValues(alpha: 0.62),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.62,
+                                      ),
                                       fontSize: 11.5,
                                       fontWeight: FontWeight.w700,
                                     ),
@@ -64709,15 +65943,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     Icon(
                                       Icons.schedule_rounded,
                                       size: 13,
-                                      color:
-                                          Colors.white.withValues(alpha: 0.48),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.48,
+                                      ),
                                     ),
                                     Text(
                                       '${L10n.translate(dialogContext, 'Resets')} ${_formatPromptResetAt(dialogContext, status.blockedResetAt)}',
                                       style: TextStyle(
                                         fontFamily: 'Pretendard',
-                                        color: Colors.white
-                                            .withValues(alpha: 0.62),
+                                        color: Colors.white.withValues(
+                                          alpha: 0.62,
+                                        ),
                                         fontSize: 12,
                                         height: 1.18,
                                         fontWeight: FontWeight.w600,
@@ -64776,11 +66012,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         children: [
           Padding(
             padding: const EdgeInsets.only(top: 1),
-            child: Icon(
-              icon,
-              size: 16,
-              color: iconColor,
-            ),
+            child: Icon(icon, size: 16, color: iconColor),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -64856,10 +66088,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    L10n.translate(
-                      context,
-                      'chat_help_intro',
-                    ),
+                    L10n.translate(context, 'chat_help_intro'),
                     style: TextStyle(
                       fontFamily: 'Pretendard',
                       color: Colors.white.withValues(alpha: 0.82),
@@ -64894,35 +66123,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   buildBullet(
                     icon: Icons.tune_rounded,
                     iconColor: const Color(0xFF8FD3FF),
-                    text: L10n.translate(
-                      context,
-                      'chat_help_can_mix',
-                    ),
+                    text: L10n.translate(context, 'chat_help_can_mix'),
                   ),
                   const SizedBox(height: 8),
                   buildBullet(
                     icon: Icons.content_cut_rounded,
                     iconColor: const Color(0xFF8FD3FF),
-                    text: L10n.translate(
-                      context,
-                      'chat_help_can_edit',
-                    ),
+                    text: L10n.translate(context, 'chat_help_can_edit'),
                   ),
                   const SizedBox(height: 8),
                   buildBullet(
                     icon: Icons.school_rounded,
                     iconColor: const Color(0xFF8FD3FF),
-                    text: L10n.translate(
-                      context,
-                      'chat_help_can_tools',
-                    ),
+                    text: L10n.translate(context, 'chat_help_can_tools'),
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    L10n.translate(
-                      context,
-                      'chat_help_examples',
-                    ),
+                    L10n.translate(context, 'chat_help_examples'),
                     style: TextStyle(
                       fontFamily: 'Pretendard',
                       color: Colors.white.withValues(alpha: 0.66),
@@ -64944,19 +66161,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   buildBullet(
                     icon: Icons.block_rounded,
                     iconColor: const Color(0xFFFFB27A),
-                    text: L10n.translate(
-                      context,
-                      'chat_help_cannot_generate',
-                    ),
+                    text: L10n.translate(context, 'chat_help_cannot_generate'),
                   ),
                   const SizedBox(height: 8),
                   buildBullet(
                     icon: Icons.block_rounded,
                     iconColor: const Color(0xFFFFB27A),
-                    text: L10n.translate(
-                      context,
-                      'chat_help_cannot_empty',
-                    ),
+                    text: L10n.translate(context, 'chat_help_cannot_empty'),
                   ),
                   const SizedBox(height: 14),
                   Row(
@@ -64964,9 +66175,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       const Spacer(),
                       TextButton(
                         onPressed: () => Navigator.of(dialogContext).pop(),
-                        child: Text(
-                          L10n.translate(dialogContext, 'Close'),
-                        ),
+                        child: Text(L10n.translate(dialogContext, 'Close')),
                       ),
                     ],
                   ),
@@ -65061,8 +66270,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           style: TextButton.styleFrom(
                             minimumSize: const Size(0, 44),
                             foregroundColor: const Color(0xFFF4F4F4),
-                            backgroundColor:
-                                Colors.white.withValues(alpha: 0.10),
+                            backgroundColor: Colors.white.withValues(
+                              alpha: 0.10,
+                            ),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(16),
                               side: BorderSide(
@@ -65088,8 +66298,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           style: TextButton.styleFrom(
                             minimumSize: const Size(0, 44),
                             foregroundColor: const Color(0xFFFFD0D0),
-                            backgroundColor:
-                                const Color.fromRGBO(255, 108, 108, 0.22),
+                            backgroundColor: const Color.fromRGBO(
+                              255,
+                              108,
+                              108,
+                              0.22,
+                            ),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(16),
                               side: const BorderSide(
@@ -65147,8 +66361,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .join('\n');
   }
 
-  Future<void> _setProducerDataMode(bool enabled,
-      {String closeReason = 'ui_toggle'}) async {
+  Future<void> _setProducerDataMode(
+    bool enabled, {
+    String closeReason = 'ui_toggle',
+  }) async {
     if (enabled == _producerDataMode) return;
     if (_producerUiBusy) return;
     setState(() => _producerUiBusy = true);
@@ -65160,7 +66376,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         await _producerCollector.setEnabled(true);
         await _refreshProducerPromptQueue(reshuffle: true);
         _insertAssistantChatText(
-            'Producer data mode enabled. Use the guided prompt queue to run, skip, or reshuffle prompts. Each accepted prompt captures before, AI-after, and final producer-after snapshots.');
+          'Producer data mode enabled. Use the guided prompt queue to run, skip, or reshuffle prompts. Each accepted prompt captures before, AI-after, and final producer-after snapshots.',
+        );
         _showSmallNotice('Producer capture enabled. Guided prompts loaded.');
       } else {
         if (_producerCollector.hasPendingPromptCycle) {
@@ -65198,7 +66415,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!_producerDataMode || !_producerCollector.hasPendingPromptCycle) {
       if (insertMessage) {
         _insertAssistantChatText(
-            'No producer prompt is awaiting final capture.');
+          'No producer prompt is awaiting final capture.',
+        );
         _showSmallNotice('No producer prompt is awaiting final capture.');
       }
       return;
@@ -65261,8 +66479,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         extension: 'json',
       );
       if (!mounted) return;
-      final desktopDialogTitle =
-          L10n.translate(context, 'Save producer session');
+      final desktopDialogTitle = L10n.translate(
+        context,
+        'Save producer session',
+      );
       macSavedPath = await ExportSaveDialog.saveExportedFile(
         sourceFilePath: file.path,
         suggestedFileName: suggestedFileName,
@@ -65287,7 +66507,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<String?> _saveProducerSessionToAndroidDownloads(
-      File sourceFile) async {
+    File sourceFile,
+  ) async {
     if (kIsWeb || !Platform.isAndroid) return null;
 
     try {
@@ -65310,8 +66531,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     };
 
     try {
-      final externalDownloads =
-          await getExternalStorageDirectories(type: StorageDirectory.downloads);
+      final externalDownloads = await getExternalStorageDirectories(
+        type: StorageDirectory.downloads,
+      );
       if (externalDownloads != null) {
         for (final dir in externalDownloads) {
           candidates.add(dir.path);
@@ -65324,8 +66546,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       try {
         final directory = Directory(path);
         await directory.create(recursive: true);
-        final target =
-            File(p.join(directory.path, p.basename(sourceFile.path)));
+        final target = File(
+          p.join(directory.path, p.basename(sourceFile.path)),
+        );
         await target.writeAsBytes(bytes, flush: true);
         return target.path;
       } catch (_) {}
@@ -65441,9 +66664,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .toList(growable: true);
 
     if (queue.isEmpty) {
-      queue.addAll(
-        _kProducerPromptTemplates.map((template) => template.id),
-      );
+      queue.addAll(_kProducerPromptTemplates.map((template) => template.id));
     }
     if ((_producerPromptShuffle || reshuffle) && queue.length > 1) {
       queue.shuffle();
@@ -65611,9 +66832,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               ? const Color(0xFF2E6EEB)
               : Colors.white.withOpacity(0.05),
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: selected ? Colors.white24 : Colors.white10,
-          ),
+          border: Border.all(color: selected ? Colors.white24 : Colors.white10),
         ),
         child: Text(
           label,
@@ -65780,8 +66999,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.05),
                     borderRadius: BorderRadius.circular(999),
@@ -65797,8 +67018,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   ),
                 ),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.04),
                     borderRadius: BorderRadius.circular(999),
@@ -66029,13 +67252,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           toolName: toolName,
           aiFeature: aiFeature,
           promptTraceId: promptTraceId,
-          actionTypes:
-              reply.mixing?.actions.map((action) => action.type).toList(
-                        growable: false,
-                      ) ??
-                  reply.assistantActions
-                      .map((action) => action.type)
-                      .toList(growable: false),
+          actionTypes: reply.mixing?.actions
+                  .map((action) => action.type)
+                  .toList(growable: false) ??
+              reply.assistantActions
+                  .map((action) => action.type)
+                  .toList(growable: false),
         );
       }
 
@@ -66153,9 +67375,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return false;
       }
 
-      final visibleReplyMessage = _completedAssistantReplyText(
-        reply.message,
-      );
+      final visibleReplyMessage = _completedAssistantReplyText(reply.message);
       if (!_chatExpanded && mounted && visibleReplyMessage.isNotEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -66416,8 +67636,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     const int maxEntriesPerOtherTarget = 4;
 
     String summarizeLane(
-        int row, String targetId, List<AutomationClipSnapshot> clips,
-        {required bool focused}) {
+      int row,
+      String targetId,
+      List<AutomationClipSnapshot> clips, {
+      required bool focused,
+    }) {
       final label = _automationTargetLabelFor(row, targetId);
       final sorted = _copyAutomationClipList(clips)
         ..sort((a, b) {
@@ -66669,9 +67892,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         toolName: toolName,
         aiFeature: aiFeature,
         promptTraceId: promptTraceId,
-        actionTypes: reply.mixing?.actions.map((action) => action.type).toList(
-                  growable: false,
-                ) ??
+        actionTypes: reply.mixing?.actions
+                .map((action) => action.type)
+                .toList(growable: false) ??
             reply.assistantActions
                 .map((action) => action.type)
                 .toList(growable: false),
@@ -66919,8 +68142,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     children: [
                       Row(
                         children: [
-                          const Icon(Icons.science_outlined,
-                              color: Colors.white, size: 16),
+                          const Icon(
+                            Icons.science_outlined,
+                            color: Colors.white,
+                            size: 16,
+                          ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
@@ -66937,7 +68163,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           ),
                           IconButton(
                             constraints: const BoxConstraints(
-                                minWidth: 32, minHeight: 32),
+                              minWidth: 32,
+                              minHeight: 32,
+                            ),
                             padding: EdgeInsets.zero,
                             tooltip:
                                 'Capture current producer final after-state',
@@ -66965,10 +68193,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           ),
                           IconButton(
                             constraints: const BoxConstraints(
-                                minWidth: 32, minHeight: 32),
+                              minWidth: 32,
+                              minHeight: 32,
+                            ),
                             padding: EdgeInsets.zero,
                             tooltip: L10n.translate(
-                                context, 'Export producer session'),
+                              context,
+                              'Export producer session',
+                            ),
                             onPressed: _producerDataMode
                                 ? () async {
                                     _trackUiClick(
@@ -66989,7 +68221,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           ),
                           IconButton(
                             constraints: const BoxConstraints(
-                                minWidth: 32, minHeight: 32),
+                              minWidth: 32,
+                              minHeight: 32,
+                            ),
                             padding: EdgeInsets.zero,
                             tooltip: _producerCapturePanelMinimized
                                 ? 'Expand producer capture'
@@ -67051,12 +68285,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ),
         if (usesTabletDesktopBottomRow && includeChatBar)
           Padding(
-            padding: EdgeInsets.fromLTRB(
-              16,
-              10,
-              16,
-              10,
-            ),
+            padding: EdgeInsets.fromLTRB(16, 10, 16, 10),
             child: _buildTabletDesktopBottomControlRow(
               includeTransport: includeTransport,
               chatBarKeyboardOffset: chatBarKeyboardOffset,
@@ -67146,7 +68375,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               value: !_chatExpanded || !_chatInputActive,
                             );
                             unawaited(
-                                _refreshPromptRateLimitStatus(silent: true));
+                              _refreshPromptRateLimitStatus(silent: true),
+                            );
                             if (_sampleBrowserVisible) {
                               unawaited(_stopSampleAudition());
                             }
@@ -67176,8 +68406,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               }
                               _handleDawOnboardingChatOpened();
                               if (Platform.isMacOS && !_isThinking) {
-                                WidgetsBinding.instance
-                                    .addPostFrameCallback((_) {
+                                WidgetsBinding.instance.addPostFrameCallback((
+                                  _,
+                                ) {
                                   if (!mounted) return;
                                   _chatFocusNode.requestFocus();
                                 });
@@ -67337,8 +68568,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             ? 0.125
                                             : 0.0,
                                     child: AnimatedScale(
-                                      duration:
-                                          const Duration(milliseconds: 180),
+                                      duration: const Duration(
+                                        milliseconds: 180,
+                                      ),
                                       curve: Curves.easeOutCubic,
                                       scale: (_chatExpanded ||
                                               _showAddActionsPanel)
@@ -67379,8 +68611,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               child: Center(
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
-                    maxWidth:
-                        math.min(MediaQuery.sizeOf(context).width - 24, 378),
+                    maxWidth: math.min(
+                      MediaQuery.sizeOf(context).width - 24,
+                      378,
+                    ),
                   ),
                   child: Stack(
                     clipBehavior: Clip.none,
@@ -67461,13 +68695,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           child: Container(
                                             decoration: BoxDecoration(
                                               color: const Color.fromRGBO(
-                                                  244, 244, 244, 0.30),
+                                                244,
+                                                244,
+                                                244,
+                                                0.30,
+                                              ),
                                               borderRadius:
                                                   BorderRadius.circular(24),
                                               boxShadow: const <BoxShadow>[
                                                 BoxShadow(
                                                   color: Color.fromRGBO(
-                                                      0, 0, 0, 0.17),
+                                                    0,
+                                                    0,
+                                                    0,
+                                                    0.17,
+                                                  ),
                                                   blurRadius: 12,
                                                   spreadRadius: 2,
                                                   offset: Offset(0, 1),
@@ -67562,13 +68804,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       child: Container(
                                         decoration: BoxDecoration(
                                           color: const Color.fromRGBO(
-                                              244, 244, 244, 0.30),
-                                          borderRadius:
-                                              BorderRadius.circular(24),
+                                            244,
+                                            244,
+                                            244,
+                                            0.30,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            24,
+                                          ),
                                           boxShadow: const <BoxShadow>[
                                             BoxShadow(
-                                              color:
-                                                  Color.fromRGBO(0, 0, 0, 0.17),
+                                              color: Color.fromRGBO(
+                                                0,
+                                                0,
+                                                0,
+                                                0.17,
+                                              ),
                                               blurRadius: 12,
                                               spreadRadius: 2,
                                               offset: Offset(0, 1),
@@ -67634,8 +68885,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               onTap: _onRecordPressed,
                                               radius: const BorderRadius.only(
                                                 topRight: Radius.circular(24),
-                                                bottomRight:
-                                                    Radius.circular(24),
+                                                bottomRight: Radius.circular(
+                                                  24,
+                                                ),
                                               ),
                                               iconSize: 19,
                                               iconColor:
@@ -67663,56 +68915,53 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           haloKey: const HaloKey(
                                             'tutorial:one_button_mix',
                                           ),
-                                          borderRadius:
-                                              BorderRadius.circular(24),
+                                          borderRadius: BorderRadius.circular(
+                                            24,
+                                          ),
                                           child: Material(
                                             color: Colors.transparent,
-                                            borderRadius:
-                                                BorderRadius.circular(24),
+                                            borderRadius: BorderRadius.circular(
+                                              24,
+                                            ),
                                             clipBehavior: Clip.antiAlias,
                                             child: InkWell(
                                               borderRadius:
                                                   BorderRadius.circular(24),
                                               splashFactory:
                                                   InkRipple.splashFactory,
-                                              splashColor:
-                                                  Colors.white.withValues(
-                                                alpha: 0.14,
-                                              ),
-                                              highlightColor:
-                                                  Colors.white.withValues(
-                                                alpha: 0.06,
-                                              ),
+                                              splashColor: Colors.white
+                                                  .withValues(alpha: 0.14),
+                                              highlightColor: Colors.white
+                                                  .withValues(alpha: 0.06),
                                               overlayColor: WidgetStateProperty
                                                   .resolveWith<Color?>(
-                                                (states) {
-                                                  if (states.contains(
-                                                    WidgetState.pressed,
-                                                  )) {
-                                                    return Colors.white
-                                                        .withValues(
-                                                      alpha: 0.18,
-                                                    );
-                                                  }
-                                                  if (states.contains(
-                                                    WidgetState.hovered,
-                                                  )) {
-                                                    return Colors.white
-                                                        .withValues(
-                                                      alpha: 0.08,
-                                                    );
-                                                  }
-                                                  if (states.contains(
-                                                    WidgetState.focused,
-                                                  )) {
-                                                    return Colors.white
-                                                        .withValues(
-                                                      alpha: 0.10,
-                                                    );
-                                                  }
-                                                  return Colors.transparent;
-                                                },
-                                              ),
+                                                      (states) {
+                                                if (states.contains(
+                                                  WidgetState.pressed,
+                                                )) {
+                                                  return Colors.white
+                                                      .withValues(
+                                                    alpha: 0.18,
+                                                  );
+                                                }
+                                                if (states.contains(
+                                                  WidgetState.hovered,
+                                                )) {
+                                                  return Colors.white
+                                                      .withValues(
+                                                    alpha: 0.08,
+                                                  );
+                                                }
+                                                if (states.contains(
+                                                  WidgetState.focused,
+                                                )) {
+                                                  return Colors.white
+                                                      .withValues(
+                                                    alpha: 0.10,
+                                                  );
+                                                }
+                                                return Colors.transparent;
+                                              }),
                                               onTap: () async {
                                                 final run =
                                                     await _confirmOneButtonMix(
@@ -67721,8 +68970,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                 );
                                                 if (!run) return;
 
-                                                ScaffoldMessenger.of(context)
-                                                    .showSnackBar(
+                                                ScaffoldMessenger.of(
+                                                  context,
+                                                ).showSnackBar(
                                                   SnackBar(
                                                     content: Text(
                                                       L10n.translate(
@@ -67735,8 +68985,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
                                                 await runOneButtonMix();
 
-                                                ScaffoldMessenger.of(context)
-                                                    .showSnackBar(
+                                                ScaffoldMessenger.of(
+                                                  context,
+                                                ).showSnackBar(
                                                   SnackBar(
                                                     content: Text(
                                                       L10n.translate(
@@ -67755,7 +69006,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                   color:
                                                       _kOneButtonMixAccentColor,
                                                   borderRadius:
-                                                      BorderRadius.circular(24),
+                                                      BorderRadius.circular(
+                                                    24,
+                                                  ),
                                                 ),
                                                 child: Center(
                                                   child: SizedBox(
@@ -67866,8 +69119,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_sampleBrowserVisible) {
       unawaited(_stopSampleAudition());
     }
-    final preserveSampleBrowserWindowState =
-        _usesTabletDesktopDawShell(context);
+    final preserveSampleBrowserWindowState = _usesTabletDesktopDawShell(
+      context,
+    );
     if (!_chatExpanded) {
       setState(() {
         _showAddActionsPanel = false;
@@ -68020,8 +69274,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           )
         : _kDesktopDawChatBarMaxWidth;
     final rightMargin = tabletDaw ? 16.0 : 12.0;
-    final availableRight =
-        math.max(baseRect.right, stackSize.width - rightMargin);
+    final availableRight = math.max(
+      baseRect.right,
+      stackSize.width - rightMargin,
+    );
     final targetRight = math.min(availableRight, baseRect.left + maxWidth);
     final targetWidth = math.max(baseRect.width, targetRight - baseRect.left);
     return Rect.fromLTWH(
@@ -68076,8 +69332,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             stackSize: stackSize,
             overlayContext: context,
           );
-          final tabletChatKeyboardFocused =
-              _tabletChatKeyboardBackdropActive(context);
+          final tabletChatKeyboardFocused = _tabletChatKeyboardBackdropActive(
+            context,
+          );
           return Stack(
             clipBehavior: Clip.none,
             children: [
@@ -68145,9 +69402,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }) async {
     final run = await _confirmOneButtonMix(anchorContext: anchorContext);
     if (!run) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(L10n.translate(context, 'Mixing…'))),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(L10n.translate(context, 'Mixing…'))));
     await runOneButtonMix();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -68694,7 +69951,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           if (!run) return;
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              content: Text(L10n.translate(context, 'Mixing…')),
+                              content: Text(
+                                L10n.translate(context, 'Mixing…'),
+                              ),
                             ),
                           );
                           await runOneButtonMix();
@@ -68781,20 +70040,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         splashFactory: InkRipple.splashFactory,
         splashColor: Colors.white.withValues(alpha: 0.14),
         highlightColor: Colors.white.withValues(alpha: 0.06),
-        overlayColor: WidgetStateProperty.resolveWith<Color?>(
-          (states) {
-            if (states.contains(WidgetState.pressed)) {
-              return Colors.white.withValues(alpha: 0.18);
-            }
-            if (states.contains(WidgetState.hovered)) {
-              return Colors.white.withValues(alpha: 0.08);
-            }
-            if (states.contains(WidgetState.focused)) {
-              return Colors.white.withValues(alpha: 0.10);
-            }
-            return Colors.transparent;
-          },
-        ),
+        overlayColor: WidgetStateProperty.resolveWith<Color?>((states) {
+          if (states.contains(WidgetState.pressed)) {
+            return Colors.white.withValues(alpha: 0.18);
+          }
+          if (states.contains(WidgetState.hovered)) {
+            return Colors.white.withValues(alpha: 0.08);
+          }
+          if (states.contains(WidgetState.focused)) {
+            return Colors.white.withValues(alpha: 0.10);
+          }
+          return Colors.transparent;
+        }),
         onTap: onTap,
         onLongPress: onLongPress,
         onSecondaryTap:
@@ -68906,8 +70163,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     variance /= n;
     final std = math.sqrt(math.max(variance, 0.0));
-    final threshold =
-        math.max(mean + std * thresholdStd, mean * 1.65 + 0.000015);
+    final threshold = math.max(
+      mean + std * thresholdStd,
+      mean * 1.65 + 0.000015,
+    );
 
     final minFrames = math.max(
       1,
@@ -69108,9 +70367,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           target.tempoStretchPreservePitch = snapshot.tempoStretchPreservePitch;
           target.tempoWarpMode = normalizeTempoWarpMode(snapshot.tempoWarpMode);
           _tempoStretchEnabled = snapshot.tempoStretchEnabled ??
-              _audioTracks.where((t) => !t.isMidi).any(
-                    (t) => t.stretchToProjectTempo,
-                  );
+              _audioTracks
+                  .where((t) => !t.isMidi)
+                  .any((t) => t.stretchToProjectTempo);
           _tempoStretchPreservePitchDefault =
               snapshot.tempoStretchPreservePitchDefault ??
                   _tempoStretchPreservePitchDefault;
@@ -69119,9 +70378,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             await _syncClipTimingToEngine(targetIndex);
           }
           await _syncClipMixToEngine(target);
-          _updateOverallDurationIfNeeded(
-            changedClips: <AudioTrack>[target],
-          );
+          _updateOverallDurationIfNeeded(changedClips: <AudioTrack>[target]);
           _scheduleProjectAutosave();
           if (mounted) setState(() {});
         },
@@ -69182,9 +70439,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           target.tempoStretchPreservePitch = snapshot.tempoStretchPreservePitch;
           target.tempoWarpMode = normalizeTempoWarpMode(snapshot.tempoWarpMode);
           _tempoStretchEnabled = snapshot.tempoStretchEnabled ??
-              _audioTracks.where((t) => !t.isMidi).any(
-                    (t) => t.stretchToProjectTempo,
-                  );
+              _audioTracks
+                  .where((t) => !t.isMidi)
+                  .any((t) => t.stretchToProjectTempo);
           _tempoStretchPreservePitchDefault =
               snapshot.tempoStretchPreservePitchDefault ??
                   _tempoStretchPreservePitchDefault;
@@ -69193,9 +70450,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             await _syncClipTimingToEngine(targetIndex);
           }
           await _syncClipMixToEngine(target);
-          _updateOverallDurationIfNeeded(
-            changedClips: <AudioTrack>[target],
-          );
+          _updateOverallDurationIfNeeded(changedClips: <AudioTrack>[target]);
           _scheduleProjectAutosave();
           if (mounted) setState(() {});
         },
@@ -69205,8 +70460,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-          content:
-              Text(L10n.translate(context, 'Clip tempo mode turned off.'))),
+        content: Text(L10n.translate(context, 'Clip tempo mode turned off.')),
+      ),
     );
   }
 
@@ -69218,10 +70473,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _setClipTempoFollowMode(clipIndex, preservePitch: false);
   }
 
-  Future<void> _setClipSourceTempo(
-    int clipIndex,
-    double sourceTempoBpm,
-  ) async {
+  Future<void> _setClipSourceTempo(int clipIndex, double sourceTempoBpm) async {
     if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
     final clip = _audioTracks[clipIndex];
     if (clip.isMidi ||
@@ -69339,11 +70591,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final rawSec = _rawClipDurationSec(clip);
     if (rawSec <= 0.0) return;
 
-    final targetTimelineSec =
-        (newTimelineDurationMs / 1000.0).clamp(0.05, 36000.0);
+    final targetTimelineSec = (newTimelineDurationMs / 1000.0).clamp(
+      0.05,
+      36000.0,
+    );
     final projectTempo = _clampTempo(_tempo);
-    final nextSourceTempo =
-        ((targetTimelineSec * projectTempo) / rawSec).clamp(20.0, 999.0);
+    final nextSourceTempo = ((targetTimelineSec * projectTempo) / rawSec).clamp(
+      20.0,
+      999.0,
+    );
 
     if (!mounted) return;
     setState(() {
@@ -69398,9 +70654,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             await _syncClipTimingToEngine(targetIndex);
           }
           await _syncClipMixToEngine(target);
-          _updateOverallDurationIfNeeded(
-            changedClips: <AudioTrack>[target],
-          );
+          _updateOverallDurationIfNeeded(changedClips: <AudioTrack>[target]);
           if (mounted) setState(() {});
         },
       ),
@@ -69415,7 +70669,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text(L10n.translate(context, 'Detecting clip tempo...'))),
+          content: Text(L10n.translate(context, 'Detecting clip tempo...')),
+        ),
       );
     }
 
@@ -69439,8 +70694,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         builder: (ctx) {
           String? errorText;
           void submit(StateSetter setInnerState, bool setProjectTempo) {
-            final parsed =
-                double.tryParse(controller.text.trim().replaceAll(',', '.'));
+            final parsed = double.tryParse(
+              controller.text.trim().replaceAll(',', '.'),
+            );
             if (parsed == null || !parsed.isFinite) {
               setInnerState(() {
                 errorText = L10n.translate(ctx, 'Enter a valid BPM.');
@@ -69449,8 +70705,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             }
             if (parsed < 40.0 || parsed > 240.0) {
               setInnerState(() {
-                errorText =
-                    L10n.translate(ctx, 'BPM must be between 40 and 240.');
+                errorText = L10n.translate(
+                  ctx,
+                  'BPM must be between 40 and 240.',
+                );
               });
               return;
             }
@@ -69598,7 +70856,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     SizedBox(
                       width: double.infinity,
                       child: MixroomShellDialogButton(
-                        label: L10n.translate(ctx, 'Set Project BPM + Stretch'),
+                        label: L10n.translate(
+                          ctx,
+                          'Set Project BPM + Stretch',
+                        ),
                         accent: true,
                         onPressed: () => submit(setInnerState, true),
                       ),
@@ -69707,8 +70968,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             Navigator.of(ctx).pop('apply');
             return;
           }
-          final parsed =
-              double.tryParse(bpmController.text.trim().replaceAll(',', '.'));
+          final parsed = double.tryParse(
+            bpmController.text.trim().replaceAll(',', '.'),
+          );
           if (parsed == null || !parsed.isFinite) {
             setInnerState(() {
               errorText = L10n.translate(ctx, 'Enter a valid BPM.');
@@ -69717,8 +70979,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           }
           if (parsed < 20.0 || parsed > 999.0) {
             setInnerState(() {
-              errorText =
-                  L10n.translate(ctx, 'BPM must be between 20 and 999.');
+              errorText = L10n.translate(
+                ctx,
+                'BPM must be between 20 and 999.',
+              );
             });
             return;
           }
@@ -69803,8 +71067,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.06),
                   borderRadius: BorderRadius.circular(10),
-                  border:
-                      Border.all(color: Colors.white.withValues(alpha: 0.09)),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.09),
+                  ),
                 ),
                 child: Text(
                   label,
@@ -69843,12 +71108,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             width: 42,
                             height: 42,
                             decoration: BoxDecoration(
-                              color: const Color(0xFF78D9FF)
-                                  .withValues(alpha: 0.12),
+                              color: const Color(
+                                0xFF78D9FF,
+                              ).withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(14),
                               border: Border.all(
-                                color: const Color(0xFF78D9FF)
-                                    .withValues(alpha: 0.22),
+                                color: const Color(
+                                  0xFF78D9FF,
+                                ).withValues(alpha: 0.22),
                               ),
                             ),
                             child: const Icon(
@@ -69952,8 +71219,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 focusedBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(14),
                                   borderSide: BorderSide(
-                                    color: const Color(0xFF78D9FF)
-                                        .withValues(alpha: 0.48),
+                                    color: const Color(
+                                      0xFF78D9FF,
+                                    ).withValues(alpha: 0.48),
                                   ),
                                 ),
                               ),
@@ -69994,8 +71262,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 Text(
                                   '${ratio.toStringAsFixed(2)}x playback',
                                   style: TextStyle(
-                                    color: const Color(0xFF78D9FF)
-                                        .withValues(alpha: 0.9),
+                                    color: const Color(
+                                      0xFF78D9FF,
+                                    ).withValues(alpha: 0.9),
                                     fontSize: 11,
                                     fontWeight: FontWeight.w800,
                                   ),
@@ -70009,13 +71278,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       Row(
                         children: [
                           modeButton(
-                              setInnerState, 'Beats', Icons.grid_4x4_rounded),
-                          const SizedBox(width: 8),
-                          modeButton(setInnerState, 'Complex',
-                              Icons.graphic_eq_rounded),
+                            setInnerState,
+                            'Beats',
+                            Icons.grid_4x4_rounded,
+                          ),
                           const SizedBox(width: 8),
                           modeButton(
-                              setInnerState, 'Repitch', Icons.speed_rounded),
+                            setInnerState,
+                            'Complex',
+                            Icons.graphic_eq_rounded,
+                          ),
+                          const SizedBox(width: 8),
+                          modeButton(
+                            setInnerState,
+                            'Repitch',
+                            Icons.speed_rounded,
+                          ),
                         ],
                       ),
                       const SizedBox(height: 12),
@@ -70033,8 +71311,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               onTap: () {
                                 setInnerState(() {
                                   chosenBpm = _clampTempo(chosenBpm * 2.0);
-                                  bpmController.text =
-                                      _formatTempoBpm(chosenBpm);
+                                  bpmController.text = _formatTempoBpm(
+                                    chosenBpm,
+                                  );
                                   chosenWarpEnabled = true;
                                 });
                               },
@@ -70066,8 +71345,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               onTap: () {
                                 setInnerState(() {
                                   chosenBpm = _clampTempo(chosenBpm * 0.5);
-                                  bpmController.text =
-                                      _formatTempoBpm(chosenBpm);
+                                  bpmController.text = _formatTempoBpm(
+                                    chosenBpm,
+                                  );
                                   chosenWarpEnabled = true;
                                 });
                               },
@@ -70168,9 +71448,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           target.tempoStretchPreservePitch = snapshot.tempoStretchPreservePitch;
           target.tempoWarpMode = normalizeTempoWarpMode(snapshot.tempoWarpMode);
           _tempoStretchEnabled = snapshot.tempoStretchEnabled ??
-              _audioTracks.where((t) => !t.isMidi).any(
-                    (t) => t.stretchToProjectTempo,
-                  );
+              _audioTracks
+                  .where((t) => !t.isMidi)
+                  .any((t) => t.stretchToProjectTempo);
           _tempoStretchPreservePitchDefault =
               snapshot.tempoStretchPreservePitchDefault ??
                   _tempoStretchPreservePitchDefault;
@@ -70261,8 +71541,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final db = _audioTracks[b].offset;
       final cmpOffset = da.compareTo(db);
       if (cmpOffset != 0) return cmpOffset;
-      final cmpRow =
-          _audioTracks[a].rowIndex.compareTo(_audioTracks[b].rowIndex);
+      final cmpRow = _audioTracks[a].rowIndex.compareTo(
+            _audioTracks[b].rowIndex,
+          );
       if (cmpRow != 0) return cmpRow;
       return a.compareTo(b);
     });
@@ -70365,8 +71646,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               ? _addMidiTrack(
                   instrumentId: clip.instrumentId,
                   instrumentName: clip.instrumentName,
-                  instrumentParams:
-                      Map<String, double>.from(clip.instrumentParams),
+                  instrumentParams: Map<String, double>.from(
+                    clip.instrumentParams,
+                  ),
                   midiNotes: clip.midiNotes.map((n) => n.copy()).toList(),
                   row: row,
                   timeMs: timeMs,
@@ -70416,9 +71698,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _updateOverallDurationIfNeeded(forceRebuild: true);
         }
         unawaited(
-          _syncClipFadesForRowsToEngine({
-            _clipRowIdForFadeSync(changedClip),
-          }),
+          _syncClipFadesForRowsToEngine({_clipRowIdForFadeSync(changedClip)}),
         );
         if (removed) {
           _clipFadeRowIdByEngineId.remove(changedClip.engineClipId);
@@ -70490,12 +71770,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (actions.length == 1) {
         await _undoManager.execute(actions.first);
       } else {
-        final description = _normalizeProjectCrossfadeMode(
-                  _projectCrossfadeMode,
-                ) ==
-                'cut'
-            ? 'Move clips with cut'
-            : 'Move clips';
+        final description =
+            _normalizeProjectCrossfadeMode(_projectCrossfadeMode) == 'cut'
+                ? 'Move clips with cut'
+                : 'Move clips';
         await _undoManager.execute(CompoundUndoAction(description, actions));
       }
     } finally {
@@ -70510,10 +71788,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     setState(() {});
   }
 
-  double _timelineTrimDeltaToSourceMs(
-    AudioTrack clip,
-    double timelineDeltaMs,
-  ) {
+  double _timelineTrimDeltaToSourceMs(AudioTrack clip, double timelineDeltaMs) {
     final timelineMs = _clipTimelineDurationMs(clip);
     final rawMs = _rawClipDurationSec(clip) * 1000.0;
     if (timelineMs <= 0.0 || rawMs <= 0.0) return timelineDeltaMs;
@@ -70632,9 +71907,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               return;
             }
             unawaited(_syncClipTimingToEngine(targetIndex));
-            _updateOverallDurationIfNeeded(
-              changedClips: <AudioTrack>[target],
-            );
+            _updateOverallDurationIfNeeded(changedClips: <AudioTrack>[target]);
           },
         ),
       );
@@ -70795,10 +72068,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   bool _captureDeckCanCleanUpRecording() {
-    return _captureDeckSelectedClipIndices().any((index) =>
-        index >= 0 &&
-        index < _audioTracks.length &&
-        !_audioTracks[index].isMidi);
+    return _captureDeckSelectedClipIndices().any(
+      (index) =>
+          index >= 0 &&
+          index < _audioTracks.length &&
+          !_audioTracks[index].isMidi,
+    );
   }
 
   bool _captureDeckCanFreezeRow() {
@@ -70866,8 +72141,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       ),
       dryClipRender: !includeRowAndMasterFx,
     );
-    final rendered =
-        File(renderedPath.trim().isNotEmpty ? renderedPath : outFile.path);
+    final rendered = File(
+      renderedPath.trim().isNotEmpty ? renderedPath : outFile.path,
+    );
     if (!await rendered.exists()) return null;
     if (await rendered.length() <= 44) return null;
     return rendered;
@@ -70929,10 +72205,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _handleCleanUpSelectedRecording() async {
     if (_captureDeckBusy || _isRecording) return;
     final selected = _captureDeckSelectedClipIndices()
-        .where((index) =>
-            index >= 0 &&
-            index < _audioTracks.length &&
-            !_audioTracks[index].isMidi)
+        .where(
+          (index) =>
+              index >= 0 &&
+              index < _audioTracks.length &&
+              !_audioTracks[index].isMidi,
+        )
         .toList(growable: false);
     if (selected.isEmpty) {
       _showSmallNotice('Select an audio recording to clean up.');
@@ -70943,9 +72221,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     try {
       await _applyAudioEnhancementAction({
         'operation': 'phone_mic_cleanup',
-        'target': {
-          'clip_indices': selected,
-        },
+        'target': {'clip_indices': selected},
       });
     } finally {
       if (mounted) setState(() => _captureDeckBusy = false);
@@ -71047,8 +72323,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         wavDithering: false,
         clipSnapshotJson: _buildNativeExportClipSnapshotJson(),
       );
-      final rendered =
-          File(renderedPath.trim().isNotEmpty ? renderedPath : outFile.path);
+      final rendered = File(
+        renderedPath.trim().isNotEmpty ? renderedPath : outFile.path,
+      );
       if (!await rendered.exists() || await rendered.length() <= 44) {
         _showSmallNotice('Could not capture the mix.');
         return;
@@ -71125,8 +72402,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       clipSnapshotJson: snapshotJson,
       dryClipRender: true,
     );
-    final rendered =
-        File(renderedPath.isNotEmpty ? renderedPath : outFile.path);
+    final rendered = File(
+      renderedPath.isNotEmpty ? renderedPath : outFile.path,
+    );
     if (!await rendered.exists()) {
       _showSmallNotice('Could not glue these clips.');
       return;
@@ -71171,13 +72449,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
 
     await _undoManager.execute(
-      CompoundUndoAction(
-        'Glue clips',
-        <EditorUndoAction>[
-          ...deleteActions,
-          addAction,
-        ],
-      ),
+      CompoundUndoAction('Glue clips', <EditorUndoAction>[
+        ...deleteActions,
+        addAction,
+      ]),
     );
     _updateOverallDurationIfNeeded();
     if (!mounted) return;
@@ -71247,17 +72522,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (group != null && group.isNotEmpty) {
         if (_audioTracks.length + group.length > kNumClips) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
                 content: Text(
-                    "Max number of audio clips reached ($kNumClips). Unable to add more clips.")));
+                  "Max number of audio clips reached ($kNumClips). Unable to add more clips.",
+                ),
+              ),
+            );
           }
           return false;
         }
         final actions = <EditorUndoAction>[];
         for (final entry in group) {
           final targetRow = row + entry.rowDelta;
-          final targetTime =
-              math.max(0.0, safePasteTimeMs + entry.offsetDeltaMs);
+          final targetTime = math.max(
+            0.0,
+            safePasteTimeMs + entry.offsetDeltaMs,
+          );
           actions.add(
             _buildPasteAction(
               clip: entry.clip,
@@ -71285,9 +72566,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (_copiedClip == null) return false;
       if (_audioTracks.length >= kNumClips) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
               content: Text(
-                  "Max number of audio clips reached ($kNumClips). Unable to add more clips.")));
+                "Max number of audio clips reached ($kNumClips). Unable to add more clips.",
+              ),
+            ),
+          );
         }
         return false;
       }
@@ -71327,8 +72612,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               _audioTracks[b].offset,
             );
         if (startCompare != 0) return startCompare;
-        final rowCompare =
-            _audioTracks[a].rowIndex.compareTo(_audioTracks[b].rowIndex);
+        final rowCompare = _audioTracks[a].rowIndex.compareTo(
+              _audioTracks[b].rowIndex,
+            );
         if (rowCompare != 0) return rowCompare;
         return a.compareTo(b);
       });
@@ -71756,8 +73042,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         newInstrumentName: instrumentName,
         newInstrumentParams: newParams,
         newHostedInstrumentStateBase64: newHostedInstrumentStateBase64,
-        applyToClip: (target, notesToApply, nextInstrumentId,
-            nextInstrumentName, nextParams, hostedInstrumentStateBase64) {
+        applyToClip: (
+          target,
+          notesToApply,
+          nextInstrumentId,
+          nextInstrumentName,
+          nextParams,
+          hostedInstrumentStateBase64,
+        ) {
           final applyingRedo = nextInstrumentId == instrumentId &&
               nextInstrumentName == instrumentName &&
               _midiNotesEqual(notesToApply, newNotes);
@@ -71877,9 +73169,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await JuceAudioEngine.setRowIcon(rowId, row.iconId);
     }
 
-    await _reloadRowsFromEngine(
-      refreshAutomationTargets: false,
-    );
+    await _reloadRowsFromEngine(refreshAutomationTargets: false);
     final restoredRows = <TimelineRow>[];
     for (int i = 0; i < _rowCount; i++) {
       final snapRow = i < snap.rows.length ? snap.rows[i] : null;
@@ -71916,12 +73206,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final changed = await perform();
     if (!changed) return;
     final after = await _captureRowLayoutSnapshot();
-    await _undoManager.addWithoutExecute(_RowLayoutSnapshotAction(
-      descriptionText: description,
-      before: before,
-      after: after,
-      applySnapshot: _applyRowLayoutSnapshot,
-    ));
+    await _undoManager.addWithoutExecute(
+      _RowLayoutSnapshotAction(
+        descriptionText: description,
+        before: before,
+        after: after,
+        applySnapshot: _applyRowLayoutSnapshot,
+      ),
+    );
   }
 
   Future<bool> _addRowImpl({int? preferredRowId}) async {
@@ -71976,10 +73268,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
     if (rowId < 0) return false;
     await _applyRowsToEditorState(
-      <TimelineRow>[
-        ..._rows,
-        instrumentRow.copyWith(rowId: rowId),
-      ],
+      <TimelineRow>[..._rows, instrumentRow.copyWith(rowId: rowId)],
       refreshAutomationTargets: false,
       syncClipRows: false,
     );
@@ -72010,10 +73299,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           );
     if (rowId < 0) return false;
     final nextRows = List<TimelineRow>.from(_rows)
-      ..insert(
-        above ? row : row + 1,
-        instrumentRow.copyWith(rowId: rowId),
-      );
+      ..insert(above ? row : row + 1, instrumentRow.copyWith(rowId: rowId));
     await _applyRowsToEditorState(
       nextRows,
       refreshAutomationTargets: false,
@@ -72034,8 +73320,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
     if (rowId < 0) return false;
     final nextRows = List<TimelineRow>.from(_rows)
-      ..insert(row,
-          TimelineRow(rowId: rowId, name: 'Track ${_rowCount + 1}', iconId: 0));
+      ..insert(
+        row,
+        TimelineRow(rowId: rowId, name: 'Track ${_rowCount + 1}', iconId: 0),
+      );
     await _applyRowsToEditorState(
       nextRows,
       refreshAutomationTargets: false,
@@ -72074,8 +73362,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
     if (rowId < 0) return false;
     final nextRows = List<TimelineRow>.from(_rows)
-      ..insert(row + 1,
-          TimelineRow(rowId: rowId, name: 'Track ${_rowCount + 1}', iconId: 0));
+      ..insert(
+        row + 1,
+        TimelineRow(rowId: rowId, name: 'Track ${_rowCount + 1}', iconId: 0),
+      );
     await _applyRowsToEditorState(
       nextRows,
       refreshAutomationTargets: false,
@@ -72125,9 +73415,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               decoration: BoxDecoration(
                 color: const Color.fromRGBO(70, 80, 95, 0.97),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.14),
-                ),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
               ),
               child: Text(
                 localizedMessage,
@@ -72151,8 +73439,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final exact = L10n.translate(context, message);
     if (exact != message) return exact;
 
-    final projectTempoMatch =
-        RegExp(r'^Project tempo set to ([0-9]+) BPM\.$').firstMatch(message);
+    final projectTempoMatch = RegExp(
+      r'^Project tempo set to ([0-9]+) BPM\.$',
+    ).firstMatch(message);
     if (projectTempoMatch != null) {
       return '${L10n.translate(context, 'Project tempo set to')} ${projectTempoMatch.group(1)} BPM.';
     }
@@ -72164,8 +73453,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return '${L10n.translate(context, 'Created')} ${sidechainMatch.group(1)} ${L10n.translate(context, 'kick-synced sidechain clips.')}';
     }
 
-    final stemsMatch =
-        RegExp(r'^Created stems for ([0-9]+) clips\.$').firstMatch(message);
+    final stemsMatch = RegExp(
+      r'^Created stems for ([0-9]+) clips\.$',
+    ).firstMatch(message);
     if (stemsMatch != null) {
       return '${L10n.translate(context, 'Created stems for')} ${stemsMatch.group(1)} ${L10n.translate(context, 'clips.')}';
     }
@@ -72177,8 +73467,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return '${L10n.translate(context, 'Shifted MIDI notes')} ${L10n.translate(context, shiftedMidiMatch.group(1)!)} ${L10n.translate(context, 'by')} ${shiftedMidiMatch.group(2)}.';
     }
 
-    final extendedMidiMatch =
-        RegExp(r'^Extended MIDI clip to (.+)\.$').firstMatch(message);
+    final extendedMidiMatch = RegExp(
+      r'^Extended MIDI clip to (.+)\.$',
+    ).firstMatch(message);
     if (extendedMidiMatch != null) {
       return '${L10n.translate(context, 'Extended MIDI clip to')} ${extendedMidiMatch.group(1)}.';
     }
@@ -72258,14 +73549,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final rowInfo = _rows[row];
     final rowId = rowInfo.rowId;
     final deletedClips = rowId >= 0
-        ? _clipsForFadeResolution(rowIds: <int>{rowId}).toList(growable: false)
+        ? _clipsForFadeResolution(
+            rowIds: <int>{rowId},
+          ).toList(growable: false)
         : _audioTracks
             .where((clip) => clip.rowIndex == row)
             .toList(growable: false);
 
     final containsActiveMidiClip = _activeMidiClipEngineId != null &&
-        deletedClips
-            .any((clip) => clip.engineClipId == _activeMidiClipEngineId);
+        deletedClips.any(
+          (clip) => clip.engineClipId == _activeMidiClipEngineId,
+        );
     final previousSelectedRowId =
         _isValidRowIndex(_selectedRow) ? _rowIdAt(_selectedRow) : null;
     final nextSelectedRowId = previousSelectedRowId == rowId
@@ -72306,10 +73600,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
-  Future<void> _restoreDeletedRowClips(
-    int row,
-    List<AudioTrack> clips,
-  ) async {
+  Future<void> _restoreDeletedRowClips(int row, List<AudioTrack> clips) async {
     for (final clip in clips) {
       if (clip.isMidi) {
         await _addMidiTrack(
@@ -72427,7 +73718,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<int> _restoreDeletedRowFromSnapshot(
-      _DeletedRowSnapshot snapshot) async {
+    _DeletedRowSnapshot snapshot,
+  ) async {
     var restoredRowIndex = snapshot.originalIndex;
     var restoredRowId = snapshot.row.rowId;
 
@@ -72496,10 +73788,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _restoreDeletedRowGroups(snapshot, restoredRowId);
 
       final nextRows = List<TimelineRow>.from(_rows)
-        ..insert(
-          restoredRowIndex,
-          snapshot.row.copyWith(rowId: restoredRowId),
-        );
+        ..insert(restoredRowIndex, snapshot.row.copyWith(rowId: restoredRowId));
       await _applyRowsToEditorState(
         _applyCurrentTrackGroupMembership(nextRows),
         refreshAutomationTargets: false,
@@ -72533,35 +73822,33 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   ) {
     _trackGroups
       ..clear()
-      ..addAll(snapshot.trackGroups.map((group) {
-        return TrackGroup(
-          id: group.id,
-          name: group.name,
-          color: group.color,
-          rowIds: group.rowIds
-              .map((id) => id == snapshot.row.rowId ? restoredRowId : id)
-              .toList(growable: false),
-          gain: group.gain,
-          pan: group.pan,
-          muted: group.muted,
-          soloed: group.soloed,
-          collapsed: group.collapsed,
-          effects: group.effects,
-        );
-      }));
+      ..addAll(
+        snapshot.trackGroups.map((group) {
+          return TrackGroup(
+            id: group.id,
+            name: group.name,
+            color: group.color,
+            rowIds: group.rowIds
+                .map((id) => id == snapshot.row.rowId ? restoredRowId : id)
+                .toList(growable: false),
+            gain: group.gain,
+            pan: group.pan,
+            muted: group.muted,
+            soloed: group.soloed,
+            collapsed: group.collapsed,
+            effects: group.effects,
+          );
+        }),
+      );
   }
 
-  List<TimelineRow> _applyCurrentTrackGroupMembership(
-    List<TimelineRow> rows,
-  ) {
+  List<TimelineRow> _applyCurrentTrackGroupMembership(List<TimelineRow> rows) {
     final groupIdByRowId = <int, String>{
       for (final group in _trackGroups)
         for (final rowId in group.rowIds) rowId: group.id,
     };
     return rows
-        .map(
-          (row) => row.copyWith(groupId: groupIdByRowId[row.rowId] ?? ''),
-        )
+        .map((row) => row.copyWith(groupId: groupIdByRowId[row.rowId] ?? ''))
         .toList(growable: false);
   }
 
@@ -72633,9 +73920,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         await JuceAudioEngine.setRowIcon(restoredRowId, rowIconId);
       }
       await _applyRowsToEditorState(
-        <TimelineRow>[
-          rowSnapshot.copyWith(rowId: restoredRowId),
-        ],
+        <TimelineRow>[rowSnapshot.copyWith(rowId: restoredRowId)],
         refreshAutomationTargets: false,
         syncClipRows: false,
       );
@@ -72673,10 +73958,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
 
       final nextRows = List<TimelineRow>.from(_rows)
-        ..insert(
-          restoredRowIndex,
-          rowSnapshot.copyWith(rowId: restoredRowId),
-        );
+        ..insert(restoredRowIndex, rowSnapshot.copyWith(rowId: restoredRowId));
       await _applyRowsToEditorState(
         nextRows,
         refreshAutomationTargets: false,
@@ -72936,8 +74218,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       final currentOrder = sourceRows.map((row) => row.rowId).toList();
       final orderedMembers = members.toList(growable: false)
-        ..sort((left, right) =>
-            currentOrder.indexOf(left).compareTo(currentOrder.indexOf(right)));
+        ..sort(
+          (left, right) =>
+              currentOrder.indexOf(left).compareTo(currentOrder.indexOf(right)),
+        );
       final memberSet = orderedMembers.toSet();
       final retainedGroups = <TrackGroup>[];
       for (final group in sourceGroups) {
@@ -72945,29 +74229,34 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             .where((rowId) => !memberSet.contains(rowId))
             .toList(growable: false);
         if (remaining.length < 2) continue;
-        retainedGroups.add(TrackGroup(
-          id: group.id,
-          name: group.name,
-          color: group.color,
-          rowIds: remaining,
-          gain: group.gain,
-          pan: group.pan,
-          muted: group.muted,
-          soloed: group.soloed,
-          collapsed: group.collapsed,
-          effects: group.effects,
-        ));
+        retainedGroups.add(
+          TrackGroup(
+            id: group.id,
+            name: group.name,
+            color: group.color,
+            rowIds: remaining,
+            gain: group.gain,
+            pan: group.pan,
+            muted: group.muted,
+            soloed: group.soloed,
+            collapsed: group.collapsed,
+            effects: group.effects,
+          ),
+        );
       }
       final memberColor = orderedMembers
-          .map((rowId) =>
-              sourceRows.firstWhere((row) => row.rowId == rowId).color)
+          .map(
+            (rowId) => sourceRows.firstWhere((row) => row.rowId == rowId).color,
+          )
           .firstWhere((color) => color != 0, orElse: () => 0);
-      retainedGroups.add(TrackGroup(
-        id: groupId,
-        name: name,
-        color: memberColor,
-        rowIds: orderedMembers,
-      ));
+      retainedGroups.add(
+        TrackGroup(
+          id: groupId,
+          name: name,
+          color: memberColor,
+          rowIds: orderedMembers,
+        ),
+      );
       final groupIdByRow = <int, String>{
         for (final group in retainedGroups)
           for (final rowId in group.rowIds) rowId: group.id,
@@ -72988,7 +74277,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         layout: _RowLayoutSnapshot(
           rows: reordered
               .map(
-                  (row) => row.copyWith(groupId: groupIdByRow[row.rowId] ?? ''))
+                (row) => row.copyWith(groupId: groupIdByRow[row.rowId] ?? ''),
+              )
               .toList(growable: false),
           trackGroups: retainedGroups,
         ),
@@ -73032,9 +74322,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return _AiV3GroupLayoutState(
         layout: _RowLayoutSnapshot(
           rows: sourceRows
-              .map((row) => retainedMemberIds.contains(row.rowId)
-                  ? row.copyWith(groupId: '')
-                  : row)
+              .map(
+                (row) => retainedMemberIds.contains(row.rowId)
+                    ? row.copyWith(groupId: '')
+                    : row,
+              )
               .toList(growable: false),
           trackGroups: nextGroups,
         ),
@@ -73060,19 +74352,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         effects: group.effects,
       );
       return _AiV3GroupLayoutState(
-        layout: _RowLayoutSnapshot(
-          rows: sourceRows,
-          trackGroups: nextGroups,
-        ),
+        layout: _RowLayoutSnapshot(rows: sourceRows, trackGroups: nextGroups),
         selectedRowId: before.selectedRowId,
       );
     }
     throw StateError('v3_group_operation_invalid');
   }
 
-  Future<void> _applyAiV3GroupLayoutState(
-    _AiV3GroupLayoutState state,
-  ) async {
+  Future<void> _applyAiV3GroupLayoutState(_AiV3GroupLayoutState state) async {
     final currentIds = _rows.map((row) => row.rowId).toSet();
     final targetIds = state.layout.rows.map((row) => row.rowId).toSet();
     if (currentIds.length != targetIds.length ||
@@ -73137,8 +74424,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final insertIndex = orderedRows.first;
     for (int i = 0; i < groupedRowIdList.length; i++) {
       final rowId = groupedRowIdList[i];
-      final fromIndex =
-          groupedRowsPacked.indexWhere((candidate) => candidate.rowId == rowId);
+      final fromIndex = groupedRowsPacked.indexWhere(
+        (candidate) => candidate.rowId == rowId,
+      );
       final toIndex = insertIndex + i;
       if (fromIndex < 0 || fromIndex == toIndex) continue;
       final movedInEngine = await JuceAudioEngine.moveRowOrder(
@@ -73155,9 +74443,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final groupId =
         'group_${DateTime.now().microsecondsSinceEpoch}_${const Uuid().v4()}';
     final nextRows = groupedRowsPacked
-        .map((row) => groupedRowIds.contains(row.rowId)
-            ? row.copyWith(groupId: groupId)
-            : _cloneTimelineRow(row))
+        .map(
+          (row) => groupedRowIds.contains(row.rowId)
+              ? row.copyWith(groupId: groupId)
+              : _cloneTimelineRow(row),
+        )
         .toList(growable: false);
     final existingGroups = _trackGroups
         .map((group) {
@@ -73225,9 +74515,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final currentGroupId = _rows[row].groupId.trim();
     if (currentGroupId.isEmpty) return false;
     final nextRows = _rows
-        .map((item) => item.rowId == rowId
-            ? item.copyWith(groupId: '')
-            : _cloneTimelineRow(item))
+        .map(
+          (item) => item.rowId == rowId
+              ? item.copyWith(groupId: '')
+              : _cloneTimelineRow(item),
+        )
         .toList(growable: false);
     final nextGroups = _trackGroups
         .map((group) {
@@ -73397,8 +74689,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Widget build(BuildContext context) {
     return Consumer<LocaleProvider>(
       builder: (context, localeProvider, child) {
-        final editorLayoutSpec =
-            _EditorLayoutSpec.fromSize(MediaQuery.of(context).size);
+        final editorLayoutSpec = _EditorLayoutSpec.fromSize(
+          MediaQuery.of(context).size,
+        );
         final fixedTransportFootprint =
             _kTransportBarHeight + _androidTransportBottomInset(context);
         final keyboardBottomInset = MediaQuery.viewInsetsOf(context).bottom;
@@ -73423,10 +74716,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             usesTabletDawLayout ? _androidTabletDawBottomInset(context) : 0.0;
         final keyboardLift = usesTabletDawLayout
             ? rawKeyboardLift
-            : math.max(
-                0.0,
-                rawKeyboardLift - fixedTransportFootprint,
-              );
+            : math.max(0.0, rawKeyboardLift - fixedTransportFootprint);
         // The phone dock contains both the AI bar and transport controls.
         // Reserving only the transport height positions a floating warning
         // directly on top of the AI bar.
@@ -73542,7 +74832,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16),
                         side: BorderSide(
-                            color: Colors.white.withValues(alpha: 0.14)),
+                          color: Colors.white.withValues(alpha: 0.14),
+                        ),
                       ),
                       contentTextStyle: const TextStyle(
                         fontFamily: 'Pretendard',
@@ -73552,8 +74843,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         color: Color(0xFFF4F4F4),
                         letterSpacing: -0.05,
                       ),
-                      insetPadding:
-                          EdgeInsets.fromLTRB(16, 0, 16, snackBottomInset),
+                      insetPadding: EdgeInsets.fromLTRB(
+                        16,
+                        0,
+                        16,
+                        snackBottomInset,
+                      ),
                     ),
                   ),
                   child: Scaffold(
@@ -73564,8 +74859,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     body: SafeArea(
                       bottom: false,
                       child: StatefulBuilder(
-                        builder:
-                            (BuildContext context, StateSetter setLocalState) {
+                        builder: (
+                          BuildContext context,
+                          StateSetter setLocalState,
+                        ) {
                           _audioEditorStateSetter = setLocalState;
                           EntitlementService? entitlementService;
                           try {
@@ -73611,8 +74908,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       ),
                                       child: Halo(
                                         highlighter: _mixHighlighter,
-                                        haloKey:
-                                            const HaloKey('tutorial:timeline'),
+                                        haloKey: const HaloKey(
+                                          'tutorial:timeline',
+                                        ),
                                         borderRadius: BorderRadius.circular(12),
                                         child: AudioCanvasTimeline(
                                           useTabletDawLayout:
@@ -73653,17 +74951,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               _automationTargetsForRowUi,
                                           getSelectedAutomationTargetId:
                                               _selectedAutomationTargetIdForRow,
-                                          setSelectedAutomationTargetId:
-                                              (row, targetId) {
+                                          setSelectedAutomationTargetId: (
+                                            row,
+                                            targetId,
+                                          ) {
                                             _setSelectedAutomationTargetIdForRow(
                                               row,
                                               targetId,
                                             );
                                             unawaited(
-                                                _syncAutomationTargetToCurrentTime(
-                                              row,
-                                              targetId,
-                                            ));
+                                              _syncAutomationTargetToCurrentTime(
+                                                row,
+                                                targetId,
+                                              ),
+                                            );
                                           },
                                           getAutomationPointsForTarget:
                                               (row, targetId) =>
@@ -73673,8 +74974,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           )
                                                       .map((p) => p.copy())
                                                       .toList(growable: false),
-                                          setAutomationPointsForTarget:
-                                              (row, targetId, points) {
+                                          setAutomationPointsForTarget: (
+                                            row,
+                                            targetId,
+                                            points,
+                                          ) {
                                             if (row < 0 || row >= _rowCount)
                                               return;
                                             final safePoints =
@@ -73689,11 +74993,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                     safePoints
                                                         .map((p) => p.copy())
                                                         .toList(
-                                                            growable: false);
+                                                          growable: false,
+                                                        );
                                               });
                                               unawaited(
-                                                  _syncNativeAutomationForRow(
-                                                      row));
+                                                _syncNativeAutomationForRow(
+                                                  row,
+                                                ),
+                                              );
                                               return;
                                             }
                                             setState(() {
@@ -73723,34 +75030,46 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           getAutomationClipsForTarget: (row,
                                                   targetId) =>
                                               const <AutomationClipSnapshot>[],
-                                          setAutomationClipsForTarget:
-                                              (row, targetId, clips) {
+                                          setAutomationClipsForTarget: (
+                                            row,
+                                            targetId,
+                                            clips,
+                                          ) {
                                             // Automation is lane-only. Ignore legacy
                                             // automation clip edits from older UI paths.
                                           },
                                           onAutomationClipsCommit: null,
-                                          onAutomationTargetCommit: (row,
-                                              targetId, oldPoints, newPoints) {
+                                          onAutomationTargetCommit: (
+                                            row,
+                                            targetId,
+                                            oldPoints,
+                                            newPoints,
+                                          ) {
                                             unawaited(
-                                                _setAutomationTargetPointsWithUndo(
-                                              row,
-                                              targetId,
-                                              newPoints,
-                                              oldPointsOverride: oldPoints,
-                                            ));
+                                              _setAutomationTargetPointsWithUndo(
+                                                row,
+                                                targetId,
+                                                newPoints,
+                                                oldPointsOverride: oldPoints,
+                                              ),
+                                            );
                                             _recordProducerManualEdit(
-                                                'row_automation_target', {
-                                              'row': row,
-                                              'target_id': targetId,
-                                              'old_count': oldPoints.length,
-                                              'new_count': newPoints.length,
-                                            });
+                                              'row_automation_target',
+                                              {
+                                                'row': row,
+                                                'target_id': targetId,
+                                                'old_count': oldPoints.length,
+                                                'new_count': newPoints.length,
+                                              },
+                                            );
                                           },
-                                          onRevealAutomationTarget:
-                                              (row, targetId) async {
+                                          onRevealAutomationTarget: (
+                                            row,
+                                            targetId,
+                                          ) async {
                                             if (_parseAutomationTargetId(
-                                                    targetId)
-                                                .isMaster) {
+                                              targetId,
+                                            ).isMaster) {
                                               await _revealMasterAutomationTarget(
                                                 targetId,
                                               );
@@ -73782,8 +75101,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           getY: (c) => c
                                               .y, // store a visual Y in your model
                                           // commit (persist in your model, then setState)
-                                          onMoveClipCommit: (i, newStartMs,
-                                              newRowIndex) async {
+                                          onMoveClipCommit: (
+                                            i,
+                                            newStartMs,
+                                            newRowIndex,
+                                          ) async {
                                             await _handleMoveClips(
                                               <TimelineClipMoveRequest>[
                                                 TimelineClipMoveRequest(
@@ -73795,15 +75117,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             );
                                           },
                                           onMoveClipsCommit: _handleMoveClips,
-                                          onTrimClip: (i, s, e,
-                                              {double? newStartMs}) async {
+                                          onTrimClip: (
+                                            i,
+                                            s,
+                                            e, {
+                                            double? newStartMs,
+                                          }) async {
                                             final clip = _audioTracks[i];
 
                                             // 1. Update the internal trim values (where in the source file we start/end)
                                             clip.trimStart = Duration(
-                                                milliseconds: s.round());
+                                              milliseconds: s.round(),
+                                            );
                                             clip.trimEnd = Duration(
-                                                milliseconds: e.round());
+                                              milliseconds: e.round(),
+                                            );
 
                                             // 2. === FIX: Use the calculated newStartMs for the timeline offset ===
                                             // newStartMs is ONLY sent by the timeline widget during a 'trim-start' operation.
@@ -73833,9 +75161,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           },
 
                                           // for the undo history
-                                          onTrimClipCommit:
-                                              (i, s, e, os, oe, oo,
-                                                  {double? newStartMs}) async {
+                                          onTrimClipCommit: (
+                                            i,
+                                            s,
+                                            e,
+                                            os,
+                                            oe,
+                                            oo, {
+                                            double? newStartMs,
+                                          }) async {
                                             // final clip = _audioTracks[i];
                                             await _undoManager.execute(
                                               TrimClipAction(
@@ -73843,20 +75177,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                 tracks: _audioTracks,
                                                 originalIndex: i,
                                                 oldTrimStart: Duration(
-                                                    milliseconds: os.round()),
+                                                  milliseconds: os.round(),
+                                                ),
                                                 oldTrimEnd: Duration(
-                                                    milliseconds: oe.round()),
+                                                  milliseconds: oe.round(),
+                                                ),
                                                 oldOffset: oo / 1000.0,
                                                 newTrimStart: Duration(
-                                                    milliseconds: s.round()),
+                                                  milliseconds: s.round(),
+                                                ),
                                                 newTrimEnd: Duration(
-                                                    milliseconds: e.round()),
+                                                  milliseconds: e.round(),
+                                                ),
                                                 newOffset: newStartMs != null
                                                     ? newStartMs / 1000.0
                                                     : null,
                                                 onChange: () {
                                                   unawaited(
-                                                    _syncClipTimingToEngine(i),
+                                                    _syncClipTimingToEngine(
+                                                      i,
+                                                    ),
                                                   );
                                                   if (i >= 0 &&
                                                       i < _audioTracks.length) {
@@ -73875,14 +75215,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           // numRows: kNumRows,
                                           // selectedRowIndex: _selectedRow,
                                           onSelectRow: (row) => setState(
-                                              () => _selectedRow = row),
+                                            () => _selectedRow = row,
+                                          ),
                                           // rowMuted: _rowMuted,
                                           // rowExpanded: _rowExpanded,
                                           recordingInProgress:
                                               _recordButtonVisuallyActive,
                                           onToggleExpanded: (row) => setState(
-                                              () => _rowExpanded[row] =
-                                                  !_rowExpanded[row]),
+                                            () => _rowExpanded[row] =
+                                                !_rowExpanded[row],
+                                          ),
                                           onAddRow: _addRow,
                                           onAddInstrumentLane:
                                               _addInstrumentClipFromPicker,
@@ -73948,19 +75290,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           // ============================
                                           getRowEffects: (row) =>
                                               JuceAudioEngine
-                                                  .getTrackEffectsForRow(row),
+                                                  .getTrackEffectsForRow(
+                                            row,
+                                          ),
                                           getRowEffectIds: (row) =>
                                               JuceAudioEngine
-                                                  .getTrackEffectIdsForRow(row),
+                                                  .getTrackEffectIdsForRow(
+                                            row,
+                                          ),
 
                                           getRowEffectBypassState:
                                               (row, effectIndex) =>
                                                   JuceAudioEngine
                                                       .getRowEffectBypassState(
-                                                          row, effectIndex),
+                                            row,
+                                            effectIndex,
+                                          ),
 
-                                          insertRowEffect:
-                                              (row, pathOrName) async {
+                                          insertRowEffect: (
+                                            row,
+                                            pathOrName,
+                                          ) async {
                                             final action = InsertEffectAction(
                                               row: row,
                                               pathOrName: pathOrName,
@@ -73969,19 +75319,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                 _refreshRowFx(row);
                                               },
                                             );
-                                            await _undoManager.execute(
-                                              action,
-                                            );
+                                            await _undoManager.execute(action);
                                             if (!action.inserted) {
                                               _showSmallNotice(
-                                                  'Could not load this effect plugin.');
+                                                'Could not load this effect plugin.',
+                                              );
                                               return;
                                             }
                                             _recordProducerManualEdit(
-                                                'row_fx_insert', {
-                                              'row': row,
-                                              'effect': pathOrName
-                                            });
+                                              'row_fx_insert',
+                                              {
+                                                'row': row,
+                                                'effect': pathOrName,
+                                              },
+                                            );
                                             _trackPluginInserted(
                                               pluginName: pathOrName,
                                               scope: 'track',
@@ -73992,12 +75343,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             );
                                           }, //=> JuceAudioEngine.insertTrackEffect(row, pathOrName),
                                           // need name of effects so undo action can add it back later
-                                          removeRowEffect: (row, effectIndex,
-                                              name, applyingPreset) async {
+                                          removeRowEffect: (
+                                            row,
+                                            effectIndex,
+                                            name,
+                                            applyingPreset,
+                                          ) async {
                                             if (applyingPreset) {
                                               await JuceAudioEngine
                                                   .removeTrackEffect(
-                                                      row, effectIndex);
+                                                row,
+                                                effectIndex,
+                                              );
                                               _syncTabletRowFxSelectionAfterRemove(
                                                 row,
                                                 effectIndex,
@@ -74020,11 +75377,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               effectIndex,
                                             );
                                             _recordProducerManualEdit(
-                                                'row_fx_remove', {
-                                              'row': row,
-                                              'index': effectIndex,
-                                              'effect': name,
-                                            });
+                                              'row_fx_remove',
+                                              {
+                                                'row': row,
+                                                'index': effectIndex,
+                                                'effect': name,
+                                              },
+                                            );
                                             _trackPluginRemoved(
                                               pluginName: name,
                                               scope: 'track',
@@ -74035,8 +75394,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             );
                                           }, //=> JuceAudioEngine.removeTrackEffect(row, effectIndex),
 
-                                          reorderRowEffects:
-                                              (row, from, to) async {
+                                          reorderRowEffects: (
+                                            row,
+                                            from,
+                                            to,
+                                          ) async {
                                             await _undoManager.execute(
                                               ReorderEffectAction(
                                                 row: row,
@@ -74049,18 +75411,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               ),
                                             );
                                             _recordProducerManualEdit(
-                                                'row_fx_reorder', {
-                                              'row': row,
-                                              'from': from,
-                                              'to': to
-                                            });
+                                              'row_fx_reorder',
+                                              {
+                                                'row': row,
+                                                'from': from,
+                                                'to': to,
+                                              },
+                                            );
                                             _scheduleAutomationTargetsRefreshForRow(
                                               row,
                                             );
                                           }, //JuceAudioEngine.reorderTrackEffects(row, from, to),
 
-                                          setRowEffectBypassed:
-                                              (row, effectIndex, bypass) async {
+                                          setRowEffectBypassed: (
+                                            row,
+                                            effectIndex,
+                                            bypass,
+                                          ) async {
                                             await _undoManager.execute(
                                               BypassEffectAction(
                                                 row: row,
@@ -74074,21 +75441,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               ),
                                             );
                                             _recordProducerManualEdit(
-                                                'row_fx_bypass', {
-                                              'row': row,
-                                              'index': effectIndex,
-                                              'bypassed': bypass,
-                                            });
+                                              'row_fx_bypass',
+                                              {
+                                                'row': row,
+                                                'index': effectIndex,
+                                                'bypassed': bypass,
+                                              },
+                                            );
                                           }, //=> JuceAudioEngine.bypassRowEffect(row, effectIndex, bypass),
 
                                           getRowPluginParameters:
                                               (row, effectIndex) =>
                                                   JuceAudioEngine
                                                       .getTrackPluginParameters(
-                                                          row, effectIndex),
+                                            row,
+                                            effectIndex,
+                                          ),
 
-                                          setRowEffectParam: (row, effectIndex,
-                                              paramId, value) async {
+                                          setRowEffectParam: (
+                                            row,
+                                            effectIndex,
+                                            paramId,
+                                            value,
+                                          ) async {
                                             await JuceAudioEngine
                                                 .setTrackEffect(
                                               row,
@@ -74106,11 +75481,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           },
 
                                           // for commiting to undo history
-                                          onPluginParamCommit: (row,
-                                              idx,
-                                              paramId,
-                                              oldValue,
-                                              newValue) async {
+                                          onPluginParamCommit: (
+                                            row,
+                                            idx,
+                                            paramId,
+                                            oldValue,
+                                            newValue,
+                                          ) async {
                                             await _undoManager.execute(
                                               SetEffectParamAction(
                                                 row: row,
@@ -74125,13 +75502,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               ),
                                             );
                                             _recordProducerManualEdit(
-                                                'row_fx_param', {
-                                              'row': row,
-                                              'index': idx,
-                                              'param_id': paramId,
-                                              'old_value': oldValue,
-                                              'new_value': newValue,
-                                            });
+                                              'row_fx_param',
+                                              {
+                                                'row': row,
+                                                'index': idx,
+                                                'param_id': paramId,
+                                                'old_value': oldValue,
+                                                'new_value': newValue,
+                                              },
+                                            );
                                             unawaited(
                                               _trackPluginParameterCommitted(
                                                 scope: 'track',
@@ -74144,8 +75523,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             );
                                           },
 
-                                          onPresetCommit:
-                                              (before, after) async {
+                                          onPresetCommit: (
+                                            before,
+                                            after,
+                                          ) async {
                                             await _undoManager.execute(
                                               TrackPresetChangeAction(
                                                 before: before,
@@ -74153,25 +75534,31 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                 onChange: () {
                                                   _refreshAudioEditorView();
                                                   unawaited(
-                                                      _refreshAutomationTargetsForRow(
-                                                          before.row));
+                                                    _refreshAutomationTargetsForRow(
+                                                      before.row,
+                                                    ),
+                                                  );
                                                 },
                                               ),
                                             );
                                             _recordProducerManualEdit(
-                                                'row_preset_commit', {
-                                              'row': before.row,
-                                              'before_count':
-                                                  before.effects.length,
-                                              'after_count':
-                                                  after.effects.length,
-                                            });
+                                              'row_preset_commit',
+                                              {
+                                                'row': before.row,
+                                                'before_count':
+                                                    before.effects.length,
+                                                'after_count':
+                                                    after.effects.length,
+                                              },
+                                            );
                                             _scheduleAutomationTargetsRefreshForRow(
                                               before.row,
                                             );
                                           },
-                                          onRowEffectSelected:
-                                              (row, effectIndex) {
+                                          onRowEffectSelected: (
+                                            row,
+                                            effectIndex,
+                                          ) {
                                             if (!usesTabletDawLayout) return;
                                             final tappedSelectedEffect =
                                                 _tabletSelectedRowFxRow ==
@@ -74193,13 +75580,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                 _tabletRightPanelCollapsed =
                                                     true;
                                                 _setMasterMeterExpandedState(
-                                                    false);
+                                                  false,
+                                                );
                                                 return;
                                               }
                                               _selectedRow = row
                                                   .clamp(
                                                     0,
-                                                    math.max(0, _rowCount - 1),
+                                                    math.max(
+                                                      0,
+                                                      _rowCount - 1,
+                                                    ),
                                                   )
                                                   .toInt();
                                               _tabletSelectedRowFxRow = row;
@@ -74255,12 +75646,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                       )
                                                   : null,
 
-                                          setTrackAutomationPoints: (row,
-                                                  points) =>
-                                              _syncNativeAutomationForRow(row),
+                                          setTrackAutomationPoints:
+                                              (row, points) =>
+                                                  _syncNativeAutomationForRow(
+                                            row,
+                                          ),
 
-                                          onAutomationCommit:
-                                              (row, oldPoints, newPoints) {
+                                          onAutomationCommit: (
+                                            row,
+                                            oldPoints,
+                                            newPoints,
+                                          ) {
                                             _undoManager.execute(
                                               SetAutomationPointsAction(
                                                 row: row,
@@ -74270,36 +75666,49 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                   setState(() {
                                                     _rowVolumeAutomation[r] =
                                                         points
-                                                            .map((p) =>
-                                                                AutomationPoint(
-                                                                    x: p.x,
-                                                                    volume: p
-                                                                        .volume))
+                                                            .map(
+                                                              (
+                                                                p,
+                                                              ) =>
+                                                                  AutomationPoint(
+                                                                x: p.x,
+                                                                volume:
+                                                                    p.volume,
+                                                              ),
+                                                            )
                                                             .toList();
                                                   });
                                                 },
                                                 onApplied: (r, _) async {
                                                   await _syncNativeAutomationForRow(
-                                                      r);
+                                                    r,
+                                                  );
                                                 },
                                               ),
                                             );
                                             _recordProducerManualEdit(
-                                                'row_automation', {
-                                              'row': row,
-                                              'old_count': oldPoints.length,
-                                              'new_count': newPoints.length,
-                                            });
+                                              'row_automation',
+                                              {
+                                                'row': row,
+                                                'old_count': oldPoints.length,
+                                                'new_count': newPoints.length,
+                                              },
+                                            );
                                           },
 
                                           setRowGain: _setRowGainLive,
-                                          onRowGainCommit:
-                                              (row, oldGain, newGain) {
-                                            unawaited(_commitRowGainFromUi(
-                                              row,
-                                              oldGain,
-                                              newGain,
-                                            ));
+                                          onRowGainCommit: (
+                                            row,
+                                            oldGain,
+                                            newGain,
+                                          ) {
+                                            unawaited(
+                                              _commitRowGainFromUi(
+                                                row,
+                                                oldGain,
+                                                newGain,
+                                              ),
+                                            );
                                           },
 
                                           muteRow: _setRowMutedFromUi,
@@ -74317,25 +75726,39 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                 _trackGroupForLeadRowIndex(row);
                                             if (group != null) {
                                               _applyTrackGroupPanState(
-                                                  group.id, newPan);
+                                                group.id,
+                                                newPan,
+                                              );
                                               return _setTrackGroupPanNative(
-                                                  group.id, newPan);
+                                                group.id,
+                                                newPan,
+                                              );
                                             }
                                             return JuceAudioEngine.setRowPan(
-                                                row, newPan);
-                                          },
-                                          onRowPanCommit:
-                                              (row, oldPan, newPan) {
-                                            unawaited(_commitRowPanFromUi(
                                               row,
-                                              oldPan,
                                               newPan,
-                                            ));
+                                            );
+                                          },
+                                          onRowPanCommit: (
+                                            row,
+                                            oldPan,
+                                            newPan,
+                                          ) {
+                                            unawaited(
+                                              _commitRowPanFromUi(
+                                                row,
+                                                oldPan,
+                                                newPan,
+                                              ),
+                                            );
                                           },
 
                                           setClipGain: _setClipGainLive,
-                                          onClipGainCommit:
-                                              (clipIndex, oldGain, newGain) {
+                                          onClipGainCommit: (
+                                            clipIndex,
+                                            oldGain,
+                                            newGain,
+                                          ) {
                                             _undoManager.execute(
                                               SetClipGainAction(
                                                 tracks: _audioTracks,
@@ -74350,17 +75773,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               ),
                                             );
                                             _recordProducerManualEdit(
-                                                'clip_gain', {
-                                              'clip': clipIndex,
-                                              'old_gain': oldGain,
-                                              'new_gain': newGain,
-                                            });
+                                              'clip_gain',
+                                              {
+                                                'clip': clipIndex,
+                                                'old_gain': oldGain,
+                                                'new_gain': newGain,
+                                              },
+                                            );
                                           },
                                           onToggleClipNormalize:
                                               _handleToggleClipNormalize,
                                           setClipPitch: _setClipPitchLive,
-                                          onClipPitchCommit:
-                                              (clipIndex, oldPitch, newPitch) {
+                                          onClipPitchCommit: (
+                                            clipIndex,
+                                            oldPitch,
+                                            newPitch,
+                                          ) {
                                             _undoManager.execute(
                                               SetClipPitchAction(
                                                 tracks: _audioTracks,
@@ -74375,14 +75803,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               ),
                                             );
                                             _recordProducerManualEdit(
-                                                'clip_pitch', {
-                                              'clip': clipIndex,
-                                              'old_pitch': oldPitch,
-                                              'new_pitch': newPitch,
-                                            });
+                                              'clip_pitch',
+                                              {
+                                                'clip': clipIndex,
+                                                'old_pitch': oldPitch,
+                                                'new_pitch': newPitch,
+                                              },
+                                            );
                                           },
-                                          onSetClipReversed:
-                                              (clipIndex, reversed) async {
+                                          onSetClipReversed: (
+                                            clipIndex,
+                                            reversed,
+                                          ) async {
                                             if (clipIndex < 0 ||
                                                 clipIndex >=
                                                     _audioTracks.length) {
@@ -74408,10 +75840,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               ),
                                             );
                                             _recordProducerManualEdit(
-                                                'clip_reverse', {
-                                              'clip': clipIndex,
-                                              'reversed': reversed,
-                                            });
+                                              'clip_reverse',
+                                              {
+                                                'clip': clipIndex,
+                                                'reversed': reversed,
+                                              },
+                                            );
                                           },
                                           onAdjustClipToTempo:
                                               _handleAdjustClipToTempo,
@@ -74435,8 +75869,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               _handleStretchClipResize,
                                           onStretchClipCommit:
                                               _handleStretchClipResizeCommit,
-                                          onRenameClip:
-                                              (clipIndex, newLabel) async {
+                                          onRenameClip: (
+                                            clipIndex,
+                                            newLabel,
+                                          ) async {
                                             if (clipIndex < 0 ||
                                                 clipIndex >=
                                                     _audioTracks.length) {
@@ -74465,11 +75901,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             );
 
                                             _recordProducerManualEdit(
-                                                'clip_rename', {
-                                              'clip': clipIndex,
-                                              'old_label': oldLabel,
-                                              'new_label': nextLabel,
-                                            });
+                                              'clip_rename',
+                                              {
+                                                'clip': clipIndex,
+                                                'old_label': oldLabel,
+                                                'new_label': nextLabel,
+                                              },
+                                            );
                                           },
                                           onOpenAudioClipOptionsPanel:
                                               _openTabletAudioClipOptions,
@@ -74533,12 +75971,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               _createMidiClipInInstrumentLane,
                                           onStemSeparation:
                                               _handleStemSeparationForClip,
-                                          onSelectionChanged:
-                                              (selectedClipIndices,
-                                                  primaryClipIndex) {
+                                          onSelectionChanged: (
+                                            selectedClipIndices,
+                                            primaryClipIndex,
+                                          ) {
                                             _timelineSelectedClipIndices =
                                                 List<int>.from(
-                                                    selectedClipIndices);
+                                              selectedClipIndices,
+                                            );
                                             _timelinePrimarySelectedClipIndex =
                                                 primaryClipIndex;
                                             _retargetOpenMidiClipEditorToSelection(
@@ -74551,8 +75991,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               _syncLiveMidiInputTargetClip(),
                                             );
                                           },
-                                          onSnapSettingsChanged: (magnetEnabled,
-                                              quantizeDivisionsPerBar) {
+                                          onSnapSettingsChanged: (
+                                            magnetEnabled,
+                                            quantizeDivisionsPerBar,
+                                          ) {
                                             if (_timelineMagnetEnabled ==
                                                     magnetEnabled &&
                                                 _timelineQuantizeDivisionsPerBar ==
@@ -74568,7 +76010,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           },
                                           onLoopToggle: (enabled) {
                                             setState(
-                                                () => _loopEnabled = enabled);
+                                              () => _loopEnabled = enabled,
+                                            );
                                             _scheduleProjectAutosave();
                                           },
                                           loopEnabled: _loopEnabled,
@@ -74610,19 +76053,28 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           getRowCompressorMeter: (row, fx) =>
                                               JuceAudioEngine
                                                   .getRowCompressorMeter(
-                                                      row, fx),
+                                            row,
+                                            fx,
+                                          ),
                                           getRowEqWaveform: (row, fx,
                                                   sampleCount) =>
                                               JuceAudioEngine.getRowEqWaveform(
-                                                  row, fx,
-                                                  sampleCount: sampleCount),
+                                            row,
+                                            fx,
+                                            sampleCount: sampleCount,
+                                          ),
                                           getRowStereoScope: (row, fx,
                                                   pointCount) =>
                                               JuceAudioEngine.getRowStereoScope(
-                                                  row, fx,
-                                                  pointCount: pointCount),
-                                          onExternalSampleDrop:
-                                              (data, row, timeMs) async {
+                                            row,
+                                            fx,
+                                            pointCount: pointCount,
+                                          ),
+                                          onExternalSampleDrop: (
+                                            data,
+                                            row,
+                                            timeMs,
+                                          ) async {
                                             _cancelSampleBrowserReopenAfterSuccessfulDrop();
                                             await _insertAudioFileAtTimeline(
                                               data.filePath,
@@ -74674,9 +76126,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 ),
                               Builder(
                                 builder: (overlayContext) {
-                                  final keyboardInset =
-                                      MediaQuery.viewInsetsOf(overlayContext)
-                                          .bottom;
+                                  final keyboardInset = MediaQuery.viewInsetsOf(
+                                    overlayContext,
+                                  ).bottom;
                                   final chatTypingActive = _isChatTypingActive;
                                   final chatKeyboardActive =
                                       _chatShouldTrackKeyboardInset(
@@ -74710,8 +76162,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               fixedTransportFootprint,
                                         );
                                   final chatLift = keyboardLift;
-                                  final mediaSize =
-                                      MediaQuery.sizeOf(overlayContext);
+                                  final mediaSize = MediaQuery.sizeOf(
+                                    overlayContext,
+                                  );
                                   final floatingEditorAvailableBounds =
                                       Rect.fromLTWH(
                                     _kOverlayPanelHorizontalInset,
@@ -74741,11 +76194,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       : collapsedTop;
                                   final samplePanelTop = desiredPanelTop
                                       .clamp(
-                                          _kSamplePanelExpandedTop, maxPanelTop)
+                                        _kSamplePanelExpandedTop,
+                                        maxPanelTop,
+                                      )
                                       .toDouble();
                                   final usesTabletAddMenu =
                                       mixroomUsesTabletLandscapeShell(
-                                          overlayContext);
+                                    overlayContext,
+                                  );
                                   final addMenuUsesAnchoredDesktopStyle =
                                       usesTabletAddMenu ||
                                           PlatformCapabilities
@@ -74866,7 +76322,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           ignoring: !_showAddActionsPanel,
                                           child: TweenAnimationBuilder<double>(
                                             duration: const Duration(
-                                                milliseconds: 165),
+                                              milliseconds: 165,
+                                            ),
                                             curve: _showAddActionsPanel
                                                 ? Curves.easeOutQuart
                                                 : Curves.easeInCubic,
@@ -74877,8 +76334,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                   : 0.0,
                                             ),
                                             builder: (context, t, child) {
-                                              final clampedT =
-                                                  t.clamp(0.0, 1.0);
+                                              final clampedT = t.clamp(
+                                                0.0,
+                                                1.0,
+                                              );
                                               final eased = Curves.easeOutQuart
                                                   .transform(clampedT);
                                               final verticalReveal = math.max(
@@ -74950,9 +76409,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                         gradient:
                                                             const LinearGradient(
                                                           colors: <Color>[
-                                                            Color(0xFF5F6772),
-                                                            Color(0xFF434D59),
-                                                            Color(0xFF303946),
+                                                            Color(
+                                                              0xFF5F6772,
+                                                            ),
+                                                            Color(
+                                                              0xFF434D59,
+                                                            ),
+                                                            Color(
+                                                              0xFF303946,
+                                                            ),
                                                           ],
                                                           begin: Alignment
                                                               .topCenter,
@@ -74960,25 +76425,31 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                               .bottomCenter,
                                                         ),
                                                         color: const Color(
-                                                            0xFF3C4652),
+                                                          0xFF3C4652,
+                                                        ),
                                                         borderRadius:
                                                             BorderRadius
-                                                                .circular(24),
+                                                                .circular(
+                                                          24,
+                                                        ),
                                                         border: Border.all(
                                                           color: Colors.white
                                                               .withValues(
-                                                                  alpha: 0.14),
+                                                            alpha: 0.14,
+                                                          ),
                                                         ),
                                                         boxShadow: [
                                                           BoxShadow(
                                                             color: Colors.black
                                                                 .withValues(
-                                                                    alpha:
-                                                                        0.24),
+                                                              alpha: 0.24,
+                                                            ),
                                                             blurRadius: 24,
                                                             offset:
                                                                 const Offset(
-                                                                    0, 10),
+                                                              0,
+                                                              10,
+                                                            ),
                                                           ),
                                                         ],
                                                       ),
@@ -74994,15 +76465,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                             if (index > 0)
                                                               Container(
                                                                 height: 1,
-                                                                margin: const EdgeInsets
-                                                                    .symmetric(
-                                                                    horizontal:
-                                                                        16),
+                                                                margin:
+                                                                    const EdgeInsets
+                                                                        .symmetric(
+                                                                  horizontal:
+                                                                      16,
+                                                                ),
                                                                 color: Colors
                                                                     .white
                                                                     .withValues(
-                                                                        alpha:
-                                                                            0.08),
+                                                                  alpha: 0.08,
+                                                                ),
                                                               ),
                                                             _buildAddActionTile(
                                                               id: addMenuActions[
@@ -75141,8 +76614,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                   previewPlaying:
                                                       _samplePreviewPlaying,
                                                   onPreviewSeek: (pos) =>
-                                                      _samplePreviewPlayer
-                                                          .seek(pos),
+                                                      _samplePreviewPlayer.seek(
+                                                    pos,
+                                                  ),
                                                   onOpenSystemSettings:
                                                       _openAppPermissionsSettings,
                                                   onDragActivityChanged:
@@ -75204,8 +76678,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                   previewPlaying:
                                                       _samplePreviewPlaying,
                                                   onPreviewSeek: (pos) =>
-                                                      _samplePreviewPlayer
-                                                          .seek(pos),
+                                                      _samplePreviewPlayer.seek(
+                                                    pos,
+                                                  ),
                                                   onOpenSystemSettings:
                                                       _openAppPermissionsSettings,
                                                   onDragActivityChanged:
@@ -75295,8 +76770,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                       _captureDeckCanFreezeRow(),
                                                   canCleanUpRecording:
                                                       _captureDeckCanCleanUpRecording(),
-                                                  onFullscreenChanged:
-                                                      (expanded) {
+                                                  onFullscreenChanged: (
+                                                    expanded,
+                                                  ) {
                                                     setState(() {
                                                       _captureDeckFullscreen =
                                                           expanded;
@@ -75382,11 +76858,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         return const SizedBox.shrink();
                                       }
 
-                                      final media = MediaQuery.of(panelContext);
+                                      final media = MediaQuery.of(
+                                        panelContext,
+                                      );
                                       final screenH = media.size.height;
                                       final pianoRollUsesTabletDawLayout =
                                           mixroomUsesTabletLandscapeShell(
-                                              panelContext);
+                                        panelContext,
+                                      );
                                       final midiPanelBottom =
                                           _desktopBottomPanelInset(
                                         chatTypingActive: _isChatTypingActive,
@@ -75427,7 +76906,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         haloKey: const HaloKey(
                                           'tutorial:piano_roll',
                                         ),
-                                        borderRadius: BorderRadius.circular(18),
+                                        borderRadius: BorderRadius.circular(
+                                          18,
+                                        ),
                                         child: PianoRollEditor(
                                           key: ValueKey<int>(
                                             clip.engineClipId >= 0
@@ -75570,7 +77051,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         return const SizedBox.shrink();
                                       }
 
-                                      final media = MediaQuery.of(panelContext);
+                                      final media = MediaQuery.of(
+                                        panelContext,
+                                      );
                                       final screenH = media.size.height;
                                       final panelBottom =
                                           _desktopBottomPanelInset(
@@ -75607,7 +77090,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               ? expandedTop
                                               : collapsedTop;
                                       final panelTop = desiredPanelTop
-                                          .clamp(expandedTop, maxPanelTop)
+                                          .clamp(
+                                            expandedTop,
+                                            maxPanelTop,
+                                          )
                                           .toDouble();
 
                                       final pitchLabChild = PitchBlobEditor(
@@ -75660,8 +77146,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                 setState(() {
                                                   _pitchLabAudioDraftNotes =
                                                       notes
-                                                          .map((note) =>
-                                                              note.copy())
+                                                          .map(
+                                                            (note) =>
+                                                                note.copy(),
+                                                          )
                                                           .toList(
                                                             growable: false,
                                                           );
@@ -75787,7 +77275,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         _onTopPopupTapAwayPointerCancel,
                                     onPointerUp: (event) {
                                       if (!_consumeTopPopupTapAwayPointerUp(
-                                          event)) {
+                                        event,
+                                      )) {
                                         return;
                                       }
                                       if (_isGlobalPointInsideKeyRect(
@@ -75821,7 +77310,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         _onTopPopupTapAwayPointerCancel,
                                     onPointerUp: (event) {
                                       if (!_consumeTopPopupTapAwayPointerUp(
-                                          event)) {
+                                        event,
+                                      )) {
                                         return;
                                       }
                                       if (_isGlobalPointInsideKeyRect(
@@ -75858,7 +77348,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     onPointerUp: (event) {
                                       if (!_isMasterPopupOpen) return;
                                       if (!_consumeTopPopupTapAwayPointerUp(
-                                          event)) {
+                                        event,
+                                      )) {
                                         return;
                                       }
                                       if (_isGlobalPointInsideKeyRect(
@@ -75879,10 +77370,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 right: tabletRightPanelReservedWidth,
                                 child: ValueListenableBuilder<Duration>(
                                   valueListenable: _transportClock,
-                                  builder: (_, clock, __) => _buildTopBar(
-                                    clock,
-                                    editorLayoutSpec,
-                                  ),
+                                  builder: (_, clock, __) =>
+                                      _buildTopBar(clock, editorLayoutSpec),
                                 ),
                               ),
                               _buildTimelineHorizontalScrollbarOverlay(
@@ -75953,7 +77442,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 value: _syncProgress,
                                 backgroundColor: Colors.white30,
                                 valueColor: AlwaysStoppedAnimation<Color>(
-                                    Colors.lightBlueAccent),
+                                  Colors.lightBlueAccent,
+                                ),
                               ),
                             ),
                             const SizedBox(height: 8),
@@ -76039,9 +77529,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         PlatformCapabilities.current.isDesktop;
   }
 
-  Alignment _effectiveDawOnboardingCardAlignment(
-    _DawTutorialStepSpec step,
-  ) {
+  Alignment _effectiveDawOnboardingCardAlignment(_DawTutorialStepSpec step) {
     if (step.id == _DawTutorialStepId.rowAutomationTab &&
         _useTabletDesktopDawOnboardingLayout()) {
       return Alignment.centerLeft;
@@ -76065,9 +77553,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return _dawOnboardingCardAlignment(step.placement);
   }
 
-  EdgeInsets _effectiveDawOnboardingCardPadding(
-    _DawTutorialStepSpec step,
-  ) {
+  EdgeInsets _effectiveDawOnboardingCardPadding(_DawTutorialStepSpec step) {
     if (step.id == _DawTutorialStepId.rowAutomationTab &&
         _useTabletDesktopDawOnboardingLayout()) {
       return const EdgeInsets.fromLTRB(178, 120, 16, 140);
@@ -76170,15 +77656,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       visualDensity: VisualDensity.compact,
                       shape: const CircleBorder(
-                        side: BorderSide(
-                          color: Colors.white12,
-                        ),
+                        side: BorderSide(color: Colors.white12),
                       ),
                     ),
-                    child: const Icon(
-                      Icons.close_rounded,
-                      size: 14,
-                    ),
+                    child: const Icon(Icons.close_rounded, size: 14),
                   ),
                 );
 
@@ -76207,10 +77688,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
                                 colors: <Color>[
-                                  const Color(0xFF10203A)
-                                      .withValues(alpha: 0.96),
-                                  const Color(0xFF0B1527)
-                                      .withValues(alpha: 0.96),
+                                  const Color(
+                                    0xFF10203A,
+                                  ).withValues(alpha: 0.96),
+                                  const Color(
+                                    0xFF0B1527,
+                                  ).withValues(alpha: 0.96),
                                 ],
                               ),
                               borderRadius: BorderRadius.circular(24),
@@ -76276,12 +77759,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                     vertical: 6,
                                                   ),
                                                   decoration: BoxDecoration(
-                                                    color: step.accent
-                                                        .withValues(
-                                                            alpha: 0.18),
+                                                    color:
+                                                        step.accent.withValues(
+                                                      alpha: 0.18,
+                                                    ),
                                                     borderRadius:
                                                         BorderRadius.circular(
-                                                            999),
+                                                      999,
+                                                    ),
                                                   ),
                                                   child: Text(
                                                     _dawTutorialText(
@@ -76309,10 +77794,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             ),
                                           ),
                                           const SizedBox(width: 8),
-                                          Flexible(
-                                            flex: 0,
-                                            child: skipButton,
-                                          ),
+                                          Flexible(flex: 0, child: skipButton),
                                         ],
                                       ),
                                       const SizedBox(height: 10),
@@ -76334,8 +77816,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         softWrap: true,
                                         style: theme.textTheme.bodyMedium
                                             ?.copyWith(
-                                          color: Colors.white
-                                              .withValues(alpha: 0.82),
+                                          color: Colors.white.withValues(
+                                            alpha: 0.82,
+                                          ),
                                           height: 1.38,
                                         ),
                                       ),
@@ -76348,13 +77831,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             vertical: 10,
                                           ),
                                           decoration: BoxDecoration(
-                                            color: Colors.white
-                                                .withValues(alpha: 0.06),
-                                            borderRadius:
-                                                BorderRadius.circular(14),
+                                            color: Colors.white.withValues(
+                                              alpha: 0.06,
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              14,
+                                            ),
                                             border: Border.all(
-                                              color: Colors.white
-                                                  .withValues(alpha: 0.08),
+                                              color: Colors.white.withValues(
+                                                alpha: 0.08,
+                                              ),
                                             ),
                                           ),
                                           child: Row(
@@ -76365,7 +77851,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                 Padding(
                                                   padding:
                                                       const EdgeInsets.only(
-                                                          right: 10),
+                                                    right: 10,
+                                                  ),
                                                   child: SizedBox(
                                                     width: 14,
                                                     height: 14,
@@ -76374,9 +77861,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                       strokeWidth: 2,
                                                       valueColor:
                                                           AlwaysStoppedAnimation<
-                                                              Color>(
-                                                        step.accent,
-                                                      ),
+                                                                  Color>(
+                                                              step.accent),
                                                     ),
                                                   ),
                                                 ),
@@ -76390,9 +77876,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                   style: theme
                                                       .textTheme.bodySmall
                                                       ?.copyWith(
-                                                    color: Colors.white
-                                                        .withValues(
-                                                            alpha: 0.78),
+                                                    color:
+                                                        Colors.white.withValues(
+                                                      alpha: 0.78,
+                                                    ),
                                                     fontWeight: FontWeight.w600,
                                                   ),
                                                 ),
@@ -76411,14 +77898,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                           step.accent,
                                                       foregroundColor:
                                                           const Color(
-                                                              0xFF081220),
+                                                        0xFF081220,
+                                                      ),
                                                       padding: const EdgeInsets
                                                           .symmetric(
                                                         horizontal: 12,
                                                         vertical: 8,
                                                       ),
-                                                      minimumSize:
-                                                          const Size(0, 32),
+                                                      minimumSize: const Size(
+                                                        0,
+                                                        32,
+                                                      ),
                                                       tapTargetSize:
                                                           MaterialTapTargetSize
                                                               .shrinkWrap,
@@ -76426,7 +77916,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                           RoundedRectangleBorder(
                                                         borderRadius:
                                                             BorderRadius
-                                                                .circular(10),
+                                                                .circular(
+                                                          10,
+                                                        ),
                                                       ),
                                                     ),
                                                     child: Text(
@@ -76451,8 +77943,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             onPressed: onPrimaryPressed,
                                             style: FilledButton.styleFrom(
                                               backgroundColor: step.accent,
-                                              foregroundColor:
-                                                  const Color(0xFF081220),
+                                              foregroundColor: const Color(
+                                                0xFF081220,
+                                              ),
                                               padding:
                                                   const EdgeInsets.symmetric(
                                                 horizontal: 18,
@@ -76470,7 +77963,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                               .done
                                                       ? _dawTutorialText('done')
                                                       : _dawTutorialText(
-                                                          'next')),
+                                                          'next',
+                                                        )),
                                               style: const TextStyle(
                                                 fontWeight: FontWeight.w800,
                                               ),
@@ -76681,7 +78175,7 @@ class _PillDivider extends StatelessWidget {
           colors: [
             Colors.white.withOpacity(0.08),
             Colors.white.withOpacity(0.28),
-            Colors.white.withOpacity(0.08)
+            Colors.white.withOpacity(0.08),
           ],
         ),
       ),
@@ -76713,10 +78207,7 @@ class _Glass extends StatelessWidget {
   Widget build(BuildContext context) {
     final effectiveGradient = overlay ??
         const LinearGradient(
-          colors: <Color>[
-            Color(0xFF5C6268),
-            Color(0xFF3C4146),
-          ],
+          colors: <Color>[Color(0xFF5C6268), Color(0xFF3C4146)],
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
         );
@@ -76756,9 +78247,7 @@ class DotsLoader extends StatefulWidget {
 }
 
 class _InlineThinkingLabel extends StatefulWidget {
-  const _InlineThinkingLabel({
-    required this.textStyle,
-  });
+  const _InlineThinkingLabel({required this.textStyle});
 
   final TextStyle textStyle;
 
@@ -76807,20 +78296,11 @@ class _InlineThinkingLabelState extends State<_InlineThinkingLabel>
               overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(width: 7),
-            _ThinkingDot(
-              opacity: dotOpacity(0.0),
-              scale: dotScale(0.0),
-            ),
+            _ThinkingDot(opacity: dotOpacity(0.0), scale: dotScale(0.0)),
             const SizedBox(width: 4),
-            _ThinkingDot(
-              opacity: dotOpacity(-0.18),
-              scale: dotScale(-0.18),
-            ),
+            _ThinkingDot(opacity: dotOpacity(-0.18), scale: dotScale(-0.18)),
             const SizedBox(width: 4),
-            _ThinkingDot(
-              opacity: dotOpacity(-0.36),
-              scale: dotScale(-0.36),
-            ),
+            _ThinkingDot(opacity: dotOpacity(-0.36), scale: dotScale(-0.36)),
           ],
         );
       },
@@ -76885,10 +78365,7 @@ class _ChatThinkingBubbleState extends State<_ChatThinkingBubble>
                   ),
                 ),
                 const SizedBox(width: 7),
-                _ThinkingDot(
-                  opacity: dotOpacity(0.0),
-                  scale: dotScale(0.0),
-                ),
+                _ThinkingDot(opacity: dotOpacity(0.0), scale: dotScale(0.0)),
                 const SizedBox(width: 4),
                 _ThinkingDot(
                   opacity: dotOpacity(-0.18),
@@ -76909,10 +78386,7 @@ class _ChatThinkingBubbleState extends State<_ChatThinkingBubble>
 }
 
 class _ThinkingDot extends StatelessWidget {
-  const _ThinkingDot({
-    required this.opacity,
-    this.scale = 1.0,
-  });
+  const _ThinkingDot({required this.opacity, this.scale = 1.0});
 
   final double opacity;
   final double scale;
@@ -76946,9 +78420,10 @@ class _DotsLoaderState extends State<DotsLoader>
   @override
   void initState() {
     super.initState();
-    _controller =
-        AnimationController(duration: const Duration(seconds: 1), vsync: this)
-          ..repeat();
+    _controller = AnimationController(
+      duration: const Duration(seconds: 1),
+      vsync: this,
+    )..repeat();
     _dotCount = StepTween(begin: 0, end: 4).animate(_controller);
   }
 
@@ -76967,16 +78442,20 @@ class _DotsLoaderState extends State<DotsLoader>
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text('${L10n.translate(context, 'Syncing Audio')}',
-            style: TextStyle(color: Colors.white, fontSize: 20)),
+        Text(
+          '${L10n.translate(context, 'Syncing Audio')}',
+          style: TextStyle(color: Colors.white, fontSize: 20),
+        ),
         const SizedBox(width: 2),
         SizedBox(
           width: totalDotSpace,
           child: AnimatedBuilder(
             animation: _dotCount,
             builder: (context, _) {
-              return Text('.' * _dotCount.value,
-                  style: const TextStyle(color: Colors.white, fontSize: 20));
+              return Text(
+                '.' * _dotCount.value,
+                style: const TextStyle(color: Colors.white, fontSize: 20),
+              );
             },
           ),
         ),
@@ -76986,7 +78465,9 @@ class _DotsLoaderState extends State<DotsLoader>
 }
 
 double getVolumeForAutomation(
-    List<AutomationPoint> points, double normalizedTime) {
+  List<AutomationPoint> points,
+  double normalizedTime,
+) {
   if (points.isEmpty) return 1.0;
   if (normalizedTime <= points.first.x) return points.first.volume;
   if (normalizedTime >= points.last.x) return points.last.volume;
@@ -77011,8 +78492,12 @@ void _findSyncOffsetInBackground(List<Object?> args) {
     List<double> videoSamples = await loadAudioSamplesAsync(videoAudioPath);
     List<double> trackSamples = await loadAudioSamplesAsync(convertedTrackPath);
 
-    int bestOffset =
-        findOffsetFFT(videoSamples, trackSamples, sampleRate, progressPort);
+    int bestOffset = findOffsetFFT(
+      videoSamples,
+      trackSamples,
+      sampleRate,
+      progressPort,
+    );
     sendPort.send(bestOffset);
   }
 
@@ -77036,8 +78521,10 @@ List<double> loadAudioSamples(String filePath, {int numChannels = 2}) {
   return samples;
 }
 
-Future<List<double>> loadAudioSamplesAsync(String filePath,
-    {int numChannels = 2}) async {
+Future<List<double>> loadAudioSamplesAsync(
+  String filePath, {
+  int numChannels = 2,
+}) async {
   final file = File(filePath);
   final bytes = await file.readAsBytes();
 
@@ -77058,8 +78545,12 @@ Future<List<double>> loadAudioSamplesAsync(String filePath,
   return samples;
 }
 
-int findOffsetFFT(List<double> videoSamples, List<double> trackSamples,
-    double sampleRate, SendPort progressPort) {
+int findOffsetFFT(
+  List<double> videoSamples,
+  List<double> trackSamples,
+  double sampleRate,
+  SendPort progressPort,
+) {
   // 1. Downsample first (Key optimization)
   const int targetSampleRate = 8000; // Adequate for sync
   final double ratio = sampleRate / targetSampleRate;
@@ -77366,7 +78857,10 @@ Future<double> getSampleRate(String filePath) async {
 }
 
 String generateVolumeAutomationFilter(
-    AudioTrack track, int offsetMs, double universalCrossfade) {
+  AudioTrack track,
+  int offsetMs,
+  double universalCrossfade,
+) {
   // If no automation points, default to universal crossfade value.
   if (track.volumeAutomation.isEmpty)
     return min(1.0, universalCrossfade * 2).toStringAsFixed(2);
@@ -77408,8 +78902,11 @@ class ExportProgressPage extends StatefulWidget {
   final Future<String> Function(ValueChanged<double>) exportFn;
   final String videoFile;
 
-  const ExportProgressPage(
-      {required this.exportFn, required this.videoFile, super.key});
+  const ExportProgressPage({
+    required this.exportFn,
+    required this.videoFile,
+    super.key,
+  });
 
   @override
   State<ExportProgressPage> createState() => _ExportProgressPageState();
@@ -77467,12 +78964,7 @@ class _ExportProgressPageState extends State<ExportProgressPage> {
       height: 22 / 18,
       fontWeight: FontWeight.w600,
       color: Color(0xFFF4F4F4),
-      shadows: [
-        Shadow(
-          blurRadius: 25,
-          color: Colors.black,
-        ),
-      ],
+      shadows: [Shadow(blurRadius: 25, color: Colors.black)],
     );
     final dotSlotPainter = TextPainter(
       text: const TextSpan(text: '...', style: exportingLabelStyle),
@@ -77486,10 +78978,7 @@ class _ExportProgressPageState extends State<ExportProgressPage> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          Image.asset(
-            kMixroomExportProgressBgAsset,
-            fit: BoxFit.cover,
-          ),
+          Image.asset(kMixroomExportProgressBgAsset, fit: BoxFit.cover),
           Container(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -77557,13 +79046,15 @@ class _ExportProgressPageState extends State<ExportProgressPage> {
                                     ),
                                     height: 10,
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFFF4F4F4)
-                                          .withValues(alpha: 0.2),
+                                      color: const Color(
+                                        0xFFF4F4F4,
+                                      ).withValues(alpha: 0.2),
                                       borderRadius: BorderRadius.circular(24),
                                       boxShadow: [
                                         BoxShadow(
-                                          color: Colors.black
-                                              .withValues(alpha: 0.2),
+                                          color: Colors.black.withValues(
+                                            alpha: 0.2,
+                                          ),
                                           blurRadius: 10,
                                           spreadRadius: 0,
                                         ),
@@ -77579,12 +79070,14 @@ class _ExportProgressPageState extends State<ExportProgressPage> {
                                           ),
                                           decoration: BoxDecoration(
                                             color: const Color(0xFFF4F4F4),
-                                            borderRadius:
-                                                BorderRadius.circular(24),
+                                            borderRadius: BorderRadius.circular(
+                                              24,
+                                            ),
                                             boxShadow: [
                                               BoxShadow(
-                                                color: const Color(0xFF2596F9)
-                                                    .withValues(alpha: 0.28),
+                                                color: const Color(
+                                                  0xFF2596F9,
+                                                ).withValues(alpha: 0.28),
                                                 blurRadius: 10,
                                                 spreadRadius: 0,
                                               ),
@@ -77618,8 +79111,9 @@ class _ExportProgressPageState extends State<ExportProgressPage> {
                         ),
                         child: TextButton(
                           style: TextButton.styleFrom(
-                            backgroundColor:
-                                const Color(0xFFF4F4F4).withValues(alpha: 0.2),
+                            backgroundColor: const Color(
+                              0xFFF4F4F4,
+                            ).withValues(alpha: 0.2),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(24),
                             ),
@@ -77659,27 +79153,26 @@ class _ExportProgressPageState extends State<ExportProgressPage> {
 
 // EXPORT SUCCESS SCREEN
 
-enum ExportSuccessAction {
-  backToDaw,
-  exitToProjects,
-}
+enum ExportSuccessAction { backToDaw, exitToProjects }
 
 class ExportSuccessScreen extends StatelessWidget {
-  static const MethodChannel _savedExportsChannel =
-      MethodChannel('mixroom/saved_exports');
+  static const MethodChannel _savedExportsChannel = MethodChannel(
+    'mixroom/saved_exports',
+  );
   final String filePath;
   final String? previewFilePath;
   final String? savedFilePath;
   final String? savedFileName;
   final bool isVideo;
 
-  const ExportSuccessScreen(
-      {super.key,
-      required this.filePath,
-      this.previewFilePath,
-      required this.isVideo,
-      this.savedFilePath,
-      this.savedFileName});
+  const ExportSuccessScreen({
+    super.key,
+    required this.filePath,
+    this.previewFilePath,
+    required this.isVideo,
+    this.savedFilePath,
+    this.savedFileName,
+  });
 
   String? _savedNameFromPathHint() {
     final saved = savedFilePath?.trim();
@@ -77893,11 +79386,7 @@ class ExportSuccessScreen extends StatelessWidget {
         final pathValue =
             normalized.startsWith('/') ? normalized : '/$normalized';
         for (final authority in authorities) {
-          add(Uri(
-            scheme: 'content',
-            host: authority,
-            path: pathValue,
-          ));
+          add(Uri(scheme: 'content', host: authority, path: pathValue));
         }
       }
     }
@@ -78024,8 +79513,9 @@ class ExportSuccessScreen extends StatelessWidget {
       if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
         final saved = savedFilePath?.trim();
         if (saved != null && saved.isNotEmpty) {
-          final shared =
-              await ExportSaveDialog.shareSavedExportFromPlatform(saved);
+          final shared = await ExportSaveDialog.shareSavedExportFromPlatform(
+            saved,
+          );
           if (shared) {
             return;
           }
@@ -78042,12 +79532,7 @@ class ExportSuccessScreen extends StatelessWidget {
       if (_isUriLikePath(sharePath) || !File(sharePath).existsSync()) {
         throw Exception('No readable export file path for sharing.');
       }
-      await Share.shareXFiles([
-        XFile(
-          sharePath,
-          name: _resolvedFileName(),
-        )
-      ]);
+      await Share.shareXFiles([XFile(sharePath, name: _resolvedFileName())]);
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -78172,17 +79657,16 @@ class ExportSuccessScreen extends StatelessWidget {
   void _showUploadComingSoon(BuildContext context) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          L10n.translate(context, 'Platform upload coming soon'),
-        ),
+        content: Text(L10n.translate(context, 'Platform upload coming soon')),
       ),
     );
   }
 
   Future<Map<String, String>?> showUploadDialog(BuildContext context) {
     final titleController = TextEditingController(text: 'My Mixroom Video');
-    final descController =
-        TextEditingController(text: 'Made with Mixroom 🎸🎬');
+    final descController = TextEditingController(
+      text: 'Made with Mixroom 🎸🎬',
+    );
 
     return showDialog<Map<String, String>>(
       context: context,
@@ -78209,18 +79693,23 @@ class ExportSuccessScreen extends StatelessWidget {
           ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text(L10n.translate(context, 'Cancel'))),
+              onPressed: () => Navigator.pop(context),
+              child: Text(L10n.translate(context, 'Cancel')),
+            ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: Theme.of(context).colorScheme.primary,
-                foregroundColor:
-                    const Color.fromARGB(255, 255, 255, 255), // or onPrimary
+                foregroundColor: const Color.fromARGB(
+                  255,
+                  255,
+                  255,
+                  255,
+                ), // or onPrimary
               ),
               onPressed: () {
                 Navigator.pop(context, {
                   'title': titleController.text,
-                  'description': descController.text
+                  'description': descController.text,
                 });
               },
               child: Text(L10n.translate(context, 'Upload')),
@@ -78259,8 +79748,10 @@ class ExportSuccessScreen extends StatelessWidget {
       emptyColor: const Color(0xFFFFFFFF),
       gapless: true,
     );
-    final qrImageData =
-        await painter.toImageData(300, format: ImageByteFormat.png);
+    final qrImageData = await painter.toImageData(
+      300,
+      format: ImageByteFormat.png,
+    );
 
     final qrBytes = qrImageData!.buffer.asUint8List();
 
@@ -78299,8 +79790,12 @@ class ExportSuccessScreen extends StatelessWidget {
               const SizedBox(height: 12),
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: Image.file(qrImage,
-                    width: 280, height: 158, fit: BoxFit.cover),
+                child: Image.file(
+                  qrImage,
+                  width: 280,
+                  height: 158,
+                  fit: BoxFit.cover,
+                ),
               ),
               const SizedBox(height: 16),
               ElevatedButton.icon(
@@ -78309,7 +79804,7 @@ class ExportSuccessScreen extends StatelessWidget {
                 onPressed: () async {
                   Navigator.pop(context);
                   await Share.shareXFiles(<XFile>[
-                    XFile(qrImage.path, name: p.basename(qrImage.path))
+                    XFile(qrImage.path, name: p.basename(qrImage.path)),
                   ]);
                 },
               ),
@@ -78350,11 +79845,7 @@ class ExportSuccessScreen extends StatelessWidget {
                   ),
                 ],
               ),
-              child: Icon(
-                icon,
-                size: 22,
-                color: const Color(0xFFF4F4F4),
-              ),
+              child: Icon(icon, size: 22, color: const Color(0xFFF4F4F4)),
             ),
             if (!iconTrailing) const SizedBox(width: 8),
             if (!iconTrailing) label,
@@ -78437,10 +79928,7 @@ class ExportSuccessScreen extends StatelessWidget {
           body: Stack(
             fit: StackFit.expand,
             children: [
-              Image.asset(
-                kMixroomExportProgressBgAsset,
-                fit: BoxFit.cover,
-              ),
+              Image.asset(kMixroomExportProgressBgAsset, fit: BoxFit.cover),
               Container(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
@@ -78488,8 +79976,9 @@ class ExportSuccessScreen extends StatelessWidget {
                                   style: topLabelStyle,
                                 ),
                                 onTap: () {
-                                  Navigator.of(context)
-                                      .pop(ExportSuccessAction.backToDaw);
+                                  Navigator.of(
+                                    context,
+                                  ).pop(ExportSuccessAction.backToDaw);
                                 },
                               ),
                               _buildTopAction(
@@ -78501,9 +79990,9 @@ class ExportSuccessScreen extends StatelessWidget {
                                 ),
                                 iconTrailing: true,
                                 onTap: () {
-                                  Navigator.of(context).pop(
-                                    ExportSuccessAction.exitToProjects,
-                                  );
+                                  Navigator.of(
+                                    context,
+                                  ).pop(ExportSuccessAction.exitToProjects);
                                 },
                               ),
                             ],
@@ -78556,7 +80045,9 @@ class ExportSuccessScreen extends StatelessWidget {
                               children: [
                                 _buildMainActionButton(
                                   label: L10n.translate(
-                                      context, 'Upload on Platform'),
+                                    context,
+                                    'Upload on Platform',
+                                  ),
                                   onPressed: () =>
                                       _showUploadComingSoon(context),
                                   primary: true,
@@ -78608,8 +80099,11 @@ class QRThumbnailScreen extends StatelessWidget {
     final paint = Paint()..color = Colors.black;
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
 
-    final qrPainter =
-        QrPainter(data: videoUrl, version: QrVersions.auto, gapless: true);
+    final qrPainter = QrPainter(
+      data: videoUrl,
+      version: QrVersions.auto,
+      gapless: true,
+    );
 
     final qrImage = await qrPainter.toImage(100);
     final qrBytes = await qrImage.toByteData(format: ui.ImageByteFormat.png);
@@ -78625,10 +80119,13 @@ class QRThumbnailScreen extends StatelessWidget {
     final file = File('${tempDir.path}/youtube_qr_thumb.png');
     await file.writeAsBytes(byteData!.buffer.asUint8List());
 
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content:
-          Text('${L10n.translate(context, 'Thumbnail saved to ')}${file.path}'),
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '${L10n.translate(context, 'Thumbnail saved to ')}${file.path}',
+        ),
+      ),
+    );
   }
 
   @override
@@ -78646,10 +80143,9 @@ class QRThumbnailScreen extends StatelessWidget {
             QrImageView(data: videoUrl, size: 200),
             const SizedBox(height: 20),
             ElevatedButton(
-                onPressed: () => _saveThumbnailWithQR(context),
-                child: Text(
-                  L10n.translate(context, 'Download QR Thumbnail'),
-                )),
+              onPressed: () => _saveThumbnailWithQR(context),
+              child: Text(L10n.translate(context, 'Download QR Thumbnail')),
+            ),
           ],
         ),
       ),
@@ -78663,8 +80159,12 @@ class _SocialButton extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
 
-  const _SocialButton(
-      {this.icon, this.iconWidget, required this.label, required this.onTap});
+  const _SocialButton({
+    this.icon,
+    this.iconWidget,
+    required this.label,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -78678,19 +80178,22 @@ class _SocialButton extends StatelessWidget {
             width: 56,
             height: 56,
             decoration: const BoxDecoration(
-                color: Colors.white12, shape: BoxShape.circle),
+              color: Colors.white12,
+              shape: BoxShape.circle,
+            ),
             child: ClipOval(
               child: Center(
-                  child:
-                      iconWidget ?? Icon(icon, size: 26, color: Colors.white)),
+                child: iconWidget ?? Icon(icon, size: 26, color: Colors.white),
+              ),
             ),
           ),
           const SizedBox(height: 6),
-          Text(label,
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: Colors.white)),
+          Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: Colors.white),
+          ),
         ],
       ),
     );
@@ -78706,11 +80209,12 @@ class DynamicRackContent extends StatefulWidget {
   final Widget effectsPage;
   final MixChangeHighlighter? tutorialHighlighter;
 
-  const DynamicRackContent(
-      {required this.volumePage,
-      required this.effectsPage,
-      this.tutorialHighlighter,
-      super.key});
+  const DynamicRackContent({
+    required this.volumePage,
+    required this.effectsPage,
+    this.tutorialHighlighter,
+    super.key,
+  });
 
   @override
   State<DynamicRackContent> createState() => _DynamicRackContentState();
@@ -78819,12 +80323,16 @@ class _DynamicRackContentState extends State<DynamicRackContent>
                 letterSpacing: 0.15,
               ),
               overlayColor: MaterialStatePropertyAll(
-                  Colors.white.withValues(alpha: 0.03)),
+                Colors.white.withValues(alpha: 0.03),
+              ),
               splashBorderRadius: BorderRadius.circular(8),
               onTap: (newIndex) {
                 // Keep the instant jump for TabBarView to avoid flicker
-                _tabController.animateTo(newIndex,
-                    duration: Duration.zero, curve: Curves.linear);
+                _tabController.animateTo(
+                  newIndex,
+                  duration: Duration.zero,
+                  curve: Curves.linear,
+                );
                 // Trigger rebuild for AnimatedContainer
                 setState(() {
                   _currentTabIndex = newIndex;
@@ -78839,7 +80347,9 @@ class _DynamicRackContentState extends State<DynamicRackContent>
                           highlighter: widget.tutorialHighlighter!,
                           haloKey: const HaloKey('master:tab:volume'),
                           borderRadius: BorderRadius.circular(8),
-                          child: Text(L10n.translate(context, 'Master Volume')),
+                          child: Text(
+                            L10n.translate(context, 'Master Volume'),
+                          ),
                         ),
                 ),
                 Tab(
@@ -78850,8 +80360,9 @@ class _DynamicRackContentState extends State<DynamicRackContent>
                           highlighter: widget.tutorialHighlighter!,
                           haloKey: const HaloKey('master:tab:effects'),
                           borderRadius: BorderRadius.circular(8),
-                          child:
-                              Text(L10n.translate(context, 'Master Effects')),
+                          child: Text(
+                            L10n.translate(context, 'Master Effects'),
+                          ),
                         ),
                 ),
               ],
@@ -79157,10 +80668,7 @@ String _persistedClipIdFor(List<AudioTrack> tracks, int index) {
 }
 
 class _EditorUndoStackEntry {
-  _EditorUndoStackEntry({
-    required this.action,
-    required this.snapshot,
-  });
+  _EditorUndoStackEntry({required this.action, required this.snapshot});
 
   final EditorUndoAction action;
   final ProjectUndoSnapshotRecord? snapshot;
@@ -79212,10 +80720,7 @@ class EditorUndoManager extends ChangeNotifier {
       return;
     }
     _undo.add(
-      _EditorUndoStackEntry(
-        action: action,
-        snapshot: _recordForAction(action),
-      ),
+      _EditorUndoStackEntry(action: action, snapshot: _recordForAction(action)),
     );
     if (_undo.length > maxHistory) {
       _undo.removeAt(0);
@@ -79244,10 +80749,7 @@ class EditorUndoManager extends ChangeNotifier {
       return;
     }
     _undo.add(
-      _EditorUndoStackEntry(
-        action: action,
-        snapshot: _recordForAction(action),
-      ),
+      _EditorUndoStackEntry(action: action, snapshot: _recordForAction(action)),
     );
     if (_undo.length > maxHistory) {
       _undo.removeAt(0);
@@ -79273,9 +80775,7 @@ class EditorUndoManager extends ChangeNotifier {
     try {
       await runZoned(
         perform,
-        zoneValues: <Object, Object>{
-          _captureZoneKey: ownerToken,
-        },
+        zoneValues: <Object, Object>{_captureZoneKey: ownerToken},
       );
       return List<EditorUndoAction>.unmodifiable(captured);
     } catch (error, stackTrace) {
@@ -79677,8 +81177,9 @@ class _ProjectNameInputDialog extends StatefulWidget {
 }
 
 class _ProjectNameInputDialogState extends State<_ProjectNameInputDialog> {
-  late final TextEditingController _controller =
-      TextEditingController(text: widget.initialName);
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initialName,
+  );
   final FocusNode _focusNode = FocusNode();
   bool _dialogClosing = false;
 
@@ -79718,9 +81219,7 @@ class _ProjectNameInputDialogState extends State<_ProjectNameInputDialog> {
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
         shadowColor: Colors.transparent,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         clipBehavior: Clip.antiAlias,
         elevation: 0,
         child: Material(
@@ -79882,17 +81381,16 @@ class _ProjectNameInputDialogState extends State<_ProjectNameInputDialog> {
 class _TempoInputDialog extends StatefulWidget {
   final String initialValue;
 
-  const _TempoInputDialog({
-    required this.initialValue,
-  });
+  const _TempoInputDialog({required this.initialValue});
 
   @override
   State<_TempoInputDialog> createState() => _TempoInputDialogState();
 }
 
 class _TempoInputDialogState extends State<_TempoInputDialog> {
-  late final TextEditingController _controller =
-      TextEditingController(text: widget.initialValue);
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initialValue,
+  );
   final FocusNode _focusNode = FocusNode();
   bool _dialogClosing = false;
 
@@ -79927,9 +81425,7 @@ class _TempoInputDialogState extends State<_TempoInputDialog> {
       backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
       shadowColor: Colors.transparent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       clipBehavior: Clip.antiAlias,
       insetPadding: const EdgeInsets.symmetric(horizontal: 20),
       child: ConstrainedBox(
@@ -80029,8 +81525,12 @@ class _TempoInputDialogState extends State<_TempoInputDialog> {
                   FilledButton(
                     onPressed: () => _close(_controller.text.trim()),
                     style: FilledButton.styleFrom(
-                      backgroundColor:
-                          const Color.fromRGBO(118, 147, 174, 0.92),
+                      backgroundColor: const Color.fromRGBO(
+                        118,
+                        147,
+                        174,
+                        0.92,
+                      ),
                       foregroundColor: const Color(0xFFF4F4F4),
                       padding: const EdgeInsets.symmetric(
                         horizontal: 14,
@@ -80120,17 +81620,19 @@ class AddAudioTrackAction extends EditorUndoAction {
     final beforeCount = tracks.length;
 
     await addTrack(
-        file: file,
-        row: row,
-        timeMs: timeMs,
-        trimStartRequested: trimStart,
-        trimEndRequested: trimEnd);
+      file: file,
+      row: row,
+      timeMs: timeMs,
+      trimStartRequested: trimStart,
+      trimEndRequested: trimEnd,
+    );
 
     // capture the newly added track
     if (tracks.length > beforeCount) {
       _addedTrack = tracks.last;
-      _addedTrackPayload =
-          Map<String, dynamic>.from(_persistedClipPayload(_addedTrack!));
+      _addedTrackPayload = Map<String, dynamic>.from(
+        _persistedClipPayload(_addedTrack!),
+      );
     }
   }
 
@@ -80143,8 +81645,9 @@ class AddAudioTrackAction extends EditorUndoAction {
 
     final removed = tracks.remove(track);
     if (!removed && track.engineClipId >= 0) {
-      final idx =
-          tracks.indexWhere((t) => t.engineClipId == track.engineClipId);
+      final idx = tracks.indexWhere(
+        (t) => t.engineClipId == track.engineClipId,
+      );
       if (idx >= 0) {
         tracks.removeAt(idx);
       }
@@ -80229,17 +81732,19 @@ class PasteAudioClipAction extends EditorUndoAction {
     final beforeCount = tracks.length;
 
     await pasteClip(
-        clip: clip,
-        row: row,
-        timeMs: timeMs,
-        trimStartRequested: trimStart,
-        trimEndRequested: trimEnd);
+      clip: clip,
+      row: row,
+      timeMs: timeMs,
+      trimStartRequested: trimStart,
+      trimEndRequested: trimEnd,
+    );
 
     // capture the newly added track
     if (tracks.length > beforeCount) {
       _addedTrack = tracks.last;
-      _addedTrackPayload =
-          Map<String, dynamic>.from(_persistedClipPayload(_addedTrack!));
+      _addedTrackPayload = Map<String, dynamic>.from(
+        _persistedClipPayload(_addedTrack!),
+      );
     }
   }
 
@@ -80252,8 +81757,9 @@ class PasteAudioClipAction extends EditorUndoAction {
 
     final removed = tracks.remove(track);
     if (!removed && track.engineClipId >= 0) {
-      final idx =
-          tracks.indexWhere((t) => t.engineClipId == track.engineClipId);
+      final idx = tracks.indexWhere(
+        (t) => t.engineClipId == track.engineClipId,
+      );
       if (idx >= 0) {
         tracks.removeAt(idx);
       }
@@ -80352,8 +81858,9 @@ class AddMidiClipAction extends EditorUndoAction {
     );
     if (tracks.length > beforeCount) {
       _addedTrack = tracks.last;
-      _addedTrackPayload =
-          Map<String, dynamic>.from(_persistedClipPayload(_addedTrack!));
+      _addedTrackPayload = Map<String, dynamic>.from(
+        _persistedClipPayload(_addedTrack!),
+      );
     }
   }
 
@@ -80364,8 +81871,9 @@ class AddMidiClipAction extends EditorUndoAction {
     track.audioStartTimer?.cancel();
     final removed = tracks.remove(track);
     if (!removed && track.engineClipId >= 0) {
-      final idx =
-          tracks.indexWhere((t) => t.engineClipId == track.engineClipId);
+      final idx = tracks.indexWhere(
+        (t) => t.engineClipId == track.engineClipId,
+      );
       if (idx >= 0) tracks.removeAt(idx);
     }
     if (track.engineClipId >= 0) {
@@ -80454,8 +81962,9 @@ class PasteMidiClipAction extends EditorUndoAction {
     );
     if (tracks.length > beforeCount) {
       _addedTrack = tracks.last;
-      _addedTrackPayload =
-          Map<String, dynamic>.from(_persistedClipPayload(_addedTrack!));
+      _addedTrackPayload = Map<String, dynamic>.from(
+        _persistedClipPayload(_addedTrack!),
+      );
     }
   }
 
@@ -80466,8 +81975,9 @@ class PasteMidiClipAction extends EditorUndoAction {
     track.audioStartTimer?.cancel();
     final removed = tracks.remove(track);
     if (!removed && track.engineClipId >= 0) {
-      final idx =
-          tracks.indexWhere((t) => t.engineClipId == track.engineClipId);
+      final idx = tracks.indexWhere(
+        (t) => t.engineClipId == track.engineClipId,
+      );
       if (idx >= 0) tracks.removeAt(idx);
     }
     if (track.engineClipId >= 0) {
@@ -80565,10 +82075,7 @@ class EditMidiClipAction extends EditorUndoAction {
         if (newClipOwnedState != null) 'newClipOwnedState': newClipOwnedState,
       };
 
-  void _applyOwnedState(
-    AudioTrack clip,
-    Map<String, dynamic>? state,
-  ) {
+  void _applyOwnedState(AudioTrack clip, Map<String, dynamic>? state) {
     if (state == null) return;
     final trimEndUs = state['trim_end_us'];
     final audioDurationUs = state['audio_duration_us'];
@@ -80773,11 +82280,12 @@ class DeleteClipAction extends EditorUndoAction {
   @override
   Future<void> undo() async {
     await addTrack(
-        clip: clip,
-        row: row,
-        timeMs: timeMs,
-        trimStartRequested: trimStart,
-        trimEndRequested: trimEnd);
+      clip: clip,
+      row: row,
+      timeMs: timeMs,
+      trimStartRequested: trimStart,
+      trimEndRequested: trimEnd,
+    );
     onChange(clip, removed: false);
   }
 }
@@ -80793,10 +82301,8 @@ class DeleteClipsAction extends EditorUndoAction {
   final List<DeleteClipAction> actions;
   final Future<void> Function() beginRestoreBatch;
   final Future<void> Function() endRestoreBatch;
-  final Future<void> Function(
-    List<AudioTrack> clips, {
-    required bool removed,
-  }) onChange;
+  final Future<void> Function(List<AudioTrack> clips, {required bool removed})
+      onChange;
 
   @override
   String get description => 'Delete clips';
@@ -81329,9 +82835,7 @@ class _ProjectTempoSnapshot {
             row.toString(),
             laneMap.map(
               (targetId, clips) => MapEntry(
-                targetId,
-                clips.map((clip) => clip.toJson()).toList(),
-              ),
+                  targetId, clips.map((clip) => clip.toJson()).toList()),
             ),
           ),
         ),
@@ -81801,12 +83305,13 @@ class SetRowGainAction extends EditorUndoAction {
   final void Function(int row, double gain) applyToState;
   final Future<void> Function(int row, double gain)? applyNative;
 
-  SetRowGainAction(
-      {required this.row,
-      required this.oldGain,
-      required this.newGain,
-      required this.applyToState,
-      this.applyNative});
+  SetRowGainAction({
+    required this.row,
+    required this.oldGain,
+    required this.newGain,
+    required this.applyToState,
+    this.applyNative,
+  });
 
   @override
   String get description => 'Change track gain';
@@ -81849,12 +83354,13 @@ class SetRowPanAction extends EditorUndoAction {
   final void Function(int row, double pan) applyToState;
   final Future<void> Function(int row, double pan)? applyNative;
 
-  SetRowPanAction(
-      {required this.row,
-      required this.oldPan,
-      required this.newPan,
-      required this.applyToState,
-      this.applyNative});
+  SetRowPanAction({
+    required this.row,
+    required this.oldPan,
+    required this.newPan,
+    required this.applyToState,
+    this.applyNative,
+  });
 
   @override
   String get description => 'Change track pan';
@@ -81895,10 +83401,11 @@ class SetMasterGainAction extends EditorUndoAction {
   final double newGain;
   final void Function(double gain) applyToState;
 
-  SetMasterGainAction(
-      {required this.oldGain,
-      required this.newGain,
-      required this.applyToState});
+  SetMasterGainAction({
+    required this.oldGain,
+    required this.newGain,
+    required this.applyToState,
+  });
 
   @override
   String get description => 'Change master gain';
@@ -81928,8 +83435,11 @@ class SetMasterPanAction extends EditorUndoAction {
   final double newPan;
   final void Function(double pan) applyToState;
 
-  SetMasterPanAction(
-      {required this.oldPan, required this.newPan, required this.applyToState});
+  SetMasterPanAction({
+    required this.oldPan,
+    required this.newPan,
+    required this.applyToState,
+  });
 
   @override
   String get description => 'Change master pan';
@@ -82195,8 +83705,9 @@ Future<int> _resolveExactRowEffectInstance({
   required String effectId,
   required int occurrence,
 }) async {
-  final instanceIds =
-      await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
+  final instanceIds = await JuceAudioEngine.getTrackEffectInstanceIdsForRow(
+    row,
+  );
   final effectIds = await JuceAudioEngine.getTrackEffectIdsForRow(row);
   final exact = instanceId.isEmpty ? -1 : instanceIds.indexOf(instanceId);
   if (exact >= 0 && exact < effectIds.length && effectIds[exact] == effectId) {
@@ -82303,8 +83814,10 @@ class InsertEffectAction extends EditorUndoAction {
 
   @override
   Future<void> redo() async {
-    final beforeCount =
-        (await JuceAudioEngine.getTrackEffectsForRow(row)).length;
+    final beforeCount = (await JuceAudioEngine.getTrackEffectsForRow(
+      row,
+    ))
+        .length;
     inserted = await JuceAudioEngine.insertTrackEffect(row, pathOrName);
     insertedIndex = inserted ? beforeCount : null;
 
@@ -82326,11 +83839,12 @@ class RemoveEffectAction extends EditorUndoAction {
   final String pathOrName;
   final VoidCallback onChange;
 
-  RemoveEffectAction(
-      {required this.row,
-      required this.effectIndex,
-      required this.pathOrName,
-      required this.onChange});
+  RemoveEffectAction({
+    required this.row,
+    required this.effectIndex,
+    required this.pathOrName,
+    required this.onChange,
+  });
 
   @override
   String get description => 'Remove track effect';
@@ -82351,8 +83865,10 @@ class RemoveEffectAction extends EditorUndoAction {
 
   @override
   Future<void> undo() async {
-    final insertedIndex =
-        (await JuceAudioEngine.getTrackEffectsForRow(row)).length;
+    final insertedIndex = (await JuceAudioEngine.getTrackEffectsForRow(
+      row,
+    ))
+        .length;
     final inserted = await JuceAudioEngine.insertTrackEffect(row, pathOrName);
     if (inserted && insertedIndex != effectIndex) {
       await JuceAudioEngine.reorderTrackEffects(
@@ -82408,8 +83924,9 @@ class RemoveEffectInstanceAction extends EditorUndoAction {
     );
     if (index < 0) throw StateError('effect_instance_missing');
     await JuceAudioEngine.removeTrackEffect(row, index);
-    final remainingIds =
-        await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
+    final remainingIds = await JuceAudioEngine.getTrackEffectInstanceIdsForRow(
+      row,
+    );
     if (remainingIds.contains(effectInstanceId)) {
       throw StateError('effect_instance_remove_failed');
     }
@@ -82419,14 +83936,20 @@ class RemoveEffectInstanceAction extends EditorUndoAction {
   @override
   Future<void> undo() async {
     final before = await JuceAudioEngine.getTrackEffectsForRow(row);
-    final inserted =
-        await JuceAudioEngine.insertTrackEffect(row, removedEffect.effectId);
+    final inserted = await JuceAudioEngine.insertTrackEffect(
+      row,
+      removedEffect.effectId,
+    );
     if (!inserted) throw StateError('effect_instance_restore_insert_failed');
     var insertedIndex = before.length;
-    await _waitUntilAsync(() async {
-      final current = await JuceAudioEngine.getTrackEffectsForRow(row);
-      return current.length == before.length + 1;
-    }, maxAttempts: 12, step: const Duration(milliseconds: 80));
+    await _waitUntilAsync(
+      () async {
+        final current = await JuceAudioEngine.getTrackEffectsForRow(row);
+        return current.length == before.length + 1;
+      },
+      maxAttempts: 12,
+      step: const Duration(milliseconds: 80),
+    );
     if (effectIndex != insertedIndex) {
       await JuceAudioEngine.reorderTrackEffects(
         row,
@@ -82449,8 +83972,9 @@ class RemoveEffectInstanceAction extends EditorUndoAction {
       );
     }
     if (!stateRestored) {
-      for (final entry
-          in _restorableEffectSnapshotParams(removedEffect).entries) {
+      for (final entry in _restorableEffectSnapshotParams(
+        removedEffect,
+      ).entries) {
         await JuceAudioEngine.setTrackEffect(
           row,
           insertedIndex,
@@ -82461,10 +83985,7 @@ class RemoveEffectInstanceAction extends EditorUndoAction {
     }
     if (removedEffect.bypassed) {
       await JuceAudioEngine.bypassRowEffect(row, insertedIndex, true);
-      if (!await JuceAudioEngine.getRowEffectBypassState(
-        row,
-        insertedIndex,
-      )) {
+      if (!await JuceAudioEngine.getRowEffectBypassState(row, insertedIndex)) {
         throw StateError('effect_instance_restore_bypass_failed');
       }
     }
@@ -82485,11 +84006,12 @@ class ReorderEffectAction extends EditorUndoAction {
   final int to;
   final VoidCallback onChange;
 
-  ReorderEffectAction(
-      {required this.row,
-      required this.from,
-      required this.to,
-      required this.onChange});
+  ReorderEffectAction({
+    required this.row,
+    required this.from,
+    required this.to,
+    required this.onChange,
+  });
 
   @override
   String get description => 'Reorder track effect';
@@ -82606,8 +84128,9 @@ class RemoveMasterEffectAction extends EditorUndoAction {
       throw StateError('master_effect_remove_snapshot_missing');
     }
     final insertedIndex = (await JuceAudioEngine.getMasterEffects()).length;
-    final inserted =
-        await JuceAudioEngine.insertMasterEffect(snapshot.effectId);
+    final inserted = await JuceAudioEngine.insertMasterEffect(
+      snapshot.effectId,
+    );
     if (!inserted) {
       throw StateError('master_effect_restore_insert_failed');
     }
@@ -82638,10 +84161,7 @@ class RemoveMasterEffectAction extends EditorUndoAction {
         );
       }
     }
-    await JuceAudioEngine.bypassMasterEffect(
-      effectIndex,
-      snapshot.bypassed,
-    );
+    await JuceAudioEngine.bypassMasterEffect(effectIndex, snapshot.bypassed);
     onChange();
   }
 }
@@ -82651,8 +84171,11 @@ class ReorderMasterEffectAction extends EditorUndoAction {
   final int to;
   final VoidCallback onChange;
 
-  ReorderMasterEffectAction(
-      {required this.from, required this.to, required this.onChange});
+  ReorderMasterEffectAction({
+    required this.from,
+    required this.to,
+    required this.onChange,
+  });
 
   @override
   String get description => 'Reorder master effect';
@@ -82769,8 +84292,9 @@ class SetEffectParamAction extends EditorUndoAction {
     if (index < 0) {
       throw StateError('row_effect_identity_missing');
     }
-    final instanceIds =
-        await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
+    final instanceIds = await JuceAudioEngine.getTrackEffectInstanceIdsForRow(
+      row,
+    );
     if (index >= instanceIds.length || instanceIds[index].trim().isEmpty) {
       throw StateError('row_effect_identity_missing');
     }
@@ -82994,10 +84518,8 @@ class RowRoleOverrideUndoAction extends EditorUndoAction {
   final int rowId;
   final String oldRole;
   final String newRole;
-  final Future<void> Function({
-    required int rowId,
-    required String role,
-  }) applyRole;
+  final Future<void> Function({required int rowId, required String role})
+      applyRole;
 
   @override
   String get description =>
@@ -83205,10 +84727,7 @@ class _RowEffectsAutomationSnapshotAction extends EditorUndoAction {
 // SNAPSHOT HISTORY
 // ----------------------------------------------------------------
 
-Future<RowEffectsSnapshot> captureRowSnapshot(
-  int row, {
-  int rowId = -1,
-}) async {
+Future<RowEffectsSnapshot> captureRowSnapshot(int row, {int rowId = -1}) async {
   var effectIds = await JuceAudioEngine.getTrackEffectIdsForRow(row);
   final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
   if (effectIds.length != effects.length) {
@@ -83342,23 +84861,30 @@ Future<void> _waitForTrackEffectParameters(
   Map<String, dynamic> expectedParams,
 ) async {
   if (expectedParams.isEmpty) return;
-  await _waitUntilAsync(() async {
-    final params =
-        await JuceAudioEngine.getTrackPluginParameters(row, effectIndex);
-    if (params.isEmpty) return false;
-    final availableKeys = _pluginParameterKeys(params);
-    return expectedParams.keys.every((key) => availableKeys.contains(key));
-  }, maxAttempts: 20, step: const Duration(milliseconds: 80));
+  await _waitUntilAsync(
+    () async {
+      final params = await JuceAudioEngine.getTrackPluginParameters(
+        row,
+        effectIndex,
+      );
+      if (params.isEmpty) return false;
+      final availableKeys = _pluginParameterKeys(params);
+      return expectedParams.keys.every((key) => availableKeys.contains(key));
+    },
+    maxAttempts: 20,
+    step: const Duration(milliseconds: 80),
+  );
 }
 
-Future<void> _waitForTrackEffectCount(
-  int row,
-  int expectedCount,
-) async {
-  await _waitUntilAsync(() async {
-    final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
-    return effects.length == expectedCount;
-  }, maxAttempts: 20, step: const Duration(milliseconds: 80));
+Future<void> _waitForTrackEffectCount(int row, int expectedCount) async {
+  await _waitUntilAsync(
+    () async {
+      final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
+      return effects.length == expectedCount;
+    },
+    maxAttempts: 20,
+    step: const Duration(milliseconds: 80),
+  );
 }
 
 Future<void> _waitForMasterEffectParameters(
@@ -83366,16 +84892,23 @@ Future<void> _waitForMasterEffectParameters(
   Map<String, dynamic> expectedParams,
 ) async {
   if (expectedParams.isEmpty) return;
-  await _waitUntilAsync(() async {
-    final params = await JuceAudioEngine.getMasterPluginParameters(effectIndex);
-    if (params.isEmpty) return false;
-    final availableKeys = _pluginParameterKeys(params);
-    return expectedParams.keys.every((key) => availableKeys.contains(key));
-  }, maxAttempts: 20, step: const Duration(milliseconds: 80));
+  await _waitUntilAsync(
+    () async {
+      final params = await JuceAudioEngine.getMasterPluginParameters(
+        effectIndex,
+      );
+      if (params.isEmpty) return false;
+      final availableKeys = _pluginParameterKeys(params);
+      return expectedParams.keys.every((key) => availableKeys.contains(key));
+    },
+    maxAttempts: 20,
+    step: const Duration(milliseconds: 80),
+  );
 }
 
 Future<_EffectRestoreResult> _restoreRowSnapshot(
-    RowEffectsSnapshot snap) async {
+  RowEffectsSnapshot snap,
+) async {
   final failures = <_EffectRestoreFailure>[];
   await JuceAudioEngine.beginGraphMutationBatch();
   try {
@@ -83418,11 +84951,15 @@ Future<_EffectRestoreResult> _restoreRowSnapshot(
       bool inserted = false;
       final insertedIndex = insertedCount;
       if (insertAccepted) {
-        await _waitUntilAsync(() async {
-          final names = await JuceAudioEngine.getTrackEffectsForRow(snap.row);
-          inserted = names.length > insertedIndex;
-          return inserted;
-        }, maxAttempts: 8, step: const Duration(milliseconds: 80));
+        await _waitUntilAsync(
+          () async {
+            final names = await JuceAudioEngine.getTrackEffectsForRow(snap.row);
+            inserted = names.length > insertedIndex;
+            return inserted;
+          },
+          maxAttempts: 8,
+          step: const Duration(milliseconds: 80),
+        );
       }
       if (!inserted) {
         failures.add(
@@ -83455,7 +84992,10 @@ Future<_EffectRestoreResult> _restoreRowSnapshot(
       final fallbackParams = _restorableEffectSnapshotParams(fx);
       if (!stateApplied && fallbackParams.isNotEmpty) {
         await _waitForTrackEffectParameters(
-            snap.row, insertedIndex, fallbackParams);
+          snap.row,
+          insertedIndex,
+          fallbackParams,
+        );
         for (final e in fallbackParams.entries) {
           await JuceAudioEngine.setTrackEffect(
             snap.row,
@@ -83559,11 +85099,15 @@ Future<_EffectRestoreResult> _restoreMasterSnapshot(
       bool inserted = false;
       final insertedIndex = insertedCount;
       if (insertAccepted) {
-        await _waitUntilAsync(() async {
-          final names = await JuceAudioEngine.getMasterEffects();
-          inserted = names.length > insertedIndex;
-          return inserted;
-        }, maxAttempts: 8, step: const Duration(milliseconds: 80));
+        await _waitUntilAsync(
+          () async {
+            final names = await JuceAudioEngine.getMasterEffects();
+            inserted = names.length > insertedIndex;
+            return inserted;
+          },
+          maxAttempts: 8,
+          step: const Duration(milliseconds: 80),
+        );
       }
       if (!inserted) {
         failures.add(
@@ -83628,8 +85172,11 @@ class TrackPresetChangeAction extends EditorUndoAction {
   final RowEffectsSnapshot after;
   final VoidCallback onChange;
 
-  TrackPresetChangeAction(
-      {required this.before, required this.after, required this.onChange});
+  TrackPresetChangeAction({
+    required this.before,
+    required this.after,
+    required this.onChange,
+  });
 
   @override
   String get description => 'Load track preset';
@@ -83659,8 +85206,11 @@ class MasterPresetChangeAction extends EditorUndoAction {
   final MasterEffectsSnapshot after;
   final VoidCallback onChange;
 
-  MasterPresetChangeAction(
-      {required this.before, required this.after, required this.onChange});
+  MasterPresetChangeAction({
+    required this.before,
+    required this.after,
+    required this.onChange,
+  });
 
   @override
   String get description => 'Load master preset';
@@ -83750,9 +85300,7 @@ Widget _chatHelpButton({
     decoration: BoxDecoration(
       color: Colors.white.withValues(alpha: 0.10),
       shape: BoxShape.circle,
-      border: Border.all(
-        color: Colors.white.withValues(alpha: 0.12),
-      ),
+      border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
     ),
     alignment: Alignment.center,
     child: busy
@@ -83771,11 +85319,7 @@ Widget _chatHelpButton({
           ),
   );
   if (busy) {
-    return SizedBox(
-      width: 28,
-      height: 28,
-      child: child,
-    );
+    return SizedBox(width: 28, height: 28, child: child);
   }
   return Tooltip(
     message: L10n.translate(context, 'chat_help_tooltip'),
@@ -83918,8 +85462,9 @@ class _ChatBarState extends State<_ChatBar> {
                 decoration: BoxDecoration(
                   color: backgroundColor,
                   borderRadius: BorderRadius.circular(999),
-                  border:
-                      Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.12),
+                  ),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.07),
@@ -84034,8 +85579,9 @@ class _ChatBarState extends State<_ChatBar> {
                       filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
                       child: Container(
                         height: barHeight,
-                        padding:
-                            EdgeInsets.symmetric(horizontal: horizontalPadding),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: horizontalPadding,
+                        ),
                         decoration: BoxDecoration(
                           gradient: widget.barGradient,
                           borderRadius: BorderRadius.circular(24),
@@ -84346,11 +85892,14 @@ class _AssistantThinkingBubbleState extends State<_AssistantThinkingBubble>
   void initState() {
     super.initState();
     _controller = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 900))
-      ..repeat(reverse: true);
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
 
-    _opacity = Tween(begin: 0.35, end: 0.85)
-        .animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+    _opacity = Tween(
+      begin: 0.35,
+      end: 0.85,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
   }
 
   @override
@@ -84369,9 +85918,14 @@ class _AssistantThinkingBubbleState extends State<_AssistantThinkingBubble>
           color: const Color.fromARGB(90, 170, 170, 170),
           borderRadius: BorderRadius.circular(14),
         ),
-        child: const Text('•••',
-            style: TextStyle(
-                fontSize: 20, letterSpacing: 2, color: Colors.white70)),
+        child: const Text(
+          '•••',
+          style: TextStyle(
+            fontSize: 20,
+            letterSpacing: 2,
+            color: Colors.white70,
+          ),
+        ),
       ),
     );
   }
@@ -84392,8 +85946,9 @@ class _TypingDotsState extends State<_TypingDots>
   void initState() {
     super.initState();
     _c = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 900))
-      ..repeat();
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat();
   }
 
   @override
@@ -84417,7 +85972,9 @@ class _TypingDotsState extends State<_TypingDots>
               child: Opacity(
                 opacity: i < count ? 1.0 : 0.25,
                 child: const CircleAvatar(
-                    radius: 3, backgroundColor: Colors.white70),
+                  radius: 3,
+                  backgroundColor: Colors.white70,
+                ),
               ),
             ),
           ),
@@ -84485,10 +86042,7 @@ List<Map<String, dynamic>> _toMaps(List<AutomationPoint> points) {
 }
 
 class _TabletMetronomeIcon extends StatelessWidget {
-  const _TabletMetronomeIcon({
-    required this.color,
-    required this.size,
-  });
+  const _TabletMetronomeIcon({required this.color, required this.size});
 
   final Color color;
   final double size;
@@ -84655,8 +86209,10 @@ class _TopBarMasterVisualizerState extends State<_TopBarMasterVisualizer> {
   void _syncFromCurrentMeterFrame({bool forceSetState = false}) {
     final frame = widget.meters.master;
     final nextLevel = math
-        .max(math.max(frame.rmsL, frame.rmsR),
-            math.max(frame.peakL, frame.peakR))
+        .max(
+          math.max(frame.rmsL, frame.rmsR),
+          math.max(frame.peakL, frame.peakR),
+        )
         .clamp(0.0, 1.0);
     if (!forceSetState &&
         (nextLevel - _level).abs() < 0.01 &&
@@ -84784,13 +86340,16 @@ class _TopBarMasterVisualizerState extends State<_TopBarMasterVisualizer> {
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
                           color: isSelected
-                              ? const Color(0xFF62D8FF).withValues(alpha: 0.16)
+                              ? const Color(
+                                  0xFF62D8FF,
+                                ).withValues(alpha: 0.16)
                               : Colors.white.withValues(alpha: 0.06),
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
                             color: isSelected
-                                ? const Color(0xFF62D8FF)
-                                    .withValues(alpha: 0.28)
+                                ? const Color(
+                                    0xFF62D8FF,
+                                  ).withValues(alpha: 0.28)
                                 : Colors.white.withValues(alpha: 0.08),
                           ),
                         ),
@@ -85104,15 +86663,12 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
       );
       final amplitude = _TopBarSpectrumAnalyzer.dbToUnit(db);
       final x = drawRect.left + (i * (barWidth + gap));
-      final height =
-          math.max(1.8, (drawRect.height - 1.4) * math.pow(amplitude, 0.84));
+      final height = math.max(
+        1.8,
+        (drawRect.height - 1.4) * math.pow(amplitude, 0.84),
+      );
       final barRect = RRect.fromRectAndRadius(
-        Rect.fromLTWH(
-          x,
-          drawRect.bottom - height,
-          barWidth,
-          height,
-        ),
+        Rect.fromLTWH(x, drawRect.bottom - height, barWidth, height),
         Radius.circular(math.min(2.2, barWidth * 0.46)),
       );
       barPaint.shader = LinearGradient(
@@ -85181,10 +86737,9 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
         canvas.drawRRect(
           RRect.fromRectAndRadius(rmsRect, const Radius.circular(2.6)),
           Paint()
-            ..shader =
-                DbfsMeterVisuals.horizontalGradient(opacity: 0.94).createShader(
-              laneRect.outerRect,
-            ),
+            ..shader = DbfsMeterVisuals.horizontalGradient(
+              opacity: 0.94,
+            ).createShader(laneRect.outerRect),
         );
       }
       if (peakWidth > rmsWidth) {
@@ -85197,10 +86752,9 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
         canvas.drawRect(
           peakRect,
           Paint()
-            ..shader =
-                DbfsMeterVisuals.horizontalGradient(opacity: 0.34).createShader(
-              laneRect.outerRect,
-            ),
+            ..shader = DbfsMeterVisuals.horizontalGradient(
+              opacity: 0.34,
+            ).createShader(laneRect.outerRect),
         );
       }
       if (peakWidth > 0.6) {
@@ -85215,11 +86769,7 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
       }
     }
 
-    drawLane(
-      top: laneArea.top,
-      rms: meterFrame.rmsL,
-      peak: meterFrame.peakL,
-    );
+    drawLane(top: laneArea.top, rms: meterFrame.rmsL, peak: meterFrame.peakL);
     drawLane(
       top: laneArea.top + laneHeight + laneGap,
       rms: meterFrame.rmsR,
@@ -85271,8 +86821,10 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
               (meterFrame.peakL + meterFrame.rmsL))
           .clamp(-1.0, 1.0)
           .toDouble();
-      final spread =
-          (0.34 + (level * 0.42) + (panSkew.abs() * 0.20)).clamp(0.26, 0.84);
+      final spread = (0.34 + (level * 0.42) + (panSkew.abs() * 0.20)).clamp(
+        0.26,
+        0.84,
+      );
       final radiusX = drawRect.width * 0.45;
       final radiusY = drawRect.height * 0.46;
       var moved = false;
@@ -85333,8 +86885,10 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
     final samples = waveformSamples;
     final path = Path();
     final fillPath = Path();
-    final points =
-        math.min(math.max(96, drawRect.width.floor()), samples.length);
+    final points = math.min(
+      math.max(96, drawRect.width.floor()),
+      samples.length,
+    );
     if (points < 8) {
       canvas.drawLine(
         Offset(drawRect.left, centerY),
@@ -85494,8 +87048,10 @@ class _TopBarSpectrumAnalyzer {
     }
 
     for (int i = 1; i < out.length - 1; i++) {
-      out[i] = ((out[i - 1] * 0.2) + (out[i] * 0.6) + (out[i + 1] * 0.2))
-          .clamp(_minDb, 6.0);
+      out[i] = ((out[i - 1] * 0.2) + (out[i] * 0.6) + (out[i + 1] * 0.2)).clamp(
+        _minDb,
+        6.0,
+      );
     }
 
     return out;
@@ -85593,8 +87149,10 @@ class _TopBarSpectrumAnalyzer {
   }
 
   static double dbToUnit(double db) {
-    return ((db.clamp(_minDb, _maxDb) - _minDb) / (_maxDb - _minDb))
-        .clamp(0.0, 1.0);
+    return ((db.clamp(_minDb, _maxDb) - _minDb) / (_maxDb - _minDb)).clamp(
+      0.0,
+      1.0,
+    );
   }
 }
 
@@ -85688,10 +87246,9 @@ class _TrackGainStagingDbMeterPainter extends CustomPainter {
         c.drawRect(
           rmsRect,
           Paint()
-            ..shader =
-                DbfsMeterVisuals.horizontalGradient(opacity: 0.95).createShader(
-              laneRect,
-            ),
+            ..shader = DbfsMeterVisuals.horizontalGradient(
+              opacity: 0.95,
+            ).createShader(laneRect),
         );
       }
 
@@ -85705,10 +87262,9 @@ class _TrackGainStagingDbMeterPainter extends CustomPainter {
         c.drawRect(
           transientRect,
           Paint()
-            ..shader =
-                DbfsMeterVisuals.horizontalGradient(opacity: 0.34).createShader(
-              laneRect,
-            ),
+            ..shader = DbfsMeterVisuals.horizontalGradient(
+              opacity: 0.34,
+            ).createShader(laneRect),
         );
       }
 
@@ -85757,9 +87313,7 @@ class _TrackGainStagingDbMeterPainter extends CustomPainter {
 }
 
 class _TabletRightPanelEdgeHandleTabPainter extends CustomPainter {
-  const _TabletRightPanelEdgeHandleTabPainter({
-    required this.active,
-  });
+  const _TabletRightPanelEdgeHandleTabPainter({required this.active});
 
   final bool active;
 
@@ -85847,9 +87401,7 @@ class _TabletRightPanelEdgeHandleTabPainter extends CustomPainter {
 }
 
 class _TabletRightPanelEdgeHandleMarkPainter extends CustomPainter {
-  const _TabletRightPanelEdgeHandleMarkPainter({
-    required this.active,
-  });
+  const _TabletRightPanelEdgeHandleMarkPainter({required this.active});
 
   final bool active;
 
@@ -85929,11 +87481,7 @@ class _MiniStereoMeterHorizontalPainter extends CustomPainter {
 
     for (final db in const [-36.0, -24.0, -15.0, -10.0, -6.0, -3.0]) {
       final x = s.width * DbfsMeterVisuals.dbfsToUnit(db);
-      c.drawLine(
-        Offset(x, 1),
-        Offset(x, s.height - 1),
-        tick,
-      );
+      c.drawLine(Offset(x, 1), Offset(x, s.height - 1), tick);
     }
 
     // ===== Meter paints =====
@@ -85952,10 +87500,7 @@ class _MiniStereoMeterHorizontalPainter extends CustomPainter {
 
     // ===== Left lane (Top) =====
     final topLane = laneRect(0);
-    c.drawRect(
-      topLane,
-      Paint()..color = Colors.white.withValues(alpha: 0.04),
-    );
+    c.drawRect(topLane, Paint()..color = Colors.white.withValues(alpha: 0.04));
 
     final lRmsW = s.width * DbfsMeterVisuals.ampToUnit(f.rmsL);
     final lPeakW = s.width * DbfsMeterVisuals.ampToUnit(f.peakL);
@@ -85964,10 +87509,9 @@ class _MiniStereoMeterHorizontalPainter extends CustomPainter {
       c.drawRect(
         Rect.fromLTWH(topLane.left, topLane.top, lRmsW, topLane.height),
         Paint()
-          ..shader =
-              DbfsMeterVisuals.horizontalGradient(opacity: 0.94).createShader(
-            topLane,
-          ),
+          ..shader = DbfsMeterVisuals.horizontalGradient(
+            opacity: 0.94,
+          ).createShader(topLane),
       );
     }
     if (lPeakW > lRmsW) {
@@ -85979,10 +87523,9 @@ class _MiniStereoMeterHorizontalPainter extends CustomPainter {
           topLane.height,
         ),
         Paint()
-          ..shader =
-              DbfsMeterVisuals.horizontalGradient(opacity: 0.34).createShader(
-            topLane,
-          ),
+          ..shader = DbfsMeterVisuals.horizontalGradient(
+            opacity: 0.34,
+          ).createShader(topLane),
       );
     }
     if (lPeakW > 0.5) {
@@ -85996,10 +87539,7 @@ class _MiniStereoMeterHorizontalPainter extends CustomPainter {
 
     // ===== Right lane (Bottom) =====
     final botLane = laneRect(1);
-    c.drawRect(
-      botLane,
-      Paint()..color = Colors.white.withValues(alpha: 0.04),
-    );
+    c.drawRect(botLane, Paint()..color = Colors.white.withValues(alpha: 0.04));
 
     final rRmsW = s.width * DbfsMeterVisuals.ampToUnit(f.rmsR);
     final rPeakW = s.width * DbfsMeterVisuals.ampToUnit(f.peakR);
@@ -86008,10 +87548,9 @@ class _MiniStereoMeterHorizontalPainter extends CustomPainter {
       c.drawRect(
         Rect.fromLTWH(botLane.left, botLane.top, rRmsW, botLane.height),
         Paint()
-          ..shader =
-              DbfsMeterVisuals.horizontalGradient(opacity: 0.94).createShader(
-            botLane,
-          ),
+          ..shader = DbfsMeterVisuals.horizontalGradient(
+            opacity: 0.94,
+          ).createShader(botLane),
       );
     }
     if (rPeakW > rRmsW) {
@@ -86023,10 +87562,9 @@ class _MiniStereoMeterHorizontalPainter extends CustomPainter {
           botLane.height,
         ),
         Paint()
-          ..shader =
-              DbfsMeterVisuals.horizontalGradient(opacity: 0.34).createShader(
-            botLane,
-          ),
+          ..shader = DbfsMeterVisuals.horizontalGradient(
+            opacity: 0.34,
+          ).createShader(botLane),
       );
     }
     if (rPeakW > 0.5) {

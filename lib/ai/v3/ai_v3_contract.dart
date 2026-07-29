@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'ai_v3_resources.dart';
+
 const String aiV3PlanVersion = 'plan_v3_prototype_2';
 const int aiV3MaxCommands = 16;
 const int aiV3MaxGeneratedMidiNotes = 256;
@@ -266,7 +268,17 @@ class AiV3Plan {
         'question_options': questionOptions,
       };
 
-  factory AiV3Plan.fromJson(Map<String, dynamic> raw) {
+  factory AiV3Plan.fromJson(
+    Map<String, dynamic> raw, {
+    bool allowResourceRefs = false,
+    Set<String>? resourceRefCommandTypes,
+  }) {
+    final enabledResourceRefCommandTypes = allowResourceRefs
+        ? resourceRefCommandTypes ?? aiV3CommandTypes
+        : const <String>{};
+    if (enabledResourceRefCommandTypes.difference(aiV3CommandTypes).isNotEmpty) {
+      throw const AiV3ContractException('v3_resource_ref_surface_invalid');
+    }
     _requireExactKeys(
         raw,
         const <String>{
@@ -321,7 +333,11 @@ class AiV3Plan {
         throw const AiV3ContractException('v3_command_type_invalid');
       }
       final args = Map<String, dynamic>.from(arguments);
-      _validateCommand(type, args);
+      _validateCommand(
+        type,
+        args,
+        allowResourceRefs: enabledResourceRefCommandTypes.contains(type),
+      );
       if (const <String>{
         'midi.create_clip',
         'midi.replace_notes',
@@ -334,6 +350,9 @@ class AiV3Plan {
         type: type,
         arguments: args,
       ));
+    }
+    if (allowResourceRefs) {
+      _validateResourceReferences(commands);
     }
     if (generatedNotes > aiV3MaxGeneratedMidiNotes) {
       throw const AiV3ContractException('v3_generated_midi_limit');
@@ -366,7 +385,11 @@ class AiV3Plan {
   }
 }
 
-void _validateCommand(String type, Map<String, dynamic> args) {
+void _validateCommand(
+  String type,
+  Map<String, dynamic> args, {
+  bool allowResourceRefs = false,
+}) {
   void requireKeys(List<String> keys) {
     final expected = keys.toSet();
     if (args.keys.toSet().difference(expected).isNotEmpty ||
@@ -622,8 +645,12 @@ void _validateCommand(String type, Map<String, dynamic> args) {
       number('start_beat', min: 0);
       return;
     case 'clip.delete':
-      requireKeys(<String>['clip_id']);
-      text('clip_id');
+      _validateIdOrResourceRef(
+        type,
+        args,
+        valueKeys: const <String>[],
+        allowResourceRefs: allowResourceRefs,
+      );
       return;
     case 'clip.glue':
       requireKeys(<String>['clip_ids', 'label']);
@@ -660,13 +687,21 @@ void _validateCommand(String type, Map<String, dynamic> args) {
       text('instrument_id');
       return;
     case 'clip.set_pitch_semitones':
-      requireKeys(<String>['clip_id', 'pitch_semitones']);
-      text('clip_id');
+      _validateIdOrResourceRef(
+        type,
+        args,
+        valueKeys: const <String>['pitch_semitones'],
+        allowResourceRefs: allowResourceRefs,
+      );
       number('pitch_semitones', min: -12, max: 12);
       return;
     case 'clip.adjust_pitch_semitones':
-      requireKeys(<String>['clip_id', 'delta_semitones']);
-      text('clip_id');
+      _validateIdOrResourceRef(
+        type,
+        args,
+        valueKeys: const <String>['delta_semitones'],
+        allowResourceRefs: allowResourceRefs,
+      );
       number('delta_semitones', min: -24, max: 24);
       return;
     case 'clip.set_timeline_length_beats':
@@ -757,8 +792,12 @@ void _validateCommand(String type, Map<String, dynamic> args) {
       }
       return;
     case 'midi.transpose':
-      requireKeys(<String>['clip_id', 'semitones']);
-      text('clip_id');
+      _validateIdOrResourceRef(
+        type,
+        args,
+        valueKeys: const <String>['semitones'],
+        allowResourceRefs: allowResourceRefs,
+      );
       final semitones = args['semitones'];
       if (semitones is! int || semitones < -48 || semitones > 48) {
         throw const AiV3ContractException('v3_midi_transpose_invalid');
@@ -767,29 +806,45 @@ void _validateCommand(String type, Map<String, dynamic> args) {
     case 'midi.create_clip':
       requireKeys(
           <String>['destination', 'start_beat', 'length_beats', 'notes']);
-      _validateDestination(type, args['destination'], midi: true);
+      _validateDestination(
+        type,
+        args['destination'],
+        midi: true,
+        allowResourceRefs: allowResourceRefs,
+      );
       number('start_beat', min: 0);
       number('length_beats', min: 0.001);
       _validateMidiNotes(args['notes']);
       return;
     case 'midi.replace_notes':
-      requireKeys(<String>['clip_id', 'notes']);
-      text('clip_id');
+      _validateIdOrResourceRef(
+        type,
+        args,
+        valueKeys: const <String>['notes'],
+        allowResourceRefs: allowResourceRefs,
+      );
       _validateMidiNotes(args['notes']);
       return;
     case 'midi.append_notes':
-      requireKeys(<String>['clip_id', 'notes']);
-      text('clip_id');
+      _validateIdOrResourceRef(
+        type,
+        args,
+        valueKeys: const <String>['notes'],
+        allowResourceRefs: allowResourceRefs,
+      );
       _validateMidiNotes(args['notes']);
       return;
     case 'midi.chop_notes':
-      requireKeys(<String>[
-        'clip_id',
-        'subdivision',
-        'range',
-        'velocity_decay_per_slice',
-      ]);
-      text('clip_id');
+      _validateIdOrResourceRef(
+        type,
+        args,
+        valueKeys: const <String>[
+          'subdivision',
+          'range',
+          'velocity_decay_per_slice',
+        ],
+        allowResourceRefs: allowResourceRefs,
+      );
       final subdivision = args['subdivision'];
       if (subdivision is! int || subdivision < 1 || subdivision > 128) {
         throw const AiV3ContractException('v3_midi_chop_subdivision_invalid');
@@ -934,7 +989,11 @@ void _validateCommand(String type, Map<String, dynamic> args) {
       return;
     case 'sample.place':
       requireKeys(<String>['destination', 'placements']);
-      _validateDestination(type, args['destination']);
+      _validateDestination(
+        type,
+        args['destination'],
+        allowResourceRefs: allowResourceRefs,
+      );
       final placements = args['placements'];
       if (placements is! List ||
           placements.isEmpty ||
@@ -1128,23 +1187,74 @@ void _validateMixReference(String type, Object? raw) {
   }
 }
 
-void _validateDestination(String type, Object? raw, {bool midi = false}) {
+AiV3ResourceRef _parseResourceRef(Object? raw) {
+  try {
+    return AiV3ResourceRef.fromJson(raw);
+  } on FormatException {
+    throw const AiV3ContractException('v3_resource_ref_invalid');
+  }
+}
+
+void _validateIdOrResourceRef(
+  String type,
+  Map<String, dynamic> args, {
+  required List<String> valueKeys,
+  required bool allowResourceRefs,
+}) {
+  final clipId = args['clip_id'];
+  final hasClipId = clipId is String && clipId.trim().isNotEmpty;
+  final hasClipRef = args['clip_ref'] is Map;
+  if (!allowResourceRefs) {
+    _requireExactKeys(
+      args,
+      <String>{'clip_id', ...valueKeys},
+      'v3_$type.required_field_missing',
+    );
+    if (!hasClipId) {
+      throw AiV3ContractException('v3_$type.clip_id.invalid');
+    }
+    return;
+  }
+  if (hasClipId == hasClipRef) {
+    throw AiV3ContractException('v3_$type.target_invalid');
+  }
+  _requireExactKeys(
+    args,
+    <String>{hasClipId ? 'clip_id' : 'clip_ref', ...valueKeys},
+    'v3_$type.target_invalid',
+  );
+  if (hasClipRef) _parseResourceRef(args['clip_ref']);
+}
+
+void _validateDestination(
+  String type,
+  Object? raw, {
+  bool midi = false,
+  bool allowResourceRefs = false,
+}) {
   if (raw is! Map) {
     throw AiV3ContractException('v3_$type.destination_invalid');
   }
   final destination = Map<String, dynamic>.from(raw);
   final hasRow =
       destination['row_id'] is int && (destination['row_id'] as int) >= 0;
+  final hasRowRef = allowResourceRefs && destination['row_ref'] is Map;
   final newRow = destination['new_row'];
   final hasNewRow = newRow is Map;
-  if (hasRow == hasNewRow) {
+  if (<bool>[hasRow, hasRowRef, hasNewRow].where((value) => value).length !=
+      1) {
     throw AiV3ContractException('v3_$type.destination_invalid');
   }
   _requireExactKeys(
     destination,
-    hasRow ? const <String>{'row_id'} : const <String>{'new_row'},
+    hasRow
+        ? const <String>{'row_id'}
+        : hasRowRef
+            ? const <String>{'row_ref'}
+            : const <String>{'new_row'},
     'v3_$type.destination_invalid',
   );
+  if (hasRowRef) _parseResourceRef(destination['row_ref']);
   if (hasNewRow) {
     final row = Map<String, dynamic>.from(newRow);
     _requireExactKeys(
@@ -1158,6 +1268,60 @@ void _validateDestination(String type, Object? raw, {bool midi = false}) {
     }
     if (midi && (row['instrument_id']?.toString().trim().isEmpty ?? true)) {
       throw AiV3ContractException('v3_$type.instrument_required');
+    }
+  }
+}
+
+void _validateResourceReferences(List<AiV3Command> commands) {
+  final available = <String, AiV3ResourceKind>{};
+
+  AiV3ResourceRef validateRef(Object? raw, AiV3ResourceKind expectedKind) {
+    final ref = _parseResourceRef(raw);
+    final key = '${ref.commandId}.${ref.output}';
+    final actualKind = available[key];
+    if (actualKind == null) {
+      throw const AiV3ContractException('v3_resource_ref_unavailable');
+    }
+    if (actualKind != expectedKind) {
+      throw const AiV3ContractException('v3_resource_ref_type_mismatch');
+    }
+    return ref;
+  }
+
+  for (final command in commands) {
+    final args = command.arguments;
+    AiV3ResourceRef? consumedClipRef;
+    if (args['clip_ref'] != null) {
+      final expectedKind = const <String>{
+        'midi.transpose',
+        'midi.replace_notes',
+        'midi.append_notes',
+        'midi.chop_notes',
+      }.contains(command.type)
+          ? AiV3ResourceKind.midiClip
+          : AiV3ResourceKind.audioClip;
+      consumedClipRef = validateRef(args['clip_ref'], expectedKind);
+    }
+    final destination = args['destination'];
+    if (destination is Map && destination['row_ref'] != null) {
+      validateRef(
+        destination['row_ref'],
+        command.type == 'midi.create_clip'
+            ? AiV3ResourceKind.midiRow
+            : AiV3ResourceKind.audioRow,
+      );
+    }
+    if (command.type == 'clip.delete' && consumedClipRef != null) {
+      available.remove(
+        '${consumedClipRef.commandId}.${consumedClipRef.output}',
+      );
+    }
+    final outputs = aiV3ProducedResources(
+      commandType: command.type,
+      arguments: command.arguments,
+    );
+    for (final output in outputs.entries) {
+      available['${command.commandId}.${output.key}'] = output.value;
     }
   }
 }
@@ -1177,10 +1341,18 @@ void _requireExactKeys(
 Map<String, dynamic> aiV3SubmitPlanTool({
   Set<String> commandTypes = aiV3CommandTypes,
   bool includeCommandSemantics = false,
+  bool includeResourceRefs = false,
+  Set<String>? resourceRefCommandTypes,
 }) {
   if (commandTypes.isEmpty ||
       commandTypes.difference(aiV3CommandTypes).isNotEmpty) {
     throw const AiV3ContractException('v3_command_surface_invalid');
+  }
+  final enabledResourceRefCommandTypes = includeResourceRefs
+      ? resourceRefCommandTypes ?? commandTypes
+      : const <String>{};
+  if (enabledResourceRefCommandTypes.difference(commandTypes).isNotEmpty) {
+    throw const AiV3ContractException('v3_resource_ref_surface_invalid');
   }
   return <String, dynamic>{
     'type': 'function',
@@ -1190,6 +1362,7 @@ Map<String, dynamic> aiV3SubmitPlanTool({
     'parameters': _aiV3PlanSchema(
       commandTypes,
       includeCommandSemantics: includeCommandSemantics,
+      resourceRefCommandTypes: enabledResourceRefCommandTypes,
     ),
   };
 }
@@ -1197,6 +1370,7 @@ Map<String, dynamic> aiV3SubmitPlanTool({
 Map<String, dynamic> _aiV3PlanSchema(
   Set<String> commandTypes, {
   required bool includeCommandSemantics,
+  required Set<String> resourceRefCommandTypes,
 }) =>
     <String, dynamic>{
       'type': 'object',
@@ -1226,6 +1400,7 @@ Map<String, dynamic> _aiV3PlanSchema(
           'items': _aiV3CommandSchema(
             commandTypes,
             includeCommandSemantics: includeCommandSemantics,
+            resourceRefCommandTypes: resourceRefCommandTypes,
           ),
         },
         'question_options': <String, dynamic>{
@@ -1249,6 +1424,7 @@ Map<String, dynamic> _aiV3PlanSchema(
 Map<String, dynamic> _aiV3CommandSchema(
   Set<String> commandTypes, {
   required bool includeCommandSemantics,
+  required Set<String> resourceRefCommandTypes,
 }) =>
     <String, dynamic>{
       'anyOf': aiV3CommandTypes
@@ -1257,6 +1433,7 @@ Map<String, dynamic> _aiV3CommandSchema(
             (type) => _aiV3CommandVariant(
               type,
               includeCommandSemantics: includeCommandSemantics,
+              includeResourceRefs: resourceRefCommandTypes.contains(type),
             ),
           )
           .toList(),
@@ -1265,9 +1442,11 @@ Map<String, dynamic> _aiV3CommandSchema(
 Map<String, dynamic> _aiV3CommandVariant(
   String type, {
   required bool includeCommandSemantics,
+  required bool includeResourceRefs,
 }) {
   final properties = <String, dynamic>{};
   final required = <String>[];
+  List<String>? resourceTargetValueKeys;
   void field(String name, Map<String, dynamic> schema) {
     properties[name] = schema;
     required.add(name);
@@ -1275,6 +1454,26 @@ Map<String, dynamic> _aiV3CommandVariant(
 
   final rowId = <String, dynamic>{'type': 'integer', 'minimum': 0};
   final clipId = <String, dynamic>{'type': 'string', 'minLength': 1};
+  final resourceRef = _strictObjectSchema(<String, dynamic>{
+    'command_id': <String, dynamic>{
+      'type': 'string',
+      'minLength': 1,
+      'maxLength': 80,
+    },
+    'output': <String, dynamic>{
+      'type': 'string',
+      'minLength': 1,
+      'maxLength': 80,
+      if (includeCommandSemantics)
+        'description':
+            'Exact documented typed output port of the referenced producer command.',
+    },
+  });
+  void clipTarget(List<String> valueKeys) {
+    properties['clip_id'] = clipId;
+    properties['clip_ref'] = resourceRef;
+    resourceTargetValueKeys = valueKeys;
+  }
   Map<String, dynamic> midiNotes(String description) => <String, dynamic>{
         'type': 'array',
         'minItems': 1,
@@ -1336,6 +1535,13 @@ Map<String, dynamic> _aiV3CommandVariant(
         'required': <String>['row_id'],
         'additionalProperties': false
       },
+      if (includeResourceRefs)
+        <String, dynamic>{
+          'type': 'object',
+          'properties': <String, dynamic>{'row_ref': resourceRef},
+          'required': <String>['row_ref'],
+          'additionalProperties': false,
+        },
       <String, dynamic>{
         'type': 'object',
         'properties': <String, dynamic>{
@@ -1621,7 +1827,9 @@ Map<String, dynamic> _aiV3CommandVariant(
       field('start_beat', <String, dynamic>{'type': 'number', 'minimum': 0});
       break;
     case 'clip.delete':
-      field('clip_id', clipId);
+      includeResourceRefs
+          ? clipTarget(const <String>[])
+          : field('clip_id', clipId);
       break;
     case 'clip.glue':
       field('clip_ids', <String, dynamic>{
@@ -1652,7 +1860,7 @@ Map<String, dynamic> _aiV3CommandVariant(
         ...clipId,
         if (includeCommandSemantics)
           'description':
-              'Stable ID of one existing audio clip to separate locally into vocal and instrumental stems. The source clip is preserved.',
+              'Stable ID of one existing audio clip to separate locally into vocal and instrumental stems. The source clip is preserved. Produces audio-clip ports vocals_clip and instrumental_clip, plus audio-row ports vocals_row and instrumental_row.',
       });
       break;
     case 'clip.convert_to_midi':
@@ -1671,7 +1879,9 @@ Map<String, dynamic> _aiV3CommandVariant(
       });
       break;
     case 'clip.set_pitch_semitones':
-      field('clip_id', clipId);
+      includeResourceRefs
+          ? clipTarget(const <String>['pitch_semitones'])
+          : field('clip_id', clipId);
       field('pitch_semitones', <String, dynamic>{
         'type': 'number',
         'minimum': -12,
@@ -1682,7 +1892,9 @@ Map<String, dynamic> _aiV3CommandVariant(
       });
       break;
     case 'clip.adjust_pitch_semitones':
-      field('clip_id', clipId);
+      includeResourceRefs
+          ? clipTarget(const <String>['delta_semitones'])
+          : field('clip_id', clipId);
       field('delta_semitones', <String, dynamic>{
         'type': 'number',
         'minimum': -24,
@@ -1820,14 +2032,16 @@ Map<String, dynamic> _aiV3CommandVariant(
       });
       break;
     case 'midi.transpose':
-      field('clip_id', clipId);
+      includeResourceRefs
+          ? clipTarget(const <String>['semitones'])
+          : field('clip_id', clipId);
       field('semitones', <String, dynamic>{
         'type': 'integer',
         'minimum': -48,
         'maximum': 48,
         if (includeCommandSemantics)
           'description':
-              'Relative pitch change for the MIDI notes in one existing MIDI clip. Never use audio-clip pitch commands for MIDI clips.',
+              'Relative pitch change for the MIDI notes in one MIDI clip selected by stable ID or a supported typed output reference. Never use audio-clip pitch commands for MIDI clips.',
       });
       break;
     case 'midi.create_clip':
@@ -1838,12 +2052,14 @@ Map<String, dynamic> _aiV3CommandVariant(
       field(
         'notes',
         midiNotes(
-          'Note starts are relative to the new clip. Every note must end within the clip length.',
+          'Note starts are relative to the new clip. Every note must end within the clip length. This command produces the MIDI-clip output port midi_clip.',
         ),
       );
       break;
     case 'midi.replace_notes':
-      field('clip_id', clipId);
+      includeResourceRefs
+          ? clipTarget(const <String>['notes'])
+          : field('clip_id', clipId);
       field(
         'notes',
         midiNotes(
@@ -1852,7 +2068,9 @@ Map<String, dynamic> _aiV3CommandVariant(
       );
       break;
     case 'midi.append_notes':
-      field('clip_id', clipId);
+      includeResourceRefs
+          ? clipTarget(const <String>['notes'])
+          : field('clip_id', clipId);
       field(
         'notes',
         midiNotes(
@@ -1861,7 +2079,13 @@ Map<String, dynamic> _aiV3CommandVariant(
       );
       break;
     case 'midi.chop_notes':
-      field('clip_id', clipId);
+      includeResourceRefs
+          ? clipTarget(const <String>[
+              'subdivision',
+              'range',
+              'velocity_decay_per_slice',
+            ])
+          : field('clip_id', clipId);
       field('subdivision', <String, dynamic>{
         'type': 'integer',
         'minimum': 1,
@@ -2142,6 +2366,31 @@ Map<String, dynamic> _aiV3CommandVariant(
       });
       break;
   }
+  final argumentsSchema = resourceTargetValueKeys == null
+      ? <String, dynamic>{
+          'type': 'object',
+          'properties': properties,
+          'required': required,
+          'additionalProperties': false,
+        }
+      : <String, dynamic>{
+          'anyOf': <Map<String, dynamic>>[
+            for (final targetKey in const <String>['clip_id', 'clip_ref'])
+              <String, dynamic>{
+                'type': 'object',
+                'properties': <String, dynamic>{
+                  targetKey: properties[targetKey],
+                  for (final key in resourceTargetValueKeys!)
+                    key: properties[key],
+                },
+                'required': <String>[
+                  targetKey,
+                  ...resourceTargetValueKeys!,
+                ],
+                'additionalProperties': false,
+              },
+          ],
+        };
   final variant = <String, dynamic>{
     'type': 'object',
     'properties': <String, dynamic>{
@@ -2154,12 +2403,7 @@ Map<String, dynamic> _aiV3CommandVariant(
         'type': 'string',
         'enum': <String>[type]
       },
-      'arguments': <String, dynamic>{
-        'type': 'object',
-        'properties': properties,
-        'required': required,
-        'additionalProperties': false
-      },
+      'arguments': argumentsSchema,
     },
     'required': <String>['command_id', 'type', 'arguments'],
     'additionalProperties': false,

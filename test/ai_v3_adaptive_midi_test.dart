@@ -678,6 +678,31 @@ Map<String, dynamic> _stemPlan({String clipId = 'clip-audio'}) =>
       'question_options': const <Object>[],
     };
 
+Map<String, dynamic> _stemPitchRefPlan() => <String, dynamic>{
+      'schema_version': aiV3PlanVersion,
+      'outcome': 'plan',
+      'user_message': 'Separated the stems and adjusted the generated clip.',
+      'commands': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'command_id': 'separate-vocal',
+          'type': 'clip.separate_stems',
+          'arguments': <String, dynamic>{'clip_id': 'clip-audio'},
+        },
+        <String, dynamic>{
+          'command_id': 'pitch-generated',
+          'type': 'clip.adjust_pitch_semitones',
+          'arguments': <String, dynamic>{
+            'clip_ref': <String, dynamic>{
+              'command_id': 'separate-vocal',
+              'output': 'instrumental_clip',
+            },
+            'delta_semitones': -1,
+          },
+        },
+      ],
+      'question_options': const <Object>[],
+    };
+
 Map<String, dynamic> _audioToMidiPlan({
   String clipId = 'clip-audio',
   String instrumentId = 'piano',
@@ -2469,6 +2494,46 @@ void main() {
 
     expect(result.callCount, 2);
     expect(result.plan.commands.single.type, 'clip.separate_stems');
+  });
+
+  test('adaptive continuation accepts a typed generated clip target', () async {
+    final fixture = await _fixture(includeAudioClip: true);
+    var call = 0;
+    final client = MockClient((_) async {
+      call++;
+      return http.Response(
+        jsonEncode(call == 1
+            ? _response(
+                'get_context_domains',
+                _clipAdvancedQuery(
+                  targets: const <Object>['clip-audio'],
+                ),
+              )
+            : _response('submit_plan_v3', _stemPitchRefPlan())),
+        200,
+      );
+    });
+
+    final result = await AiV3AdaptivePlannerService(
+      apiKey: 'test-key',
+      model: 'gpt-5.4-mini',
+      resourceRefsEnabled: true,
+      httpClient: client,
+    ).plan(
+      compactCore: fixture.compact,
+      snapshot: fixture.snapshot,
+      originalRequest: 'Perform the ordered generated-resource edit.',
+    );
+
+    expect(result.callCount, 2);
+    expect(result.plan.commands, hasLength(2));
+    expect(
+      result.plan.commands.last.arguments['clip_ref'],
+      <String, dynamic>{
+        'command_id': 'separate-vocal',
+        'output': 'instrumental_clip',
+      },
+    );
   });
 
   test('advanced stem separation rejects a source omitted from retrieval',

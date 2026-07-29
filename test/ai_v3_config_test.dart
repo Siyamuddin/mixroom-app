@@ -16,6 +16,7 @@ void main() {
     expect(LlmConfig.aiV3Model, 'gpt-5.6-luna');
     expect(LlmConfig.aiV3ReasoningEffort, 'low');
     expect(LlmConfig.aiV3CaptureEnabled, isFalse);
+    expect(LlmConfig.aiV3ResourceRefsEnabled, isFalse);
     expect(LlmConfig.aiV3DetachedComparisonsEnabled, isTrue);
     expect(LlmConfig.aiV3CompactShadowEvaluationEnabled, isFalse);
     expect(LlmConfig.aiV3AdaptiveShadowEnabled, isFalse);

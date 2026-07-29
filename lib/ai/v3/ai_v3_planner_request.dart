@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'ai_v3_contract.dart';
+import 'ai_v3_resources.dart';
 
 const String aiV3MidiTimingInstructions =
     'MIDI note starts are clip-relative and zero-based. Within each bar, '
@@ -9,6 +10,12 @@ const String aiV3MidiTimingInstructions =
     'unit, quarter notes advance by 1 beat and eighth notes by 0.5 beats. '
     'Independently requested MIDI notes may share the same start time and '
     'must not replace or suppress one another.';
+
+const String aiV3ResourceReferenceInstructions =
+    'A later command may target a documented typed output of an earlier '
+    'command by using its command_id and output port. References must point '
+    'backward in the ordered plan. Use a stable project ID for resources that '
+    'already exist, and never guess a runtime ID for a produced resource.';
 
 const String aiV3PlannerInstructions = '''
 You are Mixroom's sole semantic and musical planner.
@@ -46,6 +53,7 @@ Map<String, dynamic> buildAiV3PlannerRequestBody({
   String? promptTraceId,
   Set<String> commandTypes = aiV3CommandTypes,
   String architecture = 'v3_one_shot_prototype',
+  bool resourceRefsEnabled = false,
 }) {
   final plannerContext = Map<String, dynamic>.from(contextData)
     ..remove('original_request')
@@ -55,7 +63,10 @@ Map<String, dynamic> buildAiV3PlannerRequestBody({
   final normalizedTraceId = (promptTraceId ?? '').trim();
   return <String, dynamic>{
     'model': model.trim(),
-    'instructions': aiV3PlannerInstructions.trim(),
+    'instructions': <String>[
+      aiV3PlannerInstructions.trim(),
+      if (resourceRefsEnabled) aiV3ResourceReferenceInstructions,
+    ].join('\n'),
     'input': <Map<String, dynamic>>[
       <String, dynamic>{
         'role': 'user',
@@ -80,6 +91,9 @@ Map<String, dynamic> buildAiV3PlannerRequestBody({
       aiV3SubmitPlanTool(
         commandTypes: commandTypes,
         includeCommandSemantics: true,
+        includeResourceRefs: resourceRefsEnabled,
+        resourceRefCommandTypes:
+            aiV3RuntimeResourceRefConsumerTypes.intersection(commandTypes),
       ),
     ],
     'tool_choice': <String, dynamic>{
@@ -97,6 +111,8 @@ Map<String, dynamic> buildAiV3PlannerRequestBody({
           normalizedTraceId.length > 64 ? 64 : normalizedTraceId.length,
         ),
         'architecture': architecture,
+        if (resourceRefsEnabled)
+          'surface_revision': aiV3ResourceRefSurfaceRevision,
       },
   };
 }
