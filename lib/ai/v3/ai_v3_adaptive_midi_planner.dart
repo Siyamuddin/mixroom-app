@@ -9,12 +9,14 @@ import 'ai_v3_contract.dart';
 import 'ai_v3_planner_request.dart';
 import 'ai_v3_planning_snapshot.dart';
 import 'ai_v3_retrieval.dart';
+import 'ai_v3_user_facing_text.dart';
 
 const String aiV3AdaptiveArchitecture = 'v3_adaptive_shadow';
 const String aiV3AdaptiveSurfaceRevision = 'full_commands_fact_retrieval_v1';
 
 const String aiV3AdaptiveFirstTurnInstructions = '''
 You are Mixroom's sole semantic and musical planner.
+$aiV3CustomerLanguageInstructions
 Preserve the complete original request and its explicit constraints. Treat
 supplied project state and stable IDs as factual authority. Use general musical
 knowledge for interpretation, but never invent project resources or state.
@@ -32,6 +34,7 @@ latest user request.
 
 const String aiV3AdaptiveContinuationInstructions = '''
 You are Mixroom's sole semantic and musical planner on the final continuation.
+$aiV3CustomerLanguageInstructions
 Use the unchanged original request, compact context, exact retrieval request,
 and returned immutable facts to produce one complete final plan. No further
 context request is available. Treat supplied project state and stable IDs as

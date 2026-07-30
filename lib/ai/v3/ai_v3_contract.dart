@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'ai_v3_user_facing_text.dart';
+
 const String aiV3PlanVersion = 'plan_v3_prototype_2';
 const int aiV3MaxCommands = 16;
 const int aiV3MaxGeneratedMidiNotes = 256;
@@ -288,7 +290,7 @@ class AiV3Plan {
     final userMessage = raw['user_message'] is String
         ? (raw['user_message'] as String).trim()
         : '';
-    if (userMessage.isEmpty || userMessage.length > 1000) {
+    if (userMessage.isEmpty) {
       throw const AiV3ContractException('v3_user_message_invalid');
     }
     final rawCommands = raw['commands'];
@@ -1214,9 +1216,8 @@ Map<String, dynamic> _aiV3PlanSchema(
         'user_message': <String, dynamic>{
           'type': 'string',
           'minLength': 1,
-          'maxLength': 1000,
           'description':
-              'For outcome plan, write a concise one- or two-sentence past-tense completion summary of the requested result. This text is held until exact execution and readback succeed. For clarify, write one focused question only and do not repeat, number, or bullet question_options. For every other outcome, write the appropriate user-facing response and never claim execution.',
+              'Write concise, natural customer-facing text for a general music creator using clear, easy-to-understand language without sounding simplistic. Use deeper technical detail only when the request or conversation clearly shows it is appropriate, and keep hidden application data and private implementation details private. Avoid unnecessary implementation detail, long preambles, and repetition. For outcome plan, write a one- or two-sentence, brief past-tense completion summary of the requested result; never copy the request into the summary, and describe only the completed musical result. This text is held until exact execution and readback succeed. Keep other responses under $aiV3PreferredUserMessageLength characters and always finish naturally. For clarify, write one focused question only and do not repeat, number, or bullet question_options. For every other outcome, write the appropriate response and never claim execution.',
         },
         'commands': <String, dynamic>{
           'type': 'array',
@@ -1232,7 +1233,7 @@ Map<String, dynamic> _aiV3PlanSchema(
           'type': 'array',
           'maxItems': 4,
           'description':
-              'Up to four distinct, concise, meaningful answers for clarify; may be empty when the question stands alone. Never include Cancel, Something else, Other, navigation, or custom-answer controls because the application supplies them. Otherwise empty.',
+              'Up to four distinct, concise, meaningful answers for clarify, written for the customer; may be empty when the question stands alone. Never include Cancel, Something else, Other, navigation, or custom-answer controls because the application supplies them. Otherwise empty.',
           'items': <String, dynamic>{'type': 'string', 'minLength': 1}
         },
       },

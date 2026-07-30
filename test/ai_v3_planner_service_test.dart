@@ -8,6 +8,7 @@ import 'package:mixroom/ai/v3/ai_v3_contract.dart';
 import 'package:mixroom/ai/v3/ai_v3_planner_request.dart';
 import 'package:mixroom/ai/v3/ai_v3_planner_service.dart';
 import 'package:mixroom/ai/v3/ai_v3_adaptive_midi_planner.dart';
+import 'package:mixroom/ai/v3/ai_v3_user_facing_text.dart';
 
 AiV3CoreContext _context() => const AiV3CoreContext(
       profile: AiV3ContextProfile.essential,
@@ -102,6 +103,34 @@ void main() {
         contains('Never include Cancel, Something else, Other'),
       ),
     );
+    expect(
+      sent['instructions'],
+      contains(aiV3CustomerLanguageInstructions),
+    );
+    expect(sent['instructions'], contains('general music creator'));
+    expect(sent['instructions'], contains('clear, easy-to-understand'));
+    expect(sent['instructions'], contains('deeper technical detail'));
+    expect(
+      sent['instructions'],
+      contains('request or conversation clearly shows'),
+    );
+    expect(sent['instructions'], contains('user-visible terms'));
+    expect(
+      sent['instructions'],
+      contains('non-user-visible application context'),
+    );
+    expect(sent['instructions'], contains('never reveal or transform them'));
+    expect(
+      sent['instructions'],
+      contains('one or two brief, past-tense sentences'),
+    );
+    expect(
+      sent['instructions'],
+      contains('Never copy the request into a successful plan summary'),
+    );
+    expect(sent['instructions'], contains('completed musical result'));
+    expect(sent['instructions'], contains('under 500 characters'));
+    expect(sent['instructions'], contains('Always finish naturally'));
     expect(jsonEncode(sent['input']), contains(request));
     expect(jsonEncode(sent), isNot(contains('intent_frame')));
     expect(jsonEncode(sent), isNot(contains('legacy_action')));
