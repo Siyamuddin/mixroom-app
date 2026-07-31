@@ -8,18 +8,12 @@ import 'package:mixroom/helpers/subscription_limits.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/entitlement_models.dart';
 
-typedef ManageSubscriptionAction = void Function({
-  BillingProvider? provider,
-  String? managementChannel,
-});
+typedef ManageSubscriptionAction =
+    void Function({BillingProvider? provider, String? managementChannel});
 
 String _t(BuildContext context, String key) => L10n.translate(context, key);
 
-String _tr(
-  BuildContext context,
-  String key,
-  Map<String, Object> values,
-) {
+String _tr(BuildContext context, String key, Map<String, Object> values) {
   var text = _t(context, key);
   values.forEach((name, value) {
     text = text.replaceAll('{$name}', '$value');
@@ -156,8 +150,10 @@ List<BillingProductDefinition> _visibleBillingProducts(
   }
   final products = byCode.values.toList(growable: false);
   products.sort((a, b) {
-    final rankCompare = _billingProductSortRank(catalog, a)
-        .compareTo(_billingProductSortRank(catalog, b));
+    final rankCompare = _billingProductSortRank(
+      catalog,
+      a,
+    ).compareTo(_billingProductSortRank(catalog, b));
     if (rankCompare != 0) return rankCompare;
     return a.code.compareTo(b.code);
   });
@@ -171,7 +167,8 @@ int _billingProductSortRank(
   if (product.rank > 0) {
     return product.rank;
   }
-  final planRank = catalog.planByCode(product.planCode)?.rank ??
+  final planRank =
+      catalog.planByCode(product.planCode)?.rank ??
       _fallbackBillingPlanRank(product.planCode);
   return planRank * 100 + _billingIntervalSortRank(product.billingInterval);
 }
@@ -222,33 +219,27 @@ class _AccountSubscriptionSurfaceState
 
   @override
   Widget build(BuildContext context) {
-    final entitlement = widget.entitlementService.entitlement ??
+    final entitlement =
+        widget.entitlementService.entitlement ??
         EntitlementSnapshot.free(userId: '');
     final catalog = widget.entitlementService.billingCatalog;
     final accessSummary = widget.entitlementService.effectiveAccessSummary;
     final products = _visibleBillingProducts(catalog, widget.platformKey);
     final busy = widget.isActionBusy || widget.iapService.isPurchaseInProgress;
-    final debugMessages = _debugMessages();
     final studentEducationOrganizations = widget
-        .entitlementService.effectiveOrganizations
+        .entitlementService
+        .effectiveOrganizations
         .where(_isEducationStudentOrganization)
         .toList(growable: false);
 
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 860),
-        child: _SectionCard(
-          icon: Icons.workspace_premium_rounded,
-          title: _t(context, 'Plan & Billing'),
-          subtitle:
-              _t(context, 'Manage your current plan and available upgrades.'),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (kDebugMode && debugMessages.isNotEmpty) ...[
-                _DebugBanner(messages: debugMessages),
-                const SizedBox(height: 12),
-              ],
               _PlanHero(
                 entitlement: entitlement,
                 isBusy: busy,
@@ -262,7 +253,7 @@ class _AccountSubscriptionSurfaceState
                   onManageSubscription: widget.onManageSubscription,
                 ),
               ],
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               _BillingActions(
                 isBusy: busy,
                 isRefreshing: widget.entitlementService.isAccountSurfaceLoading,
@@ -270,7 +261,7 @@ class _AccountSubscriptionSurfaceState
                 onContactSupport: widget.onContactSupport,
                 onRefresh: widget.onRefresh,
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 26),
               _PlansPanel(
                 entitlement: entitlement,
                 catalog: catalog,
@@ -319,12 +310,15 @@ class _AccountSubscriptionSurfaceState
 
   Future<void> _acceptEducationInvite() async {
     if (_educationAcceptBusy) return;
-    final token =
-        _educationInviteTokenFromInput(_educationAcceptController.text);
+    final token = _educationInviteTokenFromInput(
+      _educationAcceptController.text,
+    );
     if (token.isEmpty) {
       setState(() {
-        _educationAcceptMessage =
-            _t(context, 'Paste a valid education invite link.');
+        _educationAcceptMessage = _t(
+          context,
+          'Paste a valid education invite link.',
+        );
       });
       return;
     }
@@ -337,8 +331,10 @@ class _AccountSubscriptionSurfaceState
       if (!mounted) return;
       _educationAcceptController.clear();
       setState(() {
-        _educationAcceptMessage =
-            _t(context, 'Education student seat activated.');
+        _educationAcceptMessage = _t(
+          context,
+          'Education student seat activated.',
+        );
       });
     } catch (_) {
       if (!mounted) return;
@@ -369,26 +365,6 @@ class _AccountSubscriptionSurfaceState
     );
   }
 
-  List<String> _debugMessages() {
-    if (!kDebugMode) {
-      return const <String>[];
-    }
-    final values = <String>[];
-    void add(String? message) {
-      final normalized = (message ?? '').trim();
-      if (normalized.isEmpty || values.contains(normalized)) {
-        return;
-      }
-      values.add(normalized);
-    }
-
-    add(widget.inlineMessage);
-    add(widget.iapService.lastMessage);
-    add(widget.entitlementService.lastError);
-    add(widget.entitlementService.accountSurfaceError);
-    add(widget.iapService.lastError);
-    return values;
-  }
 }
 
 String _educationMembershipLabel(OrganizationMembershipItem membership) {
@@ -422,8 +398,12 @@ bool _isEducationTeacherOrganization(OrganizationAccessItem organization) {
   if (organization.planCode.trim().toLowerCase() != 'education') {
     return false;
   }
-  return {'owner', 'admin', 'manager', 'teacher'}
-      .contains(organization.role.trim().toLowerCase());
+  return {
+    'owner',
+    'admin',
+    'manager',
+    'teacher',
+  }.contains(organization.role.trim().toLowerCase());
 }
 
 bool _isEducationStudentOrganization(OrganizationAccessItem organization) {
@@ -439,139 +419,6 @@ String _membershipRoleReadout(BuildContext context, String role) {
     return _tr(context, 'You are the {role}', {'role': label});
   }
   return _tr(context, 'You are a {role}', {'role': label});
-}
-
-class _SectionCard extends StatelessWidget {
-  const _SectionCard({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.child,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.045),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.085)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.24),
-            blurRadius: 34,
-            offset: const Offset(0, 18),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF3D7FFF).withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(11),
-                  border: Border.all(
-                    color: const Color(0xFF82B5FF).withValues(alpha: 0.22),
-                  ),
-                ),
-                alignment: Alignment.center,
-                child: Icon(icon, color: const Color(0xFFA4C2FF), size: 18),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                        height: 1.15,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      subtitle,
-                      style: const TextStyle(
-                        color: Colors.white60,
-                        fontSize: 12.2,
-                        fontWeight: FontWeight.w500,
-                        height: 1.35,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          child,
-        ],
-      ),
-    );
-  }
-}
-
-class _DebugBanner extends StatelessWidget {
-  const _DebugBanner({required this.messages});
-
-  final List<String> messages;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFB84D).withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: const Color(0xFFFFC56D).withValues(alpha: 0.22),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            _t(context, 'Debug only'),
-            style: const TextStyle(
-              color: Color(0xFFFFD48A),
-              fontSize: 11.4,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 6),
-          ...messages.map(
-            (message) => Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Text(
-                message,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 11.6,
-                  fontWeight: FontWeight.w500,
-                  height: 1.35,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _PlanHero extends StatelessWidget {
@@ -617,119 +464,79 @@ class _EntitlementOverviewCard extends StatelessWidget {
     final status = _subscriptionStatusLabel(context, entitlement.status);
     final canManagePersonal = personal.canManage && !isBusy;
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF4F4F4).withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: const Color(0xFFF4F4F4).withValues(alpha: 0.11),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: accent.withValues(alpha: 0.28)),
-                ),
-                child: Icon(_planIcon(planCode), color: accent, size: 20),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.16),
+                borderRadius: BorderRadius.circular(13),
+                border: Border.all(color: accent.withValues(alpha: 0.28)),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _t(context, 'Current tier'),
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.62),
-                        fontSize: 11.2,
-                        fontWeight: FontWeight.w700,
-                        height: 1.1,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      personal.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                        height: 1.05,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              _PlanStatusPill(
-                label: status,
-                active: entitlement.isAccessActive,
-              ),
-            ],
-          ),
-          if (personal.detail.trim().isNotEmpty ||
-              personal.actionLabel.trim().isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                if (personal.detail.trim().isNotEmpty)
-                  Expanded(
-                    child: Text(
-                      personal.detail,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.68),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        height: 1.28,
-                      ),
+              child: Icon(_planIcon(planCode), color: accent, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _t(context, 'Current plan'),
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.62),
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                      height: 1.1,
                     ),
                   ),
-                if (personal.actionLabel.trim().isNotEmpty) ...[
-                  const SizedBox(width: 10),
-                  _CompactManageButton(
-                    label: personal.actionLabel,
-                    icon: personal.actionIcon,
-                    onPressed: canManagePersonal
-                        ? () => onManageSubscription(
-                              provider: personal.actionProvider,
-                              managementChannel:
-                                  personal.actionManagementChannel,
-                            )
-                        : null,
+                  const SizedBox(height: 3),
+                  Text(
+                    personal.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                      height: 1.05,
+                    ),
                   ),
                 ],
-              ],
+              ),
             ),
+            const SizedBox(width: 10),
+            _PlanStatusPill(label: status, active: entitlement.isAccessActive),
           ],
-          if (planCode != 'free') ...[
-            const SizedBox(height: 12),
-            _PromptUsageCard(entitlement: entitlement),
-          ],
+        ),
+        if (personal.actionLabel.trim().isNotEmpty) ...[
+          const SizedBox(height: 5),
+          _CompactManageButton(
+            label: personal.actionLabel,
+            icon: personal.actionIcon,
+            onPressed: canManagePersonal
+                ? () => onManageSubscription(
+                    provider: personal.actionProvider,
+                    managementChannel: personal.actionManagementChannel,
+                  )
+                : null,
+          ),
         ],
-      ),
+        if (planCode != 'free') ...[
+          const SizedBox(height: 10),
+          _PromptUsageCard(entitlement: entitlement),
+        ],
+      ],
     );
   }
 }
 
 class _PlanStatusPill extends StatelessWidget {
-  const _PlanStatusPill({
-    required this.label,
-    required this.active,
-  });
+  const _PlanStatusPill({required this.label, required this.active});
 
   final String label;
   final bool active;
@@ -775,17 +582,13 @@ class _CompactManageButton extends StatelessWidget {
       icon: Icon(icon, size: 15),
       label: Text(label),
       style: TextButton.styleFrom(
-        foregroundColor: Colors.white,
+        foregroundColor: const Color(0xFFA4C2FF),
         disabledForegroundColor: Colors.white.withValues(alpha: 0.34),
-        backgroundColor: Colors.white.withValues(alpha: 0.08),
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+        padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 5),
         minimumSize: const Size(0, 0),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        textStyle: const TextStyle(
-          fontSize: 11.6,
-          fontWeight: FontWeight.w800,
-        ),
+        backgroundColor: Colors.transparent,
+        textStyle: const TextStyle(fontSize: 11.2, fontWeight: FontWeight.w800),
       ),
     );
   }
@@ -804,66 +607,35 @@ class _PromptUsageCard extends StatelessWidget {
     final modelTier = _modelTierReadout(context, limits['ai_model_tier']);
     final advanced = _advancedPromptReadout(context, limits);
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.13),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: const Color(0xFFF4F4F4).withValues(alpha: 0.08),
+    return Wrap(
+      spacing: 22,
+      runSpacing: 10,
+      children: [
+        _PromptUsagePill(
+          label: _t(context, 'AI usage'),
+          value: usage ?? _t(context, 'Standard AI usage'),
         ),
-      ),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
+        _PromptUsagePill(label: _t(context, 'Model access'), value: modelTier),
+        if (advanced.isNotEmpty)
           _PromptUsagePill(
-            label: _t(context, 'AI usage'),
-            value: usage ?? _t(context, 'Standard AI usage'),
-            wide: true,
+            label: _t(context, 'Reasoning access'),
+            value: advanced,
           ),
-          _PromptUsagePill(
-            label: _t(context, 'Model access'),
-            value: modelTier,
-            wide: true,
-          ),
-          if (advanced.isNotEmpty)
-            _PromptUsagePill(
-              label: _t(context, 'Reasoning access'),
-              value: advanced,
-              wide: true,
-            ),
-        ],
-      ),
+      ],
     );
   }
 }
 
 class _PromptUsagePill extends StatelessWidget {
-  const _PromptUsagePill({
-    required this.label,
-    required this.value,
-    this.wide = false,
-  });
+  const _PromptUsagePill({required this.label, required this.value});
 
   final String label;
   final String value;
-  final bool wide;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      constraints: BoxConstraints(
-        minWidth: wide ? 150 : 96,
-        maxWidth: wide ? 240 : 132,
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.055),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
-      ),
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 200),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -873,20 +645,20 @@ class _PromptUsagePill extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.54),
-              fontSize: 10.8,
+              color: Colors.white.withValues(alpha: 0.48),
+              fontSize: 10.4,
               fontWeight: FontWeight.w800,
               height: 1.1,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 2),
           Text(
             value,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 13.2,
+              fontSize: 12.4,
               fontWeight: FontWeight.w800,
               height: 1.1,
             ),
@@ -934,33 +706,36 @@ class _BillingActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Row(
       children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 6,
-          children: [
-            _QuietActionButton(
-              label: _t(context, 'Restore purchases'),
-              icon: Icons.restore_rounded,
-              onPressed: isBusy ? null : onRestorePurchases,
-            ),
-            _QuietActionButton(
-              label: _t(context, 'Contact support'),
-              icon: Icons.support_agent_rounded,
-              onPressed: isBusy ? null : onContactSupport,
-            ),
-            if (kDebugMode)
-              _QuietActionButton(
-                label: isRefreshing || isBusy
-                    ? _t(context, 'Refreshing')
-                    : _t(context, 'Refresh'),
-                icon: Icons.refresh_rounded,
-                onPressed: isRefreshing || isBusy ? null : onRefresh,
-              ),
-          ],
+        Expanded(
+          child: _QuietActionButton(
+            label: _t(context, 'Restore purchases'),
+            icon: Icons.restore_rounded,
+            onPressed: isBusy ? null : onRestorePurchases,
+          ),
         ),
+        Expanded(
+          child: _QuietActionButton(
+            label: _t(context, 'Contact support'),
+            icon: Icons.support_agent_rounded,
+            onPressed: isBusy ? null : onContactSupport,
+          ),
+        ),
+        if (kDebugMode)
+          IconButton(
+            tooltip: isRefreshing || isBusy
+                ? _t(context, 'Refreshing')
+                : _t(context, 'Refresh'),
+            onPressed: isRefreshing || isBusy ? null : onRefresh,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            color: Colors.white60,
+            style: IconButton.styleFrom(
+              minimumSize: const Size(32, 32),
+              padding: EdgeInsets.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
       ],
     );
   }
@@ -981,9 +756,11 @@ class _BillingDetailsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final oneTimeAccessEndsAt =
-        _isTossOneTimeBilling(billing) ? billing.expiresAt : null;
-    final shouldShowProvider = entitlement.isPaidPlan ||
+    final oneTimeAccessEndsAt = _isTossOneTimeBilling(billing)
+        ? billing.expiresAt
+        : null;
+    final shouldShowProvider =
+        entitlement.isPaidPlan ||
         (billing.provider != BillingProvider.adminGrant &&
             billing.provider != BillingProvider.unknown);
     final details = <_BillingDetailItem>[
@@ -1029,75 +806,36 @@ class _BillingDetailsPanel extends StatelessWidget {
     if (details.isEmpty && !hasProviderManagedLink) {
       return const SizedBox.shrink();
     }
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(top: 10),
-      padding: const EdgeInsets.fromLTRB(13, 12, 13, 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF4F4F4).withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: const Color(0xFFF4F4F4).withValues(alpha: 0.10),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: Row(
         children: [
-          Row(
-            children: [
-              const Icon(
-                Icons.credit_card_rounded,
-                color: Color(0xFFA4C2FF),
-                size: 17,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  _t(context, 'Billing details'),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12.4,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-            ],
+          Expanded(
+            child: Wrap(
+              spacing: 18,
+              runSpacing: 6,
+              children: [
+                for (final item in details) _BillingDetailLine(item: item),
+              ],
+            ),
           ),
-          if (details.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            for (final item in details) ...[
-              _BillingDetailLine(item: item),
-              if (item != details.last) const SizedBox(height: 7),
-            ],
-          ],
-          if (hasProviderManagedLink) ...[
-            const SizedBox(height: 9),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: isBusy
-                    ? null
-                    : () => onManageSubscription(
-                          provider: billing.provider,
-                          managementChannel: billing.managementChannel,
-                        ),
-                icon: const Icon(Icons.open_in_new_rounded, size: 15),
-                label: Text(_t(context, 'Manage billing')),
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  disabledForegroundColor: Colors.white.withValues(alpha: 0.34),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 9,
-                    vertical: 8,
-                  ),
-                  textStyle: const TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
+          if (hasProviderManagedLink)
+            IconButton(
+              tooltip: _t(context, 'Manage billing'),
+              onPressed: isBusy
+                  ? null
+                  : () => onManageSubscription(
+                      provider: billing.provider,
+                      managementChannel: billing.managementChannel,
+                    ),
+              icon: const Icon(Icons.open_in_new_rounded, size: 17),
+              color: const Color(0xFFA4C2FF),
+              style: IconButton.styleFrom(
+                minimumSize: const Size(32, 32),
+                padding: EdgeInsets.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
             ),
-          ],
         ],
       ),
     );
@@ -1118,36 +856,27 @@ class _BillingDetailLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: Text(
-            item.label,
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: '${item.label}  ',
             style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.54),
-              fontSize: 11.3,
+              color: Colors.white.withValues(alpha: 0.46),
+              fontSize: 11.2,
               fontWeight: FontWeight.w700,
-              height: 1.25,
             ),
           ),
-        ),
-        const SizedBox(width: 12),
-        Flexible(
-          child: Text(
-            item.value,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.right,
+          TextSpan(
+            text: item.value,
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.86),
-              fontSize: 11.8,
+              fontSize: 11.6,
               fontWeight: FontWeight.w700,
-              height: 1.25,
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -1281,13 +1010,13 @@ class _PlansPanelState extends State<_PlansPanel> {
                 final visibleCardCount = contentWidth >= 740
                     ? 3
                     : contentWidth >= 500
-                        ? 2
-                        : 1;
+                    ? 2
+                    : 1;
                 final cardWidth = visibleCardCount == 1
                     ? contentWidth
                     : ((contentWidth - cardGap * (visibleCardCount - 1)) /
-                            visibleCardCount)
-                        .clamp(224.0, 264.0);
+                              visibleCardCount)
+                          .clamp(224.0, 264.0);
 
                 return Container(
                   padding: const EdgeInsets.fromLTRB(
@@ -1323,8 +1052,10 @@ class _PlansPanelState extends State<_PlansPanel> {
                               child: _PlanListRow(
                                 data: entry.value,
                                 planIsCurrent: _isCurrentPlanCard(entry.value),
-                                priceLabel:
-                                    _priceLabelForCard(context, entry.value),
+                                priceLabel: _priceLabelForCard(
+                                  context,
+                                  entry.value,
+                                ),
                                 billingCaption: _billingCaptionForCard(
                                   context,
                                   entry.value,
@@ -1422,11 +1153,17 @@ class _PlansPanelState extends State<_PlansPanel> {
     }
     if (_isPlanDowngrade(purchaseContext, catalog, product) &&
         _isMobileStorePlanChange(
-            purchaseContext, product, widget.platformProvider)) {
+          purchaseContext,
+          product,
+          widget.platformProvider,
+        )) {
       return _t(context, 'Change plan');
     }
     if (_isMobileStorePlanChange(
-        purchaseContext, product, widget.platformProvider)) {
+      purchaseContext,
+      product,
+      widget.platformProvider,
+    )) {
       return _t(context, 'Change plan');
     }
     final providerProduct = catalog?.bestProviderProductForProduct(
@@ -1519,8 +1256,8 @@ class _PlansPanelState extends State<_PlansPanel> {
     final alternatives = card.products
         .where((item) => item.code != product.code)
         .map((item) {
-          final labelPrice =
-              (_displayPriceForProduct(context, item) ?? '').trim();
+          final labelPrice = (_displayPriceForProduct(context, item) ?? '')
+              .trim();
           final interval = _cadenceLabel(context, item.billingInterval);
           if (labelPrice.isEmpty) return interval ?? '';
           return interval == null ? labelPrice : '$interval $labelPrice';
@@ -1537,37 +1274,44 @@ class _PlansPanelState extends State<_PlansPanel> {
     BuildContext context,
     _PlanDisplayCardData card,
   ) {
-    return card.products.map((product) {
-      final purchaseContext = _purchaseContextForProduct(
-        widget.entitlement,
-        widget.catalog,
-        product,
-      );
-      final isCurrentPlan = _isCurrentPlan(purchaseContext, product);
-      final managedChange = _requiresManagedPlanChange(
-        purchaseContext,
-        widget.catalog,
-        product,
-        widget.platformProvider,
-      );
-      return _PlanProductAction(
-        label: _actionLabel(context, purchaseContext, widget.catalog, product),
-        detail: _productActionDetail(
-          context,
-          product,
-          priceOverride: _displayPriceForProduct(context, product),
-        ),
-        isPrimary: product.code == _preferredProduct(card.products).code,
-        onPressed: isCurrentPlan || widget.isBusy
-            ? null
-            : managedChange
+    return card.products
+        .map((product) {
+          final purchaseContext = _purchaseContextForProduct(
+            widget.entitlement,
+            widget.catalog,
+            product,
+          );
+          final isCurrentPlan = _isCurrentPlan(purchaseContext, product);
+          final managedChange = _requiresManagedPlanChange(
+            purchaseContext,
+            widget.catalog,
+            product,
+            widget.platformProvider,
+          );
+          return _PlanProductAction(
+            label: _actionLabel(
+              context,
+              purchaseContext,
+              widget.catalog,
+              product,
+            ),
+            detail: _productActionDetail(
+              context,
+              product,
+              priceOverride: _displayPriceForProduct(context, product),
+            ),
+            isPrimary: product.code == _preferredProduct(card.products).code,
+            onPressed: isCurrentPlan || widget.isBusy
+                ? null
+                : managedChange
                 ? () => widget.onManageSubscription(
-                      provider: purchaseContext.sourceProvider,
-                      managementChannel: purchaseContext.managementChannel,
-                    )
+                    provider: purchaseContext.sourceProvider,
+                    managementChannel: purchaseContext.managementChannel,
+                  )
                 : () => widget.onSelectProduct(product),
-      );
-    }).toList(growable: false);
+          );
+        })
+        .toList(growable: false);
   }
 
   _PlanProductAction? _fallbackActionForCard(
@@ -1598,8 +1342,9 @@ class _PlansPanelState extends State<_PlansPanel> {
       label: _t(context, 'Contact sales'),
       detail: '',
       isPrimary: true,
-      onPressed:
-          widget.isBusy ? null : () => widget.onSelectProduct(syntheticProduct),
+      onPressed: widget.isBusy
+          ? null
+          : () => widget.onSelectProduct(syntheticProduct),
     );
   }
 
@@ -1673,9 +1418,11 @@ class _PlansPanelState extends State<_PlansPanel> {
     if (_isCurrentPlan(purchaseContext, product)) {
       return false;
     }
-    final currentRank = catalog?.planByCode(purchaseContext.planCode)?.rank ??
+    final currentRank =
+        catalog?.planByCode(purchaseContext.planCode)?.rank ??
         _fallbackPlanRank(purchaseContext.planCode);
-    final nextRank = catalog?.planByCode(product.planCode)?.rank ??
+    final nextRank =
+        catalog?.planByCode(product.planCode)?.rank ??
         _fallbackPlanRank(product.planCode);
     return nextRank > currentRank;
   }
@@ -1693,9 +1440,11 @@ class _PlansPanelState extends State<_PlansPanel> {
     if (_isCurrentPlan(purchaseContext, product)) {
       return false;
     }
-    final currentRank = catalog?.planByCode(purchaseContext.planCode)?.rank ??
+    final currentRank =
+        catalog?.planByCode(purchaseContext.planCode)?.rank ??
         _fallbackPlanRank(purchaseContext.planCode);
-    final nextRank = catalog?.planByCode(product.planCode)?.rank ??
+    final nextRank =
+        catalog?.planByCode(product.planCode)?.rank ??
         _fallbackPlanRank(product.planCode);
     return nextRank < currentRank;
   }
@@ -1759,20 +1508,14 @@ class _PlanPurchaseContext {
 }
 
 class _PlanDisplayCardData {
-  const _PlanDisplayCardData({
-    required this.plan,
-    required this.products,
-  });
+  const _PlanDisplayCardData({required this.plan, required this.products});
 
   final BillingPlanDefinition plan;
   final List<BillingProductDefinition> products;
 }
 
 class _PlanScrollButton extends StatelessWidget {
-  const _PlanScrollButton({
-    required this.icon,
-    required this.onPressed,
-  });
+  const _PlanScrollButton({required this.icon, required this.onPressed});
 
   final IconData icon;
   final VoidCallback onPressed;
@@ -1829,10 +1572,7 @@ class _PlanMarketingContent {
 }
 
 class _PlanMarketingSection {
-  const _PlanMarketingSection({
-    required this.heading,
-    required this.items,
-  });
+  const _PlanMarketingSection({required this.heading, required this.items});
 
   final String heading;
   final List<String> items;
@@ -1852,6 +1592,9 @@ List<_PlanDisplayCardData> _planDisplayCards(
   ];
   final productsByPlan = <String, List<BillingProductDefinition>>{};
   for (final product in visibleProducts) {
+    // Keep annual products in the catalog for future use, but do not surface
+    // them in the Explore More Plans cards until annual billing is available.
+    if (_isAnnualBillingProduct(product)) continue;
     final planCode = product.planCode.trim().toLowerCase();
     productsByPlan.putIfAbsent(planCode, () => <BillingProductDefinition>[]);
     productsByPlan[planCode]!.add(product);
@@ -1860,20 +1603,33 @@ List<_PlanDisplayCardData> _planDisplayCards(
     entry.value.sort((a, b) {
       final rankCompare = a.rank.compareTo(b.rank);
       if (rankCompare != 0) return rankCompare;
-      return _billingIntervalSortRank(a.billingInterval)
-          .compareTo(_billingIntervalSortRank(b.billingInterval));
+      return _billingIntervalSortRank(
+        a.billingInterval,
+      ).compareTo(_billingIntervalSortRank(b.billingInterval));
     });
   }
 
-  return planOrder.map((planCode) {
-    final plan = catalog?.planByCode(planCode) ?? _fallbackPlan(planCode);
-    return _PlanDisplayCardData(
-      plan: plan,
-      products: List<BillingProductDefinition>.unmodifiable(
-        productsByPlan[planCode] ?? const <BillingProductDefinition>[],
-      ),
-    );
-  }).toList(growable: false);
+  return planOrder
+      .map((planCode) {
+        final plan = catalog?.planByCode(planCode) ?? _fallbackPlan(planCode);
+        return _PlanDisplayCardData(
+          plan: plan,
+          products: List<BillingProductDefinition>.unmodifiable(
+            productsByPlan[planCode] ?? const <BillingProductDefinition>[],
+          ),
+        );
+      })
+      .toList(growable: false);
+}
+
+bool _isAnnualBillingProduct(BillingProductDefinition product) {
+  switch (product.billingInterval.trim().toLowerCase()) {
+    case 'yearly':
+    case 'annual':
+      return true;
+    default:
+      return false;
+  }
 }
 
 BillingPlanDefinition _fallbackPlan(String planCode) {
@@ -1998,17 +1754,11 @@ _PlanMarketingContent _planMarketingContent(String planCode) {
           ),
           _PlanMarketingSection(
             heading: 'Export',
-            items: <String>[
-              '16-bit / 44.1 kHz stereo',
-              'MP3 export',
-            ],
+            items: <String>['16-bit / 44.1 kHz stereo', 'MP3 export'],
           ),
           _PlanMarketingSection(
             heading: 'AI usage',
-            items: <String>[
-              'Light AI usage',
-              'Standard AI model',
-            ],
+            items: <String>['Light AI usage', 'Standard AI model'],
           ),
         ],
       );
@@ -2019,10 +1769,7 @@ _PlanMarketingContent _planMarketingContent(String planCode) {
         sections: <_PlanMarketingSection>[
           _PlanMarketingSection(
             heading: 'DAW · Storage',
-            items: <String>[
-              '5 GB cloud',
-              'No free-tier track or project cap',
-            ],
+            items: <String>['5 GB cloud', 'No free-tier track or project cap'],
           ),
           _PlanMarketingSection(
             heading: 'Export',
@@ -2033,10 +1780,7 @@ _PlanMarketingContent _planMarketingContent(String planCode) {
           ),
           _PlanMarketingSection(
             heading: 'AI usage',
-            items: <String>[
-              'Expanded AI usage',
-              'Standard AI model',
-            ],
+            items: <String>['Expanded AI usage', 'Standard AI model'],
           ),
         ],
       );
@@ -2061,10 +1805,7 @@ _PlanMarketingContent _planMarketingContent(String planCode) {
           ),
           _PlanMarketingSection(
             heading: 'Other',
-            items: <String>[
-              'High-quality export formats',
-              'Priority support',
-            ],
+            items: <String>['High-quality export formats', 'Priority support'],
           ),
         ],
       );
@@ -2117,10 +1858,7 @@ _PlanMarketingContent _planMarketingContent(String planCode) {
           ),
           _PlanMarketingSection(
             heading: 'Support',
-            items: <String>[
-              'Dedicated account manager',
-              'DPA · SOC 2 roadmap',
-            ],
+            items: <String>['Dedicated account manager', 'DPA · SOC 2 roadmap'],
           ),
         ],
       );
@@ -2267,7 +2005,9 @@ String? _formatSeatOptions(Object? raw) {
 }
 
 String? _formatPlanAiUsageFeature(
-    String planCode, Map<String, dynamic> limits) {
+  String planCode,
+  Map<String, dynamic> limits,
+) {
   final tier = (limits['ai_model_tier'] ?? '').toString().trim().toLowerCase();
   switch (planCode.trim().toLowerCase()) {
     case 'free':
@@ -2458,8 +2198,8 @@ class _PlanListRow extends StatelessWidget {
     final actions = productActions.isNotEmpty
         ? productActions
         : fallbackAction == null
-            ? const <_PlanProductAction>[]
-            : <_PlanProductAction>[fallbackAction!];
+        ? const <_PlanProductAction>[]
+        : <_PlanProductAction>[fallbackAction!];
 
     return Container(
       width: double.infinity,
@@ -2548,17 +2288,11 @@ class _PlanListRow extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          _PlanFeaturePreview(
-            items: featureItems,
-            accent: accent,
-          ),
+          _PlanFeaturePreview(items: featureItems, accent: accent),
           const Spacer(),
           if (actions.isNotEmpty) ...[
             const SizedBox(height: 12),
-            _PlanInlineActions(
-              actions: actions,
-              isBusy: isBusy,
-            ),
+            _PlanInlineActions(actions: actions, isBusy: isBusy),
           ],
         ],
       ),
@@ -2567,10 +2301,7 @@ class _PlanListRow extends StatelessWidget {
 }
 
 class _PlanIconBadge extends StatelessWidget {
-  const _PlanIconBadge({
-    required this.planCode,
-    required this.accent,
-  });
+  const _PlanIconBadge({required this.planCode, required this.accent});
 
   final String planCode;
   final Color accent;
@@ -2616,10 +2347,7 @@ class _CurrentPlanCheck extends StatelessWidget {
 }
 
 class _PlanFeaturePreview extends StatelessWidget {
-  const _PlanFeaturePreview({
-    required this.items,
-    required this.accent,
-  });
+  const _PlanFeaturePreview({required this.items, required this.accent});
 
   final List<String> items;
   final Color accent;
@@ -2631,47 +2359,46 @@ class _PlanFeaturePreview extends StatelessWidget {
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: items.map((item) {
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Container(
-                width: 4,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.82),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 7),
-              Expanded(
-                child: Text(
-                  item,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.68),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w400,
-                    height: 1.25,
+      children: items
+          .map((item) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 4,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.82),
+                      shape: BoxShape.circle,
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Text(
+                      item,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.68),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w400,
+                        height: 1.25,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
-        );
-      }).toList(growable: false),
+            );
+          })
+          .toList(growable: false),
     );
   }
 }
 
 class _PlanInlineActions extends StatelessWidget {
-  const _PlanInlineActions({
-    required this.actions,
-    required this.isBusy,
-  });
+  const _PlanInlineActions({required this.actions, required this.isBusy});
 
   final List<_PlanProductAction> actions;
   final bool isBusy;
@@ -2692,8 +2419,9 @@ class _PlanInlineActions extends StatelessWidget {
           style: FilledButton.styleFrom(
             backgroundColor: const Color(0xFFF4F4F4),
             foregroundColor: const Color(0xFF111318),
-            disabledBackgroundColor: Colors.white
-                .withValues(alpha: primary.onPressed == null ? 0.12 : 0.22),
+            disabledBackgroundColor: Colors.white.withValues(
+              alpha: primary.onPressed == null ? 0.12 : 0.22,
+            ),
             disabledForegroundColor: Colors.white.withValues(alpha: 0.44),
             minimumSize: const Size(0, 44),
             padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
@@ -2724,7 +2452,7 @@ _PlanPurchaseContext _purchaseContextForProduct(
 ) {
   final planGroup =
       catalog?.planByCode(product.planCode)?.group.trim().toLowerCase() ??
-          defaultPlanGroupForCode(product.planCode);
+      defaultPlanGroupForCode(product.planCode);
   if (planGroup == 'individual') {
     return _personalPurchaseContext(entitlement);
   }
@@ -2786,19 +2514,19 @@ _AccessDisplay _personalAccessDisplay(
   final planCode = source?.planCode.trim().isNotEmpty == true
       ? source!.planCode
       : entitlement.planGroup.trim().toLowerCase() == 'individual'
-          ? entitlement.planCode
-          : 'free';
+      ? entitlement.planCode
+      : 'free';
   final planLabel = source?.planLabel.trim().isNotEmpty == true
       ? source!.planLabel.trim()
       : entitlement.planGroup.trim().toLowerCase() == 'individual'
-          ? entitlement.effectivePlanLabel
-          : defaultPlanLabelForCode(planCode);
+      ? entitlement.effectivePlanLabel
+      : defaultPlanLabelForCode(planCode);
   final purchaseContext = _personalPurchaseContext(entitlement);
   final actionLabel = _manageActionLabelForContext(context, purchaseContext);
   final entitlementDescribesPersonalPlan =
       entitlement.planGroup.trim().toLowerCase() == 'individual' &&
-          entitlement.planCode.trim().toLowerCase() ==
-              purchaseContext.planCode.trim().toLowerCase();
+      entitlement.planCode.trim().toLowerCase() ==
+          purchaseContext.planCode.trim().toLowerCase();
   final renewalCopy = entitlementDescribesPersonalPlan
       ? _renewalCopy(context, entitlement)
       : null;
@@ -2808,7 +2536,8 @@ _AccessDisplay _personalAccessDisplay(
       planCode: planCode,
       fallback: planLabel,
     ),
-    detail: renewalCopy ??
+    detail:
+        renewalCopy ??
         _t(context, 'Applies to your personal cloud and app upgrades'),
     actionLabel: actionLabel,
     actionIcon: _manageActionIconForContext(purchaseContext),
@@ -2913,8 +2642,9 @@ class _EducationStudentAccessPanel extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF10251E).withValues(alpha: 0.62),
         borderRadius: BorderRadius.circular(14),
-        border:
-            Border.all(color: const Color(0xFF8DF2C2).withValues(alpha: 0.16)),
+        border: Border.all(
+          color: const Color(0xFF8DF2C2).withValues(alpha: 0.16),
+        ),
       ),
       child: Row(
         children: [
@@ -3012,20 +2742,23 @@ class _EducationInviteAcceptPanel extends StatelessWidget {
                   style: const TextStyle(color: Colors.white),
                   decoration: InputDecoration(
                     hintText: _t(context, 'Paste invite link'),
-                    hintStyle:
-                        TextStyle(color: Colors.white.withValues(alpha: 0.36)),
+                    hintStyle: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.36),
+                    ),
                     isDense: true,
                     filled: true,
                     fillColor: Colors.white.withValues(alpha: 0.06),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
                       borderSide: BorderSide(
-                          color: Colors.white.withValues(alpha: 0.08)),
+                        color: Colors.white.withValues(alpha: 0.08),
+                      ),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
                       borderSide: BorderSide(
-                          color: Colors.white.withValues(alpha: 0.08)),
+                        color: Colors.white.withValues(alpha: 0.08),
+                      ),
                     ),
                     focusedBorder: const OutlineInputBorder(
                       borderRadius: BorderRadius.all(Radius.circular(10)),
@@ -3041,13 +2774,17 @@ class _EducationInviteAcceptPanel extends StatelessWidget {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFECF6FF),
                   foregroundColor: const Color(0xFF101820),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 13, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 13,
+                    vertical: 12,
+                  ),
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10)),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
                 child: Text(
-                    isBusy ? _t(context, 'Accepting') : _t(context, 'Accept')),
+                  isBusy ? _t(context, 'Accepting') : _t(context, 'Accept'),
+                ),
               ),
             ],
           ),
@@ -3135,7 +2872,8 @@ class _EducationTeacherDashboardPageState
   }
 
   Future<void> _inviteEducationStudent(
-      OrganizationAccessItem organization) async {
+    OrganizationAccessItem organization,
+  ) async {
     if (_inviteBusy) return;
     final email = _inviteController.text.trim();
     if (email.isEmpty || !email.contains('@')) {
@@ -3162,11 +2900,9 @@ class _EducationTeacherDashboardPageState
       setState(() {
         _snapshot = snapshot;
         _message = result.emailSent
-            ? _tr(
-                context,
-                'Invite email sent to {email}.',
-                {'email': invitedEmail},
-              )
+            ? _tr(context, 'Invite email sent to {email}.', {
+                'email': invitedEmail,
+              })
             : _tr(
                 context,
                 'Invite created for {email}, but the email could not be sent. Copy the invite link from Students.',
@@ -3217,21 +2953,15 @@ class _EducationTeacherDashboardPageState
       setState(() {
         _snapshot = snapshot;
         _message = switch (status) {
-          'active' => _tr(
-              context,
-              'Student seat restored for {student}.',
-              {'student': _educationMembershipLabel(membership)},
-            ),
-          'removed' => _tr(
-              context,
-              'Removed {student}.',
-              {'student': _educationMembershipLabel(membership)},
-            ),
-          'revoked' => _tr(
-              context,
-              'Invite cancelled for {student}.',
-              {'student': _educationMembershipLabel(membership)},
-            ),
+          'active' => _tr(context, 'Student seat restored for {student}.', {
+            'student': _educationMembershipLabel(membership),
+          }),
+          'removed' => _tr(context, 'Removed {student}.', {
+            'student': _educationMembershipLabel(membership),
+          }),
+          'revoked' => _tr(context, 'Invite cancelled for {student}.', {
+            'student': _educationMembershipLabel(membership),
+          }),
           _ => _t(context, 'Student seat updated.'),
         };
       });
@@ -3251,8 +2981,10 @@ class _EducationTeacherDashboardPageState
 
   @override
   Widget build(BuildContext context) {
-    final organization =
-        _currentEducationOrganization(_snapshot, widget.initialOrganization);
+    final organization = _currentEducationOrganization(
+      _snapshot,
+      widget.initialOrganization,
+    );
     final memberships =
         (_snapshot?.memberships ?? const <OrganizationMembershipItem>[])
             .where((item) => item.organizationId == organization.organizationId)
@@ -3442,8 +3174,9 @@ class _EducationTabButton extends StatelessWidget {
         child: Text(
           label,
           style: TextStyle(
-            color:
-                selected ? Colors.white : Colors.white.withValues(alpha: 0.72),
+            color: selected
+                ? Colors.white
+                : Colors.white.withValues(alpha: 0.72),
             fontSize: 11.6,
             fontWeight: FontWeight.w800,
           ),
@@ -3467,26 +3200,21 @@ class _EducationDashboardHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final seatText = organization.seatLimit > 0
-        ? _tr(
-            context,
-            '{used} / {limit} student seats',
-            {
-              'used': organization.seatsUsed,
-              'limit': organization.seatLimit,
-            },
-          )
-        : _tr(
-            context,
-            '{count} student seats used',
-            {'count': organization.seatsUsed},
-          );
+        ? _tr(context, '{used} / {limit} student seats', {
+            'used': organization.seatsUsed,
+            'limit': organization.seatLimit,
+          })
+        : _tr(context, '{count} student seats used', {
+            'count': organization.seatsUsed,
+          });
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
       decoration: BoxDecoration(
         color: const Color(0xFF10202B).withValues(alpha: 0.72),
         borderRadius: BorderRadius.circular(16),
-        border:
-            Border.all(color: const Color(0xFF7FD4FF).withValues(alpha: 0.16)),
+        border: Border.all(
+          color: const Color(0xFF7FD4FF).withValues(alpha: 0.16),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3541,7 +3269,8 @@ class _EducationDashboardHeader extends StatelessWidget {
             runSpacing: 8,
             children: [
               _TinyBadge(
-                  label: _localizedRoleLabel(context, organization.role)),
+                label: _localizedRoleLabel(context, organization.role),
+              ),
               _TinyBadge(label: seatText),
               _TinyBadge(label: _t(context, 'Student seats only')),
             ],
@@ -3606,25 +3335,34 @@ class _EducationDashboardOverviewPane extends StatelessWidget {
       0,
       (sum, usage) => sum + usage.projectCount,
     );
-    final studentsWithProjects =
-        studentUsage.where((usage) => usage.projectCount > 0).length;
+    final studentsWithProjects = studentUsage
+        .where((usage) => usage.projectCount > 0)
+        .length;
     final releasedCount = memberships
-        .where((item) => {'inactive', 'revoked', 'removed'}
-            .contains(item.status.trim().toLowerCase()))
+        .where(
+          (item) => {
+            'inactive',
+            'revoked',
+            'removed',
+          }.contains(item.status.trim().toLowerCase()),
+        )
         .length;
     final recentlyActiveCount = studentUsage
-        .where((usage) =>
-            usage.lastActiveAt != null &&
-            usage.lastActiveAt!.isAfter(
-              DateTime.now().toUtc().subtract(const Duration(days: 7)),
-            ))
+        .where(
+          (usage) =>
+              usage.lastActiveAt != null &&
+              usage.lastActiveAt!.isAfter(
+                DateTime.now().toUtc().subtract(const Duration(days: 7)),
+              ),
+        )
         .length;
     final lastActivity = _latestStudentActivity(studentUsage);
     final seatUtilization = organization.seatLimit > 0
         ? organization.seatsUsed / organization.seatLimit
         : 0.0;
-    final activationRate =
-        memberships.isEmpty ? 0.0 : activeCount / memberships.length;
+    final activationRate = memberships.isEmpty
+        ? 0.0
+        : activeCount / memberships.length;
     final averageProjects = activeCount == 0 ? 0.0 : projectCount / activeCount;
 
     return Column(
@@ -3641,34 +3379,26 @@ class _EducationDashboardOverviewPane extends StatelessWidget {
             _EducationMetricCard(
               label: _t(context, 'Active students'),
               value: '$activeCount',
-              detail: _tr(
-                context,
-                '{count} pending invites',
-                {'count': invitedCount},
-              ),
+              detail: _tr(context, '{count} pending invites', {
+                'count': invitedCount,
+              }),
               icon: Icons.school_rounded,
             ),
             _EducationMetricCard(
               label: _t(context, 'Available student seats'),
               value: '${organization.seatsAvailable}',
-              detail: _tr(
-                context,
-                '{used} of {limit} student seats',
-                {
-                  'used': organization.seatsUsed,
-                  'limit': organization.seatLimit,
-                },
-              ),
+              detail: _tr(context, '{used} of {limit} student seats', {
+                'used': organization.seatsUsed,
+                'limit': organization.seatLimit,
+              }),
               icon: Icons.event_seat_rounded,
             ),
             _EducationMetricCard(
               label: _t(context, 'Class projects'),
               value: '$projectCount',
-              detail: _tr(
-                context,
-                '{count} students have projects',
-                {'count': studentsWithProjects},
-              ),
+              detail: _tr(context, '{count} students have projects', {
+                'count': studentsWithProjects,
+              }),
               icon: Icons.library_music_rounded,
             ),
             _EducationMetricCard(
@@ -3676,14 +3406,11 @@ class _EducationDashboardOverviewPane extends StatelessWidget {
               value: '$recentlyActiveCount',
               detail: lastActivity == null
                   ? _t(context, 'No recent activity')
-                  : _tr(
-                      context,
-                      'Last class activity {date}',
-                      {
-                        'date':
-                            DateFormat('MMM d').format(lastActivity.toLocal()),
-                      },
-                    ),
+                  : _tr(context, 'Last class activity {date}', {
+                      'date': DateFormat(
+                        'MMM d',
+                      ).format(lastActivity.toLocal()),
+                    }),
               icon: Icons.insights_rounded,
             ),
           ],
@@ -3809,10 +3536,7 @@ class _EducationInsightRowData {
 }
 
 class _EducationInsightPanel extends StatelessWidget {
-  const _EducationInsightPanel({
-    required this.title,
-    required this.rows,
-  });
+  const _EducationInsightPanel({required this.title, required this.rows});
 
   final String title;
   final List<_EducationInsightRowData> rows;
@@ -3881,10 +3605,7 @@ class _EducationInsightRow extends StatelessWidget {
 }
 
 class _EducationPanelShell extends StatelessWidget {
-  const _EducationPanelShell({
-    required this.title,
-    required this.child,
-  });
+  const _EducationPanelShell({required this.title, required this.child});
 
   final String title;
   final Widget child;
@@ -3964,13 +3685,15 @@ class _EducationInviteRow extends StatelessWidget {
               fillColor: Colors.white.withValues(alpha: 0.06),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide:
-                    BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+                borderSide: BorderSide(
+                  color: Colors.white.withValues(alpha: 0.08),
+                ),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide:
-                    BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+                borderSide: BorderSide(
+                  color: Colors.white.withValues(alpha: 0.08),
+                ),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
@@ -3987,8 +3710,9 @@ class _EducationInviteRow extends StatelessWidget {
             backgroundColor: const Color(0xFFECF6FF),
             foregroundColor: const Color(0xFF101820),
             padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 12),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
           ),
           child: Text(isBusy ? _t(context, 'Inviting') : _t(context, 'Invite')),
         ),
@@ -4014,7 +3738,8 @@ class _EducationStudentsPane extends StatelessWidget {
     OrganizationAccessItem organization,
     OrganizationMembershipItem membership,
     String status,
-  ) onMembershipStatusChange;
+  )
+  onMembershipStatusChange;
 
   @override
   Widget build(BuildContext context) {
@@ -4028,18 +3753,21 @@ class _EducationStudentsPane extends StatelessWidget {
       );
     }
     return Column(
-      children: visible.map((membership) {
-        final label =
-            membership.email.isNotEmpty ? membership.email : membership.userId;
-        return _EducationStudentRow(
-          organization: organization,
-          membership: membership,
-          usage: _usageForMembership(studentUsage, membership),
-          label: label,
-          actionKey: actionKey,
-          onMembershipStatusChange: onMembershipStatusChange,
-        );
-      }).toList(growable: false),
+      children: visible
+          .map((membership) {
+            final label = membership.email.isNotEmpty
+                ? membership.email
+                : membership.userId;
+            return _EducationStudentRow(
+              organization: organization,
+              membership: membership,
+              usage: _usageForMembership(studentUsage, membership),
+              label: label,
+              actionKey: actionKey,
+              onMembershipStatusChange: onMembershipStatusChange,
+            );
+          })
+          .toList(growable: false),
     );
   }
 }
@@ -4078,7 +3806,8 @@ class _EducationStudentRow extends StatelessWidget {
     OrganizationAccessItem organization,
     OrganizationMembershipItem membership,
     String status,
-  ) onMembershipStatusChange;
+  )
+  onMembershipStatusChange;
 
   @override
   Widget build(BuildContext context) {
@@ -4094,8 +3823,7 @@ class _EducationStudentRow extends StatelessWidget {
       'active' => _t(context, 'Remove'),
       'inactive' ||
       'revoked' ||
-      'removed' =>
-        _t(context, 'Restore student seat'),
+      'removed' => _t(context, 'Restore student seat'),
       _ => '',
     };
     final currentActionKey =
@@ -4162,10 +3890,10 @@ class _EducationStudentRow extends StatelessWidget {
             TextButton(
               onPressed: canAct
                   ? () => onMembershipStatusChange(
-                        organization,
-                        membership,
-                        nextStatus,
-                      )
+                      organization,
+                      membership,
+                      nextStatus,
+                    )
                   : null,
               style: TextButton.styleFrom(
                 foregroundColor: Colors.white.withValues(alpha: 0.82),
@@ -4194,14 +3922,10 @@ String _educationStudentSubtitle(
         : _tr(context, '{count} projects', {'count': usage.projectCount});
     final lastActive = usage.lastActiveAt;
     if (lastActive != null) {
-      return _tr(
-        context,
-        '{projects} • last active {date}',
-        {
-          'projects': projects,
-          'date': DateFormat('MMM d').format(lastActive.toLocal()),
-        },
-      );
+      return _tr(context, '{projects} • last active {date}', {
+        'projects': projects,
+        'date': DateFormat('MMM d').format(lastActive.toLocal()),
+      });
     }
     return projects;
   }
@@ -4217,8 +3941,7 @@ String _educationStudentSubtitle(
       'active' => _t(context, 'Student seat active'),
       'removed' ||
       'revoked' ||
-      'inactive' =>
-        _t(context, 'Student seat released'),
+      'inactive' => _t(context, 'Student seat released'),
       _ => _t(context, 'Student seat'),
     };
   }
@@ -4228,8 +3951,7 @@ String _educationStudentSubtitle(
     'active' => _tr(context, 'Active since {date}', {'date': formatted}),
     'removed' ||
     'revoked' ||
-    'inactive' =>
-      _tr(context, 'Released {date}', {'date': formatted}),
+    'inactive' => _tr(context, 'Released {date}', {'date': formatted}),
     _ => _tr(context, 'Updated {date}', {'date': formatted}),
   };
 }
@@ -4357,19 +4079,11 @@ class _OrganizationAccessRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final seatText = organization.seatLimit > 0
-        ? _tr(
-            context,
-            '{used} / {limit} seats',
-            {
-              'used': organization.seatsUsed,
-              'limit': organization.seatLimit,
-            },
-          )
-        : _tr(
-            context,
-            '{count} seats used',
-            {'count': organization.seatsUsed},
-          );
+        ? _tr(context, '{used} / {limit} seats', {
+            'used': organization.seatsUsed,
+            'limit': organization.seatLimit,
+          })
+        : _tr(context, '{count} seats used', {'count': organization.seatsUsed});
     final roleReadout = _membershipRoleReadout(context, organization.role);
     final canManage = {
       'owner',
@@ -4524,10 +4238,7 @@ class _QuietActionButton extends StatelessWidget {
       icon: Icon(icon, size: 15),
       label: Text(
         label,
-        style: const TextStyle(
-          fontSize: 11.8,
-          fontWeight: FontWeight.w700,
-        ),
+        style: const TextStyle(fontSize: 11.8, fontWeight: FontWeight.w700),
       ),
     );
   }
@@ -4562,10 +4273,7 @@ class _LoadingPlansCard extends StatelessWidget {
 }
 
 class _MetricChip extends StatelessWidget {
-  const _MetricChip({
-    required this.label,
-    required this.value,
-  });
+  const _MetricChip({required this.label, required this.value});
 
   final String label;
   final String value;

@@ -94,18 +94,30 @@ def verify_google_purchase(
 
     base_plan_id = str(line_item.get("basePlanId") or "").strip()
     offer_id = str(line_item.get("offerId") or "").strip()
+    auto_renewing_plan = line_item.get("autoRenewingPlan")
+    auto_renew_enabled = None
+    if isinstance(auto_renewing_plan, dict) and "autoRenewEnabled" in auto_renewing_plan:
+        auto_renew_enabled = bool(auto_renewing_plan.get("autoRenewEnabled"))
 
     maybe_link_purchase_token(
         repo,
         provider="google",
         token=token,
         attributes={
+            # Required for scheduled server-side revalidation. This table is
+            # encrypted at rest and the token is never returned to clients.
+            "purchase_token": token,
             "user_id": user_id,
             "product_id": product_id,
             "subscription_id": subscription_id,
             "package_name": package,
             "base_plan_id": base_plan_id,
             "offer_id": offer_id,
+            "cancel_at_period_end": (
+                auto_renew_enabled is False
+                or str(payload.get("subscriptionState") or "").strip().upper()
+                == "SUBSCRIPTION_STATE_CANCELED"
+            ),
             "linked_purchase_token": linked_purchase_token,
             "reclaimed_from_user_id": reclaimed_from_user_id,
         },
@@ -153,6 +165,11 @@ def verify_google_purchase(
             "package_name": package,
             "base_plan_id": base_plan_id,
             "offer_id": offer_id,
+            "cancel_at_period_end": (
+                auto_renew_enabled is False
+                or str(payload.get("subscriptionState") or "").strip().upper()
+                == "SUBSCRIPTION_STATE_CANCELED"
+            ),
             "reclaimed_from_user_id": reclaimed_from_user_id,
         },
     }

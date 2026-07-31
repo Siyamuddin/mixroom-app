@@ -169,6 +169,13 @@ class FakeBillingRepo:
         item = self.purchase_tokens.get(f"{provider}:{token}")
         return dict(item) if isinstance(item, dict) else None
 
+    def list_purchase_tokens_for_user(self, user_id):
+        return [
+            dict(item)
+            for item in self.purchase_tokens.values()
+            if str(item.get("user_id") or "") == user_id
+        ]
+
     def put_entitlement(self, snapshot):
         self.entitlements[str(snapshot["user_id"])] = dict(snapshot)
 

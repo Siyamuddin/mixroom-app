@@ -2137,6 +2137,10 @@ class _SubscriptionEntitlementCardState
   Future<void> _handleCompletedIapPurchase(IapService iapService) async {
     final entitlementService = context.read<EntitlementService>();
     final product = _pendingIapProduct;
+    final purchaseMayBeDeferred = iapService.lastCompletedPurchaseMayBeDeferred;
+    // This signal is only for the immediate post-purchase confirmation. Clear
+    // it before awaiting refresh work so reopening Account cannot show it again.
+    iapService.consumeCompletedPurchaseNotice();
     await entitlementService.refresh(force: true);
     await entitlementService.refreshAccountSurface(force: true);
     if (!mounted) return;
@@ -2148,7 +2152,7 @@ class _SubscriptionEntitlementCardState
     final shouldManage = await _showPurchaseCompleteDialog(
       planLabel: planLabel,
       provider: _platformProvider(_regionCode(context)),
-      deferred: iapService.lastCompletedPurchaseMayBeDeferred,
+      deferred: purchaseMayBeDeferred,
     );
     _pendingIapProduct = null;
     if (shouldManage == true && mounted) {
