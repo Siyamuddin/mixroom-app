@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'ai_v3_contract.dart';
+import 'ai_v3_user_facing_text.dart';
 
 const String aiV3MidiTimingInstructions =
     'MIDI note starts are clip-relative and zero-based. Within each bar, '
@@ -12,7 +13,9 @@ const String aiV3MidiTimingInstructions =
 
 const String aiV3PlannerInstructions = '''
 You are Mixroom's sole semantic and musical planner.
-Use the original request exactly as written and the authoritative structured context.
+$aiV3CustomerLanguageInstructions
+Interpret the complete original request faithfully using the authoritative
+structured context.
 Return one submit_plan_v3 call. Use only stable IDs present in context.
 Respect explicit do-not-change constraints by selecting only commands whose
 typed targets and operation-specific effects satisfy them. Each command changes
