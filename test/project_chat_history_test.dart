@@ -124,6 +124,40 @@ void main() {
     expect(restored.messages.single.text, 'hello');
   });
 
+  test('restores clarification bullets as text without interactive metadata',
+      () {
+    const clarificationText =
+        'Which vocal take should I keep?\n\n'
+        '• Keep Track 2\n'
+        '• Keep Track 4';
+    final history = ProjectChatHistory.fromChatMessages([
+      buildMessage(
+        id: 'clarification',
+        authorId: 'assistant',
+        text: clarificationText,
+        metadata: const <String, dynamic>{
+          'source': 'ai_v3_clarification',
+          'clarification_id': 'session-only',
+          'question': 'Which vocal take should I keep?',
+          'question_options': <String>['Keep Track 2', 'Keep Track 4'],
+        },
+      ),
+    ]);
+
+    final restored = ProjectChatHistory.fromJson(history.toJsonValue());
+    final message = restored.toChatMessages().single;
+
+    expect(message.text, clarificationText);
+    expect(message.metadata, isNull);
+    expect(
+      restored.toConversation().single,
+      <String, String>{
+        'role': 'assistant',
+        'content': clarificationText,
+      },
+    );
+  });
+
   test('legacy chat history without state session id still restores', () {
     final history = ProjectChatHistory.fromJson([
       {

@@ -11,6 +11,7 @@ import 'package:mixroom/ai/v3/ai_v3_domain_registry.dart';
 import 'package:mixroom/ai/v3/ai_v3_planner_request.dart';
 import 'package:mixroom/ai/v3/ai_v3_planning_snapshot.dart';
 import 'package:mixroom/ai/v3/ai_v3_retrieval.dart';
+import 'package:mixroom/ai/v3/ai_v3_user_facing_text.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/models/project_state.dart';
 
@@ -1063,6 +1064,31 @@ void main() {
     expect(occurrences(aiV3PlannerInstructions), 1);
     expect(occurrences(aiV3AdaptiveFirstTurnInstructions), 1);
     expect(occurrences(aiV3AdaptiveContinuationInstructions), 1);
+    for (final instructions in <String>[
+      aiV3PlannerInstructions,
+      aiV3AdaptiveFirstTurnInstructions,
+      aiV3AdaptiveContinuationInstructions,
+    ]) {
+      expect(instructions, contains(aiV3CustomerLanguageInstructions));
+      expect(instructions, contains('general music creator'));
+      expect(instructions, contains('clear, easy-to-understand'));
+      expect(instructions, contains('deeper technical detail'));
+      expect(instructions, contains('request or conversation clearly shows'));
+      expect(instructions, contains('user-visible terms'));
+      expect(
+        instructions,
+        contains('non-user-visible application context'),
+      );
+      expect(instructions, contains('never reveal or transform them'));
+      expect(instructions, contains('one or two brief, past-tense sentences'));
+      expect(
+        instructions,
+        contains('Never copy the request into a successful plan summary'),
+      );
+      expect(instructions, contains('completed musical result'));
+      expect(instructions, contains('under 500 characters'));
+      expect(instructions, contains('Always finish naturally'));
+    }
 
     final oneShot = buildAiV3PlannerRequestBody(
       contextData: const <String, dynamic>{},

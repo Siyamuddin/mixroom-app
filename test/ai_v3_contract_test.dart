@@ -2241,6 +2241,48 @@ void main() {
       expect(AiV3Plan.fromJson(openClarify).questionOptions, isEmpty);
     });
 
+    test('clarification schema reserves app-owned response controls', () {
+      final encoded = jsonEncode(aiV3SubmitPlanTool());
+      expect(encoded, contains('distinct, concise, meaningful answers'));
+      expect(encoded, contains('Never include Cancel, Something else, Other'));
+      expect(encoded, contains('do not repeat, number, or bullet'));
+      final schema =
+          aiV3SubmitPlanTool()['parameters'] as Map<String, dynamic>;
+      final properties = schema['properties'] as Map<String, dynamic>;
+      final userMessage =
+          properties['user_message'] as Map<String, dynamic>;
+      expect(userMessage, isNot(contains('maxLength')));
+      expect(encoded, contains('clear, easy-to-understand language'));
+      expect(
+        encoded,
+        contains('request or conversation clearly shows it is appropriate'),
+      );
+      expect(
+        encoded,
+        contains('one- or two-sentence, brief past-tense completion summary'),
+      );
+      expect(encoded, contains('never copy the request into the summary'));
+      expect(encoded, contains('completed musical result'));
+      expect(encoded, contains('under 500 characters'));
+      expect(encoded, contains('always finish naturally'));
+    });
+
+    test('accepts long user messages and clarification options', () {
+      final longMessage = _plan(const <Map<String, dynamic>>[])
+        ..['user_message'] =
+            List<String>.filled(2000, 'a').join();
+      expect(AiV3Plan.fromJson(longMessage).userMessage, hasLength(2000));
+
+      final longOption = _plan(const <Map<String, dynamic>>[])
+        ..['outcome'] = 'clarify'
+        ..['user_message'] = 'Which option?'
+        ..['question_options'] = <String>[
+          List<String>.filled(1000, 'a').join(),
+        ];
+      expect(AiV3Plan.fromJson(longOption).questionOptions.single,
+          hasLength(1000));
+    });
+
     test('round-trips complete plans and rejects undeclared fields', () {
       final plan = AiV3Plan.fromJson(
         _plan(<Map<String, dynamic>>[
