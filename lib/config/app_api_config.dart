@@ -31,7 +31,7 @@ class AppApiConfig {
 
   static const bool cloudProjectsEnabled = bool.fromEnvironment(
     'CLOUD_PROJECTS_ENABLED',
-    defaultValue: false,
+    defaultValue: true,
   );
   static const bool hasCloudProjectsOverride =
       bool.hasEnvironment('CLOUD_PROJECTS_ENABLED');
