@@ -29602,6 +29602,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _addInstrumentClipFromPicker() async {
+    if (_rowCount >= _effectiveMaxRows) {
+      _showRowLimitReachedNotice();
+      return;
+    }
     var selected = await _showInstrumentPickerDialog();
     if (selected == null) return;
     if (_isPitchLabToolSpec(selected)) {
@@ -29626,6 +29630,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     int row, {
     required bool above,
   }) async {
+    if (_rowCount >= _effectiveMaxRows) {
+      _showRowLimitReachedNotice();
+      return;
+    }
     var selected = await _showInstrumentPickerDialog();
     if (selected == null) return;
     if (_isPitchLabToolSpec(selected)) {
@@ -72111,7 +72119,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     TimelineRow instrumentRow, {
     int? preferredRowId,
   }) async {
-    if (_rowCount >= _effectiveMaxRows) return false;
+    if (_rowCount >= _effectiveMaxRows) {
+      _showRowLimitReachedNotice();
+      return false;
+    }
     final rowId = await JuceAudioEngine.addRow(
       instrumentRow.name,
       iconId: instrumentRow.iconId,
@@ -72135,7 +72146,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required bool above,
     int? preferredRowId,
   }) async {
-    if (_rowCount >= _effectiveMaxRows) return false;
+    if (_rowCount >= _effectiveMaxRows) {
+      _showRowLimitReachedNotice();
+      return false;
+    }
     if (row < 0 || row >= _rowCount) return false;
     final refRowId = _rowIdAt(row);
     final rowId = above
