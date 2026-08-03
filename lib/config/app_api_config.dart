@@ -17,14 +17,14 @@ class AppApiConfig {
 
   static const bool enforceSubscriptions = bool.fromEnvironment(
     'SUBSCRIPTION_ENFORCE',
-    defaultValue: false,
+    defaultValue: true,
   );
   static const bool hasEnforceSubscriptionsOverride =
       bool.hasEnvironment('SUBSCRIPTION_ENFORCE');
 
   static const bool accountPlanBillingEnabled = bool.fromEnvironment(
     'ACCOUNT_PLAN_BILLING_ENABLED',
-    defaultValue: false,
+    defaultValue: true,
   );
   static const bool hasAccountPlanBillingOverride =
       bool.hasEnvironment('ACCOUNT_PLAN_BILLING_ENABLED');
