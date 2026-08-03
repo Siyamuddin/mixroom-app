@@ -100,22 +100,20 @@ class AccountScreen extends StatelessWidget {
       bottomNavigationBar: user == null
           ? null
           : showTopBar
-              ? _AccountActions(
-                  isBusy: auth.isBusy,
-                  onSignOut: () async {
-                    final authService = context.read<AuthService>();
-                    final navigator = Navigator.of(context);
-                    final shouldDismissRoute = showTopBar && navigator.canPop();
-                    if (shouldDismissRoute) {
-                      navigator.pop();
-                      await Future<void>.delayed(
-                        const Duration(milliseconds: 180),
-                      );
-                    }
-                    await authService.signOut();
-                  },
-                )
-              : null,
+          ? _AccountActions(
+              isBusy: auth.isBusy,
+              onSignOut: () async {
+                final authService = context.read<AuthService>();
+                final navigator = Navigator.of(context);
+                final shouldDismissRoute = showTopBar && navigator.canPop();
+                if (shouldDismissRoute) {
+                  navigator.pop();
+                  await Future<void>.delayed(const Duration(milliseconds: 180));
+                }
+                await authService.signOut();
+              },
+            )
+          : null,
     );
   }
 }
@@ -384,9 +382,7 @@ class _AccountBodyState extends State<_AccountBody> {
       return;
     }
 
-    final updated = widget.user.copyWith(
-      displayName: safeName,
-    );
+    final updated = widget.user.copyWith(displayName: safeName);
     final authService = context.read<AuthService>();
     final appUserService = context.read<AppUserService>();
 
@@ -406,16 +402,10 @@ class _AccountBodyState extends State<_AccountBody> {
       }
       if (!mounted) return;
       setState(() => _isEditing = false);
-      showAppSnackBar(
-        context,
-        L10n.translate(context, 'Account updated.'),
-      );
+      showAppSnackBar(context, L10n.translate(context, 'Account updated.'));
     } catch (e) {
       if (!mounted) return;
-      showAppSnackBar(
-        context,
-        e.toString().replaceFirst('Bad state: ', ''),
-      );
+      showAppSnackBar(context, e.toString().replaceFirst('Bad state: ', ''));
     } finally {
       if (mounted) {
         setState(() => _isSaving = false);
@@ -436,8 +426,10 @@ class _AccountBodyState extends State<_AccountBody> {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
               child: ConstrainedBox(
-                constraints:
-                    const BoxConstraints(maxWidth: 440, maxHeight: 760),
+                constraints: const BoxConstraints(
+                  maxWidth: 440,
+                  maxHeight: 760,
+                ),
                 child: Material(
                   color: Colors.transparent,
                   child: MixroomShellSurface(
@@ -493,27 +485,31 @@ class _AccountBodyState extends State<_AccountBody> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
     final appUserService = context.watch<AppUserService>();
-    final joinedAt =
-        _formatReadableDate(context, widget.user.createdAt.toLocal());
+    final joinedAt = _formatReadableDate(
+      context,
+      widget.user.createdAt.toLocal(),
+    );
     final birthdayValue = _formatStoredBirthdateForDisplay(
       context,
       widget.appUser?.birthdate,
     );
     final usernameValue = (widget.appUser?.username ?? '').trim();
     final bioValue = (widget.appUser?.bio ?? '').trim();
-    final musicProfileLabelText =
-        musicProfileLabel(widget.appUser?.musicProfile);
+    final musicProfileLabelText = musicProfileLabel(
+      widget.appUser?.musicProfile,
+    );
     final musicProfileValue = musicProfileLabelText.isEmpty
         ? ''
         : L10n.translate(context, musicProfileLabelText);
     final needsEmailVerification =
         widget.user.provider == AuthProviderType.email &&
-            !widget.user.emailVerified;
+        !widget.user.emailVerified;
 
     return ListView(
       controller: _scrollController,
-      physics:
-          const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+      physics: const BouncingScrollPhysics(
+        parent: AlwaysScrollableScrollPhysics(),
+      ),
       padding: EdgeInsets.fromLTRB(
         16,
         widget.embeddedMode ? 10 : 14,
@@ -547,13 +543,14 @@ class _AccountBodyState extends State<_AccountBody> {
             onResend: () async {
               try {
                 await context.read<AuthService>().resendEmailVerification(
-                      localeCode: Localizations.localeOf(context).languageCode,
-                    );
+                  localeCode: Localizations.localeOf(context).languageCode,
+                );
                 if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(
-                        L10n.translate(context, 'Verification email sent.')),
+                      L10n.translate(context, 'Verification email sent.'),
+                    ),
                   ),
                 );
               } catch (e) {
@@ -573,8 +570,8 @@ class _AccountBodyState extends State<_AccountBody> {
           padding: EdgeInsets.zero,
           color: widget.embeddedMode
               ? (_isEditing
-                  ? const Color.fromRGBO(244, 244, 244, 0.28)
-                  : const Color.fromRGBO(244, 244, 244, 0.16))
+                    ? const Color.fromRGBO(244, 244, 244, 0.28)
+                    : const Color.fromRGBO(244, 244, 244, 0.16))
               : const Color.fromRGBO(244, 244, 244, 0.08),
           child: Column(
             children: [
@@ -663,7 +660,8 @@ class _AccountBodyState extends State<_AccountBody> {
                                           },
                                     style: OutlinedButton.styleFrom(
                                       side: BorderSide(
-                                          color: Colors.white.withOpacity(0.2)),
+                                        color: Colors.white.withOpacity(0.2),
+                                      ),
                                       foregroundColor: Colors.white70,
                                     ),
                                     child: Text(
@@ -674,7 +672,8 @@ class _AccountBodyState extends State<_AccountBody> {
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: ElevatedButton(
-                                    onPressed: (_isSaving ||
+                                    onPressed:
+                                        (_isSaving ||
                                             auth.isBusy ||
                                             appUserService.isLoading)
                                         ? null
@@ -686,11 +685,14 @@ class _AccountBodyState extends State<_AccountBody> {
                                       backgroundColor: const Color(0xFF3E82FF),
                                       foregroundColor: Colors.white,
                                     ),
-                                    child: Text(L10n.translate(
+                                    child: Text(
+                                      L10n.translate(
                                         context,
                                         _isSaving
                                             ? 'Saving...'
-                                            : 'Save Changes')),
+                                            : 'Save Changes',
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ],
@@ -723,23 +725,16 @@ class _AccountBodyState extends State<_AccountBody> {
         _AccountSettingsEntryCard(
           onOpen: () {
             Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => const _AccountSettingsScreen(),
-              ),
+              MaterialPageRoute(builder: (_) => const _AccountSettingsScreen()),
             );
           },
         ),
         const SizedBox(height: 12),
         _SignInMethodsCard(user: widget.user),
         const SizedBox(height: 12),
-        _SecurityAccessCard(
-          user: widget.user,
-          auth: auth,
-        ),
+        _SecurityAccessCard(user: widget.user, auth: auth),
         const SizedBox(height: 12),
-        _FeedbackEntryCard(
-          onOpen: _openFeedbackComposer,
-        ),
+        _FeedbackEntryCard(onOpen: _openFeedbackComposer),
         const SizedBox(height: 12),
         _LegalPrivacyEntryCard(
           onOpen: () {
@@ -826,10 +821,7 @@ class _DebugOnboardingCard extends StatelessWidget {
               ),
               child: const Text(
                 'Open Welcome Onboarding',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                ),
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
               ),
             ),
           ),
@@ -914,10 +906,7 @@ class _EmbeddedAccountChrome extends StatelessWidget {
 }
 
 class _EmbeddedLogoutButton extends StatelessWidget {
-  const _EmbeddedLogoutButton({
-    required this.isBusy,
-    required this.onSignOut,
-  });
+  const _EmbeddedLogoutButton({required this.isBusy, required this.onSignOut});
 
   final bool isBusy;
   final Future<void> Function()? onSignOut;
@@ -1004,8 +993,11 @@ class _EmailVerificationBanner extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.verified_user_outlined,
-              color: Color(0xFFE8C86D), size: 18),
+          const Icon(
+            Icons.verified_user_outlined,
+            color: Color(0xFFE8C86D),
+            size: 18,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -1021,8 +1013,10 @@ class _EmailVerificationBanner extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  L10n.translate(context,
-                      'Please verify your email for better account security.'),
+                  L10n.translate(
+                    context,
+                    'Please verify your email for better account security.',
+                  ),
                   style: const TextStyle(
                     color: Colors.white70,
                     fontSize: 12,
@@ -1077,9 +1071,7 @@ class _EmailVerificationBanner extends StatelessWidget {
 }
 
 class _SignInMethodsCard extends StatelessWidget {
-  const _SignInMethodsCard({
-    required this.user,
-  });
+  const _SignInMethodsCard({required this.user});
 
   final AuthUserProfile user;
 
@@ -1249,8 +1241,9 @@ class _ProfileHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final displayName =
-        overrideName.trim().isEmpty ? user.displayName : overrideName;
+    final displayName = overrideName.trim().isEmpty
+        ? user.displayName
+        : overrideName;
     final safeUsername = username.trim().toLowerCase();
 
     return Container(
@@ -1407,8 +1400,10 @@ class _EditableNameRow extends StatelessWidget {
                 hintStyle: TextStyle(color: Colors.white.withOpacity(0.45)),
                 filled: true,
                 fillColor: Colors.white.withOpacity(0.06),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 10,
+                ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                   borderSide: BorderSide(color: Colors.white.withOpacity(0.12)),
@@ -1465,9 +1460,7 @@ class _EditableUsernameRow extends StatelessWidget {
                   onTapOutside: (_) => FocusScope.of(context).unfocus(),
                   textCapitalization: TextCapitalization.none,
                   inputFormatters: <TextInputFormatter>[
-                    FilteringTextInputFormatter.allow(
-                      RegExp(r'[A-Za-z0-9_-]'),
-                    ),
+                    FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9_-]')),
                     LengthLimitingTextInputFormatter(30),
                   ],
                   style: const TextStyle(color: Colors.white, fontSize: 13),
@@ -1483,18 +1476,22 @@ class _EditableUsernameRow extends StatelessWidget {
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide:
-                          BorderSide(color: Colors.white.withOpacity(0.12)),
+                      borderSide: BorderSide(
+                        color: Colors.white.withOpacity(0.12),
+                      ),
                     ),
                     disabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide:
-                          BorderSide(color: Colors.white.withOpacity(0.08)),
+                      borderSide: BorderSide(
+                        color: Colors.white.withOpacity(0.08),
+                      ),
                     ),
                     focusedBorder: const OutlineInputBorder(
                       borderRadius: BorderRadius.all(Radius.circular(10)),
-                      borderSide:
-                          BorderSide(color: Color(0xFF5F96FF), width: 1.1),
+                      borderSide: BorderSide(
+                        color: Color(0xFF5F96FF),
+                        width: 1.1,
+                      ),
                     ),
                   ),
                 ),
@@ -1574,8 +1571,10 @@ class _EditableBioRow extends StatelessWidget {
                 hintStyle: TextStyle(color: Colors.white.withOpacity(0.45)),
                 filled: true,
                 fillColor: Colors.white.withOpacity(enabled ? 0.06 : 0.03),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 10,
+                ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                   borderSide: BorderSide(color: Colors.white.withOpacity(0.12)),
@@ -1650,18 +1649,22 @@ class _EditableBirthdayRow extends StatelessWidget {
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide:
-                          BorderSide(color: Colors.white.withOpacity(0.12)),
+                      borderSide: BorderSide(
+                        color: Colors.white.withOpacity(0.12),
+                      ),
                     ),
                     disabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide:
-                          BorderSide(color: Colors.white.withOpacity(0.08)),
+                      borderSide: BorderSide(
+                        color: Colors.white.withOpacity(0.08),
+                      ),
                     ),
                     focusedBorder: const OutlineInputBorder(
                       borderRadius: BorderRadius.all(Radius.circular(10)),
-                      borderSide:
-                          BorderSide(color: Color(0xFF5F96FF), width: 1.1),
+                      borderSide: BorderSide(
+                        color: Color(0xFF5F96FF),
+                        width: 1.1,
+                      ),
                     ),
                     suffixIcon: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -1828,8 +1831,8 @@ class _MusicProfileDropdown extends StatelessWidget {
     final selectedLabel = normalizedValue.isEmpty
         ? 'Not set'
         : musicProfileLabel(normalizedValue).isEmpty
-            ? 'Not set'
-            : musicProfileLabel(normalizedValue);
+        ? 'Not set'
+        : musicProfileLabel(normalizedValue);
     final selectedMenuValue = normalizedValue.isEmpty
         ? _kMusicProfileUnsetMenuValue
         : normalizedValue;
@@ -1848,59 +1851,61 @@ class _MusicProfileDropdown extends StatelessWidget {
           builder: (menuContext) {
             return Column(
               mainAxisSize: MainAxisSize.min,
-              children: menuOptions.map((option) {
-                final isSelected = option.value == selectedMenuValue;
-                return GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => Navigator.pop(menuContext, option.value),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 9,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? Colors.white.withValues(alpha: 0.15)
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(13),
-                      border: isSelected
-                          ? Border.all(
-                              color: Colors.white.withValues(alpha: 0.16),
-                            )
-                          : null,
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            L10n.translate(context, option.label),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontFamily: 'Pretendard',
-                              color: isSelected
-                                  ? Colors.white
-                                  : Colors.white.withValues(alpha: 0.76),
-                              fontSize: 13,
-                              fontWeight: isSelected
-                                  ? FontWeight.w700
-                                  : FontWeight.w600,
-                            ),
-                          ),
+              children: menuOptions
+                  .map((option) {
+                    final isSelected = option.value == selectedMenuValue;
+                    return GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => Navigator.pop(menuContext, option.value),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 9,
                         ),
-                        if (isSelected) ...[
-                          const SizedBox(width: 8),
-                          const Icon(
-                            Icons.check_rounded,
-                            color: Color(0xFF8FB5FF),
-                            size: 17,
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                );
-              }).toList(growable: false),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? Colors.white.withValues(alpha: 0.15)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(13),
+                          border: isSelected
+                              ? Border.all(
+                                  color: Colors.white.withValues(alpha: 0.16),
+                                )
+                              : null,
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                L10n.translate(context, option.label),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: isSelected
+                                      ? Colors.white
+                                      : Colors.white.withValues(alpha: 0.76),
+                                  fontSize: 13,
+                                  fontWeight: isSelected
+                                      ? FontWeight.w700
+                                      : FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            if (isSelected) ...[
+                              const SizedBox(width: 8),
+                              const Icon(
+                                Icons.check_rounded,
+                                color: Color(0xFF8FB5FF),
+                                size: 17,
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    );
+                  })
+                  .toList(growable: false),
             );
           },
         ),
@@ -1997,7 +2002,7 @@ _PlanPurchaseContext _purchaseContextForProduct(
   }
   final planGroup =
       catalog?.planByCode(product.planCode)?.group.trim().toLowerCase() ??
-          defaultPlanGroupForCode(product.planCode);
+      defaultPlanGroupForCode(product.planCode);
   if (planGroup == 'individual') {
     return _personalPurchaseContext(entitlement);
   }
@@ -2180,8 +2185,8 @@ class _SubscriptionEntitlementCardState
       return plan?.label.trim().isNotEmpty == true
           ? plan!.label.trim()
           : productLabel.isNotEmpty
-              ? productLabel
-              : defaultPlanLabelForCode(productPlanCode);
+          ? productLabel
+          : defaultPlanLabelForCode(productPlanCode);
     }
     final entitlementLabel = entitlement?.effectivePlanLabel.trim() ?? '';
     if (entitlementLabel.isNotEmpty) {
@@ -2329,10 +2334,7 @@ class _SubscriptionEntitlementCardState
     }
   }
 
-  Future<void> _refreshData({
-    bool force = false,
-    bool silent = false,
-  }) async {
+  Future<void> _refreshData({bool force = false, bool silent = false}) async {
     final entitlementService = context.read<EntitlementService>();
     await entitlementService.refreshFeatureFlags(force: force);
     await entitlementService.refresh(
@@ -2400,27 +2402,16 @@ class _SubscriptionEntitlementCardState
       if (!mounted) return;
       if ((successMessage ?? '').trim().isNotEmpty) {
         final translatedSuccess = L10n.translate(context, successMessage!);
-        showAppSnackBar(
-          context,
-          translatedSuccess,
-          tone: AppPopupTone.success,
-        );
+        showAppSnackBar(context, translatedSuccess, tone: AppPopupTone.success);
         setState(() {
           _inlineMessage = translatedSuccess;
         });
       }
     } catch (error) {
       final message = _friendlyAccountActionError(error);
-      final translatedMessage = L10n.translate(
-        context,
-        message,
-      );
+      final translatedMessage = L10n.translate(context, message);
       if (!mounted) return;
-      showAppSnackBar(
-        context,
-        translatedMessage,
-        tone: AppPopupTone.error,
-      );
+      showAppSnackBar(context, translatedMessage, tone: AppPopupTone.error);
       setState(() {
         _inlineMessage = translatedMessage;
       });
@@ -2484,7 +2475,8 @@ class _SubscriptionEntitlementCardState
 
   String _regionCode(BuildContext context) {
     final locale = Localizations.maybeLocaleOf(context);
-    final countryCode = locale?.countryCode ??
+    final countryCode =
+        locale?.countryCode ??
         WidgetsBinding.instance.platformDispatcher.locale.countryCode;
     final normalized = (countryCode ?? '').trim().toUpperCase();
     return normalized.isEmpty ? 'US' : normalized;
@@ -2531,6 +2523,14 @@ class _SubscriptionEntitlementCardState
     final entitlementService = context.read<EntitlementService>();
     final entitlement = entitlementService.entitlement;
     final sourceProvider = providerOverride ?? entitlement?.sourceProvider;
+    final managementChannel =
+        (managementChannelOverride ?? entitlement?.managementChannel ?? '')
+            .trim()
+            .toLowerCase();
+    if (managementChannel == 'web_plans') {
+      await _launchUrlString('https://www.mixroom.ai/#pricing');
+      return;
+    }
     if (sourceProvider == BillingProvider.apple) {
       await _launchUrlString('https://apps.apple.com/account/subscriptions');
       return;
@@ -2542,10 +2542,6 @@ class _SubscriptionEntitlementCardState
       );
       return;
     }
-    final managementChannel =
-        (managementChannelOverride ?? entitlement?.managementChannel ?? '')
-            .trim()
-            .toLowerCase();
     final support = entitlementService.effectiveBillingSupport;
     String? portalUrl;
     if (managementChannel == 'web' ||
@@ -2563,10 +2559,10 @@ class _SubscriptionEntitlementCardState
     final target = (portalUrl ?? '').trim().isNotEmpty
         ? portalUrl!
         : support.manageSubscriptionUrl.trim().isNotEmpty
-            ? support.manageSubscriptionUrl
-            : support.defaultCheckoutUrl.trim().isNotEmpty
-                ? support.defaultCheckoutUrl
-                : 'https://mixroom.ai/account';
+        ? support.manageSubscriptionUrl
+        : support.defaultCheckoutUrl.trim().isNotEmpty
+        ? support.defaultCheckoutUrl
+        : 'https://mixroom.ai/account';
     await _launchUrlString(target);
   }
 
@@ -2595,10 +2591,7 @@ class _SubscriptionEntitlementCardState
       return;
     }
     if (support.supportEmail.trim().isNotEmpty) {
-      final uri = Uri(
-        scheme: 'mailto',
-        path: support.supportEmail,
-      );
+      final uri = Uri(scheme: 'mailto', path: support.supportEmail);
       final launched = await launchUrl(uri, mode: LaunchMode.platformDefault);
       if (!launched) {
         throw StateError('Could not open your email app.');
@@ -2661,7 +2654,11 @@ class _SubscriptionEntitlementCardState
     }
 
     if (_requiresManagedPlanChange(
-        purchaseContext, catalog, product, provider)) {
+      purchaseContext,
+      catalog,
+      product,
+      provider,
+    )) {
       await _handleManageSubscription(
         providerOverride: purchaseContext.sourceProvider,
         managementChannelOverride: purchaseContext.managementChannel,
@@ -2682,17 +2679,21 @@ class _SubscriptionEntitlementCardState
         });
       }
       await iapService.initialize();
-      final storeProduct =
-          iapService.findProductById(providerProduct.providerProductId);
+      final storeProduct = iapService.findProductById(
+        providerProduct.providerProductId,
+      );
       if (storeProduct != null) {
-        final isMobileStorePlanChange =
-            _isMobileStorePlanChange(purchaseContext, product, provider);
+        final isMobileStorePlanChange = _isMobileStorePlanChange(
+          purchaseContext,
+          product,
+          provider,
+        );
         _pendingIapProduct = product;
         await iapService.buyProduct(
           storeProduct,
           requiresAndroidSubscriptionChange:
               defaultTargetPlatform == TargetPlatform.android &&
-                  isMobileStorePlanChange,
+              isMobileStorePlanChange,
           storePlanChangeMayBeDeferred: isMobileStorePlanChange,
         );
         if (mounted) {
@@ -2718,8 +2719,8 @@ class _SubscriptionEntitlementCardState
     );
     final checkoutUrl =
         (checkout['checkout_url'] ?? '').toString().trim().isNotEmpty
-            ? (checkout['checkout_url'] ?? '').toString().trim()
-            : entitlementService.effectiveBillingSupport.defaultCheckoutUrl;
+        ? (checkout['checkout_url'] ?? '').toString().trim()
+        : entitlementService.effectiveBillingSupport.defaultCheckoutUrl;
     await _launchUrlString(checkoutUrl);
   }
 
@@ -2793,9 +2794,11 @@ class _SubscriptionEntitlementCardState
     if (_isCurrentBillingProduct(purchaseContext, product)) {
       return false;
     }
-    final currentRank = catalog?.planByCode(purchaseContext.planCode)?.rank ??
+    final currentRank =
+        catalog?.planByCode(purchaseContext.planCode)?.rank ??
         _fallbackPlanRank(purchaseContext.planCode);
-    final nextRank = catalog?.planByCode(product.planCode)?.rank ??
+    final nextRank =
+        catalog?.planByCode(product.planCode)?.rank ??
         _fallbackPlanRank(product.planCode);
     return nextRank > currentRank;
   }
@@ -2821,7 +2824,8 @@ class _SubscriptionEntitlementCardState
   Widget build(BuildContext context) {
     final entitlementService = context.watch<EntitlementService>();
     if (!entitlementService.isAccountPlanBillingEnabled) {
-      final entitlement = entitlementService.entitlement ??
+      final entitlement =
+          entitlementService.entitlement ??
           EntitlementSnapshot.free(userId: '');
       return _SubscriptionComingSoonCard(
         entitlement: entitlement,
@@ -3016,8 +3020,10 @@ class _LegalPrivacyEntryCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  L10n.translate(context,
-                      'Manage privacy controls, legal documents, and data requests.'),
+                  L10n.translate(
+                    context,
+                    'Manage privacy controls, legal documents, and data requests.',
+                  ),
                   style: const TextStyle(
                     color: Colors.white70,
                     fontSize: 12,
@@ -3272,8 +3278,9 @@ class _AccountSettingsScreenState extends State<_AccountSettingsScreen> {
                         const SizedBox(width: 10),
                         Switch.adaptive(
                           value: _versionHistoryEnabled,
-                          onChanged:
-                              _loading ? null : _setVersionHistoryEnabled,
+                          onChanged: _loading
+                              ? null
+                              : _setVersionHistoryEnabled,
                           activeThumbColor: const Color(0xFF9FC2FF),
                         ),
                       ],
@@ -3290,9 +3297,7 @@ class _AccountSettingsScreenState extends State<_AccountSettingsScreen> {
 }
 
 class _FeedbackEntryCard extends StatelessWidget {
-  const _FeedbackEntryCard({
-    required this.onOpen,
-  });
+  const _FeedbackEntryCard({required this.onOpen});
 
   final Future<void> Function() onOpen;
 
@@ -3375,10 +3380,7 @@ String _localizedSocialSignInDescription({
 }
 
 class _SecurityAccessCard extends StatelessWidget {
-  const _SecurityAccessCard({
-    required this.user,
-    required this.auth,
-  });
+  const _SecurityAccessCard({required this.user, required this.auth});
 
   final AuthUserProfile user;
   final AuthService auth;
@@ -3483,9 +3485,7 @@ class _SecurityAccessCard extends StatelessWidget {
 }
 
 class _ChangePasswordSheet extends StatefulWidget {
-  const _ChangePasswordSheet({
-    required this.auth,
-  });
+  const _ChangePasswordSheet({required this.auth});
 
   final AuthService auth;
 
@@ -3526,8 +3526,10 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
       _showSnack('Please enter your current password.');
       return;
     }
-    final passwordIssue =
-        PasswordPolicy.validateLocalized(context, newPassword);
+    final passwordIssue = PasswordPolicy.validateLocalized(
+      context,
+      newPassword,
+    );
     if (passwordIssue != null) {
       _showSnack(passwordIssue);
       return;
@@ -3550,8 +3552,9 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content:
-              Text(L10n.translate(context, 'Password updated successfully.')),
+          content: Text(
+            L10n.translate(context, 'Password updated successfully.'),
+          ),
         ),
       );
     } catch (e) {
@@ -3561,9 +3564,9 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
   }
 
   void _showSnack(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(L10n.translate(context, message))),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(L10n.translate(context, message))));
   }
 
   @override
@@ -3581,8 +3584,9 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
             child: Container(
               decoration: BoxDecoration(
                 color: const Color(0xFF0F2038),
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(22)),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(22),
+                ),
                 border: Border.all(color: Colors.white.withOpacity(0.10)),
               ),
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
@@ -3637,9 +3641,8 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
                     hint: 'At least 8 characters',
                     controller: _newPasswordController,
                     obscureText: _hideNewPassword,
-                    onToggleVisibility: () => setState(
-                      () => _hideNewPassword = !_hideNewPassword,
-                    ),
+                    onToggleVisibility: () =>
+                        setState(() => _hideNewPassword = !_hideNewPassword),
                   ),
                   const SizedBox(height: 10),
                   _PasswordField(
@@ -3745,10 +3748,7 @@ class _PasswordField extends StatelessWidget {
 }
 
 class _AccountActions extends StatelessWidget {
-  const _AccountActions({
-    required this.isBusy,
-    required this.onSignOut,
-  });
+  const _AccountActions({required this.isBusy, required this.onSignOut});
 
   final bool isBusy;
   final Future<void> Function() onSignOut;
@@ -3763,10 +3763,7 @@ class _AccountActions extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
             child: Text(
-              L10n.translate(
-                context,
-                'Project files are stored locally.',
-              ),
+              L10n.translate(context, 'Project files are stored locally.'),
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: Colors.white60,

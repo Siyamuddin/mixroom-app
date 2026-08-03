@@ -242,17 +242,10 @@ class _AccountSubscriptionSurfaceState
             children: [
               _PlanHero(
                 entitlement: entitlement,
+                billing: widget.entitlementService.billingAccount,
                 isBusy: busy,
                 onManageSubscription: widget.onManageSubscription,
               ),
-              if (widget.entitlementService.billingAccount != null) ...[
-                _BillingDetailsPanel(
-                  billing: widget.entitlementService.billingAccount!,
-                  entitlement: entitlement,
-                  isBusy: busy,
-                  onManageSubscription: widget.onManageSubscription,
-                ),
-              ],
               const SizedBox(height: 10),
               _BillingActions(
                 isBusy: busy,
@@ -364,7 +357,6 @@ class _AccountSubscriptionSurfaceState
       ),
     );
   }
-
 }
 
 String _educationMembershipLabel(OrganizationMembershipItem membership) {
@@ -424,11 +416,13 @@ String _membershipRoleReadout(BuildContext context, String role) {
 class _PlanHero extends StatelessWidget {
   const _PlanHero({
     required this.entitlement,
+    required this.billing,
     required this.isBusy,
     required this.onManageSubscription,
   });
 
   final EntitlementSnapshot entitlement;
+  final BillingAccountSnapshot? billing;
   final bool isBusy;
   final ManageSubscriptionAction onManageSubscription;
 
@@ -436,6 +430,7 @@ class _PlanHero extends StatelessWidget {
   Widget build(BuildContext context) {
     return _EntitlementOverviewCard(
       entitlement: entitlement,
+      billing: billing,
       isBusy: isBusy,
       onManageSubscription: onManageSubscription,
     );
@@ -445,11 +440,13 @@ class _PlanHero extends StatelessWidget {
 class _EntitlementOverviewCard extends StatelessWidget {
   const _EntitlementOverviewCard({
     required this.entitlement,
+    required this.billing,
     required this.isBusy,
     required this.onManageSubscription,
   });
 
   final EntitlementSnapshot entitlement;
+  final BillingAccountSnapshot? billing;
   final bool isBusy;
   final ManageSubscriptionAction onManageSubscription;
 
@@ -463,76 +460,182 @@ class _EntitlementOverviewCard extends StatelessWidget {
     final accent = _planAccentColor(planCode);
     final status = _subscriptionStatusLabel(context, entitlement.status);
     final canManagePersonal = personal.canManage && !isBusy;
+    final billingDetails = _billingDetailsForOverview(
+      context,
+      billing,
+      entitlement,
+      isBusy: isBusy,
+      onManageSubscription: onManageSubscription,
+    );
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: accent.withValues(alpha: 0.16),
-                borderRadius: BorderRadius.circular(13),
-                border: Border.all(color: accent.withValues(alpha: 0.28)),
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.055),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.09)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(13),
+                  border: Border.all(color: accent.withValues(alpha: 0.28)),
+                ),
+                child: Icon(_planIcon(planCode), color: accent, size: 20),
               ),
-              child: Icon(_planIcon(planCode), color: accent, size: 20),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _t(context, 'Current plan'),
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.62),
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w700,
-                      height: 1.1,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _t(context, 'Current plan'),
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.62),
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        height: 1.1,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    personal.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.w800,
-                      height: 1.05,
+                    const SizedBox(height: 3),
+                    Text(
+                      personal.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 23,
+                        fontWeight: FontWeight.w800,
+                        height: 1.05,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 10),
-            _PlanStatusPill(label: status, active: entitlement.isAccessActive),
-          ],
-        ),
-        if (personal.actionLabel.trim().isNotEmpty) ...[
-          const SizedBox(height: 5),
-          _CompactManageButton(
-            label: personal.actionLabel,
-            icon: personal.actionIcon,
-            onPressed: canManagePersonal
-                ? () => onManageSubscription(
-                    provider: personal.actionProvider,
-                    managementChannel: personal.actionManagementChannel,
-                  )
-                : null,
+              const SizedBox(width: 10),
+              _PlanStatusPill(
+                label: status,
+                active: entitlement.isAccessActive,
+              ),
+            ],
           ),
+          if (billingDetails.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 18,
+              runSpacing: 8,
+              children: [
+                for (final item in billingDetails)
+                  _BillingDetailLine(item: item),
+              ],
+            ),
+          ],
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (personal.actionLabel.trim().isNotEmpty)
+                _SubscriptionActionButton(
+                  label: personal.actionLabel,
+                  icon: personal.actionIcon,
+                  onPressed: canManagePersonal
+                      ? () => onManageSubscription(
+                          provider: personal.actionProvider,
+                          managementChannel: personal.actionManagementChannel,
+                        )
+                      : null,
+                ),
+              _SubscriptionActionButton(
+                label: _t(context, 'View on web'),
+                icon: Icons.language_rounded,
+                onPressed: isBusy
+                    ? null
+                    : () => onManageSubscription(
+                        provider: BillingProvider.unknown,
+                        managementChannel: 'web_plans',
+                      ),
+                emphasized: true,
+              ),
+            ],
+          ),
+          if (planCode != 'free') ...[
+            const SizedBox(height: 14),
+            _PromptUsageCard(entitlement: entitlement),
+          ],
         ],
-        if (planCode != 'free') ...[
-          const SizedBox(height: 10),
-          _PromptUsageCard(entitlement: entitlement),
-        ],
-      ],
+      ),
     );
   }
+}
+
+List<_BillingDetailItem> _billingDetailsForOverview(
+  BuildContext context,
+  BillingAccountSnapshot? billing,
+  EntitlementSnapshot entitlement, {
+  required bool isBusy,
+  required ManageSubscriptionAction onManageSubscription,
+}) {
+  if (billing == null) return const <_BillingDetailItem>[];
+
+  final oneTimeAccessEndsAt = _isTossOneTimeBilling(billing)
+      ? billing.expiresAt
+      : null;
+  final shouldShowProvider =
+      entitlement.isPaidPlan ||
+      (billing.provider != BillingProvider.adminGrant &&
+          billing.provider != BillingProvider.unknown);
+
+  return [
+    if (shouldShowProvider)
+      _BillingDetailItem(
+        label: _t(context, 'Billed through'),
+        value: _providerLabel(context, billing.provider),
+        onPressed:
+            isBusy ||
+                billing.provider == BillingProvider.unknown ||
+                billing.provider == BillingProvider.adminGrant
+            ? null
+            : () => onManageSubscription(
+                provider: billing.provider,
+                managementChannel: billing.managementChannel,
+              ),
+      ),
+    if (oneTimeAccessEndsAt != null)
+      _BillingDetailItem(
+        label: _t(context, 'Access ends'),
+        value: _formatDate(oneTimeAccessEndsAt),
+      )
+    else if (billing.nextBilledAt != null)
+      _BillingDetailItem(
+        label: _t(context, 'Renews'),
+        value: _formatDate(billing.nextBilledAt!),
+      ),
+    if (billing.seatCount != null && billing.seatCount! > 0)
+      _BillingDetailItem(
+        label: _t(context, 'Seats'),
+        value: '${billing.seatCount}',
+      ),
+    if (billing.extraStorageTb > 0)
+      _BillingDetailItem(
+        label: _t(context, 'Extra storage'),
+        value: '+${billing.extraStorageTb} TB',
+      ),
+    if (billing.paymentMethod != null)
+      _BillingDetailItem(
+        label: _t(context, 'Payment'),
+        value: _paymentMethodLabel(billing.paymentMethod!),
+      ),
+  ];
 }
 
 class _PlanStatusPill extends StatelessWidget {
@@ -564,31 +667,43 @@ class _PlanStatusPill extends StatelessWidget {
   }
 }
 
-class _CompactManageButton extends StatelessWidget {
-  const _CompactManageButton({
+class _SubscriptionActionButton extends StatelessWidget {
+  const _SubscriptionActionButton({
     required this.label,
     required this.icon,
     required this.onPressed,
+    this.emphasized = false,
   });
 
   final String label;
   final IconData icon;
   final VoidCallback? onPressed;
+  final bool emphasized;
 
   @override
   Widget build(BuildContext context) {
-    return TextButton.icon(
+    return OutlinedButton.icon(
       onPressed: onPressed,
       icon: Icon(icon, size: 15),
       label: Text(label),
-      style: TextButton.styleFrom(
-        foregroundColor: const Color(0xFFA4C2FF),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: emphasized
+            ? Colors.white.withValues(alpha: 0.90)
+            : const Color(0xFFA4C2FF),
         disabledForegroundColor: Colors.white.withValues(alpha: 0.34),
-        padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 5),
+        backgroundColor: emphasized
+            ? Colors.white.withValues(alpha: 0.08)
+            : Colors.transparent,
+        side: BorderSide(
+          color: emphasized
+              ? Colors.white.withValues(alpha: 0.16)
+              : const Color(0xFFA4C2FF).withValues(alpha: 0.34),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
         minimumSize: const Size(0, 0),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        backgroundColor: Colors.transparent,
         textStyle: const TextStyle(fontSize: 11.2, fontWeight: FontWeight.w800),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
       ),
     );
   }
@@ -741,112 +856,16 @@ class _BillingActions extends StatelessWidget {
   }
 }
 
-class _BillingDetailsPanel extends StatelessWidget {
-  const _BillingDetailsPanel({
-    required this.billing,
-    required this.entitlement,
-    required this.isBusy,
-    required this.onManageSubscription,
-  });
-
-  final BillingAccountSnapshot billing;
-  final EntitlementSnapshot entitlement;
-  final bool isBusy;
-  final ManageSubscriptionAction onManageSubscription;
-
-  @override
-  Widget build(BuildContext context) {
-    final oneTimeAccessEndsAt = _isTossOneTimeBilling(billing)
-        ? billing.expiresAt
-        : null;
-    final shouldShowProvider =
-        entitlement.isPaidPlan ||
-        (billing.provider != BillingProvider.adminGrant &&
-            billing.provider != BillingProvider.unknown);
-    final details = <_BillingDetailItem>[
-      if (shouldShowProvider)
-        _BillingDetailItem(
-          label: _t(context, 'Provider'),
-          value: _providerLabel(context, billing.provider),
-        ),
-      if (oneTimeAccessEndsAt != null)
-        _BillingDetailItem(
-          label: _t(context, 'Access ends'),
-          value: _formatDate(oneTimeAccessEndsAt),
-        )
-      else if (billing.nextBilledAt != null)
-        _BillingDetailItem(
-          label: _t(context, 'Renewal'),
-          value: _formatDate(billing.nextBilledAt!),
-        ),
-      if (billing.seatCount != null && billing.seatCount! > 0)
-        _BillingDetailItem(
-          label: _t(context, 'Seats'),
-          value: '${billing.seatCount}',
-        ),
-      if (billing.extraStorageTb > 0)
-        _BillingDetailItem(
-          label: _t(context, 'Extra storage'),
-          value: '+${billing.extraStorageTb} TB',
-        ),
-      if (billing.billingEmail.trim().isNotEmpty)
-        _BillingDetailItem(
-          label: _t(context, 'Billing email'),
-          value: billing.billingEmail.trim(),
-        ),
-      if (billing.paymentMethod != null)
-        _BillingDetailItem(
-          label: _t(context, 'Payment method'),
-          value: _paymentMethodLabel(billing.paymentMethod!),
-        ),
-    ];
-
-    final hasProviderManagedLink =
-        billing.manageUrl.trim().isNotEmpty || entitlement.isPaidPlan;
-    if (details.isEmpty && !hasProviderManagedLink) {
-      return const SizedBox.shrink();
-    }
-    return Padding(
-      padding: const EdgeInsets.only(top: 14),
-      child: Row(
-        children: [
-          Expanded(
-            child: Wrap(
-              spacing: 18,
-              runSpacing: 6,
-              children: [
-                for (final item in details) _BillingDetailLine(item: item),
-              ],
-            ),
-          ),
-          if (hasProviderManagedLink)
-            IconButton(
-              tooltip: _t(context, 'Manage billing'),
-              onPressed: isBusy
-                  ? null
-                  : () => onManageSubscription(
-                      provider: billing.provider,
-                      managementChannel: billing.managementChannel,
-                    ),
-              icon: const Icon(Icons.open_in_new_rounded, size: 17),
-              color: const Color(0xFFA4C2FF),
-              style: IconButton.styleFrom(
-                minimumSize: const Size(32, 32),
-                padding: EdgeInsets.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
 class _BillingDetailItem {
-  const _BillingDetailItem({required this.label, required this.value});
+  const _BillingDetailItem({
+    required this.label,
+    required this.value,
+    this.onPressed,
+  });
 
   final String label;
   final String value;
+  final VoidCallback? onPressed;
 }
 
 class _BillingDetailLine extends StatelessWidget {
@@ -856,7 +875,7 @@ class _BillingDetailLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text.rich(
+    final child = Text.rich(
       TextSpan(
         children: [
           TextSpan(
@@ -873,10 +892,20 @@ class _BillingDetailLine extends StatelessWidget {
               color: Colors.white.withValues(alpha: 0.86),
               fontSize: 11.6,
               fontWeight: FontWeight.w700,
+              decoration: item.onPressed == null
+                  ? TextDecoration.none
+                  : TextDecoration.underline,
+              decorationColor: const Color(0xFFA4C2FF),
             ),
           ),
         ],
       ),
+    );
+    if (item.onPressed == null) return child;
+    return GestureDetector(
+      onTap: item.onPressed,
+      behavior: HitTestBehavior.opaque,
+      child: child,
     );
   }
 }
@@ -1017,6 +1046,7 @@ class _PlansPanelState extends State<_PlansPanel> {
                     : ((contentWidth - cardGap * (visibleCardCount - 1)) /
                               visibleCardCount)
                           .clamp(224.0, 264.0);
+                final cardStep = cardWidth + cardGap;
 
                 return Container(
                   padding: const EdgeInsets.fromLTRB(
@@ -1033,49 +1063,59 @@ class _PlansPanelState extends State<_PlansPanel> {
                     ),
                   ),
                   clipBehavior: Clip.antiAlias,
-                  child: Scrollbar(
-                    controller: _plansScrollController,
-                    notificationPredicate: (notification) =>
-                        notification.metrics.axis == Axis.horizontal,
-                    child: SingleChildScrollView(
+                  child: NotificationListener<ScrollEndNotification>(
+                    onNotification: (notification) {
+                      if (notification.metrics.axis == Axis.horizontal) {
+                        _snapPlansToNearest(cardStep);
+                      }
+                      return false;
+                    },
+                    child: Scrollbar(
                       controller: _plansScrollController,
-                      scrollDirection: Axis.horizontal,
-                      physics: const BouncingScrollPhysics(),
-                      clipBehavior: Clip.hardEdge,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          for (final entry in cards.asMap().entries) ...[
-                            SizedBox(
-                              width: cardWidth,
-                              height: 450,
-                              child: _PlanListRow(
-                                data: entry.value,
-                                planIsCurrent: _isCurrentPlanCard(entry.value),
-                                priceLabel: _priceLabelForCard(
-                                  context,
-                                  entry.value,
-                                ),
-                                billingCaption: _billingCaptionForCard(
-                                  context,
-                                  entry.value,
-                                ),
-                                isBusy: widget.isBusy,
-                                productActions: _productActionsForCard(
-                                  context,
-                                  entry.value,
-                                ),
-                                fallbackAction: _fallbackActionForCard(
-                                  context,
-                                  entry.value,
-                                  _isCurrentPlanCard(entry.value),
+                      notificationPredicate: (notification) =>
+                          notification.metrics.axis == Axis.horizontal,
+                      child: SingleChildScrollView(
+                        controller: _plansScrollController,
+                        scrollDirection: Axis.horizontal,
+                        physics: const BouncingScrollPhysics(),
+                        clipBehavior: Clip.hardEdge,
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            for (final entry in cards.asMap().entries) ...[
+                              SizedBox(
+                                width: cardWidth,
+                                height: 450,
+                                child: _PlanListRow(
+                                  data: entry.value,
+                                  planIsCurrent: _isCurrentPlanCard(
+                                    entry.value,
+                                  ),
+                                  priceLabel: _priceLabelForCard(
+                                    context,
+                                    entry.value,
+                                  ),
+                                  billingCaption: _billingCaptionForCard(
+                                    context,
+                                    entry.value,
+                                  ),
+                                  isBusy: widget.isBusy,
+                                  productActions: _productActionsForCard(
+                                    context,
+                                    entry.value,
+                                  ),
+                                  fallbackAction: _fallbackActionForCard(
+                                    context,
+                                    entry.value,
+                                    _isCurrentPlanCard(entry.value),
+                                  ),
                                 ),
                               ),
-                            ),
-                            if (entry.key != cards.length - 1)
-                              const SizedBox(width: cardGap),
+                              if (entry.key != cards.length - 1)
+                                const SizedBox(width: cardGap),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
                     ),
                   ),
@@ -1100,15 +1140,75 @@ class _PlansPanelState extends State<_PlansPanel> {
   void _scrollPlans(int direction) {
     if (!_plansScrollController.hasClients) return;
     final position = _plansScrollController.position;
-    final distance = position.viewportDimension * 0.74;
-    final target = (position.pixels + (distance * direction))
-        .clamp(position.minScrollExtent, position.maxScrollExtent)
-        .toDouble();
+    final points = _planSnapPoints(position);
+    if (points.length < 2) return;
+    final currentIndex = _nearestSnapPointIndex(points, position.pixels);
+    final targetIndex = (currentIndex + direction).clamp(0, points.length - 1);
+    _animatePlansTo(points[targetIndex]);
+  }
+
+  void _snapPlansToNearest(double cardStep) {
+    if (!_plansScrollController.hasClients || cardStep <= 0) return;
+    final position = _plansScrollController.position;
+    final points = _planSnapPoints(position, cardStep: cardStep);
+    if (points.isEmpty) return;
+    _animatePlansTo(points[_nearestSnapPointIndex(points, position.pixels)]);
+  }
+
+  List<double> _planSnapPoints(ScrollPosition position, {double? cardStep}) {
+    final step =
+        cardStep ?? _planCardStepForViewport(position.viewportDimension);
+    if (step <= 0) return <double>[position.minScrollExtent];
+
+    final points = <double>[position.minScrollExtent];
+    var next = position.minScrollExtent + step;
+    while (next < position.maxScrollExtent - 0.5) {
+      points.add(next);
+      next += step;
+    }
+    if ((points.last - position.maxScrollExtent).abs() > 0.5) {
+      points.add(position.maxScrollExtent);
+    }
+    return points;
+  }
+
+  int _nearestSnapPointIndex(List<double> points, double pixels) {
+    var nearestIndex = 0;
+    var nearestDistance = double.infinity;
+    for (var index = 0; index < points.length; index++) {
+      final distance = (points[index] - pixels).abs();
+      if (distance < nearestDistance) {
+        nearestIndex = index;
+        nearestDistance = distance;
+      }
+    }
+    return nearestIndex;
+  }
+
+  void _animatePlansTo(double target) {
+    if (!_plansScrollController.hasClients) return;
+    final current = _plansScrollController.position.pixels;
+    if ((target - current).abs() < 0.5) return;
     _plansScrollController.animateTo(
       target,
       duration: const Duration(milliseconds: 260),
       curve: Curves.easeOutCubic,
     );
+  }
+
+  double _planCardStepForViewport(double viewportWidth) {
+    const cardGap = 10.0;
+    final visibleCardCount = viewportWidth >= 740
+        ? 3
+        : viewportWidth >= 500
+        ? 2
+        : 1;
+    final cardWidth = visibleCardCount == 1
+        ? viewportWidth
+        : ((viewportWidth - cardGap * (visibleCardCount - 1)) /
+                  visibleCardCount)
+              .clamp(224.0, 264.0);
+    return cardWidth + cardGap;
   }
 
   String? _storePriceForProduct(
