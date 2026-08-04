@@ -1056,6 +1056,35 @@ void main() {
       );
     });
 
+    test('verified action notices retain every committed command detail', () {
+      expect(
+        aiV3VerifiedExecutionDetails(
+          const <String, dynamic>{
+            'receipts': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'command_id': 'rename',
+                'status': 'prepared',
+                'preview_label': 'Rename Keys to Custom Keys',
+              },
+              <String, dynamic>{
+                'command_id': 'instrument',
+                'status': 'prepared',
+                'preview_label': 'Set Custom Keys instrument to Dream Pad',
+              },
+            ],
+          },
+          actionNotices: const <String>[
+            '• Renamed row to Custom Keys •',
+            '• Changed Custom Keys instrument to Dream Pad •',
+          ],
+        ),
+        <String>[
+          'Renamed row to Custom Keys',
+          'Changed Custom Keys instrument to Dream Pad',
+        ],
+      );
+    });
+
     test('adaptive evaluation stays detached from the visible V3 result',
         () async {
       final captureDirectory =

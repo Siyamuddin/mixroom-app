@@ -35,6 +35,7 @@ const Set<String> aiV3CommandTypes = <String>{
   'row.set_muted',
   'row.set_soloed',
   'row.rename',
+  'row.set_instrument',
   'row.set_role_override',
   'row.apply_phone_mic_cleanup',
   'row.select',
@@ -100,6 +101,7 @@ const Map<String, AiV3ExecutionPolicy> aiV3ExecutionPolicyByCommandType =
   'row.set_muted': AiV3ExecutionPolicy.autoApply,
   'row.set_soloed': AiV3ExecutionPolicy.autoApply,
   'row.rename': AiV3ExecutionPolicy.autoApply,
+  'row.set_instrument': AiV3ExecutionPolicy.autoApply,
   'row.set_role_override': AiV3ExecutionPolicy.autoApply,
   'row.apply_phone_mic_cleanup': AiV3ExecutionPolicy.autoApply,
   'row.select': AiV3ExecutionPolicy.autoApply,
@@ -488,6 +490,11 @@ void _validateCommand(String type, Map<String, dynamic> args) {
       requireKeys(<String>['row_id', 'new_name']);
       rowId('row_id');
       text('new_name', max: 80);
+      return;
+    case 'row.set_instrument':
+      requireKeys(<String>['row_id', 'instrument_id']);
+      rowId('row_id');
+      text('instrument_id');
       return;
     case 'row.set_role_override':
       requireKeys(<String>['row_id', 'role']);
@@ -1433,6 +1440,22 @@ Map<String, dynamic> _aiV3CommandVariant(
       field('row_id', rowId);
       field('new_name',
           <String, dynamic>{'type': 'string', 'minLength': 1, 'maxLength': 80});
+      break;
+    case 'row.set_instrument':
+      field('row_id', <String, dynamic>{
+        ...rowId,
+        if (includeCommandSemantics)
+          'description':
+              'Stable ID of one existing MIDI instrument row. The row identity, row name, MIDI notes, timing, mix state, and tempo state are preserved.',
+      });
+      field('instrument_id', <String, dynamic>{
+        'type': 'string',
+        'minLength': 1,
+        'maxLength': 160,
+        if (includeCommandSemantics)
+          'description':
+              'Exact ID of one currently available instrument from project context or retrieved MIDI facts. Never invent or approximate an ID.',
+      });
       break;
     case 'row.set_role_override':
       field('row_id', rowId);

@@ -6,7 +6,7 @@ Last reviewed: 2026-07-21
 
 This is the decision-complete implementation specification for the scalable V3
 planner described by [ADR 0002](adr/0002-ai-v3-architecture.md). The current
-53-command one-shot planner is the user-visible production baseline. Shared
+54-command one-shot planner is the user-visible production baseline. Shared
 capability slices update both planner surfaces through one canonical contract;
 adaptive activation remains gated by the evaluations in this document.
 
@@ -269,6 +269,11 @@ The closed initial `requested_fields` registry is:
 | `mix` | `row_analysis`, `group_state`, `master_state`, `reference_analysis`, `engine_capabilities` |
 | `music_generation` | `provider_capabilities`, `roles`, `styles`, `destination_capabilities` |
 | `files_plugins` | `file_results`, `instrument_catalog`, `plugin_catalog`, `preset_results`, `parameter_definitions` |
+
+MIDI `edit_capabilities` retrieval returns the bounded allowed instrument
+catalog as exact `instrument_id`/`name` pairs. Plans still execute only the
+returned IDs; display names are authoritative resolution facts, not runtime
+fallbacks.
 | `external_audio` | `job_capabilities`, `source_requirements`, `service_status` |
 | `tutorial_ui` | `topics`, `visible_controls`, `platform_capabilities` |
 

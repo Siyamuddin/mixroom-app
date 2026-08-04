@@ -11,6 +11,8 @@ import 'ai_v3_audio_facts.dart';
 
 enum AiV3ContextProfile { essential, enriched, rich }
 
+const int _aiV3MaxInstrumentCatalogFacts = 64;
+
 AiV3ContextProfile parseAiV3ContextProfile(String value) {
   switch (value.trim().toLowerCase()) {
     case 'enriched':
@@ -524,6 +526,7 @@ class AiV3CoreContextBuilder {
       'clips': clips,
       'instruments':
           _sortedUniqueStrings(clientContext['allowed_instrument_ids']),
+      'instrument_catalog': _instrumentCatalogFacts(clientContext),
       'effects': _effectCatalog(clientContext, profile),
       'library_assets': libraryAssets.map((asset) {
         if (profile == AiV3ContextProfile.essential) {
@@ -616,6 +619,38 @@ List<String> _sortedUniqueStrings(Object? raw) {
       .toList()
     ..sort();
   return values;
+}
+
+List<Map<String, dynamic>> _instrumentCatalogFacts(
+  Map<String, dynamic> context,
+) {
+  final allowedIds =
+      _sortedUniqueStrings(context['allowed_instrument_ids']).toSet();
+  final raw = context['ai_v3_instrument_catalog'];
+  if (raw == null) return const <Map<String, dynamic>>[];
+  if (raw is! List || raw.any((value) => value is! Map)) {
+    throw const AiV3ContextException('prototype_instrument_catalog_invalid');
+  }
+  final byId = <String, Map<String, dynamic>>{};
+  for (final value in raw.whereType<Map>()) {
+    final instrumentId = value['instrument_id']?.toString().trim() ?? '';
+    final name = value['name']?.toString().trim() ?? '';
+    if (instrumentId.isEmpty ||
+        name.isEmpty ||
+        !allowedIds.contains(instrumentId) ||
+        byId.containsKey(instrumentId)) {
+      throw const AiV3ContextException('prototype_instrument_catalog_invalid');
+    }
+    byId[instrumentId] = <String, dynamic>{
+      'instrument_id': instrumentId,
+      'name': name,
+    };
+  }
+  final result = byId.values.toList(growable: false)
+    ..sort((left, right) => left['instrument_id']
+        .toString()
+        .compareTo(right['instrument_id'].toString()));
+  return result.take(_aiV3MaxInstrumentCatalogFacts).toList(growable: false);
 }
 
 Map<String, dynamic> _selectionWithStableIds(

@@ -272,6 +272,18 @@ Future<({PlanningSnapshotV3 snapshot, CompactCoreV3 compact})> _fixture({
       'current_rows': rows.length,
       'row_creation_policy': 'Rows may be created up to the app row limit.',
       'allowed_instrument_ids': allowedInstrumentIds,
+      'ai_v3_instrument_catalog': <Map<String, dynamic>>[
+        for (final instrumentId in allowedInstrumentIds)
+          <String, dynamic>{
+            'instrument_id': instrumentId,
+            'name': switch (instrumentId) {
+              'piano' => 'Piano',
+              'bass' => 'Bass',
+              'mixroom.sarah_harmonic' => 'Dream Pad',
+              _ => instrumentId,
+            },
+          },
+      ],
       'allowed_builtin_effects': allowedEffects,
       'ai_v3_library_assets': libraryAssets,
       'plugin_access': 'none',
@@ -547,6 +559,27 @@ Map<String, dynamic> _createMidiPlan({
                 'velocity': 0.8,
               },
             ],
+          },
+        },
+      ],
+      'question_options': const <Object>[],
+    };
+
+Map<String, dynamic> _setRowInstrumentPlan({
+  int rowId = 20,
+  String instrumentId = 'bass',
+}) =>
+    <String, dynamic>{
+      'schema_version': aiV3PlanVersion,
+      'outcome': 'plan',
+      'user_message': 'Changed the Keys instrument.',
+      'commands': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'command_id': 'set-instrument',
+          'type': 'row.set_instrument',
+          'arguments': <String, dynamic>{
+            'row_id': rowId,
+            'instrument_id': instrumentId,
           },
         },
       ],
@@ -1352,8 +1385,13 @@ void main() {
     expect(notes.map((note) => (note as Map)['note_id']),
         <String>['note-0', 'note-1', 'note-2']);
     expect(item['instrument_ids'], <String>['bass', 'piano']);
+    expect(item['instrument_catalog'], <Map<String, dynamic>>[
+      <String, dynamic>{'instrument_id': 'bass', 'name': 'Bass'},
+      <String, dynamic>{'instrument_id': 'piano', 'name': 'Piano'},
+    ]);
     final capabilities = item['edit_capabilities'] as Map;
     expect(capabilities['can_create'], isTrue);
+    expect(capabilities['can_set_instrument'], isTrue);
     expect(capabilities['can_replace'], isTrue);
     expect(capabilities['can_append'], isTrue);
     expect(capabilities['can_chop'], isTrue);
@@ -1374,6 +1412,35 @@ void main() {
     final item = (result.toJson()['results'] as List).single as Map;
     expect(item['matched_row_ids'], <int>[30]);
     expect(item['midi_clips'], isEmpty);
+    expect(
+      (item['edit_capabilities'] as Map)['can_set_instrument'],
+      isFalse,
+    );
+  });
+
+  test('retrieval preserves opaque instrument ID to display-name mappings',
+      () async {
+    final fixture = await _fixture(
+      allowedInstrumentIds: const <String>['mixroom.sarah_harmonic'],
+    );
+    final request = AiV3ContextRequest.fromJson(_query(
+      targets: const <Object>[],
+      fields: const <String>['edit_capabilities'],
+      limit: 1,
+    ));
+
+    final result = const AiV3MidiContextRetriever().retrieve(
+      snapshot: fixture.snapshot,
+      request: request,
+    );
+    final item = (result.toJson()['results'] as List).single as Map;
+
+    expect(item['instrument_catalog'], <Map<String, dynamic>>[
+      <String, dynamic>{
+        'instrument_id': 'mixroom.sarah_harmonic',
+        'name': 'Dream Pad',
+      },
+    ]);
   });
 
   test('retriever rejects unknown and non-MIDI targets', () async {
@@ -2192,6 +2259,142 @@ void main() {
         'v3_adaptive_midi_instrument_not_retrieved',
       )),
     );
+  });
+
+  test('row instrument swap can plan directly from compact facts', () async {
+    final fixture = await _fixture();
+    final client = MockClient((_) async => http.Response(
+          jsonEncode(_response('submit_plan_v3', _setRowInstrumentPlan())),
+          200,
+        ));
+
+    final result = await AiV3AdaptivePlannerService(
+      apiKey: 'test-key',
+      model: 'gpt-5.4-mini',
+      httpClient: client,
+    ).plan(
+      compactCore: fixture.compact,
+      snapshot: fixture.snapshot,
+      originalRequest: 'Change the Keys row to bass.',
+    );
+
+    expect(result.plan.commands.single.type, 'row.set_instrument');
+    expect(result.retrievalRequest, isNull);
+  });
+
+  test('row instrument continuation requires returned row and instrument IDs',
+      () async {
+    final fixture = await _fixture();
+
+    Future<AiV3AdaptivePlannerResult> run({
+      required int rowId,
+      required String instrumentId,
+    }) {
+      var call = 0;
+      final client = MockClient((_) async {
+        call++;
+        return http.Response(
+          jsonEncode(
+            call == 1
+                ? _response(
+                    'get_context_domains',
+                    _query(
+                      targets: const <Object>[20],
+                      fields: const <String>[
+                        'clip_instruments',
+                        'edit_capabilities',
+                      ],
+                    ),
+                  )
+                : _response(
+                    'submit_plan_v3',
+                    _setRowInstrumentPlan(
+                      rowId: rowId,
+                      instrumentId: instrumentId,
+                    ),
+                  ),
+          ),
+          200,
+        );
+      });
+      return AiV3AdaptivePlannerService(
+        apiKey: 'test-key',
+        model: 'gpt-5.4-mini',
+        httpClient: client,
+      ).plan(
+        compactCore: fixture.compact,
+        snapshot: fixture.snapshot,
+        originalRequest: 'Change the Keys row instrument.',
+      );
+    }
+
+    expect(
+      (await run(rowId: 20, instrumentId: 'bass')).plan.commands.single.type,
+      'row.set_instrument',
+    );
+    await expectLater(
+      run(rowId: 30, instrumentId: 'bass'),
+      throwsA(isA<AiV3AdaptivePlannerException>().having(
+        (error) => error.code,
+        'code',
+        'v3_adaptive_midi_row_not_retrieved',
+      )),
+    );
+    await expectLater(
+      run(rowId: 20, instrumentId: 'missing'),
+      throwsA(isA<AiV3AdaptivePlannerException>().having(
+        (error) => error.code,
+        'code',
+        'v3_adaptive_midi_instrument_not_retrieved',
+      )),
+    );
+  });
+
+  test('row instrument continuation receives opaque ID display names',
+      () async {
+    final fixture = await _fixture(
+      allowedInstrumentIds: const <String>['mixroom.sarah_harmonic'],
+    );
+    final sent = <Map<String, dynamic>>[];
+    var call = 0;
+    final client = MockClient((request) async {
+      sent.add(Map<String, dynamic>.from(jsonDecode(request.body) as Map));
+      call++;
+      return http.Response(
+        jsonEncode(
+          call == 1
+              ? _response(
+                  'get_context_domains',
+                  _query(
+                    targets: const <Object>[20],
+                    fields: const <String>['edit_capabilities'],
+                  ),
+                )
+              : _response(
+                  'submit_plan_v3',
+                  _setRowInstrumentPlan(
+                    instrumentId: 'mixroom.sarah_harmonic',
+                  ),
+                ),
+        ),
+        200,
+      );
+    });
+
+    final result = await AiV3AdaptivePlannerService(
+      apiKey: 'test-key',
+      model: 'gpt-5.4-mini',
+      httpClient: client,
+    ).plan(
+      compactCore: fixture.compact,
+      snapshot: fixture.snapshot,
+      originalRequest: 'Change the Keys row to Dream Pad.',
+    );
+
+    expect(result.plan.commands.single.arguments['instrument_id'],
+        'mixroom.sarah_harmonic');
+    expect(jsonEncode(sent.last), contains('Dream Pad'));
+    expect(jsonEncode(sent.last), contains('mixroom.sarah_harmonic'));
   });
 
   test(
