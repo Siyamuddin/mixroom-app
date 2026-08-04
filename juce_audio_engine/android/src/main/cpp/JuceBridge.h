@@ -53,6 +53,7 @@ extern "C"
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_sendLiveMidiInputEventJNI(JNIEnv *, jclass, jboolean, jint, jint, jfloat);
     JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_consumeLiveMidiInputEventsJNI(JNIEnv *, jclass);
     JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getConnectedMidiInputDevicesJNI(JNIEnv *, jclass);
+    JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_preparePlaybackGraphJNI(JNIEnv *, jclass, jstring);
 
     // Transport
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setTransportSecondsJNI(JNIEnv *, jclass, jdouble);

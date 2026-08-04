@@ -4871,6 +4871,7 @@ public:
     void prepareRecordingInputsAsync(int desiredInputChannels,
                                      const juce::String &reason);
     void refreshAudioRouteAsync(const juce::String &reason);
+    bool preparePlaybackGraph(const juce::String &reason);
     bool hardResetPlaybackOnlyRoute(const juce::String &reason);
     void requestAudioDeviceRefreshAsync(const juce::String &reason);
     void flushDeferredAudioRouteRefreshAsync(const juce::String &reason);

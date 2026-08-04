@@ -77,12 +77,6 @@ void main() {
 
       await JuceAudioEngine.initialise();
       try {
-        expect(
-          await JuceAudioEngine.preparePlaybackRoute(
-            reason: 'midiPreviewIntegration',
-          ),
-          isTrue,
-        );
         await JuceAudioEngine.setRowMetersEnabled(true);
 
         Future<int> loadClip({
@@ -92,6 +86,7 @@ void main() {
           required String instrumentName,
           required int existingPitch,
           Map<String, double> params = const <String, double>{},
+          bool asProjectLoad = false,
         }) async {
           final rowId = await JuceAudioEngine.addRow(rowName);
           expect(rowId, greaterThanOrEqualTo(0));
@@ -101,18 +96,32 @@ void main() {
             (row) => row['rowId'] == rowId,
           );
           expect(rowIndex, greaterThanOrEqualTo(0));
-          final loaded = await JuceAudioEngine.loadMidiClip(
-            clipId,
-            rowId,
-            instrumentId: instrumentId,
-            instrumentName: instrumentName,
-            notes: <Map<String, dynamic>>[_note(clipId, existingPitch)],
-            params: params,
-            sourceTempoBpm: 120.0,
-            startSec: 10.0,
-            lengthSec: 2.0,
-          );
+          if (asProjectLoad) await JuceAudioEngine.beginProjectClipLoad();
+          var loaded = false;
+          try {
+            loaded = await JuceAudioEngine.loadMidiClip(
+              clipId,
+              rowId,
+              instrumentId: instrumentId,
+              instrumentName: instrumentName,
+              notes: <Map<String, dynamic>>[_note(clipId, existingPitch)],
+              params: params,
+              sourceTempoBpm: 120.0,
+              startSec: 10.0,
+              lengthSec: 2.0,
+            );
+          } finally {
+            if (asProjectLoad) await JuceAudioEngine.endProjectClipLoad();
+          }
           expect(loaded, isTrue);
+          expect(
+            await JuceAudioEngine.preparePlaybackRoute(
+              reason: asProjectLoad
+                  ? 'midiPreviewColdProjectLoad'
+                  : 'midiPreviewIntegration',
+            ),
+            isTrue,
+          );
           final updated = await JuceAudioEngine.updateMidiClipEvents(
             clipId,
             instrumentId: instrumentId,
@@ -135,6 +144,7 @@ void main() {
           instrumentId: _uprightPiano,
           instrumentName: 'Upright Piano',
           existingPitch: 60,
+          asProjectLoad: true,
           params: const <String, double>{
             'outputGain': 0.78,
             'attackMs': 4.0,

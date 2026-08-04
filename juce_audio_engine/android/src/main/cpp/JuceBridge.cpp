@@ -3128,6 +3128,20 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_hardResetPlaybackOnlyRouteJNI(JN
     return ok.load() ? JNI_TRUE : JNI_FALSE;
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_preparePlaybackGraphJNI(JNIEnv *env,
+                                                                         jclass,
+                                                                         jstring reason)
+{
+    const juce::String juceReason = reason == nullptr
+                                        ? juce::String("dart")
+                                        : juceStringFromJString(env, reason);
+    std::atomic<bool> ok{false};
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  { ok = JuceEngine::get().preparePlaybackGraph(juceReason); });
+    return ok.load() ? JNI_TRUE : JNI_FALSE;
+}
+
 extern "C" JNIEXPORT jdouble JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_getRecordingPeakJNI(JNIEnv *, jclass)
 {
