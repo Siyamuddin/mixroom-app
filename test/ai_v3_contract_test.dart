@@ -19,10 +19,14 @@ Map<String, dynamic> _command(
   String id,
   String type,
   Map<String, dynamic> arguments,
-) => <String, dynamic>{'command_id': id, 'type': type, 'arguments': arguments};
+) =>
+    <String, dynamic>{
+      'command_id': id,
+      'type': type,
+      'arguments': arguments,
+    };
 
-AiV3Plan _allRowsMixPlan() => AiV3Plan.fromJson(
-      _plan(<Map<String, dynamic>>[
+AiV3Plan _allRowsMixPlan() => AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
       _command('mix-all', 'mix.apply_goal', <String, dynamic>{
         'target': <String, dynamic>{'scope': 'all_rows'},
         'intents': <Map<String, dynamic>>[
@@ -39,8 +43,7 @@ AiV3Plan _allRowsMixPlan() => AiV3Plan.fromJson(
         'reset_fx': false,
         'reference': null,
       }),
-      ]),
-    );
+    ]));
 
 AiV3CoreContext _context() => AiV3CoreContext(
       profile: AiV3ContextProfile.essential,
@@ -215,9 +218,8 @@ AiV3CoreContext _context() => AiV3CoreContext(
     );
 
 AiV3CoreContext _contextWithSecondAudioClip() {
-  final data = Map<String, dynamic>.from(
-    jsonDecode(jsonEncode(_context().data)) as Map,
-  );
+  final data =
+      Map<String, dynamic>.from(jsonDecode(jsonEncode(_context().data)) as Map);
   final clips = (data['clips'] as List)
       .map((value) => Map<String, dynamic>.from(value as Map))
       .toList(growable: true);
@@ -252,9 +254,8 @@ AiV3CoreContext _contextWithAudioClipBounds({
   required double startBeat,
   required double lengthBeats,
 }) {
-  final data = Map<String, dynamic>.from(
-    jsonDecode(jsonEncode(_context().data)) as Map,
-  );
+  final data =
+      Map<String, dynamic>.from(jsonDecode(jsonEncode(_context().data)) as Map);
   final clips = (data['clips'] as List).cast<Map<String, dynamic>>();
   clips.first['start_beat'] = startBeat;
   clips.first['length_beats'] = lengthBeats;
@@ -268,15 +269,15 @@ AiV3CoreContext _contextWithAudioClipBounds({
 
 AiV3CoreContext _contextForStemSeparation() {
   final base = _context();
-  final data = Map<String, dynamic>.from(
-    jsonDecode(jsonEncode(base.data)) as Map,
-  );
+  final data =
+      Map<String, dynamic>.from(jsonDecode(jsonEncode(base.data)) as Map);
   data['runtime_capabilities'] = <String>['daw.stem_separate'];
   final clips = (data['clips'] as List)
       .map((value) => Map<String, dynamic>.from(value as Map))
       .toList(growable: false);
-  clips.singleWhere((clip) => clip['clip_id'] == 'audio-clip')['source_file'] =
-      'pubspec.yaml';
+  clips.singleWhere(
+    (clip) => clip['clip_id'] == 'audio-clip',
+  )['source_file'] = 'pubspec.yaml';
   data['clips'] = clips;
   return AiV3CoreContext(
     profile: base.profile,
@@ -287,15 +288,17 @@ AiV3CoreContext _contextForStemSeparation() {
 
 AiV3CoreContext _contextForAudioToMidi() {
   final base = _context();
-  final data = Map<String, dynamic>.from(
-    jsonDecode(jsonEncode(base.data)) as Map,
-  );
-  data['runtime_capabilities'] = <String>['daw.midi_compose.audio_to_midi'];
+  final data =
+      Map<String, dynamic>.from(jsonDecode(jsonEncode(base.data)) as Map);
+  data['runtime_capabilities'] = <String>[
+    'daw.midi_compose.audio_to_midi',
+  ];
   final clips = (data['clips'] as List)
       .map((value) => Map<String, dynamic>.from(value as Map))
       .toList(growable: false);
-  clips.singleWhere((clip) => clip['clip_id'] == 'audio-clip')['source_file'] =
-      'pubspec.yaml';
+  clips.singleWhere(
+    (clip) => clip['clip_id'] == 'audio-clip',
+  )['source_file'] = 'pubspec.yaml';
   data['clips'] = clips;
   return AiV3CoreContext(
     profile: base.profile,
@@ -310,18 +313,19 @@ AiV3CoreContext _contextForPhoneMicCleanup({
   bool secondAudioClip = false,
 }) {
   final base = secondAudioClip ? _contextWithSecondAudioClip() : _context();
-  final data = Map<String, dynamic>.from(
-    jsonDecode(jsonEncode(base.data)) as Map,
-  );
-  data['runtime_capabilities'] = includeService
-      ? <String>['daw.audio_enhance']
-      : <String>[];
+  final data =
+      Map<String, dynamic>.from(jsonDecode(jsonEncode(base.data)) as Map);
+  data['runtime_capabilities'] =
+      includeService ? <String>['daw.audio_enhance'] : <String>[];
   final effects = <Map<String, dynamic>>[
     ...((data['effects'] as List).whereType<Map>().map(
           (effect) => Map<String, dynamic>.from(effect),
         )),
     for (final effectId in aiV3PhoneMicCleanupEffectIds)
-      <String, dynamic>{'effect_id': effectId, 'parameters': const <Object>[]},
+      <String, dynamic>{
+        'effect_id': effectId,
+        'parameters': const <Object>[],
+      },
   ];
   if (!includeAllEffects) {
     effects.removeWhere((effect) => effect['effect_id'] == 'Limiter');
@@ -336,14 +340,14 @@ AiV3CoreContext _contextForPhoneMicCleanup({
 
 AiV3CoreContext _contextWithCrossRowAudioClips() {
   final base = _contextWithSecondAudioClip();
-  final data = Map<String, dynamic>.from(
-    jsonDecode(jsonEncode(base.data)) as Map,
-  );
+  final data =
+      Map<String, dynamic>.from(jsonDecode(jsonEncode(base.data)) as Map);
   final clips = (data['clips'] as List)
       .map((value) => Map<String, dynamic>.from(value as Map))
       .toList(growable: false);
-  clips.singleWhere((clip) => clip['clip_id'] == 'audio-clip-2')['row_id'] =
-      200;
+  clips.singleWhere(
+    (clip) => clip['clip_id'] == 'audio-clip-2',
+  )['row_id'] = 200;
   data['clips'] = clips;
   return AiV3CoreContext(
     profile: base.profile,
@@ -357,7 +361,8 @@ Map<String, dynamic> _note(
   double start,
   double length, [
   double velocity = 0.8,
-]) => <String, dynamic>{
+]) =>
+    <String, dynamic>{
       'pitch': pitch,
       'start_beat': start,
       'length_beats': length,
@@ -369,17 +374,14 @@ AiV3CoreContext _contextWithMidiNotes(
   double lengthBeats = 8.0,
 }) {
   final base = _context();
-  final clips = (base.data['clips'] as List)
-      .whereType<Map>()
-      .map((raw) {
+  final clips = (base.data['clips'] as List).whereType<Map>().map((raw) {
     final clip = Map<String, dynamic>.from(raw);
     if (clip['clip_id'] == 'midi-clip') {
       clip['length_beats'] = lengthBeats;
       clip['midi_notes'] = notes;
     }
     return clip;
-      })
-      .toList(growable: false);
+  }).toList(growable: false);
   return AiV3CoreContext(
     profile: base.profile,
     stateDigest: base.stateDigest,
@@ -3136,43 +3138,39 @@ void main() {
       <String, dynamic>{'row_id': 100, 'mode': 'strong'},
     ]) {
       expect(
-        () => AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
-            _command('bad-cleanup', 'row.apply_phone_mic_cleanup', arguments),
-          ]),
-        ),
+        () => AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
+          _command(
+            'bad-cleanup',
+            'row.apply_phone_mic_cleanup',
+            arguments,
+          ),
+        ])),
         throwsA(isA<AiV3ContractException>()),
       );
     }
   });
 
   test('strict sample replacement contract is shared and exact', () {
-    final plan = AiV3Plan.fromJson(
-      _plan(<Map<String, dynamic>>[
-        _command('replace', 'sample.replace', <String, dynamic>{
-          'clip_id': 'audio-clip',
-          'asset_id': 'kick-1',
-        }),
-      ]),
-    );
+    final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
+      _command('replace', 'sample.replace', <String, dynamic>{
+        'clip_id': 'audio-clip',
+        'asset_id': 'kick-1',
+      }),
+    ]));
     expect(plan.commands.single.type, 'sample.replace');
 
-    final semanticTool = aiV3SubmitPlanTool(includeCommandSemantics: true);
-    final variants =
-        (((((semanticTool['parameters'] as Map)['properties']
-                            as Map)['commands']
-                        as Map)['items']
-                    as Map)['anyOf']
-                as List)
+    final semanticTool = aiV3SubmitPlanTool(
+      includeCommandSemantics: true,
+    );
+    final variants = (((((semanticTool['parameters'] as Map)['properties']
+            as Map)['commands'] as Map)['items'] as Map)['anyOf'] as List)
         .cast<Map>();
     final replaceVariant = variants.singleWhere((candidate) {
       final type = ((candidate['properties'] as Map)['type'] as Map);
       return (type['enum'] as List).contains('sample.replace');
     });
-    final arguments =
-        (((replaceVariant['properties'] as Map)['arguments']
-                as Map)['properties']
-            as Map);
+    final arguments = (((replaceVariant['properties'] as Map)['arguments']
+        as Map)['properties'] as Map);
     expect(arguments.keys, <String>{'clip_id', 'asset_id'});
     expect(
       (arguments['asset_id'] as Map)['description'],
@@ -3190,11 +3188,9 @@ void main() {
       <String, dynamic>{'clip_id': '', 'asset_id': 'kick-1'},
     ]) {
       expect(
-        () => AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+        () => AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
           _command('bad', 'sample.replace', invalid),
-          ]),
-        ),
+        ])),
         throwsA(isA<AiV3ContractException>()),
       );
     }
@@ -3216,11 +3212,8 @@ void main() {
           as Map);
     }
 
-    expect(argumentsFor('row.create').keys, <String>{
-      'name',
-      'lane',
-      'position',
-    });
+    expect(
+        argumentsFor('row.create').keys, <String>{'name', 'lane', 'position'});
     expect(argumentsFor('row.delete').keys, <String>{'row_id'});
     expect(
       ((argumentsFor('row.create')['lane'] as Map)['anyOf'] as List),
@@ -3341,14 +3334,10 @@ void main() {
     }
 
     expect(argumentsFor('group.create').keys, <String>{'row_ids', 'name'});
-    expect(argumentsFor('group.remove_row').keys, <String>{
-      'group_id',
-      'row_id',
-    });
-    expect(argumentsFor('group.set_collapsed').keys, <String>{
-      'group_id',
-      'collapsed',
-    });
+    expect(
+        argumentsFor('group.remove_row').keys, <String>{'group_id', 'row_id'});
+    expect(argumentsFor('group.set_collapsed').keys,
+        <String>{'group_id', 'collapsed'});
     expect(
       (argumentsFor('group.set_collapsed')['collapsed'] as Map)['description'],
       allOf(contains('Final collapsed state'), contains('opposite')),
@@ -3418,11 +3407,9 @@ void main() {
         throwsA(isA<AiV3ContractException>()),
       );
     }
-    },
-  );
+  });
 
-  test(
-    'row lifecycle contract rejects malformed lane and position variants',
+  test('row lifecycle contract rejects malformed lane and position variants',
       () {
     Map<String, dynamic> lifecyclePlan(Map<String, dynamic> arguments) =>
         _plan(<Map<String, dynamic>>[
@@ -3432,7 +3419,10 @@ void main() {
     for (final arguments in <Map<String, dynamic>>[
       <String, dynamic>{
         'name': 'Audio',
-          'lane': <String, dynamic>{'kind': 'audio', 'instrument_id': 'piano'},
+        'lane': <String, dynamic>{
+          'kind': 'audio',
+          'instrument_id': 'piano',
+        },
         'position': <String, dynamic>{'kind': 'end'},
       },
       <String, dynamic>{
@@ -3451,8 +3441,7 @@ void main() {
         throwsA(isA<AiV3ContractException>()),
       );
     }
-    },
-  );
+  });
 
   test('mix reference schema requires factual suitability', () {
     final tool = aiV3SubmitPlanTool(
@@ -3476,15 +3465,13 @@ void main() {
   });
 
   test('pitch command semantics distinguish MIDI from audio clips', () {
-    final encoded = jsonEncode(
-      aiV3SubmitPlanTool(
+    final encoded = jsonEncode(aiV3SubmitPlanTool(
       commandTypes: const <String>{
         'clip.adjust_pitch_semitones',
         'midi.transpose',
       },
       includeCommandSemantics: true,
-      ),
-    );
+    ));
 
     expect(encoded, contains('Never use for MIDI clips; use midi.transpose'));
     expect(
@@ -3495,12 +3482,10 @@ void main() {
 
   test('embedded destinations distinguish existing and created rows', () {
     for (final type in <String>['sample.place', 'midi.create_clip']) {
-      final encoded = jsonEncode(
-        aiV3SubmitPlanTool(
+      final encoded = jsonEncode(aiV3SubmitPlanTool(
         commandTypes: <String>{type},
         includeCommandSemantics: true,
-        ),
-      );
+      ));
       expect(
         encoded,
         contains(
@@ -3509,7 +3494,9 @@ void main() {
       );
       expect(
         encoded,
-        contains('Never guess the ID of a row created earlier in this plan'),
+        contains(
+          'Never guess the ID of a row created earlier in this plan',
+        ),
       );
       expect(
         encoded,
@@ -3521,12 +3508,10 @@ void main() {
   });
 
   test('trim schema defines absolute project-timeline bounds', () {
-    final encoded = jsonEncode(
-      aiV3SubmitPlanTool(
+    final encoded = jsonEncode(aiV3SubmitPlanTool(
       commandTypes: const <String>{'clip.trim_to_range'},
       includeCommandSemantics: true,
-      ),
-    );
+    ));
     expect(encoded, contains('Absolute project-timeline beat'));
     expect(encoded, contains('not an offset from the clip start'));
     expect(encoded, contains('not a clip-relative length or offset'));
@@ -3576,8 +3561,7 @@ void main() {
     });
 
     test('accepts strict subjective and reference mix goals', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('mix', 'mix.apply_goal', <String, dynamic>{
           'target': <String, dynamic>{'scope': 'row', 'row_id': 100},
           'intents': <Map<String, dynamic>>[
@@ -3598,14 +3582,12 @@ void main() {
             'closeness': 'balanced',
           },
         }),
-        ]),
-      );
+      ]));
       expect(plan.commands.single.type, 'mix.apply_goal');
     });
 
     test('prepares exact effect-instance removal and final bypass state', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('bypass', 'effect.set_bypassed', <String, dynamic>{
           'effect_instance_id': 'fx-comp-1',
           'bypassed': true,
@@ -3613,8 +3595,7 @@ void main() {
         _command('remove', 'effect.remove', <String, dynamic>{
           'effect_instance_id': 'fx-reverb-1',
         }),
-        ]),
-      );
+      ]));
 
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
@@ -3631,14 +3612,12 @@ void main() {
     });
 
     test('effect bypass no-op is already satisfied without an action', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('enabled', 'effect.set_bypassed', <String, dynamic>{
           'effect_instance_id': 'fx-comp-1',
           'bypassed': false,
         }),
-        ]),
-      );
+      ]));
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
         context: _context(),
@@ -3773,7 +3752,9 @@ void main() {
         plan: plan,
         context: _context(),
       );
-      expect(prepared.actions.map((action) => action.type), <String>[
+      expect(
+        prepared.actions.map((action) => action.type),
+        <String>[
           'project_edit',
           'row_mix',
           'row_mix',
@@ -3788,7 +3769,8 @@ void main() {
           'v3_effect_configure',
           'automation_edit',
           'sample_insert',
-      ]);
+        ],
+      );
       expect(prepared.actions[0].data['tempo_bpm'], 128);
       expect(prepared.actions[1].data['delta_db'], -2);
       expect(prepared.actions[2].data['gain_db'], -6);
@@ -3799,9 +3781,10 @@ void main() {
       expect(prepared.actions[8].data['delta_ms'], 2000.0);
       expect(prepared.actions[9].data['semitones'], -2);
       expect(prepared.actions[10].data['notes'], hasLength(1));
-      expect(prepared.actions[11].data['parameters'], <String, dynamic>{
-        'Mix': 0.2,
-      });
+      expect(
+        prepared.actions[11].data['parameters'],
+        <String, dynamic>{'Mix': 0.2},
+      );
       expect(prepared.actions[13].data['items'], hasLength(1));
       expect(prepared.receipts, hasLength(14));
     });
@@ -3833,8 +3816,7 @@ void main() {
     });
 
     test('accepts exact core clip command variants', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('trim', 'clip.trim_to_range', <String, dynamic>{
           'clip_id': 'audio-clip',
           'start_beat': 1,
@@ -3852,8 +3834,7 @@ void main() {
         _command('delete', 'clip.delete', <String, dynamic>{
           'clip_id': 'midi-clip',
         }),
-        ]),
-      );
+      ]));
 
       expect(plan.commands, hasLength(4));
       expect(plan.commands.map((command) => command.type), <String>[
@@ -3864,41 +3845,35 @@ void main() {
       ]);
     });
 
-    test(
-      'accepts strict audio clip glue and prepares exact stable targets',
+    test('accepts strict audio clip glue and prepares exact stable targets',
         () {
-        final plan = AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('glue', 'clip.glue', <String, dynamic>{
           'clip_ids': <String>['audio-clip-2', 'audio-clip'],
           'label': 'Hook Comp',
         }),
-          ]),
-        );
+      ]));
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
         context: _contextWithSecondAudioClip(),
       );
 
       expect(prepared.actions.single.type, 'v3_clip_glue');
-        expect(prepared.actions.single.data['source_clip_ids'], <String>[
-          'audio-clip',
-          'audio-clip-2',
-        ]);
+      expect(
+        prepared.actions.single.data['source_clip_ids'],
+        <String>['audio-clip', 'audio-clip-2'],
+      );
       expect(prepared.actions.single.data['label'], 'Hook Comp');
       expect(prepared.actions.single.data['start_ms'], 0.0);
       expect(prepared.actions.single.data['duration_ms'], 6000.0);
-      },
-    );
+    });
 
     test('accepts and prepares strict local two-stem separation', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('stems', 'clip.separate_stems', <String, dynamic>{
           'clip_id': 'audio-clip',
         }),
-        ]),
-      );
+      ]));
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
         context: _contextForStemSeparation(),
@@ -3916,27 +3891,22 @@ void main() {
       );
     });
 
-    test(
-      'stem separation rejects malformed, MIDI, and unavailable requests',
+    test('stem separation rejects malformed, MIDI, and unavailable requests',
         () {
       expect(
-          () => AiV3Plan.fromJson(
-            _plan(<Map<String, dynamic>>[
+        () => AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
           _command('bad', 'clip.separate_stems', <String, dynamic>{
             'clip_id': 'audio-clip',
             'output': 'vocals',
           }),
-            ]),
-          ),
+        ])),
         throwsA(isA<AiV3ContractException>()),
       );
-        final midi = AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+      final midi = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('midi', 'clip.separate_stems', <String, dynamic>{
           'clip_id': 'midi-clip',
         }),
-          ]),
-        );
+      ]));
       expect(
         () => const AiV3CommandPreparer().prepare(
           plan: midi,
@@ -3944,13 +3914,11 @@ void main() {
         ),
         throwsA(isA<AiV3PreparationException>()),
       );
-        final unavailable = AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+      final unavailable = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('stems', 'clip.separate_stems', <String, dynamic>{
           'clip_id': 'audio-clip',
         }),
-          ]),
-        );
+      ]));
       expect(
         () => const AiV3CommandPreparer().prepare(
           plan: unavailable,
@@ -3967,9 +3935,7 @@ void main() {
       final capacityData = Map<String, dynamic>.from(
         jsonDecode(jsonEncode(_contextForStemSeparation().data)) as Map,
       );
-        final project = Map<String, dynamic>.from(
-          capacityData['project'] as Map,
-        );
+      final project = Map<String, dynamic>.from(capacityData['project'] as Map);
       project['row_capacity'] = <String, dynamic>{
         'current_rows': (capacityData['rows'] as List).length,
         'max_rows': (capacityData['rows'] as List).length + 1,
@@ -4019,14 +3985,11 @@ void main() {
           ),
         ),
       );
-      },
-    );
+    });
 
-    test(
-      'stem separation permits a later stable edit but blocks topology work',
+    test('stem separation permits a later stable edit but blocks topology work',
         () {
-        final allowed = AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+      final allowed = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('stems', 'clip.separate_stems', <String, dynamic>{
           'clip_id': 'audio-clip',
         }),
@@ -4034,8 +3997,7 @@ void main() {
           'row_id': 200,
           'delta_db': -1,
         }),
-          ]),
-        );
+      ]));
       expect(
         const AiV3CommandPreparer()
             .prepare(plan: allowed, context: _contextForStemSeparation())
@@ -4043,8 +4005,7 @@ void main() {
         hasLength(2),
       );
 
-        final blocked = AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+      final blocked = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('stems', 'clip.separate_stems', <String, dynamic>{
           'clip_id': 'audio-clip',
         }),
@@ -4053,8 +4014,7 @@ void main() {
           'lane': <String, dynamic>{'kind': 'audio'},
           'position': <String, dynamic>{'kind': 'end'},
         }),
-          ]),
-        );
+      ]));
       expect(
         () => const AiV3CommandPreparer().prepare(
           plan: blocked,
@@ -4062,18 +4022,15 @@ void main() {
         ),
         throwsA(isA<AiV3PreparationException>()),
       );
-      },
-    );
+    });
 
     test('accepts and prepares strict local audio-to-MIDI conversion', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('convert', 'clip.convert_to_midi', <String, dynamic>{
           'clip_id': 'audio-clip',
           'instrument_id': 'piano',
         }),
-        ]),
-      );
+      ]));
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
         context: _contextForAudioToMidi(),
@@ -4090,23 +4047,20 @@ void main() {
 
     test('audio-to-MIDI rejects malformed and unavailable requests', () {
       expect(
-        () => AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+        () => AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
           _command('bad', 'clip.convert_to_midi', <String, dynamic>{
             'clip_id': 'audio-clip',
           }),
-          ]),
-        ),
+        ])),
         throwsA(isA<AiV3ContractException>()),
       );
-      final unavailableInstrument = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final unavailableInstrument =
+          AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('convert', 'clip.convert_to_midi', <String, dynamic>{
           'clip_id': 'audio-clip',
           'instrument_id': 'invented',
         }),
-        ]),
-      );
+      ]));
       expect(
         () => const AiV3CommandPreparer().prepare(
           plan: unavailableInstrument,
@@ -4120,14 +4074,12 @@ void main() {
           ),
         ),
       );
-      final unavailableService = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final unavailableService = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('convert', 'clip.convert_to_midi', <String, dynamic>{
           'clip_id': 'audio-clip',
           'instrument_id': 'piano',
         }),
-        ]),
-      );
+      ]));
       expect(
         () => const AiV3CommandPreparer().prepare(
           plan: unavailableService,
@@ -4159,17 +4111,14 @@ void main() {
         },
       ]) {
         expect(
-          () => AiV3Plan.fromJson(
-            _plan(<Map<String, dynamic>>[
+          () => AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
             _command('glue', 'clip.glue', arguments),
-            ]),
-          ),
+          ])),
           throwsA(isA<AiV3ContractException>()),
         );
       }
 
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('glue', 'clip.glue', <String, dynamic>{
           'clip_ids': <String>['audio-clip', 'audio-clip-2'],
           'label': null,
@@ -4177,8 +4126,7 @@ void main() {
         _command('delete', 'clip.delete', <String, dynamic>{
           'clip_id': 'audio-clip',
         }),
-        ]),
-      );
+      ]));
       expect(
         () => const AiV3CommandPreparer().prepare(
           plan: plan,
@@ -4194,32 +4142,27 @@ void main() {
       );
     });
 
-    test(
-      'glue rejects cross-row, previously mutated, and post-topology clips',
+    test('glue rejects cross-row, previously mutated, and post-topology clips',
         () {
       AiV3Plan glueAfter(List<Map<String, dynamic>> preceding) =>
-            AiV3Plan.fromJson(
-              _plan(<Map<String, dynamic>>[
+          AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
             ...preceding,
             _command('glue', 'clip.glue', <String, dynamic>{
               'clip_ids': <String>['audio-clip', 'audio-clip-2'],
               'label': null,
             }),
-              ]),
-            );
+          ]));
 
       expect(
         () => const AiV3CommandPreparer().prepare(
           plan: glueAfter(const <Map<String, dynamic>>[]),
           context: _contextWithCrossRowAudioClips(),
         ),
-          throwsA(
-            isA<AiV3PreparationException>().having(
+        throwsA(isA<AiV3PreparationException>().having(
           (error) => error.code,
           'code',
           'v3_clip_glue_row_mismatch',
-            ),
-          ),
+        )),
       );
       expect(
         () => const AiV3CommandPreparer().prepare(
@@ -4231,13 +4174,11 @@ void main() {
           ]),
           context: _contextWithSecondAudioClip(),
         ),
-          throwsA(
-            isA<AiV3PreparationException>().having(
+        throwsA(isA<AiV3PreparationException>().having(
           (error) => error.code,
           'code',
           'v3_clip_glue_source_already_mutated',
-            ),
-          ),
+        )),
       );
       expect(
         () => const AiV3CommandPreparer().prepare(
@@ -4250,8 +4191,7 @@ void main() {
           ]),
           context: _contextWithSecondAudioClip(),
         ),
-          throwsA(
-            isA<AiV3PreparationException>().having(
+        throwsA(isA<AiV3PreparationException>().having(
           (error) => error.code,
           'code',
           'v3_clip_id_unknown',
@@ -4262,8 +4202,7 @@ void main() {
       );
 
     test('keeps absolute and relative audio pitch commands distinct', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('set-pitch', 'clip.set_pitch_semitones', <String, dynamic>{
           'clip_id': 'audio-clip',
           'pitch_semitones': 3,
@@ -4271,10 +4210,12 @@ void main() {
         _command(
           'adjust-pitch',
           'clip.adjust_pitch_semitones',
-            <String, dynamic>{'clip_id': 'audio-clip', 'delta_semitones': -2},
+          <String, dynamic>{
+            'clip_id': 'audio-clip',
+            'delta_semitones': -2,
+          },
         ),
-        ]),
-      );
+      ]));
 
       expect(plan.commands, hasLength(2));
       expect(plan.commands.first.arguments, contains('pitch_semitones'));
@@ -4305,28 +4246,20 @@ void main() {
     });
 
     test('keeps absolute and relative audio stretch commands distinct', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command(
-            'set-length',
-            'clip.set_timeline_length_beats',
-            <String, dynamic>{
+            'set-length', 'clip.set_timeline_length_beats', <String, dynamic>{
           'clip_id': 'audio-clip',
           'length_beats': 12,
           'preserve_pitch': true,
-            },
-          ),
+        }),
         _command(
-            'scale-length',
-            'clip.scale_timeline_length',
-            <String, dynamic>{
+            'scale-length', 'clip.scale_timeline_length', <String, dynamic>{
           'clip_id': 'audio-clip',
           'factor': 0.5,
           'preserve_pitch': false,
-            },
-          ),
-        ]),
-      );
+        }),
+      ]));
 
       expect(plan.commands, hasLength(2));
       expect(plan.commands.first.arguments, contains('length_beats'));
@@ -4348,10 +4281,10 @@ void main() {
           'preserve_pitch': false,
         }),
         _command(
-          'missing-mode',
-          'clip.scale_timeline_length',
-          <String, dynamic>{'clip_id': 'audio-clip', 'factor': 2},
-        ),
+            'missing-mode', 'clip.scale_timeline_length', <String, dynamic>{
+          'clip_id': 'audio-clip',
+          'factor': 2,
+        }),
         _command('extra', 'clip.set_timeline_length_beats', <String, dynamic>{
           'clip_id': 'audio-clip',
           'length_beats': 8,
@@ -4367,8 +4300,7 @@ void main() {
     });
 
     test('accepts explicit source tempo and tempo-follow mode commands', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('source', 'clip.set_source_tempo_bpm', <String, dynamic>{
           'clip_id': 'audio-clip',
           'source_tempo_bpm': 92,
@@ -4377,8 +4309,7 @@ void main() {
           'clip_id': 'audio-clip',
           'mode': 'preserve_pitch',
         }),
-        ]),
-      );
+      ]));
 
       expect(plan.commands, hasLength(2));
       expect(plan.commands.first.arguments['source_tempo_bpm'], 92);
@@ -4386,8 +4317,7 @@ void main() {
     });
 
     test('accepts automatic clip and project tempo commands', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('align', 'clip.align_tempo_to_project', <String, dynamic>{
           'clip_id': 'audio-clip',
           'mode': 'preserve_pitch',
@@ -4396,8 +4326,7 @@ void main() {
           'clip_id': 'audio-clip',
           'mode': 'repitch',
         }),
-        ]),
-      );
+      ]));
 
       expect(plan.commands, hasLength(2));
       expect(plan.commands.first.arguments['mode'], 'preserve_pitch');
@@ -4427,8 +4356,7 @@ void main() {
     });
 
     test('accepts silence trim and first-sound destination variants', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('trim', 'clip.trim_silence', <String, dynamic>{
           'clip_id': 'audio-clip',
           'edges': 'both',
@@ -4436,14 +4364,16 @@ void main() {
         }),
         _command('align', 'clip.align_first_sound', <String, dynamic>{
           'clip_id': 'audio-clip',
-            'destination': <String, dynamic>{'kind': 'project_beat', 'beat': 4},
+          'destination': <String, dynamic>{
+            'kind': 'project_beat',
+            'beat': 4,
+          },
         }),
         _command('snap', 'clip.align_first_sound', <String, dynamic>{
           'clip_id': 'audio-clip',
           'destination': <String, dynamic>{'kind': 'nearest_bar'},
         }),
-        ]),
-      );
+      ]));
 
       expect(plan.commands, hasLength(3));
       expect(plan.commands.first.arguments['edges'], 'both');
@@ -4467,7 +4397,10 @@ void main() {
         }),
         _command('extra', 'clip.align_first_sound', <String, dynamic>{
           'clip_id': 'audio-clip',
-          'destination': <String, dynamic>{'kind': 'nearest_beat', 'beat': 2},
+          'destination': <String, dynamic>{
+            'kind': 'nearest_beat',
+            'beat': 2,
+          },
         }),
       ]) {
         expect(
@@ -4523,8 +4456,7 @@ void main() {
 
     test('rejects duplicate command ids and outcome mismatches', () {
       expect(
-        () => AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+        () => AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
           _command('same', 'row.rename', <String, dynamic>{
             'row_id': 100,
             'new_name': 'A',
@@ -4533,8 +4465,7 @@ void main() {
             'row_id': 100,
             'new_name': 'B',
           }),
-          ]),
-        ),
+        ])),
         throwsA(isA<AiV3ContractException>()),
       );
       final invalid = _plan(const <Map<String, dynamic>>[])
@@ -4568,9 +4499,11 @@ void main() {
       expect(encoded, contains('distinct, concise, meaningful answers'));
       expect(encoded, contains('Never include Cancel, Something else, Other'));
       expect(encoded, contains('do not repeat, number, or bullet'));
-      final schema = aiV3SubmitPlanTool()['parameters'] as Map<String, dynamic>;
+      final schema =
+          aiV3SubmitPlanTool()['parameters'] as Map<String, dynamic>;
       final properties = schema['properties'] as Map<String, dynamic>;
-      final userMessage = properties['user_message'] as Map<String, dynamic>;
+      final userMessage =
+          properties['user_message'] as Map<String, dynamic>;
       expect(userMessage, isNot(contains('maxLength')));
       expect(encoded, contains('clear, easy-to-understand language'));
       expect(
@@ -4589,7 +4522,8 @@ void main() {
 
     test('accepts long user messages and clarification options', () {
       final longMessage = _plan(const <Map<String, dynamic>>[])
-        ..['user_message'] = List<String>.filled(2000, 'a').join();
+        ..['user_message'] =
+            List<String>.filled(2000, 'a').join();
       expect(AiV3Plan.fromJson(longMessage).userMessage, hasLength(2000));
 
       final longOption = _plan(const <Map<String, dynamic>>[])
@@ -4598,21 +4532,17 @@ void main() {
         ..['question_options'] = <String>[
           List<String>.filled(1000, 'a').join(),
         ];
-      expect(
-        AiV3Plan.fromJson(longOption).questionOptions.single,
-        hasLength(1000),
-      );
+      expect(AiV3Plan.fromJson(longOption).questionOptions.single,
+          hasLength(1000));
     });
 
     test('round-trips complete plans and rejects undeclared fields', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('mute', 'row.set_muted', <String, dynamic>{
           'row_id': 100,
           'muted': true,
         }),
-        ]),
-      );
+      ]));
       expect(AiV3Plan.fromJson(plan.toJson()).commands, hasLength(1));
 
       final extraRoot = _plan(const <Map<String, dynamic>>[])
@@ -4689,11 +4619,9 @@ void main() {
       );
     });
 
-    test(
-      'prepares a stable-id mix goal without exposing concrete MixActions',
+    test('prepares a stable-id mix goal without exposing concrete MixActions',
         () {
-        final plan = AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('mix', 'mix.apply_goal', <String, dynamic>{
           'target': <String, dynamic>{'scope': 'row', 'row_id': 100},
           'intents': <Map<String, dynamic>>[
@@ -4710,8 +4638,7 @@ void main() {
           'reset_fx': false,
           'reference': null,
         }),
-          ]),
-        );
+      ]));
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
         context: _context(),
@@ -4721,12 +4648,10 @@ void main() {
       expect(target['row_id'], 100);
       expect(target['row_index'], 0);
       expect(prepared.preview, contains('Mix Audio'));
-      },
-    );
+    });
 
     test('rejects a reference that is the processing row', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('mix', 'mix.apply_goal', <String, dynamic>{
           'target': <String, dynamic>{'scope': 'row', 'row_id': 100},
           'intents': <Map<String, dynamic>>[
@@ -4747,8 +4672,7 @@ void main() {
             'closeness': 'balanced',
           },
         }),
-        ]),
-      );
+      ]));
       expect(
         () => const AiV3CommandPreparer().prepare(
           plan: plan,
@@ -4765,8 +4689,7 @@ void main() {
     });
 
     test('resolves stable ids and expands compound commands', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('mute', 'row.set_muted', <String, dynamic>{
           'row_id': 100,
           'muted': true,
@@ -4777,26 +4700,25 @@ void main() {
         }),
         _command('sample', 'sample.place', <String, dynamic>{
           'destination': <String, dynamic>{
-              'new_row': <String, dynamic>{'name': 'Kick'},
+            'new_row': <String, dynamic>{
+              'name': 'Kick',
+            },
           },
           'placements': <Map<String, dynamic>>[
             <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
           ],
         }),
-        ]),
-      );
+      ]));
 
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
         context: _context(),
       );
 
-      expect(prepared.actions.map((action) => action.type), <String>[
-        'row_mute',
-        'row_rename',
-        'row_create',
-        'sample_insert',
-      ]);
+      expect(
+        prepared.actions.map((action) => action.type),
+        <String>['row_mute', 'row_rename', 'row_create', 'sample_insert'],
+      );
       expect(prepared.stateDigest, 'state-1');
     });
 
@@ -4806,15 +4728,13 @@ void main() {
         lengthBeats: 8,
       );
       final prepared = const AiV3CommandPreparer().prepare(
-        plan: AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+        plan: AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
           _command('trim', 'clip.trim_to_range', <String, dynamic>{
             'clip_id': 'audio-clip',
             'start_beat': 14,
             'end_beat': 18,
           }),
-          ]),
-        ),
+        ])),
         context: context,
       );
       expect(prepared.actions, hasLength(1));
@@ -4825,15 +4745,13 @@ void main() {
 
       expect(
         () => const AiV3CommandPreparer().prepare(
-          plan: AiV3Plan.fromJson(
-            _plan(<Map<String, dynamic>>[
+          plan: AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
             _command('relative', 'clip.trim_to_range', <String, dynamic>{
               'clip_id': 'audio-clip',
               'start_beat': 2,
               'end_beat': 6,
             }),
-            ]),
-          ),
+          ])),
           context: context,
         ),
         throwsA(
@@ -4848,8 +4766,7 @@ void main() {
 
     test('canonicalizes only unique effect parameter casing', () {
       final prepared = const AiV3CommandPreparer().prepare(
-        plan: AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+        plan: AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
           _command('effect', 'effect.ensure_configured', <String, dynamic>{
             'row_id': 100,
             'effect_id': 'Reverb',
@@ -4857,19 +4774,18 @@ void main() {
               <String, dynamic>{'parameter_id': 'mix', 'value': 0.25},
             ],
           }),
-          ]),
-        ),
+        ])),
         context: _context(),
       );
       expect(prepared.actions.single.type, 'v3_effect_configure');
-      expect(prepared.actions.single.data['parameters'], <String, dynamic>{
-        'Mix': 0.25,
-      });
+      expect(
+        prepared.actions.single.data['parameters'],
+        <String, dynamic>{'Mix': 0.25},
+      );
 
       expect(
         () => const AiV3CommandPreparer().prepare(
-          plan: AiV3Plan.fromJson(
-            _plan(<Map<String, dynamic>>[
+          plan: AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
             _command('effect', 'effect.ensure_configured', <String, dynamic>{
               'row_id': 100,
               'effect_id': 'Reverb',
@@ -4880,8 +4796,7 @@ void main() {
                 },
               ],
             }),
-            ]),
-          ),
+          ])),
           context: _context(),
         ),
         throwsA(
@@ -4894,8 +4809,7 @@ void main() {
       );
     });
 
-    test(
-      'prepares exact stable sample replacement and rejects dead targets',
+    test('prepares exact stable sample replacement and rejects dead targets',
         () {
       final replace = _command('replace', 'sample.replace', <String, dynamic>{
         'clip_id': 'audio-clip',
@@ -4933,12 +4847,10 @@ void main() {
           ),
         ),
       );
-      },
-    );
+    });
 
     test('embedded MIDI destination expands to exactly one row creation', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('midi', 'midi.create_clip', <String, dynamic>{
           'destination': <String, dynamic>{
             'new_row': <String, dynamic>{
@@ -4957,23 +4869,21 @@ void main() {
             },
           ],
         }),
-        ]),
-      );
+      ]));
 
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
         context: _context(),
       );
 
-      expect(prepared.actions.map((action) => action.type), <String>[
-        'row_create',
-        'midi_compose',
-      ]);
+      expect(
+        prepared.actions.map((action) => action.type),
+        <String>['row_create', 'midi_compose'],
+      );
     });
 
     test('delete then embedded MIDI destination uses the final row index', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('delete-keys', 'row.delete', <String, dynamic>{
           'row_id': 200,
         }),
@@ -4995,34 +4905,34 @@ void main() {
             },
           ],
         }),
-        ]),
-      );
+      ]));
 
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
         context: _context(),
       );
 
-      expect(prepared.actions.map((action) => action.type), <String>[
-        'row_delete',
-        'row_create',
-        'midi_compose',
-      ]);
-      expect((prepared.actions.last.data['target'] as Map)['row_index'], 1);
+      expect(
+        prepared.actions.map((action) => action.type),
+        <String>['row_delete', 'row_create', 'midi_compose'],
+      );
+      expect(
+        (prepared.actions.last.data['target'] as Map)['row_index'],
+        1,
+      );
     });
 
-    test(
-      'canonicalizes exact standalone and embedded MIDI row duplication',
+    test('canonicalizes exact standalone and embedded MIDI row duplication',
         () {
-        Map<String, dynamic> createRow(String id) => _command(
-              id,
-              'row.create',
-              <String, dynamic>{
+      Map<String, dynamic> createRow(String id) =>
+          _command(id, 'row.create', <String, dynamic>{
             'name': 'House Drums',
-            'lane': <String, dynamic>{'kind': 'midi', 'instrument_id': 'piano'},
+            'lane': <String, dynamic>{
+              'kind': 'midi',
+              'instrument_id': 'piano',
+            },
             'position': <String, dynamic>{'kind': 'end'},
-              },
-            );
+          });
       Map<String, dynamic> createClip(String id) =>
           _command(id, 'midi.create_clip', <String, dynamic>{
             'destination': <String, dynamic>{
@@ -5056,16 +4966,14 @@ void main() {
           prepared.plan.commands.map((command) => command.commandId),
           <String>['clip'],
         );
-          expect(prepared.actions.map((action) => action.type), <String>[
-            'row_create',
-            'midi_compose',
-          ]);
+        expect(
+          prepared.actions.map((action) => action.type),
+          <String>['row_create', 'midi_compose'],
+        );
       }
-      },
-    );
+    });
 
-    test(
-      'canonicalizes exact standalone and embedded sample row duplication',
+    test('canonicalizes exact standalone and embedded sample row duplication',
         () {
       final sample = _command('sample', 'sample.place', <String, dynamic>{
         'destination': <String, dynamic>{
@@ -5094,13 +5002,12 @@ void main() {
           prepared.plan.commands.map((command) => command.commandId),
           <String>['sample'],
         );
-          expect(prepared.actions.map((action) => action.type), <String>[
-            'row_create',
-            'sample_insert',
-          ]);
+        expect(
+          prepared.actions.map((action) => action.type),
+          <String>['row_create', 'sample_insert'],
+        );
       }
-      },
-    );
+    });
 
     test('rejects ambiguous repeated embedded destination rows', () {
       final sample = _command('sample', 'sample.place', <String, dynamic>{
@@ -5111,12 +5018,10 @@ void main() {
           <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
         ],
       });
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         sample,
         <String, dynamic>{...sample, 'command_id': 'sample-2'},
-        ]),
-      );
+      ]));
 
       expect(
         () => const AiV3CommandPreparer().prepare(
@@ -5133,8 +5038,7 @@ void main() {
       );
     });
 
-    test(
-      'rejects multiple standalone rows matching one embedded destination',
+    test('rejects multiple standalone rows matching one embedded destination',
         () {
       Map<String, dynamic> row(String id) =>
           _command(id, 'row.create', <String, dynamic>{
@@ -5167,13 +5071,11 @@ void main() {
           ),
         ),
       );
-      },
-    );
+    });
 
     test('allows factually distinct standalone and embedded rows', () {
       final plans = <AiV3Plan>[
-        AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+        AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
           _command('row', 'row.create', <String, dynamic>{
             'name': 'Percussion',
             'lane': <String, dynamic>{'kind': 'audio'},
@@ -5187,17 +5089,18 @@ void main() {
               <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
             ],
           }),
-          ]),
-        ),
-        AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+        ])),
+        AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
           _command('row', 'row.create', <String, dynamic>{
             'name': 'Keys',
             'lane': <String, dynamic>{
               'kind': 'midi',
               'instrument_id': 'piano',
             },
-              'position': <String, dynamic>{'kind': 'before', 'row_id': 100},
+            'position': <String, dynamic>{
+              'kind': 'before',
+              'row_id': 100,
+            },
           }),
           _command('midi', 'midi.create_clip', <String, dynamic>{
             'destination': <String, dynamic>{
@@ -5217,8 +5120,7 @@ void main() {
               },
             ],
           }),
-          ]),
-        ),
+        ])),
       ];
 
       for (final plan in plans) {
@@ -5234,14 +5136,12 @@ void main() {
     });
 
     test('rejects unknown targets', () {
-      final unknown = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final unknown = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('rename', 'row.rename', <String, dynamic>{
           'row_id': 999,
           'new_name': 'Missing',
         }),
-        ]),
-      );
+      ]));
       expect(
         () => const AiV3CommandPreparer().prepare(
           plan: unknown,
@@ -5252,8 +5152,7 @@ void main() {
     });
 
     test('prepares semantic row controls with stable targets', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('adjust-gain', 'row.adjust_gain_db', <String, dynamic>{
           'row_id': 100,
           'delta_db': -2,
@@ -5270,8 +5169,7 @@ void main() {
           'row_id': 100,
           'soloed': true,
         }),
-        ]),
-      );
+      ]));
 
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
@@ -5293,8 +5191,7 @@ void main() {
     });
 
     test('prepares row selection, color, and mute final states', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('select', 'row.select', <String, dynamic>{'row_id': 200}),
         _command('color', 'row.set_color', <String, dynamic>{
           'row_id': 100,
@@ -5304,19 +5201,17 @@ void main() {
           'row_id': 200,
           'muted': false,
         }),
-        ]),
-      );
+      ]));
 
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
         context: _context(),
       );
 
-      expect(prepared.actions.map((action) => action.type), <String>[
-        'row_select',
-        'row_color_edit',
-        'row_mute',
-      ]);
+      expect(
+        prepared.actions.map((action) => action.type),
+        <String>['row_select', 'row_color_edit', 'row_mute'],
+      );
       for (final action in prepared.actions) {
         final target = action.data['target'] as Map;
         expect(target['row_id'], isIn(<int>[100, 200]));
@@ -5328,8 +5223,7 @@ void main() {
     });
 
     test('row metadata commands detect already-satisfied state', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('select', 'row.select', <String, dynamic>{'row_id': 100}),
         _command('color', 'row.set_color', <String, dynamic>{
           'row_id': 200,
@@ -5339,8 +5233,7 @@ void main() {
           'row_id': 100,
           'muted': false,
         }),
-        ]),
-      );
+      ]));
 
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
@@ -5354,8 +5247,7 @@ void main() {
     });
 
     test('prepares ordered row role overrides and skips satisfied setters', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('same', 'row.set_role_override', <String, dynamic>{
           'row_id': 100,
           'role': 'vocals',
@@ -5372,36 +5264,38 @@ void main() {
           'row_id': 100,
           'role': null,
         }),
-        ]),
-      );
+      ]));
 
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
         context: _context(),
       );
 
-      expect(prepared.actions.map((action) => action.type), <String>[
-        'v3_row_role_override',
-        'v3_row_role_override',
-      ]);
+      expect(
+        prepared.actions.map((action) => action.type),
+        <String>['v3_row_role_override', 'v3_row_role_override'],
+      );
       expect(prepared.actions.first.data['role'], 'drums');
       expect(prepared.actions.last.data['role'], isNull);
-      expect(prepared.receipts.map((receipt) => receipt['status']), <String>[
+      expect(
+        prepared.receipts.map((receipt) => receipt['status']),
+        <String>[
           'already_satisfied',
           'prepared',
           'already_satisfied',
           'prepared',
-      ]);
+        ],
+      );
     });
 
     test('prepares one row-scoped phone cleanup action with exact facts', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
-          _command('cleanup', 'row.apply_phone_mic_cleanup', <String, dynamic>{
-            'row_id': 100,
-          }),
-        ]),
-      );
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
+        _command(
+          'cleanup',
+          'row.apply_phone_mic_cleanup',
+          <String, dynamic>{'row_id': 100},
+        ),
+      ]));
 
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
@@ -5423,13 +5317,13 @@ void main() {
     });
 
     test('phone cleanup rejects unavailable service, effects, and audio', () {
-      final cleanup = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
-          _command('cleanup', 'row.apply_phone_mic_cleanup', <String, dynamic>{
-            'row_id': 100,
-          }),
-        ]),
-      );
+      final cleanup = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
+        _command(
+          'cleanup',
+          'row.apply_phone_mic_cleanup',
+          <String, dynamic>{'row_id': 100},
+        ),
+      ]));
       for (final context in <AiV3CoreContext>[
         _contextForPhoneMicCleanup(includeService: false),
         _contextForPhoneMicCleanup(includeAllEffects: false),
@@ -5448,15 +5342,13 @@ void main() {
           ),
         );
       }
-      final midiRowCleanup = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final midiRowCleanup = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command(
           'cleanup-midi',
           'row.apply_phone_mic_cleanup',
           <String, dynamic>{'row_id': 200},
         ),
-        ]),
-      );
+      ]));
       expect(
         () => const AiV3CommandPreparer().prepare(
           plan: midiRowCleanup,
@@ -5473,18 +5365,18 @@ void main() {
     });
 
     test('phone cleanup enforces ordering and same-row sound conflicts', () {
-      final conflict = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
-          _command('cleanup', 'row.apply_phone_mic_cleanup', <String, dynamic>{
-            'row_id': 100,
-          }),
+      final conflict = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
+        _command(
+          'cleanup',
+          'row.apply_phone_mic_cleanup',
+          <String, dynamic>{'row_id': 100},
+        ),
         _command('effect', 'effect.ensure_configured', <String, dynamic>{
           'row_id': 100,
           'effect_id': 'Compressor',
           'parameters': const <Object>[],
         }),
-        ]),
-      );
+      ]));
       expect(
         () => const AiV3CommandPreparer().prepare(
           plan: conflict,
@@ -5499,31 +5391,39 @@ void main() {
         ),
       );
 
-      final cleanupThenDelete = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
-          _command('cleanup', 'row.apply_phone_mic_cleanup', <String, dynamic>{
-            'row_id': 100,
-          }),
-          _command('delete', 'row.delete', <String, dynamic>{'row_id': 100}),
-        ]),
-      );
+      final cleanupThenDelete = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
+        _command(
+          'cleanup',
+          'row.apply_phone_mic_cleanup',
+          <String, dynamic>{'row_id': 100},
+        ),
+        _command(
+          'delete',
+          'row.delete',
+          <String, dynamic>{'row_id': 100},
+        ),
+      ]));
       final prepared = const AiV3CommandPreparer().prepare(
         plan: cleanupThenDelete,
         context: _contextForPhoneMicCleanup(),
       );
-      expect(prepared.actions.map((action) => action.type), <String>[
-        'v3_phone_mic_cleanup',
-        'row_delete',
-      ]);
-
-      final deleteThenCleanup = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
-          _command('delete', 'row.delete', <String, dynamic>{'row_id': 100}),
-          _command('cleanup', 'row.apply_phone_mic_cleanup', <String, dynamic>{
-            'row_id': 100,
-          }),
-        ]),
+      expect(
+        prepared.actions.map((action) => action.type),
+        <String>['v3_phone_mic_cleanup', 'row_delete'],
       );
+
+      final deleteThenCleanup = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
+        _command(
+          'delete',
+          'row.delete',
+          <String, dynamic>{'row_id': 100},
+        ),
+        _command(
+          'cleanup',
+          'row.apply_phone_mic_cleanup',
+          <String, dynamic>{'row_id': 100},
+        ),
+      ]));
       expect(
         () => const AiV3CommandPreparer().prepare(
           plan: deleteThenCleanup,
@@ -5540,30 +5440,29 @@ void main() {
     });
 
     test('phone cleanup allows an independent surviving row edit', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
-          _command('cleanup', 'row.apply_phone_mic_cleanup', <String, dynamic>{
-            'row_id': 100,
-          }),
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
+        _command(
+          'cleanup',
+          'row.apply_phone_mic_cleanup',
+          <String, dynamic>{'row_id': 100},
+        ),
         _command('rename', 'row.rename', <String, dynamic>{
           'row_id': 200,
           'new_name': 'Keys Preserved',
         }),
-        ]),
-      );
+      ]));
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
         context: _contextForPhoneMicCleanup(),
       );
-      expect(prepared.actions.map((action) => action.type), <String>[
-        'v3_phone_mic_cleanup',
-        'row_rename',
-      ]);
+      expect(
+        prepared.actions.map((action) => action.type),
+        <String>['v3_phone_mic_cleanup', 'row_rename'],
+      );
     });
 
     test('prepares audio and MIDI row creation plus stable row deletion', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('audio', 'row.create', <String, dynamic>{
           'name': 'Vocal Double',
           'lane': <String, dynamic>{'kind': 'audio'},
@@ -5571,23 +5470,24 @@ void main() {
         }),
         _command('midi', 'row.create', <String, dynamic>{
           'name': 'Soft Keys',
-            'lane': <String, dynamic>{'kind': 'midi', 'instrument_id': 'piano'},
+          'lane': <String, dynamic>{
+            'kind': 'midi',
+            'instrument_id': 'piano',
+          },
           'position': <String, dynamic>{'kind': 'end'},
         }),
         _command('delete', 'row.delete', <String, dynamic>{'row_id': 100}),
-        ]),
-      );
+      ]));
 
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
         context: _context(),
       );
 
-      expect(prepared.actions.map((action) => action.type), <String>[
-        'row_create',
-        'row_create',
-        'row_delete',
-      ]);
+      expect(
+        prepared.actions.map((action) => action.type),
+        <String>['row_create', 'row_create', 'row_delete'],
+      );
       expect(prepared.actions[0].data['position'], 'above');
       expect((prepared.actions[0].data['target'] as Map)['row_id'], 200);
       expect(prepared.actions[0].data['lane_kind'], 'audio');
@@ -5598,8 +5498,7 @@ void main() {
     });
 
     test('row lifecycle preparation rejects unavailable factual state', () {
-      final unknownInstrument = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final unknownInstrument = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('midi', 'row.create', <String, dynamic>{
           'name': 'Unknown',
           'lane': <String, dynamic>{
@@ -5608,8 +5507,7 @@ void main() {
           },
           'position': <String, dynamic>{'kind': 'end'},
         }),
-        ]),
-      );
+      ]));
       expect(
         () => const AiV3CommandPreparer().prepare(
           plan: unknownInstrument,
@@ -5634,11 +5532,9 @@ void main() {
         'max_rows': 32,
         'can_create': true,
       };
-      final deleteLast = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final deleteLast = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('delete', 'row.delete', <String, dynamic>{'row_id': 100}),
-        ]),
-      );
+      ]));
       expect(
         () => const AiV3CommandPreparer().prepare(
           plan: deleteLast,
@@ -5741,8 +5637,7 @@ void main() {
 
     test('ordered deletion preserves reverse and unrelated operations', () {
       final prepared = const AiV3CommandPreparer().prepare(
-        plan: AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+        plan: AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
           _command('rename-deleted', 'row.rename', <String, dynamic>{
             'row_id': 100,
             'new_name': 'Before Delete',
@@ -5752,16 +5647,14 @@ void main() {
             'row_id': 200,
             'new_name': 'Still Here',
           }),
-          ]),
-        ),
+        ])),
         context: _context(),
       );
 
-      expect(prepared.actions.map((action) => action.type), <String>[
-        'row_rename',
-        'row_delete',
-        'row_rename',
-      ]);
+      expect(
+        prepared.actions.map((action) => action.type),
+        <String>['row_rename', 'row_delete', 'row_rename'],
+      );
     });
 
     test('topology changes block later index-dependent operations', () {
@@ -5772,8 +5665,7 @@ void main() {
             'position': <String, dynamic>{'kind': 'end'},
           });
 
-      final laterMix = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final laterMix = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         createRow(),
         _command('mix', 'mix.apply_goal', <String, dynamic>{
           'target': <String, dynamic>{'scope': 'row', 'row_id': 100},
@@ -5791,8 +5683,7 @@ void main() {
           'reset_fx': false,
           'reference': null,
         }),
-        ]),
-      );
+      ]));
       expect(
         () => const AiV3CommandPreparer().prepare(
           plan: laterMix,
@@ -5807,16 +5698,14 @@ void main() {
         ),
       );
 
-      final laterDuplicate = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final laterDuplicate = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         createRow(),
         _command('duplicate', 'clip.duplicate_to', <String, dynamic>{
           'clip_id': 'audio-clip',
           'destination_row_id': 100,
           'start_beat': 12,
         }),
-        ]),
-      );
+      ]));
       expect(
         () => const AiV3CommandPreparer().prepare(
           plan: laterDuplicate,
@@ -5834,8 +5723,7 @@ void main() {
 
     test('index-dependent operations remain valid before row deletion', () {
       final prepared = const AiV3CommandPreparer().prepare(
-        plan: AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+        plan: AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
           _command('duplicate', 'clip.duplicate_to', <String, dynamic>{
             'clip_id': 'audio-clip',
             'destination_row_id': 100,
@@ -5858,31 +5746,22 @@ void main() {
             'reference': null,
           }),
           _command('delete', 'row.delete', <String, dynamic>{'row_id': 100}),
-          ]),
-        ),
+        ])),
         context: _context(),
       );
 
-      expect(prepared.actions.map((action) => action.type), <String>[
-        'clip_edit',
-        'v3_mix_goal',
-        'row_delete',
-      ]);
+      expect(
+        prepared.actions.map((action) => action.type),
+        <String>['clip_edit', 'v3_mix_goal', 'row_delete'],
+      );
     });
 
-    test(
-      'duplicate deletion and group mixing after membership change fail',
+    test('duplicate deletion and group mixing after membership change fail',
         () {
-        final duplicateDelete = AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
-            _command('delete-1', 'row.delete', <String, dynamic>{
-              'row_id': 100,
-            }),
-            _command('delete-2', 'row.delete', <String, dynamic>{
-              'row_id': 100,
-            }),
-          ]),
-        );
+      final duplicateDelete = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
+        _command('delete-1', 'row.delete', <String, dynamic>{'row_id': 100}),
+        _command('delete-2', 'row.delete', <String, dynamic>{'row_id': 100}),
+      ]));
       expect(
         () => const AiV3CommandPreparer().prepare(
           plan: duplicateDelete,
@@ -5916,17 +5795,13 @@ void main() {
         stateDigest: 'grouped-ordering',
         data: groupedData,
       );
-        final groupThenMix = AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+      final groupThenMix = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('remove', 'group.remove_row', <String, dynamic>{
           'group_id': 'music',
           'row_id': 200,
         }),
         _command('mix', 'mix.apply_goal', <String, dynamic>{
-              'target': <String, dynamic>{
-                'scope': 'group',
-                'group_id': 'music',
-              },
+          'target': <String, dynamic>{'scope': 'group', 'group_id': 'music'},
           'intents': <Map<String, dynamic>>[
             <String, dynamic>{
               'kind': 'balance',
@@ -5941,8 +5816,7 @@ void main() {
           'reset_fx': false,
           'reference': null,
         }),
-          ]),
-        );
+      ]));
       expect(
         () => const AiV3CommandPreparer().prepare(
           plan: groupThenMix,
@@ -5956,18 +5830,15 @@ void main() {
           ),
         ),
       );
-      },
-    );
+    });
 
     test('prepares grouping from exact stable identities', () {
-      final create = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final create = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('group', 'group.create', <String, dynamic>{
           'row_ids': <int>[200, 100],
           'name': 'Music',
         }),
-        ]),
-      );
+      ]));
       final created = const AiV3CommandPreparer().prepare(
         plan: create,
         context: _context(),
@@ -6004,38 +5875,32 @@ void main() {
         data: groupedData,
       );
       final remove = const AiV3CommandPreparer().prepare(
-        plan: AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+        plan: AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
           _command('remove', 'group.remove_row', <String, dynamic>{
             'group_id': 'music',
             'row_id': 200,
           }),
-          ]),
-        ),
+        ])),
         context: groupedContext,
       );
       expect(remove.actions.single.data['dissolves_group'], isTrue);
       final collapse = const AiV3CommandPreparer().prepare(
-        plan: AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+        plan: AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
           _command('collapse', 'group.set_collapsed', <String, dynamic>{
             'group_id': 'music',
             'collapsed': true,
           }),
-          ]),
-        ),
+        ])),
         context: groupedContext,
       );
       expect(collapse.actions.single.data['collapsed'], isTrue);
       final noOp = const AiV3CommandPreparer().prepare(
-        plan: AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+        plan: AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
           _command('expanded', 'group.set_collapsed', <String, dynamic>{
             'group_id': 'music',
             'collapsed': false,
           }),
-          ]),
-        ),
+        ])),
         context: groupedContext,
       );
       expect(noOp.actions, isEmpty);
@@ -6043,8 +5908,7 @@ void main() {
     });
 
     test('prepares exact core clip edits from stable ids and beats', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('trim', 'clip.trim_to_range', <String, dynamic>{
           'clip_id': 'audio-clip',
           'start_beat': 1,
@@ -6062,8 +5926,7 @@ void main() {
         _command('delete', 'clip.delete', <String, dynamic>{
           'clip_id': 'midi-clip',
         }),
-        ]),
-      );
+      ]));
 
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
@@ -6071,10 +5934,8 @@ void main() {
       );
 
       expect(prepared.actions, hasLength(4));
-      expect(
-        prepared.actions.map((action) => action.data['operation']),
-        <String>['trim', 'cut', 'duplicate', 'delete'],
-      );
+      expect(prepared.actions.map((action) => action.data['operation']),
+          <String>['trim', 'cut', 'duplicate', 'delete']);
       expect(prepared.actions[0].data['delta_trim_start_ms'], 500.0);
       expect(prepared.actions[0].data['delta_trim_end_ms'], -500.0);
       expect(prepared.actions[0].data['new_start_ms'], 500.0);
@@ -6087,8 +5948,7 @@ void main() {
     });
 
     test('prepares exact absolute and relative audio pitch values', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('adjust', 'clip.adjust_pitch_semitones', <String, dynamic>{
           'clip_id': 'audio-clip',
           'delta_semitones': -2,
@@ -6097,8 +5957,7 @@ void main() {
           'clip_id': 'audio-clip',
           'pitch_semitones': 3,
         }),
-        ]),
-      );
+      ]));
 
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
@@ -6116,8 +5975,7 @@ void main() {
     });
 
     test('prepares absolute and relative visible audio lengths', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('set', 'clip.set_timeline_length_beats', <String, dynamic>{
           'clip_id': 'audio-clip',
           'length_beats': 12,
@@ -6128,8 +5986,7 @@ void main() {
           'factor': 0.5,
           'preserve_pitch': false,
         }),
-        ]),
-      );
+      ]));
 
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
@@ -6148,8 +6005,7 @@ void main() {
     });
 
     test('prepares source tempo and explicit tempo-follow mode', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('source', 'clip.set_source_tempo_bpm', <String, dynamic>{
           'clip_id': 'audio-clip',
           'source_tempo_bpm': 96,
@@ -6158,8 +6014,7 @@ void main() {
           'clip_id': 'audio-clip',
           'mode': 'repitch',
         }),
-        ]),
-      );
+      ]));
 
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
@@ -6177,8 +6032,7 @@ void main() {
     });
 
     test('materializes detected tempo into exact existing actions', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('align', 'clip.align_tempo_to_project', <String, dynamic>{
           'clip_id': 'audio-clip',
           'mode': 'preserve_pitch',
@@ -6187,13 +6041,14 @@ void main() {
           'clip_id': 'audio-clip',
           'mode': 'repitch',
         }),
-        ]),
-      );
+      ]));
 
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
         context: _context(),
-        detectedTempoByClipId: const <String, double>{'audio-clip': 127.6},
+        detectedTempoByClipId: const <String, double>{
+          'audio-clip': 127.6,
+        },
       );
 
       expect(
@@ -6215,33 +6070,28 @@ void main() {
     });
 
     test('requires a successful local tempo detection before preparation', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('align', 'clip.align_tempo_to_project', <String, dynamic>{
           'clip_id': 'audio-clip',
           'mode': 'preserve_pitch',
         }),
-        ]),
-      );
+      ]));
 
       expect(
         () => const AiV3CommandPreparer().prepare(
           plan: plan,
           context: _context(),
         ),
-        throwsA(
-          isA<AiV3PreparationException>().having(
+        throwsA(isA<AiV3PreparationException>().having(
           (error) => error.code,
           'code',
           'v3_clip_tempo_detection_unavailable',
-          ),
-        ),
+        )),
       );
     });
 
     test('materializes boundary analysis into exact trim and move actions', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('trim', 'clip.trim_silence', <String, dynamic>{
           'clip_id': 'audio-clip',
           'edges': 'both',
@@ -6249,10 +6099,12 @@ void main() {
         }),
         _command('align', 'clip.align_first_sound', <String, dynamic>{
           'clip_id': 'audio-clip',
-            'destination': <String, dynamic>{'kind': 'project_beat', 'beat': 4},
+          'destination': <String, dynamic>{
+            'kind': 'project_beat',
+            'beat': 4,
+          },
         }),
-        ]),
-      );
+      ]));
 
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
@@ -6273,7 +6125,10 @@ void main() {
       expect(prepared.actions[0].data['new_start_ms'], 200.0);
       expect(prepared.actions[1].data['operation'], 'move');
       expect(prepared.actions[1].data['delta_ms'], 1790.0);
-      expect(prepared.actions[1].data['new_alignment_offset_ms'], 1790.0);
+      expect(
+        prepared.actions[1].data['new_alignment_offset_ms'],
+        1790.0,
+      );
     });
 
     test('prepares nearest grid and playhead first-sound destinations', () {
@@ -6291,14 +6146,12 @@ void main() {
         const MapEntry(<String, dynamic>{'kind': 'nearest_bar'}, 790.0),
         const MapEntry(<String, dynamic>{'kind': 'playhead'}, 1790.0),
       ]) {
-        final plan = AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+        final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
           _command('align', 'clip.align_first_sound', <String, dynamic>{
             'clip_id': 'audio-clip',
             'destination': entry.key,
           }),
-          ]),
-        );
+        ]));
         final prepared = const AiV3CommandPreparer().prepare(
           plan: plan,
           context: context,
@@ -6315,28 +6168,24 @@ void main() {
     });
 
     test('requires usable boundary analysis before preparation', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('trim', 'clip.trim_silence', <String, dynamic>{
           'clip_id': 'audio-clip',
           'edges': 'both',
           'padding_ms': 8,
         }),
-        ]),
-      );
+      ]));
 
       expect(
         () => const AiV3CommandPreparer().prepare(
           plan: plan,
           context: _context(),
         ),
-        throwsA(
-          isA<AiV3PreparationException>().having(
+        throwsA(isA<AiV3PreparationException>().having(
           (error) => error.code,
           'code',
           'v3_clip_boundary_analysis_unavailable',
-          ),
-        ),
+        )),
       );
     });
 
@@ -6344,15 +6193,13 @@ void main() {
       final data =
           jsonDecode(jsonEncode(_context().data)) as Map<String, dynamic>;
       ((data['clips'] as List).first
-              as Map<String, dynamic>)['source_tempo_bpm'] =
-          120.0;
+          as Map<String, dynamic>)['source_tempo_bpm'] = 120.0;
       final context = AiV3CoreContext(
         profile: AiV3ContextProfile.essential,
         stateDigest: 'state-1',
         data: data,
       );
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('source', 'clip.set_source_tempo_bpm', <String, dynamic>{
           'clip_id': 'audio-clip',
           'source_tempo_bpm': 120,
@@ -6361,8 +6208,7 @@ void main() {
           'clip_id': 'audio-clip',
           'mode': 'off',
         }),
-        ]),
-      );
+      ]));
 
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
@@ -6411,13 +6257,11 @@ void main() {
             plan: plan,
             context: _context(),
           ),
-          throwsA(
-            isA<AiV3PreparationException>().having(
+          throwsA(isA<AiV3PreparationException>().having(
             (error) => error.code,
             'code',
             item.code,
-            ),
-          ),
+          )),
         );
       }
     });
@@ -6435,15 +6279,13 @@ void main() {
         stateDigest: 'state-1',
         data: data,
       );
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('noop', 'clip.set_timeline_length_beats', <String, dynamic>{
           'clip_id': 'audio-clip',
           'length_beats': 8,
           'preserve_pitch': true,
         }),
-        ]),
-      );
+      ]));
 
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
@@ -6476,25 +6318,24 @@ void main() {
         stateDigest: 'state-1',
         data: data,
       );
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('stretch', 'clip.scale_timeline_length', <String, dynamic>{
           'clip_id': 'audio-clip',
           'factor': 2,
           'preserve_pitch': true,
         }),
-        ]),
-      );
+      ]));
 
       expect(
-        () => const AiV3CommandPreparer().prepare(plan: plan, context: context),
-        throwsA(
-          isA<AiV3PreparationException>().having(
+        () => const AiV3CommandPreparer().prepare(
+          plan: plan,
+          context: context,
+        ),
+        throwsA(isA<AiV3PreparationException>().having(
           (error) => error.code,
           'code',
           'v3_clip_stretch_global_conflict',
-          ),
-        ),
+        )),
       );
     });
 
@@ -6504,7 +6345,10 @@ void main() {
           command: _command(
             'midi',
             'clip.set_pitch_semitones',
-            <String, dynamic>{'clip_id': 'midi-clip', 'pitch_semitones': 3},
+            <String, dynamic>{
+              'clip_id': 'midi-clip',
+              'pitch_semitones': 3,
+            },
           ),
           code: 'v3_audio_clip_required',
         ),
@@ -6512,7 +6356,10 @@ void main() {
           command: _command(
             'overflow',
             'clip.adjust_pitch_semitones',
-            <String, dynamic>{'clip_id': 'audio-clip', 'delta_semitones': 11},
+            <String, dynamic>{
+              'clip_id': 'audio-clip',
+              'delta_semitones': 11,
+            },
           ),
           code: 'v3_clip_pitch_out_of_range',
         ),
@@ -6526,13 +6373,11 @@ void main() {
             plan: plan,
             context: _context(),
           ),
-          throwsA(
-            isA<AiV3PreparationException>().having(
+          throwsA(isA<AiV3PreparationException>().having(
             (error) => error.code,
             'code',
             item.code,
-            ),
-          ),
+          )),
         );
       }
     });
@@ -6540,27 +6385,21 @@ void main() {
     test('rejects invalid clip bounds, kinds, and destination lanes', () {
       final cases = <({Map<String, dynamic> command, String code})>[
         (
-          command: _command(
-            'trim-midi',
-            'clip.trim_to_range',
-            <String, dynamic>{
+          command:
+              _command('trim-midi', 'clip.trim_to_range', <String, dynamic>{
             'clip_id': 'midi-clip',
             'start_beat': 5,
             'end_beat': 10,
-            },
-          ),
+          }),
           code: 'v3_audio_clip_required',
         ),
         (
-          command: _command(
-            'trim-expand',
-            'clip.trim_to_range',
-            <String, dynamic>{
+          command:
+              _command('trim-expand', 'clip.trim_to_range', <String, dynamic>{
             'clip_id': 'audio-clip',
             'start_beat': 0,
             'end_beat': 9,
-            },
-          ),
+          }),
           code: 'v3_clip_trim_bounds_invalid',
         ),
         (
@@ -6572,14 +6411,11 @@ void main() {
         ),
         (
           command: _command(
-            'duplicate-mismatch',
-            'clip.duplicate_to',
-            <String, dynamic>{
+              'duplicate-mismatch', 'clip.duplicate_to', <String, dynamic>{
             'clip_id': 'audio-clip',
             'destination_row_id': 200,
             'start_beat': 8,
-            },
-          ),
+          }),
           code: 'v3_clip_destination_lane_mismatch',
         ),
       ];
@@ -6593,20 +6429,17 @@ void main() {
             plan: plan,
             context: _context(),
           ),
-          throwsA(
-            isA<AiV3PreparationException>().having(
+          throwsA(isA<AiV3PreparationException>().having(
             (error) => error.code,
             'code',
             item.code,
-            ),
-          ),
+          )),
         );
       }
     });
 
     test('converts gain fades into normalized editor multipliers', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('fade', 'automation.gain_fade', <String, dynamic>{
           'row_id': 100,
           'start_beat': 0,
@@ -6614,8 +6447,7 @@ void main() {
           'from_gain_db': -120,
           'to_level': 'current',
         }),
-        ]),
-      );
+      ]));
 
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
@@ -6630,11 +6462,9 @@ void main() {
       expect(points.last['value'], 1.0);
     });
 
-    test(
-      'prepares exact normalized automation points and clear by stable ids',
+    test('prepares exact normalized automation points and clear by stable ids',
         () {
-        final plan = AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('curve', 'automation.set_points', <String, dynamic>{
           'row_id': 100,
           'automation_target_id': 'row:100:mix:pan',
@@ -6648,17 +6478,16 @@ void main() {
           'row_id': 100,
           'automation_target_id': 'fx:reverb:mix',
         }),
-          ]),
-        );
+      ]));
 
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
         context: _context(),
       );
-        expect(prepared.actions.map((action) => action.type), <String>[
-          'v3_automation_points',
-          'v3_automation_points',
-        ]);
+      expect(
+        prepared.actions.map((action) => action.type),
+        <String>['v3_automation_points', 'v3_automation_points'],
+      );
       expect(prepared.actions.first.data['target'], <String, dynamic>{
         'scope': 'row',
         'row_id': 100,
@@ -6671,11 +6500,9 @@ void main() {
         <String, dynamic>{'time_ms': 2000.0, 'value': 1.0},
       ]);
       expect(prepared.actions.last.data['operation'], 'clear');
-      },
-    );
+    });
 
-    test(
-      'rejects malformed or orphaned exact automation targets and points',
+    test('rejects malformed or orphaned exact automation targets and points',
         () {
       final malformed = <Map<String, dynamic>>[
         _command('duplicate', 'automation.set_points', <String, dynamic>{
@@ -6701,14 +6528,12 @@ void main() {
         );
       }
 
-        final unknownTarget = AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+      final unknownTarget = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('unknown', 'automation.clear', <String, dynamic>{
           'row_id': 100,
           'automation_target_id': 'missing',
         }),
-          ]),
-        );
+      ]));
       expect(
         () => const AiV3CommandPreparer().prepare(
           plan: unknownTarget,
@@ -6722,12 +6547,10 @@ void main() {
           ),
         ),
       );
-      },
-    );
+    });
 
     test('limits generated MIDI length without limiting timeline position', () {
-      final validLaterClip = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final validLaterClip = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('later-midi', 'midi.create_clip', <String, dynamic>{
           'destination': <String, dynamic>{'row_id': 200},
           'start_beat': 64,
@@ -6741,8 +6564,7 @@ void main() {
             },
           ],
         }),
-        ]),
-      );
+      ]));
       expect(
         const AiV3CommandPreparer()
             .prepare(plan: validLaterClip, context: _context())
@@ -6750,8 +6572,7 @@ void main() {
         isNotEmpty,
       );
 
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('midi', 'midi.create_clip', <String, dynamic>{
           'destination': <String, dynamic>{'row_id': 200},
           'start_beat': 64,
@@ -6765,8 +6586,7 @@ void main() {
             },
           ],
         }),
-        ]),
-      );
+      ]));
 
       expect(
         () => const AiV3CommandPreparer().prepare(
@@ -6799,18 +6619,18 @@ void main() {
           },
         },
       );
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('sample', 'sample.place', <String, dynamic>{
           'destination': <String, dynamic>{
-              'new_row': <String, dynamic>{'name': 'Kick'},
+            'new_row': <String, dynamic>{
+              'name': 'Kick',
+            },
           },
           'placements': <Map<String, dynamic>>[
             <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
           ],
         }),
-        ]),
-      );
+      ]));
 
       expect(
         () => const AiV3CommandPreparer().prepare(
@@ -6830,8 +6650,7 @@ void main() {
 
   group('V3 transport', () {
     test('accepts only four strict final-state commands', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('play', 'transport.set_playing', <String, dynamic>{
           'playing': true,
         }),
@@ -6841,59 +6660,54 @@ void main() {
           'transport.set_metronome_enabled',
           <String, dynamic>{'enabled': true},
         ),
-          _command('loop', 'transport.set_loop_enabled', <String, dynamic>{
-            'enabled': false,
-          }),
-        ]),
-      );
+        _command(
+          'loop',
+          'transport.set_loop_enabled',
+          <String, dynamic>{'enabled': false},
+        ),
+      ]));
 
-      expect(plan.commands.map((command) => command.type), <String>[
+      expect(
+        plan.commands.map((command) => command.type),
+        <String>[
           'transport.set_playing',
           'transport.restart',
           'transport.set_metronome_enabled',
           'transport.set_loop_enabled',
-      ]);
+        ],
+      );
       expect(
-        () => AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+        () => AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
           _command('toggle', 'transport.toggle_playing', const {}),
-          ]),
-        ),
+        ])),
         throwsA(isA<AiV3ContractException>()),
       );
       expect(
-        () => AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+        () => AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
           _command('alias', 'transport.play', const {}),
-          ]),
-        ),
+        ])),
         throwsA(isA<AiV3ContractException>()),
       );
       expect(
-        () => AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+        () => AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
           _command('extra', 'transport.restart', <String, dynamic>{
             'position': 0,
           }),
-          ]),
-        ),
+        ])),
         throwsA(isA<AiV3ContractException>()),
       );
       expect(
-        () => AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+        () => AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
           _command('bad', 'transport.set_loop_enabled', <String, dynamic>{
             'enabled': 1,
           }),
-          ]),
-        ),
+        ])),
         throwsA(isA<AiV3ContractException>()),
       );
     });
 
     test('prepares canonical actions in authoritative order', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('loop-on', 'transport.set_loop_enabled', <String, dynamic>{
           'enabled': true,
         }),
@@ -6904,8 +6718,7 @@ void main() {
         _command('play', 'transport.set_playing', <String, dynamic>{
           'playing': true,
         }),
-        ]),
-      );
+      ]));
 
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
@@ -6968,7 +6781,10 @@ void main() {
       Object? range,
       double decay = 0,
     }) {
-      return _command(id, type, switch (type) {
+      return _command(
+        id,
+        type,
+        switch (type) {
           'midi.replace_notes' => <String, dynamic>{
               'clip_id': clipId,
               'notes': notes,
@@ -6984,12 +6800,12 @@ void main() {
               'velocity_decay_per_slice': decay,
             },
           _ => throw StateError(type),
-          });
+        },
+      );
     }
 
     test('accepts strict replace, append, and nullable-range chop shapes', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         editCommand(
           'replace',
           'midi.replace_notes',
@@ -7013,8 +6829,7 @@ void main() {
           subdivision: 8,
           range: <String, dynamic>{'start_beat': 1, 'end_beat': 3},
         ),
-        ]),
-      );
+      ]));
 
       expect(plan.commands.map((command) => command.type), <String>[
         'midi.replace_notes',
@@ -7042,13 +6857,21 @@ void main() {
           'midi.replace_notes',
           notes: <Map<String, dynamic>>[_note(128, 0, 1)],
         ),
-        editCommand('bad-subdivision', 'midi.chop_notes', subdivision: 129),
+        editCommand(
+          'bad-subdivision',
+          'midi.chop_notes',
+          subdivision: 129,
+        ),
         editCommand(
           'bad-range',
           'midi.chop_notes',
           range: <String, dynamic>{'start_beat': 2, 'end_beat': 2},
         ),
-        editCommand('bad-decay', 'midi.chop_notes', decay: 1.1),
+        editCommand(
+          'bad-decay',
+          'midi.chop_notes',
+          decay: 1.1,
+        ),
       ];
 
       for (final command in invalid) {
@@ -7060,15 +6883,22 @@ void main() {
       }
     });
 
-    test(
-      '256 serialized notes fit conservatively and totals above 256 fail',
-      () {
+    test('256 serialized notes fit conservatively and totals above 256 fail', () {
       final notes = List<Map<String, dynamic>>.generate(
         aiV3MaxGeneratedMidiNotes,
-          (index) => _note(127, index * 0.03125, 0.03125, 0.999999),
+        (index) => _note(
+          127,
+          index * 0.03125,
+          0.03125,
+          0.999999,
+        ),
       );
       final rawPlan = _plan(<Map<String, dynamic>>[
-          editCommand('replace-max', 'midi.replace_notes', notes: notes),
+        editCommand(
+          'replace-max',
+          'midi.replace_notes',
+          notes: notes,
+        ),
       ]);
       expect(AiV3Plan.fromJson(rawPlan).commands, hasLength(1));
       expect((jsonEncode(rawPlan).length / 4).ceil(), lessThan(8192));
@@ -7092,12 +6922,10 @@ void main() {
           ),
         ),
       );
-      },
-    );
+    });
 
     test('simulates replace then append as exact complete note states', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         editCommand(
           'replace',
           'midi.replace_notes',
@@ -7108,18 +6936,17 @@ void main() {
           'midi.append_notes',
           notes: <Map<String, dynamic>>[_note(60, 0.5, 0.5)],
         ),
-        ]),
-      );
+      ]));
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
-        context: _contextWithMidiNotes(<Map<String, dynamic>>[_note(50, 0, 1)]),
+        context: _contextWithMidiNotes(<Map<String, dynamic>>[
+          _note(50, 0, 1),
+        ]),
       );
 
       expect(prepared.actions, hasLength(2));
-      expect(
-        prepared.actions.every((action) => action.type == 'midi_compose'),
-        isTrue,
-      );
+      expect(prepared.actions.every((action) => action.type == 'midi_compose'),
+          isTrue);
       expect(prepared.actions.last.data['operation'], 'replace_notes');
       expect(prepared.actions.last.data['notes'], <Map<String, dynamic>>[
         _note(65, 1, 1),
@@ -7130,8 +6957,7 @@ void main() {
     });
 
     test('repeated appends use each preceding final clip length', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         editCommand(
           'append-one',
           'midi.append_notes',
@@ -7142,13 +6968,13 @@ void main() {
           'midi.append_notes',
           notes: <Map<String, dynamic>>[_note(64, 0.5, 0.5)],
         ),
-        ]),
-      );
+      ]));
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
-        context: _contextWithMidiNotes(<Map<String, dynamic>>[
-          _note(48, 0, 1),
-        ], lengthBeats: 4),
+        context: _contextWithMidiNotes(
+          <Map<String, dynamic>>[_note(48, 0, 1)],
+          lengthBeats: 4,
+        ),
       );
 
       expect(prepared.actions[0].data['notes'], <Map<String, dynamic>>[
@@ -7164,24 +6990,24 @@ void main() {
       expect(prepared.actions[1].data['final_length_beats'], 6.0);
     });
 
-    test(
-      'append continues after existing notes beyond a stale visible end',
+    test('append continues after existing notes beyond a stale visible end',
         () {
-        final plan = AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         editCommand(
           'append',
           'midi.append_notes',
           notes: <Map<String, dynamic>>[_note(64, 0.5, 0.5)],
         ),
-          ]),
-        );
+      ]));
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
-          context: _contextWithMidiNotes(<Map<String, dynamic>>[
+        context: _contextWithMidiNotes(
+          <Map<String, dynamic>>[
             _note(48, 0, 1),
             _note(55, 4, 3.5),
-          ], lengthBeats: 2.5),
+          ],
+          lengthBeats: 2.5,
+        ),
       );
 
       expect(prepared.actions.single.data['notes'], <Map<String, dynamic>>[
@@ -7190,12 +7016,11 @@ void main() {
         _note(64, 8, 0.5),
       ]);
       expect(prepared.actions.single.data['final_length_beats'], 8.5);
-      },
-    );
+    });
 
     test('simulates transpose and append in authoritative planner order', () {
-      final transposeThenAppend = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final transposeThenAppend =
+          AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         _command('up', 'midi.transpose', <String, dynamic>{
           'clip_id': 'midi-clip',
           'semitones': 48,
@@ -7209,21 +7034,23 @@ void main() {
           'midi.append_notes',
           notes: <Map<String, dynamic>>[_note(40, 0, 0.5)],
         ),
-        ]),
-      );
+      ]));
       final prepared = const AiV3CommandPreparer().prepare(
         plan: transposeThenAppend,
         context: _contextWithMidiNotes(<Map<String, dynamic>>[
           _note(100, 0, 1),
         ]),
       );
-      expect(prepared.actions.last.data['notes'], <Map<String, dynamic>>[
+      expect(
+        prepared.actions.last.data['notes'],
+        <Map<String, dynamic>>[
           _note(79, 0, 1),
           _note(40, 8, 0.5),
-      ]);
+        ],
+      );
 
-      final appendThenTranspose = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final appendThenTranspose =
+          AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         editCommand(
           'append-first',
           'midi.append_notes',
@@ -7233,8 +7060,7 @@ void main() {
           'clip_id': 'midi-clip',
           'semitones': 2,
         }),
-        ]),
-      );
+      ]));
       final reverse = const AiV3CommandPreparer().prepare(
         plan: appendThenTranspose,
         context: _contextWithMidiNotes(<Map<String, dynamic>>[
@@ -7248,8 +7074,7 @@ void main() {
     });
 
     test('chops only the range with deterministic decay and sorting', () {
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
         editCommand(
           'chop',
           'midi.chop_notes',
@@ -7257,8 +7082,7 @@ void main() {
           range: <String, dynamic>{'start_beat': 1, 'end_beat': 3},
           decay: 0.25,
         ),
-        ]),
-      );
+      ]));
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
         context: _contextWithMidiNotes(<Map<String, dynamic>>[
@@ -7276,85 +7100,91 @@ void main() {
 
     test('coalesces satisfied replacements and chops during preparation', () {
       final notes = <Map<String, dynamic>>[_note(60, 0, 0.5)];
-      final plan = AiV3Plan.fromJson(
-        _plan(<Map<String, dynamic>>[
-          editCommand('replace-1', 'midi.replace_notes', notes: notes),
-          editCommand('replace-2', 'midi.replace_notes', notes: notes),
-          editCommand('chop', 'midi.chop_notes', subdivision: 4, range: null),
-        ]),
-      );
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
+        editCommand(
+          'replace-1',
+          'midi.replace_notes',
+          notes: notes,
+        ),
+        editCommand(
+          'replace-2',
+          'midi.replace_notes',
+          notes: notes,
+        ),
+        editCommand(
+          'chop',
+          'midi.chop_notes',
+          subdivision: 4,
+          range: null,
+        ),
+      ]));
       final prepared = const AiV3CommandPreparer().prepare(
         plan: plan,
-        context: _contextWithMidiNotes(<Map<String, dynamic>>[_note(50, 0, 1)]),
+        context: _contextWithMidiNotes(<Map<String, dynamic>>[
+          _note(50, 0, 1),
+        ]),
       );
 
       expect(prepared.actions, hasLength(1));
-      expect(prepared.receipts.map((receipt) => receipt['status']), <String>[
-        'prepared',
-        'already_satisfied',
-        'already_satisfied',
-      ]);
+      expect(
+        prepared.receipts.map((receipt) => receipt['status']),
+        <String>['prepared', 'already_satisfied', 'already_satisfied'],
+      );
     });
 
-    test(
-      'rejects wrong clips, bounds, ranges, empty chop, and 512 overflow',
+    test('rejects wrong clips, bounds, ranges, empty chop, and 512 overflow',
         () {
-        final cases = <({AiV3Plan plan, AiV3CoreContext context, String code})>[
+      final cases = <({
+        AiV3Plan plan,
+        AiV3CoreContext context,
+        String code,
+      })>[
         (
-            plan: AiV3Plan.fromJson(
-              _plan(<Map<String, dynamic>>[
+          plan: AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
             editCommand(
               'audio',
               'midi.replace_notes',
               clipId: 'audio-clip',
               notes: <Map<String, dynamic>>[_note(60, 0, 1)],
             ),
-              ]),
-            ),
+          ])),
           context: _context(),
           code: 'v3_midi_clip_required',
         ),
         (
-            plan: AiV3Plan.fromJson(
-              _plan(<Map<String, dynamic>>[
+          plan: AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
             editCommand(
               'missing',
               'midi.append_notes',
               clipId: 'missing',
               notes: <Map<String, dynamic>>[_note(60, 0, 1)],
             ),
-              ]),
-            ),
+          ])),
           context: _context(),
           code: 'v3_clip_id_unknown',
         ),
         (
-            plan: AiV3Plan.fromJson(
-              _plan(<Map<String, dynamic>>[
+          plan: AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
             editCommand(
               'range',
               'midi.chop_notes',
               range: <String, dynamic>{'start_beat': 7, 'end_beat': 9},
             ),
-              ]),
-            ),
+          ])),
           context: _contextWithMidiNotes(<Map<String, dynamic>>[
             _note(60, 0, 1),
           ]),
           code: 'v3_midi_chop_range_invalid',
         ),
         (
-            plan: AiV3Plan.fromJson(
-              _plan(<Map<String, dynamic>>[
+          plan: AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
             editCommand('empty', 'midi.chop_notes'),
-              ]),
-            ),
+          ])),
           context: _contextWithMidiNotes(const <Map<String, dynamic>>[]),
           code: 'v3_midi_notes_missing',
         ),
         (
-            plan: AiV3Plan.fromJson(
-              _plan(<Map<String, dynamic>>[
+          plan: AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
             editCommand(
               'overflow',
               'midi.append_notes',
@@ -7363,8 +7193,7 @@ void main() {
                 (index) => _note(80, index * 0.01, 0.005),
               ),
             ),
-              ]),
-            ),
+          ])),
           context: _contextWithMidiNotes(
             List<Map<String, dynamic>>.generate(
               500,
@@ -7391,7 +7220,6 @@ void main() {
           reason: value.code,
         );
       }
-      },
-    );
+    });
   });
 }

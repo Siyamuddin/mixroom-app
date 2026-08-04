@@ -18,25 +18,22 @@ void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
 
-  testWidgets('V3 transport success is rollback-capable but not user Undo', (
-    tester,
-  ) async {
+  testWidgets('V3 transport success is rollback-capable but not user Undo',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
     final before = controller.snapshot();
     final initialUndoDepth = before['undo_depth'] as int;
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _transportAction('set_metronome_enabled', enabled: true),
-          _transportAction('set_loop_enabled', enabled: true),
-          _transportAction('restart'),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _transportAction('set_metronome_enabled', enabled: true),
+        _transportAction('set_loop_enabled', enabled: true),
+        _transportAction('restart'),
+      ],
+    ));
 
     final applied = controller.snapshot();
     final transport = (applied['transport'] as Map).cast<String, dynamic>();
@@ -44,37 +41,32 @@ void main() {
     expect(transport['playhead_ms'], transport['loop_start_ms']);
     expect(transport['metronome_enabled'], isTrue);
     expect(transport['loop_enabled'], isTrue);
-    expect(
-      transport['loop_end_ms'] as int,
-      greaterThan(transport['loop_start_ms'] as int),
-    );
+    expect(transport['loop_end_ms'] as int,
+        greaterThan(transport['loop_start_ms'] as int));
     expect(applied['undo_depth'], initialUndoDepth);
 
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 restores transport after a later bundle action fails', (
-    tester,
-  ) async {
+  testWidgets('V3 restores transport after a later bundle action fails',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
     final before = controller.snapshot();
     final rows = (before['rows'] as List).cast<Map<String, dynamic>>();
-    final initialTransport = (before['transport'] as Map)
-        .cast<String, dynamic>();
+    final initialTransport =
+        (before['transport'] as Map).cast<String, dynamic>();
     final initialUndoDepth = before['undo_depth'] as int;
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _transportAction('set_metronome_enabled', enabled: true),
-          _transportAction('set_loop_enabled', enabled: true),
-          _renameAction(1, rows[1]['row_id'] as int, ''),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _transportAction('set_metronome_enabled', enabled: true),
+        _transportAction('set_loop_enabled', enabled: true),
+        _renameAction(1, rows[1]['row_id'] as int, ''),
+      ],
+    ));
 
     final after = controller.snapshot();
     expect(after['transport'], initialTransport);
@@ -83,9 +75,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('mixed V3 Undo leaves successful transport state alone', (
-    tester,
-  ) async {
+  testWidgets('mixed V3 Undo leaves successful transport state alone',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -93,15 +84,13 @@ void main() {
     final rows = (before['rows'] as List).cast<Map<String, dynamic>>();
     final initialUndoDepth = before['undo_depth'] as int;
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _transportAction('set_metronome_enabled', enabled: true),
-          _muteAction(0, rows[0]['row_id'] as int),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _transportAction('set_metronome_enabled', enabled: true),
+        _muteAction(0, rows[0]['row_id'] as int),
+      ],
+    ));
     expect(controller.snapshot()['undo_depth'], initialUndoDepth + 1);
 
     await controller.undo();
@@ -118,9 +107,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 compound mute and rename is one atomic undo entry', (
-    tester,
-  ) async {
+  testWidgets('V3 compound mute and rename is one atomic undo entry',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -128,34 +116,27 @@ void main() {
     final rows = (before['rows'] as List).cast<Map<String, dynamic>>();
     final initialUndoDepth = before['undo_depth'] as int;
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _muteAction(0, rows[0]['row_id'] as int),
-          _renameAction(1, rows[1]['row_id'] as int, 'Soft Pad'),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _muteAction(0, rows[0]['row_id'] as int),
+        _renameAction(1, rows[1]['row_id'] as int, 'Soft Pad'),
+      ],
+    ));
 
     final applied = controller.snapshot();
     expect(_row(applied, 0)['muted'], isTrue);
     expect(_row(applied, 1)['name'], 'Soft Pad');
     expect(applied['undo_depth'], initialUndoDepth + 1);
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _muteAction(0, rows[0]['row_id'] as int),
-        ],
-      ),
-    );
-    expect(
-      controller.snapshot()['undo_depth'],
-      initialUndoDepth + 1,
-      reason: 'An idempotent mute must not add an undo entry.',
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _muteAction(0, rows[0]['row_id'] as int),
+      ],
+    ));
+    expect(controller.snapshot()['undo_depth'], initialUndoDepth + 1,
+        reason: 'An idempotent mute must not add an undo entry.');
 
     await controller.undo();
     final undone = controller.snapshot();
@@ -172,9 +153,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 row role override uses one ordered reversible transaction', (
-    tester,
-  ) async {
+  testWidgets('V3 row role override uses one ordered reversible transaction',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -184,15 +164,13 @@ void main() {
     final initialRole = rows.first['role_override'] as String;
     final initialUndoDepth = before['undo_depth'] as int;
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _roleOverrideAction(0, rowId, 'drums'),
-          _roleOverrideAction(0, rowId, 'bass'),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _roleOverrideAction(0, rowId, 'drums'),
+        _roleOverrideAction(0, rowId, 'bass'),
+      ],
+    ));
 
     var applied = controller.snapshot();
     expect(_row(applied, 0)['role_override'], 'bass');
@@ -204,21 +182,20 @@ void main() {
     await controller.redo();
     expect(_row(controller.snapshot(), 0)['role_override'], 'bass');
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[_roleOverrideAction(0, rowId, null)],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _roleOverrideAction(0, rowId, null),
+      ],
+    ));
     applied = controller.snapshot();
     expect(_row(applied, 0)['role_override'], isEmpty);
 
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 row role override rolls back after a later failure', (
-    tester,
-  ) async {
+  testWidgets('V3 row role override rolls back after a later failure',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -228,15 +205,13 @@ void main() {
     final initialRole = rows.first['role_override'] as String;
     final initialUndoDepth = before['undo_depth'] as int;
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _roleOverrideAction(0, rowId, 'synth'),
-          _renameAction(0, rowId, ''),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _roleOverrideAction(0, rowId, 'synth'),
+        _renameAction(0, rowId, ''),
+      ],
+    ));
 
     final after = controller.snapshot();
     expect(_row(after, 0)['role_override'], initialRole);
@@ -245,35 +220,28 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 row role override survives autosave and project reload', (
-    tester,
-  ) async {
+  testWidgets('V3 row role override survives autosave and project reload',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
-    final rows = (controller.snapshot()['rows'] as List)
-        .cast<Map<String, dynamic>>();
+    final rows =
+        (controller.snapshot()['rows'] as List).cast<Map<String, dynamic>>();
     final rowId = rows.first['row_id'] as int;
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _roleOverrideAction(0, rowId, 'guitar'),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _roleOverrideAction(0, rowId, 'guitar'),
+      ],
+    ));
     await _pumpFor(tester, const Duration(seconds: 2));
 
-    final projectJson =
-        jsonDecode(
-              await File(
-                '${fixture.directory.path}/project.json',
-              ).readAsString(),
-            )
-            as Map<String, dynamic>;
-    final persistedRows = (projectJson['rows'] as List)
-        .cast<Map<String, dynamic>>();
+    final projectJson = jsonDecode(
+      await File('${fixture.directory.path}/project.json').readAsString(),
+    ) as Map<String, dynamic>;
+    final persistedRows =
+        (projectJson['rows'] as List).cast<Map<String, dynamic>>();
     final persisted = persistedRows.singleWhere((row) => row['rowId'] == rowId);
     expect(persisted['roleOverride'], 'guitar');
 
@@ -297,14 +265,16 @@ void main() {
           reopenedController.snapshot()['rows'] is List,
     );
     await _pumpFor(tester, const Duration(seconds: 2));
-    expect(_row(reopenedController.snapshot(), 0)['role_override'], 'guitar');
+    expect(
+      _row(reopenedController.snapshot(), 0)['role_override'],
+      'guitar',
+    );
 
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 rolls mute back when the following action fails', (
-    tester,
-  ) async {
+  testWidgets('V3 rolls mute back when the following action fails',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -312,15 +282,13 @@ void main() {
     final rows = (before['rows'] as List).cast<Map<String, dynamic>>();
     final initialUndoDepth = before['undo_depth'] as int;
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _muteAction(0, rows[0]['row_id'] as int),
-          _renameAction(1, rows[1]['row_id'] as int, ''),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _muteAction(0, rows[0]['row_id'] as int),
+        _renameAction(1, rows[1]['row_id'] as int, ''),
+      ],
+    ));
 
     final after = controller.snapshot();
     expect(_row(after, 0)['muted'], isFalse);
@@ -330,9 +298,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 row metadata is one reversible atomic transaction', (
-    tester,
-  ) async {
+  testWidgets('V3 row metadata is one reversible atomic transaction',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -349,9 +316,10 @@ void main() {
       _colorAction(1, secondRowId, 'blue'),
       _muteAction(0, firstRowId),
     ];
-    await controller.executeV3Handoff(
-      _handoff(digest: controller.stateDigest, actions: metadataActions),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: metadataActions,
+    ));
 
     final applied = controller.snapshot();
     expect(applied['selected_row_id'], secondRowId);
@@ -374,15 +342,13 @@ void main() {
     expect(redone['undo_depth'], initialUndoDepth + 1);
 
     await controller.undo();
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          ...metadataActions,
-          _renameAction(1, secondRowId, ''),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        ...metadataActions,
+        _renameAction(1, secondRowId, ''),
+      ],
+    ));
     final rolledBack = controller.snapshot();
     expect(rolledBack['selected_row_id'], initialSelectedRowId);
     expect(_row(rolledBack, 1)['color'], initialColor);
@@ -392,9 +358,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 row creation preserves stable compound targets and undo', (
-    tester,
-  ) async {
+  testWidgets('V3 row creation preserves stable compound targets and undo',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -405,20 +370,18 @@ void main() {
     final previousSelection = before['selected_row_id'];
     final initialUndoDepth = before['undo_depth'] as int;
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _createRowAction(
-            name: 'Vocal Double',
-            position: 'above',
-            anchorRowIndex: 0,
-            anchorRowId: anchorId,
-          ),
-          _renameAction(1, shiftedId, 'Shifted Synth'),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _createRowAction(
+          name: 'Vocal Double',
+          position: 'above',
+          anchorRowIndex: 0,
+          anchorRowId: anchorId,
+        ),
+        _renameAction(1, shiftedId, 'Shifted Synth'),
+      ],
+    ));
 
     var applied = controller.snapshot();
     final appliedRows = (applied['rows'] as List).cast<Map>();
@@ -450,9 +413,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 identical row creations bind distinct runtime ids', (
-    tester,
-  ) async {
+  testWidgets('V3 identical row creations bind distinct runtime ids',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -462,25 +424,23 @@ void main() {
     final anchorId = rows.first['row_id'] as int;
     final initialUndoDepth = before['undo_depth'] as int;
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _createRowAction(
-            name: 'Double',
-            position: 'end',
-            anchorRowIndex: 0,
-            anchorRowId: anchorId,
-          ),
-          _createRowAction(
-            name: 'Double',
-            position: 'end',
-            anchorRowIndex: 0,
-            anchorRowId: anchorId,
-          ),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _createRowAction(
+          name: 'Double',
+          position: 'end',
+          anchorRowIndex: 0,
+          anchorRowId: anchorId,
+        ),
+        _createRowAction(
+          name: 'Double',
+          position: 'end',
+          anchorRowIndex: 0,
+          anchorRowId: anchorId,
+        ),
+      ],
+    ));
 
     var applied = controller.snapshot();
     final created = (applied['rows'] as List)
@@ -509,9 +469,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 created row identity survives persisted undo and redo', (
-    tester,
-  ) async {
+  testWidgets('V3 created row identity survives persisted undo and redo',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -519,19 +478,17 @@ void main() {
     final rows = (before['rows'] as List).cast<Map<String, dynamic>>();
     final originalIds = rows.map((row) => row['row_id'] as int).toSet();
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _createRowAction(
-            name: 'Persisted Creation',
-            position: 'end',
-            anchorRowIndex: 0,
-            anchorRowId: rows.first['row_id'] as int,
-          ),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _createRowAction(
+          name: 'Persisted Creation',
+          position: 'end',
+          anchorRowIndex: 0,
+          anchorRowId: rows.first['row_id'] as int,
+        ),
+      ],
+    ));
     await _pumpFor(tester, const Duration(seconds: 2));
 
     final applied = controller.snapshot();
@@ -584,57 +541,54 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets(
-    'V3 row deletion rollback restores exact row and clip identities',
-    (tester) async {
-      _ignoreKnownEditorSemanticsAssertion();
-      final fixture = await _openAudioFixture(tester);
-      final controller = fixture.controller;
-      final before = controller.snapshot();
-      final rows = (before['rows'] as List).cast<Map<String, dynamic>>();
-      final clips = (before['clips'] as List).cast<Map<String, dynamic>>();
-      expect(rows.length, greaterThanOrEqualTo(2));
-      final initialRowIds = rows
-          .map((row) => row['row_id'] as int)
-          .toList(growable: false);
-      final initialClipOwners = <String, int>{
-        for (final clip in clips)
-          clip['clip_id'] as String: clip['row_id'] as int,
-      };
-      final initialUndoDepth = before['undo_depth'] as int;
+  testWidgets('V3 row deletion rollback restores exact row and clip identities',
+      (tester) async {
+    _ignoreKnownEditorSemanticsAssertion();
+    final fixture = await _openAudioFixture(tester);
+    final controller = fixture.controller;
+    final before = controller.snapshot();
+    final rows = (before['rows'] as List).cast<Map<String, dynamic>>();
+    final clips = (before['clips'] as List).cast<Map<String, dynamic>>();
+    expect(rows.length, greaterThanOrEqualTo(2));
+    final initialRowIds =
+        rows.map((row) => row['row_id'] as int).toList(growable: false);
+    final initialClipOwners = <String, int>{
+      for (final clip in clips)
+        clip['clip_id'] as String: clip['row_id'] as int,
+    };
+    final initialUndoDepth = before['undo_depth'] as int;
 
-      await controller.executeV3Handoff(
-        _handoff(
-          digest: controller.stateDigest,
-          actions: <Map<String, dynamic>>[
-            _deleteRowAction(1, initialRowIds[1]),
-            _renameAction(0, initialRowIds[0], ''),
-          ],
-        ),
-      );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _deleteRowAction(1, initialRowIds[1]),
+        _renameAction(0, initialRowIds[0], ''),
+      ],
+    ));
 
-      final after = controller.snapshot();
-      expect(
-        (after['rows'] as List)
-            .cast<Map<String, dynamic>>()
-            .map((row) => row['row_id'])
-            .toList(growable: false),
-        initialRowIds,
-      );
-      expect(<String, int>{
+    final after = controller.snapshot();
+    expect(
+      (after['rows'] as List)
+          .cast<Map<String, dynamic>>()
+          .map((row) => row['row_id'])
+          .toList(growable: false),
+      initialRowIds,
+    );
+    expect(
+      <String, int>{
         for (final clip
             in (after['clips'] as List).cast<Map<String, dynamic>>())
           clip['clip_id'] as String: clip['row_id'] as int,
-      }, initialClipOwners);
-      expect(after['undo_depth'], initialUndoDepth);
+      },
+      initialClipOwners,
+    );
+    expect(after['undo_depth'], initialUndoDepth);
 
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
-  testWidgets('V3 populated row deletion restores contents and selection', (
-    tester,
-  ) async {
+  testWidgets('V3 populated row deletion restores contents and selection',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -643,17 +597,16 @@ void main() {
     final clips = (before['clips'] as List).cast<Map<String, dynamic>>();
     final deletedRowId = rows.first['row_id'] as int;
     final survivingRowId = rows.last['row_id'] as int;
-    final deletedClipCount = clips
-        .where((clip) => clip['row_id'] == deletedRowId)
-        .length;
+    final deletedClipCount =
+        clips.where((clip) => clip['row_id'] == deletedRowId).length;
     final initialUndoDepth = before['undo_depth'] as int;
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[_deleteRowAction(0, deletedRowId)],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _deleteRowAction(0, deletedRowId),
+      ],
+    ));
 
     var applied = controller.snapshot();
     expect((applied['rows'] as List), hasLength(rows.length - 1));
@@ -665,7 +618,10 @@ void main() {
       <Object?>[survivingRowId],
     );
     expect(applied['selected_row_id'], survivingRowId);
-    expect((applied['clips'] as List).length, clips.length - deletedClipCount);
+    expect(
+      (applied['clips'] as List).length,
+      clips.length - deletedClipCount,
+    );
     expect(applied['undo_depth'], initialUndoDepth + 1);
 
     await controller.undo();
@@ -687,18 +643,15 @@ void main() {
       <Object?>[survivingRowId],
     );
     expect(
-      (applied['clips'] as List),
-      hasLength(clips.length - deletedClipCount),
-    );
+        (applied['clips'] as List), hasLength(clips.length - deletedClipCount));
     expect(applied['selected_row_id'], survivingRowId);
     expect(applied['undo_depth'], initialUndoDepth + 1);
 
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 verifies edited row followed by deletion as final absence', (
-    tester,
-  ) async {
+  testWidgets('V3 verifies edited row followed by deletion as final absence',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -762,15 +715,15 @@ void main() {
 
     var applied = controller.snapshot();
     expect(
-      (applied['rows'] as List).cast<Map<String, dynamic>>().any(
-        (row) => row['row_id'] == deletedRowId,
-      ),
+      (applied['rows'] as List)
+          .cast<Map<String, dynamic>>()
+          .any((row) => row['row_id'] == deletedRowId),
       isFalse,
     );
     expect(
-      (applied['clips'] as List).cast<Map<String, dynamic>>().any(
-        (clip) => clip['row_id'] == deletedRowId,
-      ),
+      (applied['clips'] as List)
+          .cast<Map<String, dynamic>>()
+          .any((clip) => clip['row_id'] == deletedRowId),
       isFalse,
     );
     expect(applied['undo_depth'], initialUndoDepth + 1);
@@ -785,9 +738,9 @@ void main() {
     await controller.redo();
     applied = controller.snapshot();
     expect(
-      (applied['rows'] as List).cast<Map<String, dynamic>>().any(
-        (row) => row['row_id'] == deletedRowId,
-      ),
+      (applied['rows'] as List)
+          .cast<Map<String, dynamic>>()
+          .any((row) => row['row_id'] == deletedRowId),
       isFalse,
     );
     expect(applied['undo_depth'], initialUndoDepth + 1);
@@ -795,9 +748,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 grouped row deletion restores the dissolved group', (
-    tester,
-  ) async {
+  testWidgets('V3 grouped row deletion restores the dissolved group',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -807,22 +759,20 @@ void main() {
     final initialUndoDepth = before['undo_depth'] as int;
     const groupId = 'v3-delete-group';
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _groupCreateAction(groupId, 'Delete Test', rowIds, rowIds),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _groupCreateAction(groupId, 'Delete Test', rowIds, rowIds),
+      ],
+    ));
     expect(_group(controller.snapshot(), groupId)['name'], 'Delete Test');
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[_deleteRowAction(0, rowIds.first)],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _deleteRowAction(0, rowIds.first),
+      ],
+    ));
     var current = controller.snapshot();
     expect(current['groups'], isEmpty);
     expect(current['undo_depth'], initialUndoDepth + 2);
@@ -836,11 +786,8 @@ void main() {
         .toList(growable: false);
     expect(_group(current, groupId)['name'], 'Delete Test');
     expect(_group(current, groupId)['member_row_ids'], restoredRowIds);
-    expect(
-      restoredRowIds.last,
-      rowIds.last,
-      reason: 'The surviving row must keep its stable runtime ID.',
-    );
+    expect(restoredRowIds.last, rowIds.last,
+        reason: 'The surviving row must keep its stable runtime ID.');
     expect(current['undo_depth'], initialUndoDepth + 1);
 
     await controller.redo();
@@ -852,9 +799,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 grouping applies, dissolves, and rolls back atomically', (
-    tester,
-  ) async {
+  testWidgets('V3 grouping applies, dissolves, and rolls back atomically',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -865,14 +811,12 @@ void main() {
     final initialUndoDepth = before['undo_depth'] as int;
     const groupId = 'v3-test-group';
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _groupCreateAction(groupId, 'Music', rowIds, rowIds),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _groupCreateAction(groupId, 'Music', rowIds, rowIds),
+      ],
+    ));
 
     var applied = controller.snapshot();
     expect(applied['groups'], hasLength(1));
@@ -901,31 +845,24 @@ void main() {
     expect(_group(applied, groupId)['member_row_ids'], rowIds);
     expect(applied['undo_depth'], initialUndoDepth + 1);
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _groupCollapsedAction(groupId, true),
-          _renameAction(1, rowIds[1], ''),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _groupCollapsedAction(groupId, true),
+        _renameAction(1, rowIds[1], ''),
+      ],
+    ));
     applied = controller.snapshot();
-    expect(
-      _group(applied, groupId)['collapsed'],
-      isFalse,
-      reason: 'A later failure must roll back the group state.',
-    );
+    expect(_group(applied, groupId)['collapsed'], isFalse,
+        reason: 'A later failure must roll back the group state.');
     expect(applied['undo_depth'], initialUndoDepth + 1);
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _groupRemoveRowAction(groupId, rowIds.first, dissolvesGroup: true),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _groupRemoveRowAction(groupId, rowIds.first, dissolvesGroup: true),
+      ],
+    ));
     applied = controller.snapshot();
     expect(applied['groups'], isEmpty);
     expect(
@@ -1044,31 +981,25 @@ void main() {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
-    final rows = (controller.snapshot()['rows'] as List)
-        .cast<Map<String, dynamic>>();
+    final rows =
+        (controller.snapshot()['rows'] as List).cast<Map<String, dynamic>>();
     final rowIds = rows.map((row) => row['row_id'] as int).toList();
     const groupId = 'v3-persisted-group';
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _groupCreateAction(groupId, 'Persisted Name', rowIds, rowIds),
-          _groupCollapsedAction(groupId, true),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _groupCreateAction(groupId, 'Persisted Name', rowIds, rowIds),
+        _groupCollapsedAction(groupId, true),
+      ],
+    ));
     await _pumpFor(tester, const Duration(seconds: 2));
 
-    final projectJson =
-        jsonDecode(
-              await File(
-                '${fixture.directory.path}/project.json',
-              ).readAsString(),
-            )
-            as Map<String, dynamic>;
-    final persistedGroups = (projectJson['trackGroups'] as List)
-        .cast<Map<String, dynamic>>();
+    final projectJson = jsonDecode(
+      await File('${fixture.directory.path}/project.json').readAsString(),
+    ) as Map<String, dynamic>;
+    final persistedGroups =
+        (projectJson['trackGroups'] as List).cast<Map<String, dynamic>>();
     final persisted = persistedGroups.singleWhere(
       (group) => group['id'] == groupId,
     );
@@ -1108,9 +1039,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 row controls apply, undo, redo, and roll back atomically', (
-    tester,
-  ) async {
+  testWidgets('V3 row controls apply, undo, redo, and roll back atomically',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -1125,16 +1055,14 @@ void main() {
     final expectedPanSigned = (initialPanSigned + 0.25).clamp(-1.0, 1.0);
     final expectedPan = (expectedPanSigned + 1.0) * 0.5;
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _rowMixAction(0, rowId, 'set_gain', gainDb: -6),
-          _rowMixAction(0, rowId, 'adjust_pan', deltaSigned: 0.25),
-          _soloAction(0, rowId, true),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _rowMixAction(0, rowId, 'set_gain', gainDb: -6),
+        _rowMixAction(0, rowId, 'adjust_pan', deltaSigned: 0.25),
+        _soloAction(0, rowId, true),
+      ],
+    ));
 
     final applied = controller.snapshot();
     expect(_row(applied, 0)['gain_ui'], closeTo(expectedGain, 0.00001));
@@ -1142,21 +1070,16 @@ void main() {
     expect(_row(applied, 0)['soloed'], isTrue);
     expect(applied['undo_depth'], initialUndoDepth + 1);
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _rowMixAction(0, rowId, 'set_gain', gainDb: -6),
-          _rowMixAction(0, rowId, 'set_pan', panSigned: expectedPanSigned),
-          _soloAction(0, rowId, true),
-        ],
-      ),
-    );
-    expect(
-      controller.snapshot()['undo_depth'],
-      initialUndoDepth + 1,
-      reason: 'Already-satisfied row controls must not add history.',
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _rowMixAction(0, rowId, 'set_gain', gainDb: -6),
+        _rowMixAction(0, rowId, 'set_pan', panSigned: expectedPanSigned),
+        _soloAction(0, rowId, true),
+      ],
+    ));
+    expect(controller.snapshot()['undo_depth'], initialUndoDepth + 1,
+        reason: 'Already-satisfied row controls must not add history.');
 
     await controller.undo();
     final undone = controller.snapshot();
@@ -1173,18 +1096,16 @@ void main() {
     expect(redone['undo_depth'], initialUndoDepth + 1);
 
     await controller.undo();
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _rowMixAction(0, rowId, 'set_gain', gainDb: -6),
-          _rowMixAction(0, rowId, 'adjust_gain', deltaSigned: 0.1),
-          _rowMixAction(0, rowId, 'adjust_pan', deltaSigned: 0.25),
-          _soloAction(0, rowId, true),
-          _renameAction(1, rows[1]['row_id'] as int, ''),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _rowMixAction(0, rowId, 'set_gain', gainDb: -6),
+        _rowMixAction(0, rowId, 'adjust_gain', deltaSigned: 0.1),
+        _rowMixAction(0, rowId, 'adjust_pan', deltaSigned: 0.25),
+        _soloAction(0, rowId, true),
+        _renameAction(1, rows[1]['row_id'] as int, ''),
+      ],
+    ));
     final rolledBack = controller.snapshot();
     expect(_row(rolledBack, 0)['gain_ui'], closeTo(initialGain, 0.00001));
     expect(_row(rolledBack, 0)['pan_01'], closeTo(initialPan, 0.00001));
@@ -1194,9 +1115,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 direct row controls do not edit a containing group bus', (
-    tester,
-  ) async {
+  testWidgets('V3 direct row controls do not edit a containing group bus',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -1205,14 +1125,12 @@ void main() {
     final rowIds = rows.map((row) => row['row_id'] as int).toList();
     const groupId = 'v3-direct-row-group';
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _groupCreateAction(groupId, 'Grouped Rows', rowIds, rowIds),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _groupCreateAction(groupId, 'Grouped Rows', rowIds, rowIds),
+      ],
+    ));
 
     final grouped = controller.snapshot();
     final groupBefore = Map<String, dynamic>.from(_group(grouped, groupId));
@@ -1220,15 +1138,23 @@ void main() {
     final initialGain = (rowBefore['gain_ui'] as num).toDouble();
     final initialPan = (rowBefore['pan_01'] as num).toDouble();
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _rowMixAction(0, rowIds.first, 'adjust_gain', deltaSigned: 0.2),
-          _rowMixAction(0, rowIds.first, 'adjust_pan', deltaSigned: -0.2),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _rowMixAction(
+          0,
+          rowIds.first,
+          'adjust_gain',
+          deltaSigned: 0.2,
+        ),
+        _rowMixAction(
+          0,
+          rowIds.first,
+          'adjust_pan',
+          deltaSigned: -0.2,
+        ),
+      ],
+    ));
 
     var applied = controller.snapshot();
     expect(
@@ -1264,9 +1190,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 verifies repeated direct row edits as ordered final state', (
-    tester,
-  ) async {
+  testWidgets('V3 verifies repeated direct row edits as ordered final state',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -1278,38 +1203,32 @@ void main() {
     final initialPan = rows[0]['pan_01'] as double;
     final initialUndoDepth = before['undo_depth'] as int;
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _rowMixAction(0, rowId, 'set_gain', gainDb: -6),
-          _rowMixAction(0, rowId, 'adjust_gain', deltaSigned: 0.1),
-          _rowMixAction(0, rowId, 'adjust_gain', deltaSigned: 0.2),
-          _rowMixAction(0, rowId, 'adjust_pan', deltaSigned: 0.2),
-          _rowMixAction(0, rowId, 'adjust_pan', deltaSigned: -0.1),
-          _renameAction(0, rowId, 'First Name'),
-          _renameAction(0, rowId, 'Final Name'),
-          _soloAction(0, rowId, true),
-          _soloAction(0, rowId, false),
-          _muteAction(0, rowId),
-          _muteAction(0, rowId, false),
-          _colorAction(0, rowId, 'blue'),
-          _colorAction(0, rowId, 'none'),
-          _selectAction(1, secondRowId),
-          _selectAction(0, rowId),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _rowMixAction(0, rowId, 'set_gain', gainDb: -6),
+        _rowMixAction(0, rowId, 'adjust_gain', deltaSigned: 0.1),
+        _rowMixAction(0, rowId, 'adjust_gain', deltaSigned: 0.2),
+        _rowMixAction(0, rowId, 'adjust_pan', deltaSigned: 0.2),
+        _rowMixAction(0, rowId, 'adjust_pan', deltaSigned: -0.1),
+        _renameAction(0, rowId, 'First Name'),
+        _renameAction(0, rowId, 'Final Name'),
+        _soloAction(0, rowId, true),
+        _soloAction(0, rowId, false),
+        _muteAction(0, rowId),
+        _muteAction(0, rowId, false),
+        _colorAction(0, rowId, 'blue'),
+        _colorAction(0, rowId, 'none'),
+        _selectAction(1, secondRowId),
+        _selectAction(0, rowId),
+      ],
+    ));
 
     final applied = controller.snapshot();
-    expect(
-      _row(applied, 0)['gain_ui'],
-      closeTo((rowGainDbToUi(-6) + 0.3).clamp(0.0, 3.0), 0.00001),
-    );
-    expect(
-      _row(applied, 0)['pan_01'],
-      closeTo((initialPan + 0.05).clamp(0.0, 1.0), 0.00001),
-    );
+    expect(_row(applied, 0)['gain_ui'],
+        closeTo((rowGainDbToUi(-6) + 0.3).clamp(0.0, 3.0), 0.00001));
+    expect(_row(applied, 0)['pan_01'],
+        closeTo((initialPan + 0.05).clamp(0.0, 1.0), 0.00001));
     expect(_row(applied, 0)['name'], 'Final Name');
     expect(_row(applied, 0)['soloed'], isFalse);
     expect(_row(applied, 0)['muted'], isFalse);
@@ -1332,9 +1251,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 compact mix accumulates repeated row and master edits', (
-    tester,
-  ) async {
+  testWidgets('V3 compact mix accumulates repeated row and master edits',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -1384,30 +1302,23 @@ void main() {
     );
 
     final applied = controller.snapshot();
-    expect(
-      _row(applied, 0)['gain_ui'],
-      closeTo((initialGain + 0.3).clamp(0.0, 3.0), 0.00001),
-    );
-    expect(
-      _row(applied, 0)['pan_01'],
-      closeTo((initialPan + 0.05).clamp(0.0, 1.0), 0.00001),
-    );
+    expect(_row(applied, 0)['gain_ui'],
+        closeTo((initialGain + 0.3).clamp(0.0, 3.0), 0.00001));
+    expect(_row(applied, 0)['pan_01'],
+        closeTo((initialPan + 0.05).clamp(0.0, 1.0), 0.00001));
     expect(applied['undo_depth'], initialUndoDepth + 1);
 
     await controller.undo();
-    expect(
-      _row(controller.snapshot(), 0)['gain_ui'],
-      closeTo(initialGain, 0.00001),
-    );
+    expect(_row(controller.snapshot(), 0)['gain_ui'],
+        closeTo(initialGain, 0.00001));
     await controller.redo();
     expect(controller.snapshot()['undo_depth'], initialUndoDepth + 1);
 
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 audio pitch applies, reads back, undoes, and redoes', (
-    tester,
-  ) async {
+  testWidgets('V3 audio pitch applies, reads back, undoes, and redoes',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -1612,59 +1523,53 @@ void main() {
         isNot(p.basename(target['file'] as String)),
       );
 
-      await tester.pumpWidget(const SizedBox.shrink());
-      await _pumpFor(tester, const Duration(milliseconds: 250));
-      final reopenedController = AudioEditorEvaluationController();
-      await tester.pumpWidget(
-        buildIntegrationTestApp(
-          home: AudioEditorScreen(
-            mode: 'edit',
-            projectDir: fixture.directory,
-            isProEntitled: true,
-            evaluationController: reopenedController,
-          ),
-        ),
-      );
-      await _pumpUntil(
-        tester,
-        () =>
-            reopenedController.isAttached &&
-            reopenedController.snapshot()['clips'] is List,
-      );
-      await _pumpFor(tester, const Duration(seconds: 2));
-
-      final reopened = (reopenedController.snapshot()['clips'] as List)
-          .cast<Map<String, dynamic>>()
-          .singleWhere((clip) => clip['clip_id'] == clipId);
-      expect(reopened['file'], isNot(target['file']));
-      expect(reopened['pitch_semitones'], closeTo(targetPitch, 0.0005));
-
-      await reopenedController.undo();
-      final reopenedUndone = (reopenedController.snapshot()['clips'] as List)
-          .cast<Map<String, dynamic>>()
-          .singleWhere((clip) => clip['clip_id'] == clipId);
-      expect(reopenedUndone['file'], target['file']);
-      expect(reopenedUndone['pitch_semitones'], closeTo(initialPitch, 0.0005));
-
-      await reopenedController.redo();
-      final reopenedRedone = (reopenedController.snapshot()['clips'] as List)
-          .cast<Map<String, dynamic>>()
-          .singleWhere((clip) => clip['clip_id'] == clipId);
-      expect(reopenedRedone['file'], isNot(target['file']));
-      expect(reopenedRedone['pitch_semitones'], closeTo(targetPitch, 0.0005));
-
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
-
-  testWidgets('V3 sample replacement shortens only for a shorter source', (
-    tester,
-  ) async {
-    _ignoreKnownEditorSemanticsAssertion();
-    final fixture = await _openAudioFixture(
+    await tester.pumpWidget(const SizedBox.shrink());
+    await _pumpFor(tester, const Duration(milliseconds: 250));
+    final reopenedController = AudioEditorEvaluationController();
+    await tester.pumpWidget(buildIntegrationTestApp(
+      home: AudioEditorScreen(
+        mode: 'edit',
+        projectDir: fixture.directory,
+        isProEntitled: true,
+        evaluationController: reopenedController,
+      ),
+    ));
+    await _pumpUntil(
       tester,
-      fixtureId: 'audio_replace_lengths',
+      () =>
+          reopenedController.isAttached &&
+          reopenedController.snapshot()['clips'] is List,
     );
+    await _pumpFor(tester, const Duration(seconds: 2));
+
+    final reopened = (reopenedController.snapshot()['clips'] as List)
+        .cast<Map<String, dynamic>>()
+        .singleWhere((clip) => clip['clip_id'] == clipId);
+    expect(reopened['file'], isNot(target['file']));
+    expect(reopened['pitch_semitones'], closeTo(targetPitch, 0.0005));
+
+    await reopenedController.undo();
+    final reopenedUndone = (reopenedController.snapshot()['clips'] as List)
+        .cast<Map<String, dynamic>>()
+        .singleWhere((clip) => clip['clip_id'] == clipId);
+    expect(reopenedUndone['file'], target['file']);
+    expect(reopenedUndone['pitch_semitones'], closeTo(initialPitch, 0.0005));
+
+    await reopenedController.redo();
+    final reopenedRedone = (reopenedController.snapshot()['clips'] as List)
+        .cast<Map<String, dynamic>>()
+        .singleWhere((clip) => clip['clip_id'] == clipId);
+    expect(reopenedRedone['file'], isNot(target['file']));
+    expect(reopenedRedone['pitch_semitones'], closeTo(targetPitch, 0.0005));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('V3 sample replacement shortens only for a shorter source',
+      (tester) async {
+    _ignoreKnownEditorSemanticsAssertion();
+    final fixture =
+        await _openAudioFixture(tester, fixtureId: 'audio_replace_lengths');
     final controller = fixture.controller;
     final before = controller.snapshot();
     final clips = (before['clips'] as List).cast<Map<String, dynamic>>();
@@ -1717,9 +1622,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 rolls audio pitch back when a later action fails', (
-    tester,
-  ) async {
+  testWidgets('V3 rolls audio pitch back when a later action fails',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -1762,9 +1666,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 exact trim and onset move share one atomic undo entry', (
-    tester,
-  ) async {
+  testWidgets('V3 exact trim and onset move share one atomic undo entry',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -1848,9 +1751,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 audio stretch applies, reads back, undoes, and redoes', (
-    tester,
-  ) async {
+  testWidgets('V3 audio stretch applies, reads back, undoes, and redoes',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -1897,10 +1799,8 @@ void main() {
     final undone = controller.snapshot();
     final undoneClip = ((undone['clips'] as List).first as Map);
     expect(undoneClip['length_ms'], closeTo(initialLengthMs, 2.0));
-    expect(
-      undoneClip['stretch_to_project_tempo'],
-      clip['stretch_to_project_tempo'],
-    );
+    expect(undoneClip['stretch_to_project_tempo'],
+        clip['stretch_to_project_tempo']);
     expect(_row(undone, 1)['name'], 'Synth');
     expect(undone['undo_depth'], initialUndoDepth);
 
@@ -1914,9 +1814,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 coalesces stretch and tempo-follow in planner order', (
-    tester,
-  ) async {
+  testWidgets('V3 coalesces stretch and tempo-follow in planner order',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -1929,34 +1828,33 @@ void main() {
     Map<String, dynamic> clipAction(
       String operation,
       Map<String, dynamic> values,
-    ) => <String, dynamic>{
-      'type': 'clip_edit',
-      'data': <String, dynamic>{
-        'operation': operation,
-        ...values,
-        'target': <String, dynamic>{
-          'scope': 'clip',
-          'clip_index': 0,
-          'clip_id': clip['clip_id'],
-          'row_index': clip['row_index'],
-        },
-      },
-    };
+    ) =>
+        <String, dynamic>{
+          'type': 'clip_edit',
+          'data': <String, dynamic>{
+            'operation': operation,
+            ...values,
+            'target': <String, dynamic>{
+              'scope': 'clip',
+              'clip_index': 0,
+              'clip_id': clip['clip_id'],
+              'row_index': clip['row_index'],
+            },
+          },
+        };
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          clipAction('stretch', <String, dynamic>{
-            'timeline_duration_ms': targetLengthMs,
-            'preserve_pitch': false,
-          }),
-          clipAction('tempo_follow', <String, dynamic>{
-            'mode': 'preserve_pitch',
-          }),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        clipAction('stretch', <String, dynamic>{
+          'timeline_duration_ms': targetLengthMs,
+          'preserve_pitch': false,
+        }),
+        clipAction('tempo_follow', <String, dynamic>{
+          'mode': 'preserve_pitch',
+        }),
+      ],
+    ));
 
     var appliedClip = ((controller.snapshot()['clips'] as List).first as Map);
     expect(appliedClip['length_ms'], closeTo(targetLengthMs, 2.0));
@@ -1967,20 +1865,18 @@ void main() {
     await controller.undo();
     expect(controller.snapshot()['undo_depth'], initialUndoDepth);
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          clipAction('tempo_follow', <String, dynamic>{
-            'mode': 'preserve_pitch',
-          }),
-          clipAction('stretch', <String, dynamic>{
-            'timeline_duration_ms': targetLengthMs,
-            'preserve_pitch': false,
-          }),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        clipAction('tempo_follow', <String, dynamic>{
+          'mode': 'preserve_pitch',
+        }),
+        clipAction('stretch', <String, dynamic>{
+          'timeline_duration_ms': targetLengthMs,
+          'preserve_pitch': false,
+        }),
+      ],
+    ));
 
     appliedClip = ((controller.snapshot()['clips'] as List).first as Map);
     expect(appliedClip['length_ms'], closeTo(targetLengthMs, 2.0));
@@ -1996,9 +1892,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 rolls audio stretch back when a later action fails', (
-    tester,
-  ) async {
+  testWidgets('V3 rolls audio stretch back when a later action fails',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -2034,22 +1929,17 @@ void main() {
     final after = controller.snapshot();
     final afterClip = ((after['clips'] as List).first as Map);
     expect(afterClip['length_ms'], closeTo(initialLengthMs, 2.0));
-    expect(
-      afterClip['stretch_to_project_tempo'],
-      clip['stretch_to_project_tempo'],
-    );
-    expect(
-      afterClip['tempo_stretch_preserve_pitch'],
-      clip['tempo_stretch_preserve_pitch'],
-    );
+    expect(afterClip['stretch_to_project_tempo'],
+        clip['stretch_to_project_tempo']);
+    expect(afterClip['tempo_stretch_preserve_pitch'],
+        clip['tempo_stretch_preserve_pitch']);
     expect(after['undo_depth'], initialUndoDepth);
 
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 detected source, project tempo, and follow share one undo', (
-    tester,
-  ) async {
+  testWidgets('V3 detected source, project tempo, and follow share one undo',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -2063,19 +1953,20 @@ void main() {
     Map<String, dynamic> clipAction(
       String operation,
       Map<String, dynamic> values,
-    ) => <String, dynamic>{
-      'type': 'clip_edit',
-      'data': <String, dynamic>{
-        'operation': operation,
-        ...values,
-        'target': <String, dynamic>{
-          'scope': 'clip',
-          'clip_index': 0,
-          'clip_id': clip['clip_id'],
-          'row_index': clip['row_index'],
-        },
-      },
-    };
+    ) =>
+        <String, dynamic>{
+          'type': 'clip_edit',
+          'data': <String, dynamic>{
+            'operation': operation,
+            ...values,
+            'target': <String, dynamic>{
+              'scope': 'clip',
+              'clip_index': 0,
+              'clip_id': clip['clip_id'],
+              'row_index': clip['row_index'],
+            },
+          },
+        };
 
     await controller.executeV3Handoff(
       _handoff(
@@ -2128,7 +2019,10 @@ void main() {
     await controller.undo();
     final undone = controller.snapshot();
     final undoneClip = ((undone['clips'] as List).first as Map);
-    expect(undoneClip['source_tempo_bpm'], closeTo(initialSourceTempo, 0.0005));
+    expect(
+      undoneClip['source_tempo_bpm'],
+      closeTo(initialSourceTempo, 0.0005),
+    );
     expect(undone['tempo_bpm'], closeTo(initialProjectTempo, 0.0005));
     expect(
       undoneClip['stretch_to_project_tempo'],
@@ -2149,9 +2043,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 core audio clip edits stay atomic across index shifts', (
-    tester,
-  ) async {
+  testWidgets('V3 core audio clip edits stay atomic across index shifts',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -2160,44 +2053,42 @@ void main() {
     final clips = (before['clips'] as List).cast<Map<String, dynamic>>();
     final initialUndoDepth = before['undo_depth'] as int;
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _clipAction(
-            'trim',
-            clips[0],
-            rows[0],
-            extra: <String, dynamic>{
-              'delta_trim_start_ms': 250.0,
-              'delta_trim_end_ms': -200.0,
-              'new_start_ms': 250.0,
-            },
-          ),
-          _clipAction(
-            'cut',
-            clips[1],
-            rows[1],
-            extra: const <String, dynamic>{'cut_ms': 600.0},
-          ),
-          _clipAction(
-            'duplicate',
-            clips[0],
-            rows[0],
-            extra: const <String, dynamic>{
-              'paste_start_ms': 2000.0,
-              'row_index': 0,
-              'new_row_index': 0,
-            },
-          ),
-          _clipAction('delete', clips[1], rows[1]),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _clipAction(
+          'trim',
+          clips[0],
+          rows[0],
+          extra: <String, dynamic>{
+            'delta_trim_start_ms': 250.0,
+            'delta_trim_end_ms': -200.0,
+            'new_start_ms': 250.0,
+          },
+        ),
+        _clipAction(
+          'cut',
+          clips[1],
+          rows[1],
+          extra: const <String, dynamic>{'cut_ms': 600.0},
+        ),
+        _clipAction(
+          'duplicate',
+          clips[0],
+          rows[0],
+          extra: const <String, dynamic>{
+            'paste_start_ms': 2000.0,
+            'row_index': 0,
+            'new_row_index': 0,
+          },
+        ),
+        _clipAction('delete', clips[1], rows[1]),
+      ],
+    ));
 
     final applied = controller.snapshot();
-    final appliedClips = (applied['clips'] as List)
-        .cast<Map<String, dynamic>>();
+    final appliedClips =
+        (applied['clips'] as List).cast<Map<String, dynamic>>();
     final trimmed = _clip(applied, clips[0]['clip_id'] as String);
     expect(trimmed['start_ms'], closeTo(250.0, 1.0));
     expect(trimmed['length_ms'], closeTo(750.0, 1.0));
@@ -2213,15 +2104,11 @@ void main() {
       hasLength(1),
     );
     expect(
-      appliedClips.where(
-        (clip) =>
-            clip['file'] == clips[0]['file'] && clip['start_ms'] == 2000.0,
-      ),
-      hasLength(1),
-    );
-    final duplicatedAudio = appliedClips.singleWhere(
-      (clip) => clip['file'] == clips[0]['file'] && clip['start_ms'] == 2000.0,
-    );
+        appliedClips.where((clip) =>
+            clip['file'] == clips[0]['file'] && clip['start_ms'] == 2000.0),
+        hasLength(1));
+    final duplicatedAudio = appliedClips.singleWhere((clip) =>
+        clip['file'] == clips[0]['file'] && clip['start_ms'] == 2000.0);
     final duplicatedAudioId = duplicatedAudio['clip_id'] as String;
     expect(applied['undo_depth'], initialUndoDepth + 1);
 
@@ -2255,66 +2142,60 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 core MIDI clip split duplicate and delete is reversible', (
-    tester,
-  ) async {
+  testWidgets('V3 core MIDI clip split duplicate and delete is reversible',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester, fixtureId: 'midi_small');
     final controller = fixture.controller;
     final before = controller.snapshot();
-    final row = ((before['rows'] as List).single as Map)
-        .cast<String, dynamic>();
-    final source = ((before['clips'] as List).single as Map)
-        .cast<String, dynamic>();
+    final row =
+        ((before['rows'] as List).single as Map).cast<String, dynamic>();
+    final source =
+        ((before['clips'] as List).single as Map).cast<String, dynamic>();
     final initialUndoDepth = before['undo_depth'] as int;
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _clipAction(
-            'cut',
-            source,
-            row,
-            extra: const <String, dynamic>{'cut_ms': 600.0},
-          ),
-          _clipAction(
-            'duplicate',
-            source,
-            row,
-            extra: const <String, dynamic>{
-              'paste_start_ms': 1800.0,
-              'row_index': 0,
-              'new_row_index': 0,
-            },
-          ),
-          _clipAction('delete', source, row),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _clipAction(
+          'cut',
+          source,
+          row,
+          extra: const <String, dynamic>{'cut_ms': 600.0},
+        ),
+        _clipAction(
+          'duplicate',
+          source,
+          row,
+          extra: const <String, dynamic>{
+            'paste_start_ms': 1800.0,
+            'row_index': 0,
+            'new_row_index': 0,
+          },
+        ),
+        _clipAction('delete', source, row),
+      ],
+    ));
 
     final applied = controller.snapshot();
     expect((applied['clips'] as List), hasLength(2));
     expect(
-      (applied['clips'] as List).cast<Map>().every(
-        (clip) => clip['kind'] == 'midi',
-      ),
-      isTrue,
-    );
+        (applied['clips'] as List)
+            .cast<Map>()
+            .every((clip) => clip['kind'] == 'midi'),
+        isTrue);
     expect(
-      (applied['clips'] as List).cast<Map>().any(
-        (clip) => clip['clip_id'] == source['clip_id'],
-      ),
-      isFalse,
-    );
+        (applied['clips'] as List)
+            .cast<Map>()
+            .any((clip) => clip['clip_id'] == source['clip_id']),
+        isFalse);
     final generatedMidiClips = (applied['clips'] as List)
         .cast<Map<String, dynamic>>()
         .where((clip) => clip['clip_id'] != source['clip_id'])
         .toList(growable: false);
     expect(generatedMidiClips, hasLength(2));
-    final generatedMidiIds = generatedMidiClips
-        .map((clip) => clip['clip_id'] as String)
-        .toSet();
+    final generatedMidiIds =
+        generatedMidiClips.map((clip) => clip['clip_id'] as String).toSet();
     expect(applied['undo_depth'], initialUndoDepth + 1);
 
     await controller.undo();
@@ -2338,9 +2219,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 rolls a trim back when a later clip bundle action fails', (
-    tester,
-  ) async {
+  testWidgets('V3 rolls a trim back when a later clip bundle action fails',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -2349,24 +2229,22 @@ void main() {
     final clips = (before['clips'] as List).cast<Map<String, dynamic>>();
     final initialUndoDepth = before['undo_depth'] as int;
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _clipAction(
-            'trim',
-            clips[0],
-            rows[0],
-            extra: <String, dynamic>{
-              'delta_trim_start_ms': 250.0,
-              'delta_trim_end_ms': 0.0,
-              'new_start_ms': 250.0,
-            },
-          ),
-          _renameAction(1, rows[1]['row_id'] as int, ''),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _clipAction(
+          'trim',
+          clips[0],
+          rows[0],
+          extra: <String, dynamic>{
+            'delta_trim_start_ms': 250.0,
+            'delta_trim_end_ms': 0.0,
+            'new_start_ms': 250.0,
+          },
+        ),
+        _renameAction(1, rows[1]['row_id'] as int, ''),
+      ],
+    ));
 
     final after = controller.snapshot();
     final restored = _clip(after, clips[0]['clip_id'] as String);
@@ -2377,9 +2255,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 mix actions share one transaction with direct commands', (
-    tester,
-  ) async {
+  testWidgets('V3 mix actions share one transaction with direct commands',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -2466,9 +2343,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 row mix effects persist through one-step undo and redo', (
-    tester,
-  ) async {
+  testWidgets('V3 row mix effects persist through one-step undo and redo',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -2498,37 +2374,30 @@ void main() {
     );
 
     Map<String, dynamic> snapshot = controller.snapshot();
-    expect(
-      _effectNames(_row(snapshot, 0)['effects']),
-      contains(contains('EQ 3-Band')),
-    );
+    expect(_effectNames(_row(snapshot, 0)['effects']),
+        contains(contains('EQ 3-Band')));
     expect(snapshot['undo_depth'], initialUndoDepth + 1);
 
     await controller.undo();
     await _pumpFor(tester, const Duration(seconds: 2));
     snapshot = controller.snapshot();
-    expect(
-      _effectNames(_row(snapshot, 0)['effects']),
-      isEmpty,
-      reason: 'Row effects must be removed by the compound undo.',
-    );
+    expect(_effectNames(_row(snapshot, 0)['effects']), isEmpty,
+        reason: 'Row effects must be removed by the compound undo.');
     expect(snapshot['undo_depth'], initialUndoDepth);
 
     await controller.redo();
     await _pumpUntil(tester, () {
       snapshot = controller.snapshot();
-      return _effectNames(
-        _row(snapshot, 0)['effects'],
-      ).any((name) => name.contains('EQ 3-Band'));
+      return _effectNames(_row(snapshot, 0)['effects'])
+          .any((name) => name.contains('EQ 3-Band'));
     });
     expect(snapshot['undo_depth'], initialUndoDepth + 1);
 
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 mix removal is already satisfied when effect is absent', (
-    tester,
-  ) async {
+  testWidgets('V3 mix removal is already satisfied when effect is absent',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -2629,12 +2498,10 @@ void main() {
         },
       };
 
-      await controller.executeV3Handoff(
-        _handoff(
-          digest: controller.stateDigest,
-          actions: <Map<String, dynamic>>[mixAction()],
-        ),
-      );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[mixAction()],
+    ));
 
       var applied = controller.snapshot();
       var eq = (_row(applied, 0)['effects'] as List)
@@ -2965,9 +2832,8 @@ void main() {
       );
       expect(snapshot['undo_depth'], initialUndoDepth + 1);
 
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets('V3 master effect removal restores exact parameters on Undo', (
     tester,
@@ -3119,18 +2985,17 @@ void main() {
         isNot(contains(contains('Limiter'))),
       );
 
-      await controller.undo();
-      expect(controller.snapshot()['master_effects'], before['master_effects']);
+    await controller.undo();
+    expect(controller.snapshot()['master_effects'], before['master_effects']);
 
-      await controller.redo();
-      expect(
-        _effectNames(controller.snapshot()['master_effects']),
-        isNot(contains(contains('Limiter'))),
-      );
+    await controller.redo();
+    expect(
+      _effectNames(controller.snapshot()['master_effects']),
+      isNot(contains(contains('Limiter'))),
+    );
 
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets(
     'V3 verifies exact sample placement automation and effect parameters',
@@ -3251,18 +3116,16 @@ void main() {
         contains(contains('EQ 3-Band')),
       );
 
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
-  testWidgets('V3 effect-instance edits target, undo, and redo exact plugins', (
-    tester,
-  ) async {
+  testWidgets('V3 effect-instance edits target, undo, and redo exact plugins',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
-    final rows = (controller.snapshot()['rows'] as List)
-        .cast<Map<String, dynamic>>();
+    final rows =
+        (controller.snapshot()['rows'] as List).cast<Map<String, dynamic>>();
     final rowId = rows[0]['row_id'] as int;
 
     await controller.executeV3Handoff(
@@ -3381,15 +3244,14 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 MIDI transpose expectations follow ordered clamp semantics', (
-    tester,
-  ) async {
+  testWidgets('V3 MIDI transpose expectations follow ordered clamp semantics',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester, fixtureId: 'midi_small');
     final controller = fixture.controller;
     final before = controller.snapshot();
-    final clip = ((before['clips'] as List).single as Map)
-        .cast<String, dynamic>();
+    final clip =
+        ((before['clips'] as List).single as Map).cast<String, dynamic>();
     final initialPitches = (clip['midi_notes'] as List)
         .cast<Map<String, dynamic>>()
         .map((note) => note['pitch'] as int)
@@ -3397,24 +3259,25 @@ void main() {
     final initialUndoDepth = before['undo_depth'] as int;
 
     Map<String, dynamic> transpose(int semitones) => <String, dynamic>{
-      'type': 'midi_compose',
-      'data': <String, dynamic>{
-        'operation': 'transpose_notes',
-        'semitones': semitones,
-        'target': <String, dynamic>{
-          'scope': 'clip',
-          'clip_index': 0,
-          'clip_id': clip['clip_id'],
-        },
-      },
-    };
+          'type': 'midi_compose',
+          'data': <String, dynamic>{
+            'operation': 'transpose_notes',
+            'semitones': semitones,
+            'target': <String, dynamic>{
+              'scope': 'clip',
+              'clip_index': 0,
+              'clip_id': clip['clip_id'],
+            },
+          },
+        };
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[transpose(100), transpose(-100)],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        transpose(100),
+        transpose(-100),
+      ],
+    ));
 
     final applied = controller.snapshot();
     final finalPitches =
@@ -3440,17 +3303,16 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 exact MIDI replacements verify final state and undo once', (
-    tester,
-  ) async {
+  testWidgets('V3 exact MIDI replacements verify final state and undo once',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester, fixtureId: 'midi_small');
     final controller = fixture.controller;
     final before = controller.snapshot();
-    final clip = ((before['clips'] as List).single as Map)
-        .cast<String, dynamic>();
-    final initialNotes = (clip['midi_notes'] as List)
-        .cast<Map<String, dynamic>>();
+    final clip =
+        ((before['clips'] as List).single as Map).cast<String, dynamic>();
+    final initialNotes =
+        (clip['midi_notes'] as List).cast<Map<String, dynamic>>();
     final initialUndoDepth = before['undo_depth'] as int;
     final firstNotes = const <Map<String, dynamic>>[
       <String, dynamic>{
@@ -3475,15 +3337,13 @@ void main() {
       },
     ];
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _midiReplaceAction(clip, firstNotes),
-          _midiReplaceAction(clip, finalNotes),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _midiReplaceAction(clip, firstNotes),
+        _midiReplaceAction(clip, finalNotes),
+      ],
+    ));
 
     var applied = _clip(controller.snapshot(), clip['clip_id'] as String);
     expect(applied['midi_notes'], finalNotes);
@@ -3508,19 +3368,16 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 MIDI append extends length and restores it with Undo Redo', (
-    tester,
-  ) async {
+  testWidgets('V3 MIDI append extends length and restores it with Undo Redo',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
-    final fixture = await _openAudioFixture(
-      tester,
-      fixtureId: 'midi_append_live',
-    );
+    final fixture =
+        await _openAudioFixture(tester, fixtureId: 'midi_append_live');
     final controller = fixture.controller;
     final before = controller.snapshot();
     final clip = _clip(before, 'append_midi');
-    final initialNotes = (clip['midi_notes'] as List)
-        .cast<Map<String, dynamic>>();
+    final initialNotes =
+        (clip['midi_notes'] as List).cast<Map<String, dynamic>>();
     final initialLengthMs = (clip['length_ms'] as num).toDouble();
     final initialTempoState = <String, dynamic>{
       'source_tempo_bpm': clip['source_tempo_bpm'],
@@ -3554,18 +3411,16 @@ void main() {
     ];
     final initialUndoDepth = before['undo_depth'] as int;
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _midiReplaceAction(
-            clip,
-            finalNotes,
-            finalLengthBeats: finalLengthBeats,
-          ),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _midiReplaceAction(
+          clip,
+          finalNotes,
+          finalLengthBeats: finalLengthBeats,
+        ),
+      ],
+    ));
 
     var applied = _clip(controller.snapshot(), clip['clip_id'] as String);
     expect(applied['midi_notes'], finalNotes);
@@ -3599,37 +3454,37 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 MIDI edit rolls back completely when a later action fails', (
-    tester,
-  ) async {
+  testWidgets('V3 MIDI edit rolls back completely when a later action fails',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester, fixtureId: 'midi_small');
     final controller = fixture.controller;
     final before = controller.snapshot();
-    final clip = ((before['clips'] as List).single as Map)
-        .cast<String, dynamic>();
-    final row = ((before['rows'] as List).single as Map)
-        .cast<String, dynamic>();
-    final initialNotes = (clip['midi_notes'] as List)
-        .cast<Map<String, dynamic>>();
+    final clip =
+        ((before['clips'] as List).single as Map).cast<String, dynamic>();
+    final row =
+        ((before['rows'] as List).single as Map).cast<String, dynamic>();
+    final initialNotes =
+        (clip['midi_notes'] as List).cast<Map<String, dynamic>>();
     final initialUndoDepth = before['undo_depth'] as int;
 
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          _midiReplaceAction(clip, const <Map<String, dynamic>>[
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        _midiReplaceAction(
+          clip,
+          const <Map<String, dynamic>>[
             <String, dynamic>{
               'pitch': 72,
               'start_beat': 0.0,
               'length_beats': 0.25,
               'velocity': 0.9,
             },
-          ]),
-          _renameAction(0, row['row_id'] as int, ''),
-        ],
-      ),
-    );
+          ],
+        ),
+        _renameAction(0, row['row_id'] as int, ''),
+      ],
+    ));
 
     final rolledBack = controller.snapshot();
     expect(
@@ -3641,9 +3496,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 repeated automation verifies only the final point set', (
-    tester,
-  ) async {
+  testWidgets('V3 repeated automation verifies only the final point set',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -3671,26 +3525,23 @@ void main() {
       <String, dynamic>{'time_ms': 0.0, 'value': 0.25},
       <String, dynamic>{'time_ms': 1500.0, 'value': 0.75},
     ];
-    await controller.executeV3Handoff(
-      _handoff(
-        digest: controller.stateDigest,
-        actions: <Map<String, dynamic>>[
-          automation(const <Map<String, dynamic>>[
-            <String, dynamic>{'time_ms': 0.0, 'value': 0.0},
-            <String, dynamic>{'time_ms': 1000.0, 'value': 1.0},
-          ]),
-          automation(finalPoints),
-        ],
-      ),
-    );
+    await controller.executeV3Handoff(_handoff(
+      digest: controller.stateDigest,
+      actions: <Map<String, dynamic>>[
+        automation(const <Map<String, dynamic>>[
+          <String, dynamic>{'time_ms': 0.0, 'value': 0.0},
+          <String, dynamic>{'time_ms': 1000.0, 'value': 1.0},
+        ]),
+        automation(finalPoints),
+      ],
+    ));
 
     expect(
-      _row(controller.snapshot(), 0)['automation'],
-      const <Map<String, dynamic>>[
-        <String, dynamic>{'x': 0.0, 'value': 0.25},
-        <String, dynamic>{'x': 1500.0, 'value': 0.75},
-      ],
-    );
+        _row(controller.snapshot(), 0)['automation'],
+        const <Map<String, dynamic>>[
+          <String, dynamic>{'x': 0.0, 'value': 0.25},
+          <String, dynamic>{'x': 1500.0, 'value': 0.75},
+        ]);
     expect(controller.snapshot()['undo_depth'], initialUndoDepth + 1);
 
     await controller.undo();
@@ -3786,13 +3637,11 @@ void main() {
       );
       expect(controller.snapshot()['undo_depth'], beforeFailureUndoDepth);
 
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
-  testWidgets('V3 exact automation and Undo history survive project reload', (
-    tester,
-  ) async {
+  testWidgets('V3 exact automation and Undo history survive project reload',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester);
     final controller = fixture.controller;
@@ -3858,9 +3707,7 @@ void main() {
     await _pumpFor(tester, const Duration(seconds: 2));
 
     expect(
-      _row(reopenedController.snapshot(), 0)['automation'],
-      expectedPoints,
-    );
+        _row(reopenedController.snapshot(), 0)['automation'], expectedPoints);
     await reopenedController.undo();
     expect(
       _row(reopenedController.snapshot(), 0)['automation'],
@@ -3868,24 +3715,21 @@ void main() {
     );
     await reopenedController.redo();
     expect(
-      _row(reopenedController.snapshot(), 0)['automation'],
-      expectedPoints,
-    );
+        _row(reopenedController.snapshot(), 0)['automation'], expectedPoints);
 
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 verifies exact created MIDI content and timing', (
-    tester,
-  ) async {
+  testWidgets('V3 verifies exact created MIDI content and timing',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(tester, fixtureId: 'midi_small');
     final controller = fixture.controller;
     final before = controller.snapshot();
-    final row = ((before['rows'] as List).single as Map)
-        .cast<String, dynamic>();
-    final source = ((before['clips'] as List).single as Map)
-        .cast<String, dynamic>();
+    final row =
+        ((before['rows'] as List).single as Map).cast<String, dynamic>();
+    final source =
+        ((before['clips'] as List).single as Map).cast<String, dynamic>();
     final instrumentId = source['instrument_id'] as String;
     final initialUndoDepth = before['undo_depth'] as int;
 
@@ -3962,8 +3806,7 @@ void main() {
     expect((applied['clips'] as List), hasLength(2));
     expect(
       (applied['clips'] as List).cast<Map<String, dynamic>>().singleWhere(
-        (clip) => clip['clip_id'] != source['clip_id'],
-      )['clip_id'],
+          (clip) => clip['clip_id'] != source['clip_id'])['clip_id'],
       createdClipId,
     );
     expect(applied['undo_depth'], initialUndoDepth + 1);
@@ -10064,7 +9907,9 @@ void main() {
     final appliedClips = (applied['clips'] as List)
         .cast<Map<String, dynamic>>();
     expect(
-      appliedClips.singleWhere((clip) => clip['clip_id'] == source['clip_id']),
+      appliedClips.singleWhere(
+        (clip) => clip['clip_id'] == source['clip_id'],
+      ),
       source,
     );
     expect(
@@ -10466,9 +10311,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 audio-to-MIDI empty transcription leaves project unchanged', (
-    tester,
-  ) async {
+  testWidgets('V3 audio-to-MIDI empty transcription leaves project unchanged',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     final fixture = await _openAudioFixture(
       tester,
@@ -10521,9 +10365,8 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('V3 audio-to-MIDI Undo and Redo persist after reopen', (
-    tester,
-  ) async {
+  testWidgets('V3 audio-to-MIDI Undo and Redo persist after reopen',
+      (tester) async {
     _ignoreKnownEditorSemanticsAssertion();
     var transcriptionCount = 0;
     final fixture = await _openAudioFixture(
@@ -11507,7 +11350,7 @@ void _ignoreKnownEditorSemanticsAssertion() {
 }
 
 Future<({AudioEditorEvaluationController controller, Directory directory})>
-_openAudioFixture(
+    _openAudioFixture(
   WidgetTester tester, {
   String fixtureId = 'audio_small',
   AudioEditorStemSeparatorOverride? stemSeparatorOverride,
@@ -11565,54 +11408,54 @@ Map<String, dynamic> _handoff({
   },
 };
 
-Map<String, dynamic> _muteAction(
-  int rowIndex,
-  int rowId, [
-  bool muted = true,
-]) => <String, dynamic>{
-  'type': 'row_mute',
-  'data': <String, dynamic>{
-    'operation': muted ? 'mute' : 'unmute',
-    'target': <String, dynamic>{
-      'scope': 'row',
-      'row_index': rowIndex,
-      'row_id': rowId,
-    },
-  },
-};
+Map<String, dynamic> _muteAction(int rowIndex, int rowId,
+        [bool muted = true]) =>
+    <String, dynamic>{
+      'type': 'row_mute',
+      'data': <String, dynamic>{
+        'operation': muted ? 'mute' : 'unmute',
+        'target': <String, dynamic>{
+          'scope': 'row',
+          'row_index': rowIndex,
+          'row_id': rowId,
+        },
+      },
+    };
 
 Map<String, dynamic> _transportAction(
   String operation, {
   bool? playing,
   bool? enabled,
-}) => <String, dynamic>{
-  'type': 'v3_transport',
-  'data': <String, dynamic>{
-    'operation': operation,
-    if (playing != null) 'playing': playing,
-    if (enabled != null) 'enabled': enabled,
-    'target': const <String, dynamic>{'scope': 'project'},
-  },
-};
+}) =>
+    <String, dynamic>{
+      'type': 'v3_transport',
+      'data': <String, dynamic>{
+        'operation': operation,
+        if (playing != null) 'playing': playing,
+        if (enabled != null) 'enabled': enabled,
+        'target': const <String, dynamic>{'scope': 'project'},
+      },
+    };
 
 Map<String, dynamic> _phoneMicCleanupAction(
   int rowIndex,
   int rowId,
   List<String> clipIds,
-) => <String, dynamic>{
-  'type': 'v3_phone_mic_cleanup',
-  'data': <String, dynamic>{
-    'operation': 'apply',
-    'effect_ids': aiV3PhoneMicCleanupEffectIds,
-    'audio_clip_ids': clipIds,
-    'preset': aiV3PhoneMicCleanupPreset,
-    'target': <String, dynamic>{
-      'scope': 'row',
-      'row_index': rowIndex,
-      'row_id': rowId,
-    },
-  },
-};
+) =>
+    <String, dynamic>{
+      'type': 'v3_phone_mic_cleanup',
+      'data': <String, dynamic>{
+        'operation': 'apply',
+        'effect_ids': aiV3PhoneMicCleanupEffectIds,
+        'audio_clip_ids': clipIds,
+        'preset': aiV3PhoneMicCleanupPreset,
+        'target': <String, dynamic>{
+          'scope': 'row',
+          'row_index': rowIndex,
+          'row_id': rowId,
+        },
+      },
+    };
 
 Map<String, dynamic> _renameAction(int rowIndex, int rowId, String name) =>
     <String, dynamic>{
@@ -11632,17 +11475,18 @@ Map<String, dynamic> _roleOverrideAction(
   int rowIndex,
   int rowId,
   String? role,
-) => <String, dynamic>{
-  'type': 'v3_row_role_override',
-  'data': <String, dynamic>{
-    'role': role,
-    'target': <String, dynamic>{
-      'scope': 'row',
-      'row_index': rowIndex,
-      'row_id': rowId,
-    },
-  },
-};
+) =>
+    <String, dynamic>{
+      'type': 'v3_row_role_override',
+      'data': <String, dynamic>{
+        'role': role,
+        'target': <String, dynamic>{
+          'scope': 'row',
+          'row_index': rowIndex,
+          'row_id': rowId,
+        },
+      },
+    };
 
 Map<String, dynamic> _selectAction(int rowIndex, int rowId) =>
     <String, dynamic>{
@@ -11662,20 +11506,21 @@ Map<String, dynamic> _createRowAction({
   required String position,
   required int anchorRowIndex,
   required int anchorRowId,
-}) => <String, dynamic>{
-  'type': 'row_create',
-  'data': <String, dynamic>{
-    'operation': 'create',
-    'name': name,
-    'lane_kind': 'audio',
-    'position': position,
-    'target': <String, dynamic>{
-      'scope': 'row',
-      'row_index': anchorRowIndex,
-      'row_id': anchorRowId,
-    },
-  },
-};
+}) =>
+    <String, dynamic>{
+      'type': 'row_create',
+      'data': <String, dynamic>{
+        'operation': 'create',
+        'name': name,
+        'lane_kind': 'audio',
+        'position': position,
+        'target': <String, dynamic>{
+          'scope': 'row',
+          'row_index': anchorRowIndex,
+          'row_id': anchorRowId,
+        },
+      },
+    };
 
 Map<String, dynamic> _deleteRowAction(int rowIndex, int rowId) =>
     <String, dynamic>{
@@ -11695,33 +11540,35 @@ Map<String, dynamic> _groupCreateAction(
   String name,
   List<int> rowIds,
   List<int> expectedRowOrder,
-) => <String, dynamic>{
-  'type': 'v3_group_edit',
-  'data': <String, dynamic>{
-    'operation': 'create',
-    'group_id': groupId,
-    'name': name,
-    'row_ids': rowIds,
-    'expected_row_order': expectedRowOrder,
-    'affected_group_ids': const <String>[],
-    'dissolved_group_ids': const <String>[],
-  },
-};
+) =>
+    <String, dynamic>{
+      'type': 'v3_group_edit',
+      'data': <String, dynamic>{
+        'operation': 'create',
+        'group_id': groupId,
+        'name': name,
+        'row_ids': rowIds,
+        'expected_row_order': expectedRowOrder,
+        'affected_group_ids': const <String>[],
+        'dissolved_group_ids': const <String>[],
+      },
+    };
 
 Map<String, dynamic> _groupRemoveRowAction(
   String groupId,
   int rowId, {
   required bool dissolvesGroup,
-}) => <String, dynamic>{
-  'type': 'v3_group_edit',
-  'data': <String, dynamic>{
-    'operation': 'remove_row',
-    'group_id': groupId,
-    'row_id': rowId,
-    'dissolves_group': dissolvesGroup,
-    'expected_member_row_ids': const <int>[],
-  },
-};
+}) =>
+    <String, dynamic>{
+      'type': 'v3_group_edit',
+      'data': <String, dynamic>{
+        'operation': 'remove_row',
+        'group_id': groupId,
+        'row_id': rowId,
+        'dissolves_group': dissolvesGroup,
+        'expected_member_row_ids': const <int>[],
+      },
+    };
 
 Map<String, dynamic> _groupCollapsedAction(String groupId, bool collapsed) =>
     <String, dynamic>{
@@ -11733,7 +11580,11 @@ Map<String, dynamic> _groupCollapsedAction(String groupId, bool collapsed) =>
       },
     };
 
-Map<String, dynamic> _colorAction(int rowIndex, int rowId, String color) =>
+Map<String, dynamic> _colorAction(
+  int rowIndex,
+  int rowId,
+  String color,
+) =>
     <String, dynamic>{
       'type': 'row_color_edit',
       'data': <String, dynamic>{
@@ -11754,20 +11605,21 @@ Map<String, dynamic> _rowMixAction(
   double? gainDb,
   double? deltaSigned,
   double? panSigned,
-}) => <String, dynamic>{
-  'type': 'row_mix',
-  'data': <String, dynamic>{
-    'operation': operation,
-    if (gainDb != null) 'gain_db': gainDb,
-    if (deltaSigned != null) 'delta': deltaSigned,
-    if (panSigned != null) 'pan_signed': panSigned,
-    'target': <String, dynamic>{
-      'scope': 'row',
-      'row_index': rowIndex,
-      'row_id': rowId,
-    },
-  },
-};
+}) =>
+    <String, dynamic>{
+      'type': 'row_mix',
+      'data': <String, dynamic>{
+        'operation': operation,
+        if (gainDb != null) 'gain_db': gainDb,
+        if (deltaSigned != null) 'delta': deltaSigned,
+        if (panSigned != null) 'pan_signed': panSigned,
+        'target': <String, dynamic>{
+          'scope': 'row',
+          'row_index': rowIndex,
+          'row_id': rowId,
+        },
+      },
+    };
 
 Map<String, dynamic> _soloAction(int rowIndex, int rowId, bool soloed) =>
     <String, dynamic>{
@@ -11785,10 +11637,8 @@ Map<String, dynamic> _soloAction(int rowIndex, int rowId, bool soloed) =>
 
 List<String> _effectNames(Object? raw) => (raw as List? ?? const <Object>[])
     .whereType<Map>()
-    .map(
-      (effect) =>
-          (effect['display_name'] ?? effect['effect_id'] ?? '').toString(),
-    )
+    .map((effect) =>
+        (effect['display_name'] ?? effect['effect_id'] ?? '').toString())
     .toList(growable: false);
 
 Map<String, dynamic> _clipAction(
@@ -11796,20 +11646,21 @@ Map<String, dynamic> _clipAction(
   Map<String, dynamic> clip,
   Map<String, dynamic> row, {
   Map<String, dynamic> extra = const <String, dynamic>{},
-}) => <String, dynamic>{
-  'type': 'clip_edit',
-  'data': <String, dynamic>{
-    'operation': operation,
-    ...extra,
-    'target': <String, dynamic>{
-      'scope': 'clip',
-      'clip_id': clip['clip_id'],
-      'clip_index': (clip['display_index'] ?? clip['clip_index']) ?? 0,
-      'row_id': row['row_id'],
-      'row_index': clip['row_index'],
-    },
-  },
-};
+}) =>
+    <String, dynamic>{
+      'type': 'clip_edit',
+      'data': <String, dynamic>{
+        'operation': operation,
+        ...extra,
+        'target': <String, dynamic>{
+          'scope': 'clip',
+          'clip_id': clip['clip_id'],
+          'clip_index': (clip['display_index'] ?? clip['clip_index']) ?? 0,
+          'row_id': row['row_id'],
+          'row_index': clip['row_index'],
+        },
+      },
+    };
 
 Map<String, dynamic> _glueAction({
   required List<String> clipIds,
@@ -11818,44 +11669,46 @@ Map<String, dynamic> _glueAction({
   required double startMs,
   required double durationMs,
   required String label,
-}) => <String, dynamic>{
-  'type': 'v3_clip_glue',
-  'data': <String, dynamic>{
-    'source_clip_ids': clipIds,
-    'label': label,
-    'start_ms': startMs,
-    'duration_ms': durationMs,
-    'target': <String, dynamic>{
-      'scope': 'clips',
-      'source_clip_ids': clipIds,
-      'row_index': rowIndex,
-      'row_id': rowId,
-    },
-  },
-};
+}) =>
+    <String, dynamic>{
+      'type': 'v3_clip_glue',
+      'data': <String, dynamic>{
+        'source_clip_ids': clipIds,
+        'label': label,
+        'start_ms': startMs,
+        'duration_ms': durationMs,
+        'target': <String, dynamic>{
+          'scope': 'clips',
+          'source_clip_ids': clipIds,
+          'row_index': rowIndex,
+          'row_id': rowId,
+        },
+      },
+    };
 
 Map<String, dynamic> _midiReplaceAction(
   Map<String, dynamic> clip,
   List<Map<String, dynamic>> notes, {
   double? finalLengthBeats,
-}) => <String, dynamic>{
-  'type': 'midi_compose',
-  'data': <String, dynamic>{
-    'operation': 'replace_notes',
-    'notes': notes,
-    'exact_notes': true,
-    'preserve_existing_notes': false,
-    'preserve_clip_state': true,
-    if (finalLengthBeats != null) 'final_length_beats': finalLengthBeats,
-    'target': <String, dynamic>{
-      'scope': 'clip',
-      'clip_id': clip['clip_id'],
-      'clip_index': clip['clip_index'],
-      'row_id': clip['row_id'],
-      'row_index': clip['row_index'],
-    },
-  },
-};
+}) =>
+    <String, dynamic>{
+      'type': 'midi_compose',
+      'data': <String, dynamic>{
+        'operation': 'replace_notes',
+        'notes': notes,
+        'exact_notes': true,
+        'preserve_existing_notes': false,
+        'preserve_clip_state': true,
+        if (finalLengthBeats != null) 'final_length_beats': finalLengthBeats,
+        'target': <String, dynamic>{
+          'scope': 'clip',
+          'clip_id': clip['clip_id'],
+          'clip_index': clip['clip_index'],
+          'row_id': clip['row_id'],
+          'row_index': clip['row_index'],
+        },
+      },
+    };
 
 Map<String, dynamic> _row(Map<String, dynamic> snapshot, int index) =>
     ((snapshot['rows'] as List)[index] as Map).cast<String, dynamic>();
@@ -11879,18 +11732,15 @@ Map<String, dynamic> _plannerVisibleEvaluationState(
     ..remove('undo_depth')
     ..remove('redo_depth')
     ..remove('transport');
-  result['clips'] = (snapshot['clips'] as List)
-      .whereType<Map>()
-      .map((raw) {
-        final clip = Map<String, dynamic>.from(raw);
-        if (clip['kind'] == 'midi') {
-          // MIDI render slots are native playback details, not planner-visible
-          // source identities. The stable clip ID, notes, and instrument are.
-          clip.remove('file');
-        }
-        return clip;
-      })
-      .toList(growable: false);
+  result['clips'] = (snapshot['clips'] as List).whereType<Map>().map((raw) {
+    final clip = Map<String, dynamic>.from(raw);
+    if (clip['kind'] == 'midi') {
+      // MIDI render slots are native playback details, not planner-visible
+      // source identities. The stable clip ID, notes, and instrument are.
+      clip.remove('file');
+    }
+    return clip;
+  }).toList(growable: false);
   return result;
 }
 
