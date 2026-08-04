@@ -3921,8 +3921,8 @@ typedef AudioEditorBasicPitchOverride = Future<List<BasicPitchNoteEvent>>
 @visibleForTesting
 bool showProjectSettingsAudioRoutingLauncher({
   required bool showInlineAudioRouting,
-  required bool isIOS,
-}) => showInlineAudioRouting || isIOS;
+  required bool isMobilePlatform,
+}) => showInlineAudioRouting || isMobilePlatform;
 
 @visibleForTesting
 Duration audioEditorTransportEndPoint({
@@ -38419,7 +38419,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final showAudioRoutingLauncher =
         showProjectSettingsAudioRoutingLauncher(
           showInlineAudioRouting: showInlineAudioRouting,
-          isIOS: Platform.isIOS,
+          isMobilePlatform: Platform.isIOS || Platform.isAndroid,
         );
     final usesTabletDawLayout = _usesTabletDesktopDawShell(context);
     final usesTabletDesktopLayout = usesTabletDawLayout;

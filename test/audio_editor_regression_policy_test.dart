@@ -3,11 +3,11 @@ import 'package:mixroom/screens/audio_editor.dart';
 
 void main() {
   group('Project Settings audio-routing visibility', () {
-    test('iPhone and narrow iPad layouts keep the routing launcher', () {
+    test('phone and narrow tablet layouts keep the routing launcher', () {
       expect(
         showProjectSettingsAudioRoutingLauncher(
           showInlineAudioRouting: false,
-          isIOS: true,
+          isMobilePlatform: true,
         ),
         isTrue,
       );
@@ -17,24 +17,24 @@ void main() {
       expect(
         showProjectSettingsAudioRoutingLauncher(
           showInlineAudioRouting: true,
-          isIOS: false,
+          isMobilePlatform: false,
         ),
         isTrue,
       );
       expect(
         showProjectSettingsAudioRoutingLauncher(
           showInlineAudioRouting: true,
-          isIOS: true,
+          isMobilePlatform: true,
         ),
         isTrue,
       );
     });
 
-    test('narrow Android layouts remain unchanged', () {
+    test('non-mobile narrow layouts remain unchanged', () {
       expect(
         showProjectSettingsAudioRoutingLauncher(
           showInlineAudioRouting: false,
-          isIOS: false,
+          isMobilePlatform: false,
         ),
         isFalse,
       );
