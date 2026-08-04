@@ -1383,12 +1383,12 @@ void main() {
       expect(
         prepared.receipts.map((receipt) => receipt['verified_label']),
         <String>[
-          'Create audio row Audio',
+          'Created audio row Audio',
           'Set project tempo to 60 BPM',
-          'Add/configure Reverb on Audio',
-          'Add gain fade on Audio',
+          'Added/configured Reverb on Audio',
+          'Added gain fade on Audio',
           'Set 2 automation points on Audio',
-          'Clear automation on Audio',
+          'Cleared automation on Audio',
         ],
       );
     });
@@ -2844,7 +2844,7 @@ void main() {
         prepared.receipts.map((receipt) => receipt['verified_label']),
         <String>[
           'Set project tempo to 110 BPM',
-          'Separate vocals and instrumental',
+          'Separated vocals and instrumental',
           'Set instrumental stem pitch to -1.0 semitones',
           'Set instrumental stem pitch to 1.0 semitones',
         ],

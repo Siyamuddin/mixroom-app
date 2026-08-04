@@ -658,7 +658,7 @@ void main() {
       expect(result.aiV3Handoff?['reason'], 'already_satisfied');
       expect(
         result.message,
-        'No changes were needed:\n- Unmute Audio 1 (already set)',
+        'No changes were needed:\n- Unmuted Audio 1 (already set)',
       );
       expect(result.message, isNot(contains('I will')));
       expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
@@ -1066,7 +1066,7 @@ void main() {
                 'status': 'prepared',
                 'preview_label':
                     'Separate a long source into two generated rows',
-                'verified_label': 'Separate vocals and instrumental',
+                'verified_label': 'Separated vocals and instrumental',
               },
               <String, dynamic>{
                 'command_id': 'pitch',
@@ -1086,7 +1086,7 @@ void main() {
           ],
         ),
         <String>[
-          'Separate vocals and instrumental',
+          'Separated vocals and instrumental',
           'Set instrumental stem pitch to -1 semitones',
         ],
       );

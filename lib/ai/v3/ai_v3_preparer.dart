@@ -4368,7 +4368,7 @@ String _aiV3VerifiedReceiptLabel({
   required Map<String, _AiV3SymbolicResource> symbolicResources,
 }) {
   if (commandType == 'clip.separate_stems') {
-    return 'Separate vocals and instrumental';
+    return 'Separated vocals and instrumental';
   }
 
   var label = previewLabel;
@@ -4381,7 +4381,59 @@ String _aiV3VerifiedReceiptLabel({
       _aiV3SymbolicResourceDisplayLabel(entry.key, entry.value),
     );
   }
-  return label;
+  return _aiV3CompletedReceiptLabel(label);
+}
+
+String _aiV3CompletedReceiptLabel(String label) {
+  const completedPrefixes = <String, String>{
+    'Add/configure ': 'Added/configured ',
+    'Start ': 'Started ',
+    'Pause ': 'Paused ',
+    'Enable ': 'Enabled ',
+    'Disable ': 'Disabled ',
+    'Adjust ': 'Adjusted ',
+    'Mute ': 'Muted ',
+    'Unmute ': 'Unmuted ',
+    'Solo ': 'Soloed ',
+    'Unsolo ': 'Unsoloed ',
+    'Rename ': 'Renamed ',
+    'Clear ': 'Cleared ',
+    'Clean ': 'Cleaned ',
+    'Select ': 'Selected ',
+    'Create ': 'Created ',
+    'Delete ': 'Deleted ',
+    'Keep ': 'Kept ',
+    'Remove ': 'Removed ',
+    'Collapse ': 'Collapsed ',
+    'Expand ': 'Expanded ',
+    'Move ': 'Moved ',
+    'Trim ': 'Trimmed ',
+    'Duplicate ': 'Duplicated ',
+    'Glue ': 'Glued ',
+    'Convert ': 'Converted ',
+    'Scale ': 'Scaled ',
+    'Align ': 'Aligned ',
+    'Detect ': 'Detected ',
+    'Transpose ': 'Transposed ',
+    'Replace ': 'Replaced ',
+    'Append ': 'Appended ',
+    'Chop ': 'Chopped ',
+    'Bypass ': 'Bypassed ',
+    'Add ': 'Added ',
+    'Place ': 'Placed ',
+    'Mix ': 'Mixed ',
+  };
+  var completed = label;
+  for (final entry in completedPrefixes.entries) {
+    if (!completed.startsWith(entry.key)) continue;
+    completed = '${entry.value}${completed.substring(entry.key.length)}';
+    break;
+  }
+  return completed
+      .replaceAll(' and dissolve ', ' and dissolved ')
+      .replaceAll('; preserve ', '; preserved ')
+      .replaceAll(' and follow in ', ' and followed in ')
+      .replaceAll(' and align it ', ' and aligned it ');
 }
 
 String _aiV3SymbolicResourceDisplayLabel(
