@@ -5938,6 +5938,7 @@ public:
         int pitch = 60;
         float velocity = 0.0f;
         double transportSec = 0.0;
+        juce::AudioProcessor *routedProcessorIdentity = nullptr;
         TimelineMidiClipProcessor::PreparedLiveSample preparedSample;
     };
     bool setLiveMidiInputTargetClip(int clipId);

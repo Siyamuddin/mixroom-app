@@ -3586,6 +3586,8 @@ bool JuceEngine::updateMidiClipEvents(int clipId,
 
 bool JuceEngine::setLiveMidiInputTargetClip(int clipId)
 {
+    const int previousClipId =
+        liveMidiInputTargetClip.load(std::memory_order_relaxed);
     if (clipId >= 0)
     {
         const auto itemSnapshot =
@@ -3616,6 +3618,9 @@ bool JuceEngine::setLiveMidiInputTargetClip(int clipId)
         if (!midiInputCallbacksInitialized.load(std::memory_order_relaxed))
             refreshMidiInputCallbacks();
     }
+
+    if (previousClipId == clipId)
+        return true;
 
     liveMidiInputTargetClip.store(clipId, std::memory_order_relaxed);
     clearLiveMidiInputAudioQueue();
@@ -3846,30 +3851,30 @@ bool JuceEngine::sendLiveMidiInputEvent(bool noteOn,
 bool JuceEngine::prepareLiveMidiInputEventForAudioQueue(
     LiveMidiInputEvent &event)
 {
+    std::shared_ptr<juce::AudioProcessor> routedProcessor;
+    {
+        const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+        const auto itemSnapshot =
+            std::atomic_load_explicit(&routedClipItemSnapshot, std::memory_order_acquire);
+        const auto *item = itemSnapshot != nullptr
+                               ? itemSnapshot->findClip(event.clipId)
+                               : nullptr;
+        if (item == nullptr || !item->isMidi || item->processor == nullptr ||
+            event.clipId < 0 || event.clipId >= (int)clips.size())
+            return false;
+
+        const auto &clip = clips[(size_t)event.clipId];
+        routedProcessor = liveProcessorSharedForClip(clip);
+        if (!clip.alive || !clip.isMidi || item->processor != routedProcessor)
+            return false;
+    }
+
+    event.routedProcessorIdentity = routedProcessor.get();
     if (!event.noteOn || event.velocity <= 0.0f)
         return true;
 
-    const auto itemSnapshot =
-        std::atomic_load_explicit(&routedClipItemSnapshot, std::memory_order_acquire);
-    if (itemSnapshot == nullptr)
-        return false;
-
-    const auto *item = itemSnapshot->findClip(event.clipId);
-    if (item == nullptr || !item->isMidi || item->processor == nullptr)
-        return false;
-
-    if (clips.empty() ||
-        event.clipId < 0 ||
-        event.clipId >= (int)clips.size())
-        return false;
-    const auto &clip = clips[(size_t)event.clipId];
-    if (!clip.alive ||
-        !clip.isMidi ||
-        item->processor != liveProcessorSharedForClip(clip))
-        return false;
-
     if (auto *timelineProc =
-            dynamic_cast<TimelineMidiClipProcessor *>(item->processor.get()))
+            dynamic_cast<TimelineMidiClipProcessor *>(routedProcessor.get()))
     {
         return timelineProc->prepareLiveMidiSample(
             event.pitch,
@@ -3877,7 +3882,7 @@ bool JuceEngine::prepareLiveMidiInputEventForAudioQueue(
             event.preparedSample);
     }
     return dynamic_cast<ExternalMidiPluginClipProcessor *>(
-               item->processor.get()) != nullptr;
+               routedProcessor.get()) != nullptr;
 }
 
 bool JuceEngine::sendLiveMidiInputEventForClip(int clipId,
@@ -4035,6 +4040,9 @@ void JuceEngine::dispatchQueuedLiveMidiInputEventsForAudioThread()
             continue;
 
         if (!item->isMidi || item->processor == nullptr)
+            continue;
+
+        if (event.routedProcessorIdentity != item->processor.get())
             continue;
 
         if (auto *timelineProc =

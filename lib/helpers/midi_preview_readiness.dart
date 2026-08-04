@@ -15,6 +15,9 @@ Future<bool> ensureMidiPreviewReady({
 }) async {
   if (!isStillValid() || !await prepareRoute() || !isStillValid()) return false;
 
+  if (await assignLiveTarget()) return isStillValid();
+  if (!isStillValid()) return false;
+
   var reloaded = false;
   var processorReady = await updateProcessor();
   if (!processorReady) {

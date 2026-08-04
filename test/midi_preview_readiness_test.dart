@@ -11,35 +11,32 @@ void main() {
     expect(midiPreviewNeedsMobileRoute(TargetPlatform.linux), isFalse);
   });
 
-  test(
-    'runs route, processor update, target, then preview can proceed',
-    () async {
-      final calls = <String>[];
-      final ready = await ensureMidiPreviewReady(
-        prepareRoute: () async {
-          calls.add('route');
-          return true;
-        },
-        updateProcessor: () async {
-          calls.add('update');
-          return true;
-        },
-        reloadProcessor: () async {
-          calls.add('reload');
-          return true;
-        },
-        assignLiveTarget: () async {
-          calls.add('target');
-          return true;
-        },
-        isStillValid: () => true,
-      );
+  test('ready target skips processor replacement', () async {
+    final calls = <String>[];
+    final ready = await ensureMidiPreviewReady(
+      prepareRoute: () async {
+        calls.add('route');
+        return true;
+      },
+      updateProcessor: () async {
+        calls.add('update');
+        return true;
+      },
+      reloadProcessor: () async {
+        calls.add('reload');
+        return true;
+      },
+      assignLiveTarget: () async {
+        calls.add('target');
+        return true;
+      },
+      isStillValid: () => true,
+    );
 
-      if (ready) calls.add('preview');
-      expect(ready, isTrue);
-      expect(calls, <String>['route', 'update', 'target', 'preview']);
-    },
-  );
+    if (ready) calls.add('preview');
+    expect(ready, isTrue);
+    expect(calls, <String>['route', 'target', 'preview']);
+  });
 
   test('route failure stops before processor, target, or preview', () async {
     final calls = <String>[];
@@ -68,7 +65,7 @@ void main() {
     expect(calls, <String>['route']);
   });
 
-  test('target failure reloads once and retries target once', () async {
+  test('failed target updates once before retrying target', () async {
     final calls = <String>[];
     var targetAttempts = 0;
     final ready = await ensureMidiPreviewReady(
@@ -93,17 +90,10 @@ void main() {
 
     if (ready) calls.add('preview');
     expect(ready, isTrue);
-    expect(calls, <String>[
-      'route',
-      'update',
-      'target',
-      'reload',
-      'target',
-      'preview',
-    ]);
+    expect(calls, <String>['route', 'target', 'update', 'target', 'preview']);
   });
 
-  test('two failed target assignments stop without another reload', () async {
+  test('failed target after update reloads once and retries', () async {
     final calls = <String>[];
     final ready = await ensureMidiPreviewReady(
       prepareRoute: () async {
@@ -127,7 +117,14 @@ void main() {
 
     if (ready) calls.add('preview');
     expect(ready, isFalse);
-    expect(calls, <String>['route', 'update', 'target', 'reload', 'target']);
+    expect(calls, <String>[
+      'route',
+      'target',
+      'update',
+      'target',
+      'reload',
+      'target',
+    ]);
   });
 
   test('processor update failure uses its only reload before target', () async {
@@ -153,6 +150,6 @@ void main() {
     );
 
     expect(ready, isFalse);
-    expect(calls, <String>['route', 'update', 'reload', 'target']);
+    expect(calls, <String>['route', 'target', 'update', 'reload', 'target']);
   });
 }

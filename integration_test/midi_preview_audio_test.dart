@@ -153,6 +153,18 @@ void main() {
         );
         results.add(
           await _measureStrike(
+            label: 'upright-absent-pitch-preview-before-playback',
+            rowIndex: pianoRow,
+            strike: () => JuceAudioEngine.playPreviewMidiNote(
+              clipIds[0],
+              pitch: 64,
+              velocity: 0.8,
+              durationMs: 180,
+            ),
+          ),
+        );
+        results.add(
+          await _measureStrike(
             label: 'upright-timeline-playback',
             rowIndex: pianoRow,
             strike: () async {
@@ -169,18 +181,6 @@ void main() {
         expect(
           await JuceAudioEngine.setLiveMidiInputTargetClip(clipIds[0]),
           isTrue,
-        );
-        results.add(
-          await _measureStrike(
-            label: 'upright-absent-pitch-preview',
-            rowIndex: pianoRow,
-            strike: () => JuceAudioEngine.playPreviewMidiNote(
-              clipIds[0],
-              pitch: 64,
-              velocity: 0.8,
-              durationMs: 180,
-            ),
-          ),
         );
 
         final secondPianoRow = await loadClip(
@@ -260,6 +260,34 @@ void main() {
         expect(
           await JuceAudioEngine.setLiveMidiInputTargetClip(clipIds[0]),
           isTrue,
+        );
+        await JuceAudioEngine.consumeLiveMidiInputEvents();
+        expect(
+          await JuceAudioEngine.sendLiveMidiInputEvent(
+            noteOn: true,
+            channel: 1,
+            pitch: 69,
+            velocity: 0.8,
+          ),
+          isTrue,
+        );
+        expect(
+          await JuceAudioEngine.sendLiveMidiInputEvent(
+            noteOn: false,
+            channel: 1,
+            pitch: 69,
+            velocity: 0.0,
+          ),
+          isTrue,
+        );
+        expect(
+          await JuceAudioEngine.setLiveMidiInputTargetClip(clipIds[0]),
+          isTrue,
+        );
+        expect(
+          await JuceAudioEngine.consumeLiveMidiInputEvents(),
+          hasLength(2),
+          reason: 'Revalidating the same target must preserve queued events',
         );
         results.add(
           await _measureStrike(
