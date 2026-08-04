@@ -2588,13 +2588,14 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 
 + (NSArray<NSDictionary *> *)getTrackPluginParametersObjC:(NSInteger)row
                                               effectIndex:(NSInteger)effect
+                                       forceIndividualRow:(BOOL)forceIndividualRow
 {
     __unsafe_unretained NSMutableArray *__result = nil;
 
-    juce::MessageManager::getInstance()->callSync([row, effect, &__result]
+    juce::MessageManager::getInstance()->callSync([row, effect, forceIndividualRow, &__result]
                                                   {
         NSMutableArray* arr = [NSMutableArray array];
-        auto list = JuceEngine::get().getTrackPluginParameterInfo((int)row, (int)effect);
+        auto list = JuceEngine::get().getTrackPluginParameterInfo((int)row, (int)effect, (bool)forceIndividualRow);
 
         for (auto& e : list)
         {
@@ -3203,7 +3204,7 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     return result.load();
 }
 
-+ (BOOL)insertTrackEffectObjC:(NSInteger)trackRow path:(NSString *)pluginPath
++ (BOOL)insertTrackEffectObjC:(NSInteger)trackRow path:(NSString *)pluginPath forceIndividualRow:(BOOL)forceIndividualRow
 {
     if (pluginPath == nil || pluginPath.length == 0)
         return NO;
@@ -3215,13 +3216,13 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 
 #if JUCE_MAC && !JUCE_IOS
     NSLog(@"[MixroomPluginRestore] bridge insertTrackEffect engine call start row=%ld path=%@", (long)trackRow, pluginPath ?: @"");
-    success = JuceEngine::get().insertTrackEffect((int)trackRow, jucePath);
+    success = JuceEngine::get().insertTrackEffect((int)trackRow, jucePath, (bool)forceIndividualRow);
     NSLog(@"[MixroomPluginRestore] bridge insertTrackEffect engine call done row=%ld path=%@ success=%@", (long)trackRow, pluginPath ?: @"", success ? @"YES" : @"NO");
 #else
     if (auto *mm = juce::MessageManager::getInstance())
     {
         mm->callSync([&]
-                     { success = JuceEngine::get().insertTrackEffect((int)trackRow, jucePath); });
+                     { success = JuceEngine::get().insertTrackEffect((int)trackRow, jucePath, (bool)forceIndividualRow); });
     }
 #endif
 
@@ -3238,23 +3239,24 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     return success ? YES : NO;
 }
 
-+ (void)removeTrackEffectObjC:(NSInteger)trackRow effectIndex:(NSInteger)effectIndex
++ (void)removeTrackEffectObjC:(NSInteger)trackRow effectIndex:(NSInteger)effectIndex forceIndividualRow:(BOOL)forceIndividualRow
 {
-    juce::MessageManager::getInstance()->callSync([trackRow, effectIndex]
-                                                  { JuceEngine::get().removeTrackEffect((int)trackRow, (int)effectIndex); });
+    juce::MessageManager::getInstance()->callSync([trackRow, effectIndex, forceIndividualRow]
+                                                  { JuceEngine::get().removeTrackEffect((int)trackRow, (int)effectIndex, (bool)forceIndividualRow); });
 }
 
 + (void)reorderTrackEffectsObjC:(NSInteger)trackRow
                       fromIndex:(NSInteger)fromIdx
                         toIndex:(NSInteger)toIdx
+             forceIndividualRow:(BOOL)forceIndividualRow
 {
-    juce::MessageManager::getInstance()->callSync([trackRow, fromIdx, toIdx]
-                                                  { JuceEngine::get().reorderTrackEffects((int)trackRow, (int)fromIdx, (int)toIdx); });
+    juce::MessageManager::getInstance()->callSync([trackRow, fromIdx, toIdx, forceIndividualRow]
+                                                  { JuceEngine::get().reorderTrackEffects((int)trackRow, (int)fromIdx, (int)toIdx, (bool)forceIndividualRow); });
 }
 
-+ (NSArray<NSString *> *)getTrackEffectsForRowObjC:(NSInteger)trackRow
++ (NSArray<NSString *> *)getTrackEffectsForRowObjC:(NSInteger)trackRow forceIndividualRow:(BOOL)forceIndividualRow
 {
-    auto names = JuceEngine::get().getTrackEffectsForRow((int)trackRow);
+    auto names = JuceEngine::get().getTrackEffectsForRow((int)trackRow, (bool)forceIndividualRow);
     NSMutableArray *out = [NSMutableArray array];
     for (auto &s : names)
     {
@@ -3263,9 +3265,9 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     return out;
 }
 
-+ (NSArray<NSString *> *)getTrackEffectIdsForRowObjC:(NSInteger)trackRow
++ (NSArray<NSString *> *)getTrackEffectIdsForRowObjC:(NSInteger)trackRow forceIndividualRow:(BOOL)forceIndividualRow
 {
-    auto ids = JuceEngine::get().getTrackEffectIdsForRow((int)trackRow);
+    auto ids = JuceEngine::get().getTrackEffectIdsForRow((int)trackRow, (bool)forceIndividualRow);
     NSMutableArray *out = [NSMutableArray array];
     for (auto &s : ids)
     {
@@ -3274,9 +3276,9 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     return out;
 }
 
-+ (NSArray<NSString *> *)getTrackEffectInstanceIdsForRowObjC:(NSInteger)trackRow
++ (NSArray<NSString *> *)getTrackEffectInstanceIdsForRowObjC:(NSInteger)trackRow forceIndividualRow:(BOOL)forceIndividualRow
 {
-    auto ids = JuceEngine::get().getTrackEffectInstanceIdsForRow((int)trackRow);
+    auto ids = JuceEngine::get().getTrackEffectInstanceIdsForRow((int)trackRow, (bool)forceIndividualRow);
     NSMutableArray *out = [NSMutableArray array];
     for (auto &s : ids)
     {
@@ -3287,12 +3289,13 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 
 + (NSString *)getTrackEffectStateObjC:(NSInteger)trackRow
                           effectIndex:(NSInteger)effectIndex
+                   forceIndividualRow:(BOOL)forceIndividualRow
 {
     juce::String state;
     if (auto *mm = juce::MessageManager::getInstance())
     {
-        mm->callSync([trackRow, effectIndex, &state]
-                     { state = JuceEngine::get().getTrackEffectStateBase64((int)trackRow, (int)effectIndex); });
+        mm->callSync([trackRow, effectIndex, forceIndividualRow, &state]
+                     { state = JuceEngine::get().getTrackEffectStateBase64((int)trackRow, (int)effectIndex, (bool)forceIndividualRow); });
     }
     return [NSString stringWithUTF8String:state.toRawUTF8()] ?: @"";
 }
@@ -3300,6 +3303,7 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 + (BOOL)setTrackEffectStateObjC:(NSInteger)trackRow
                     effectIndex:(NSInteger)effectIndex
                     stateBase64:(NSString *)stateBase64
+             forceIndividualRow:(BOOL)forceIndividualRow
 {
     bool applied = false;
     const juce::String state = juceStringFromNSString(stateBase64 ?: @"");
@@ -3307,12 +3311,13 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     applied = JuceEngine::get().setTrackEffectStateBase64(
         (int)trackRow,
         (int)effectIndex,
-        state);
+        state,
+        (bool)forceIndividualRow);
 #else
     if (auto *mm = juce::MessageManager::getInstance())
     {
-        mm->callSync([trackRow, effectIndex, &applied, state]
-                     { applied = JuceEngine::get().setTrackEffectStateBase64((int)trackRow, (int)effectIndex, state); });
+        mm->callSync([trackRow, effectIndex, forceIndividualRow, &applied, state]
+                     { applied = JuceEngine::get().setTrackEffectStateBase64((int)trackRow, (int)effectIndex, state, (bool)forceIndividualRow); });
     }
 #endif
     return (BOOL)applied;
@@ -3322,6 +3327,7 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
                effectIndex:(NSInteger)effectIndex
                    paramId:(NSString *)param
                      value:(id)value
+        forceIndividualRow:(BOOL)forceIndividualRow
 {
     juce::var newVal;
     if ([value isKindOfClass:[NSNumber class]])
@@ -3340,24 +3346,26 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     }
 
     juce::String juceParam = juceStringFromNSString(param);
-    juce::MessageManager::getInstance()->callSync([trackRow, effectIndex, juceParam, newVal]
-                                                  { JuceEngine::get().setTrackEffectParameter((int)trackRow, (int)effectIndex, juceParam, newVal); });
+    juce::MessageManager::getInstance()->callSync([trackRow, effectIndex, juceParam, newVal, forceIndividualRow]
+                                                  { JuceEngine::get().setTrackEffectParameter((int)trackRow, (int)effectIndex, juceParam, newVal, (bool)forceIndividualRow); });
 }
 
 + (void)bypassRowEffectObjC:(NSInteger)rowIndex
                 effectIndex:(NSInteger)effectIndex
                      bypass:(BOOL)shouldBypass
+         forceIndividualRow:(BOOL)forceIndividualRow
 {
-    juce::MessageManager::getInstance()->callSync([rowIndex, effectIndex, shouldBypass]
-                                                  { JuceEngine::get().bypassRowEffect((int)rowIndex, (int)effectIndex, (bool)shouldBypass); });
+    juce::MessageManager::getInstance()->callSync([rowIndex, effectIndex, shouldBypass, forceIndividualRow]
+                                                  { JuceEngine::get().bypassRowEffect((int)rowIndex, (int)effectIndex, (bool)shouldBypass, (bool)forceIndividualRow); });
 }
 
 + (bool)getRowEffectBypassStateObjC:(NSInteger)rowIndex
                         effectIndex:(NSInteger)effectIndex
+                 forceIndividualRow:(BOOL)forceIndividualRow
 {
     bool result = false;
-    juce::MessageManager::getInstance()->callSync([rowIndex, effectIndex, &result]
-                                                  { result = JuceEngine::get().getRowEffectBypassState((int)rowIndex, (int)effectIndex); });
+    juce::MessageManager::getInstance()->callSync([rowIndex, effectIndex, forceIndividualRow, &result]
+                                                  { result = JuceEngine::get().getRowEffectBypassState((int)rowIndex, (int)effectIndex, (bool)forceIndividualRow); });
     return result;
 }
 

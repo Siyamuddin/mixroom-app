@@ -666,7 +666,10 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"getTrackPluginParameters"]) {
         NSInteger row    = [call.arguments[@"row"] integerValue];
         NSInteger effect = [call.arguments[@"effect"] integerValue];
-        NSArray* arr = [JuceBridge getTrackPluginParametersObjC:row effectIndex:effect];
+        BOOL forceIndividualRow = [call.arguments[@"forceIndividualRow"] boolValue];
+        NSArray* arr = [JuceBridge getTrackPluginParametersObjC:row
+                                                    effectIndex:effect
+                                             forceIndividualRow:forceIndividualRow];
         result(arr);
     } else if ([call.method isEqualToString:@"getMasterPluginParameters"]) {
         NSInteger effect = [call.arguments[@"effect"] integerValue];
@@ -1159,10 +1162,13 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"insertTrackEffect"]) {
         NSInteger row = [args[@"row"] integerValue];
         NSString *path = [args[@"path"] copy];
+        BOOL forceIndividualRow = [args[@"forceIndividualRow"] boolValue];
 #if TARGET_OS_OSX
         FlutterResult insertResult = [result copy];
         dispatch_async(MixroomMidiClipLoadQueue(), ^{
-            BOOL ok = [JuceBridge insertTrackEffectObjC:row path:path];
+            BOOL ok = [JuceBridge insertTrackEffectObjC:row
+                                                   path:path
+                                     forceIndividualRow:forceIndividualRow];
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (ok) {
                     insertResult(@(YES));
@@ -1174,7 +1180,9 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
             });
         });
 #else
-        BOOL ok = [JuceBridge insertTrackEffectObjC:row path:path];
+        BOOL ok = [JuceBridge insertTrackEffectObjC:row
+                                               path:path
+                                 forceIndividualRow:forceIndividualRow];
         if (ok) {
             result(@(YES));
         } else {
@@ -1186,37 +1194,55 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"removeTrackEffect"]) {
         NSInteger row = [args[@"row"] integerValue];
         NSInteger effect = [args[@"effect"] integerValue];
-        [JuceBridge removeTrackEffectObjC:row effectIndex:effect];
+        BOOL forceIndividualRow = [args[@"forceIndividualRow"] boolValue];
+        [JuceBridge removeTrackEffectObjC:row
+                              effectIndex:effect
+                       forceIndividualRow:forceIndividualRow];
         result(nil);
     } else if ([call.method isEqualToString:@"reorderTrackEffects"]) {
         NSInteger row  = [args[@"row"] integerValue];
         NSInteger from = [args[@"from"] integerValue];
         NSInteger to   = [args[@"to"] integerValue];
-        [JuceBridge reorderTrackEffectsObjC:row fromIndex:from toIndex:to];
+        BOOL forceIndividualRow = [args[@"forceIndividualRow"] boolValue];
+        [JuceBridge reorderTrackEffectsObjC:row
+                                  fromIndex:from
+                                    toIndex:to
+                         forceIndividualRow:forceIndividualRow];
         result(nil);
     } else if ([call.method isEqualToString:@"getTrackEffectsForRow"]) {
         NSInteger row = [args[@"row"] integerValue];
-        result([JuceBridge getTrackEffectsForRowObjC:row]);
+        BOOL forceIndividualRow = [args[@"forceIndividualRow"] boolValue];
+        result([JuceBridge getTrackEffectsForRowObjC:row
+                                  forceIndividualRow:forceIndividualRow]);
     } else if ([call.method isEqualToString:@"getTrackEffectIdsForRow"]) {
         NSInteger row = [args[@"row"] integerValue];
-        result([JuceBridge getTrackEffectIdsForRowObjC:row]);
+        BOOL forceIndividualRow = [args[@"forceIndividualRow"] boolValue];
+        result([JuceBridge getTrackEffectIdsForRowObjC:row
+                                    forceIndividualRow:forceIndividualRow]);
     } else if ([call.method isEqualToString:@"getTrackEffectInstanceIdsForRow"]) {
         NSInteger row = [args[@"row"] integerValue];
-        result([JuceBridge getTrackEffectInstanceIdsForRowObjC:row]);
+        BOOL forceIndividualRow = [args[@"forceIndividualRow"] boolValue];
+        result([JuceBridge getTrackEffectInstanceIdsForRowObjC:row
+                                            forceIndividualRow:forceIndividualRow]);
     } else if ([call.method isEqualToString:@"getTrackEffectState"]) {
         NSInteger row = [args[@"row"] integerValue];
         NSInteger effect = [args[@"effect"] integerValue];
-        result([JuceBridge getTrackEffectStateObjC:row effectIndex:effect]);
+        BOOL forceIndividualRow = [args[@"forceIndividualRow"] boolValue];
+        result([JuceBridge getTrackEffectStateObjC:row
+                                         effectIndex:effect
+                                  forceIndividualRow:forceIndividualRow]);
     } else if ([call.method isEqualToString:@"setTrackEffectState"]) {
         NSInteger row = [args[@"row"] integerValue];
         NSInteger effect = [args[@"effect"] integerValue];
         NSString *stateBase64 = [args[@"stateBase64"] ?: @"" copy];
+        BOOL forceIndividualRow = [args[@"forceIndividualRow"] boolValue];
 #if TARGET_OS_OSX
         FlutterResult stateResult = [result copy];
         dispatch_async(MixroomMidiClipLoadQueue(), ^{
             BOOL applied = [JuceBridge setTrackEffectStateObjC:row
                                                    effectIndex:effect
-                                                   stateBase64:stateBase64];
+                                                   stateBase64:stateBase64
+                                            forceIndividualRow:forceIndividualRow];
             dispatch_async(dispatch_get_main_queue(), ^{
                 stateResult(@(applied));
             });
@@ -1224,7 +1250,8 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
 #else
         result(@([JuceBridge setTrackEffectStateObjC:row
                                          effectIndex:effect
-                                         stateBase64:stateBase64]));
+                                         stateBase64:stateBase64
+                                  forceIndividualRow:forceIndividualRow]));
 #endif
     } else if ([call.method isEqualToString:@"openTrackPluginEditor"]) {
         NSInteger row = [args[@"row"] integerValue];
@@ -1235,21 +1262,30 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSInteger effect = [args[@"effect"] integerValue];
         NSString *param  = args[@"paramId"];
         id value         = args[@"value"];
+        BOOL forceIndividualRow = [args[@"forceIndividualRow"] boolValue];
         [JuceBridge setTrackEffectObjC:row
                            effectIndex:effect
                                paramId:param
-                                 value:value];
+                                 value:value
+                    forceIndividualRow:forceIndividualRow];
         result(nil);
     } else if ([call.method isEqualToString:@"bypassRowEffect"]) {
         NSInteger row = [args[@"row"] integerValue];
         NSInteger effect = [args[@"effect"] integerValue];
         BOOL bypass = [args[@"bypass"] boolValue];
-        [JuceBridge bypassRowEffectObjC:row effectIndex:effect bypass:bypass];
+        BOOL forceIndividualRow = [args[@"forceIndividualRow"] boolValue];
+        [JuceBridge bypassRowEffectObjC:row
+                             effectIndex:effect
+                                  bypass:bypass
+                      forceIndividualRow:forceIndividualRow];
         result(nil);
     } else if ([call.method isEqualToString:@"getRowEffectBypassState"]) {
         NSInteger row = [args[@"row"] integerValue];
         NSInteger effect = [args[@"effect"] integerValue];
-        BOOL state = [JuceBridge getRowEffectBypassStateObjC:row effectIndex:effect];
+        BOOL forceIndividualRow = [args[@"forceIndividualRow"] boolValue];
+        BOOL state = [JuceBridge getRowEffectBypassStateObjC:row
+                                                effectIndex:effect
+                                         forceIndividualRow:forceIndividualRow];
         result(@(state));
     } else if ([call.method isEqualToString:@"setTrackAutomationPoints"]) {
         // points: List<Map<String, double>> from Dart

@@ -26,6 +26,8 @@ sufficient. Otherwise request only the enabled domain facts needed to complete
 the entire request, including every required domain in the single batch. Use the
 capability directory to identify which domain owns missing functionality. Do not
 request context for an ordinary common edit.
+$aiV3RequestedResourceLifecycleInstructions
+$aiV3VisibleLanguageInstructions
 $aiV3MidiTimingInstructions
 Clarify only ambiguity that materially changes the result; never choose an
 ambiguous target arbitrarily. The application owns factual preparation and
@@ -42,6 +44,8 @@ context request is available. Treat supplied project state and stable IDs as
 factual authority, use only supplied commands, and preserve every explicit
 target and constraint. Use general musical knowledge for interpretation, but
 never invent project resources or state.
+$aiV3RequestedResourceLifecycleInstructions
+$aiV3VisibleLanguageInstructions
 $aiV3MidiTimingInstructions
 Clarify only ambiguity that materially changes the result; never choose an
 ambiguous target arbitrarily. Never claim unexecuted work was applied. Match the
@@ -436,6 +440,7 @@ void _requireRetrievedMidiIdentifiers(
       'midi.append_notes',
       'midi.chop_notes',
     }.contains(command.type)) {
+      if (command.arguments['clip_ref'] is Map) continue;
       final clipId = command.arguments['clip_id']?.toString() ?? '';
       if (!returnedClipIds.contains(clipId)) {
         throw AiV3AdaptivePlannerException(
@@ -581,7 +586,13 @@ void _requireRetrievedAdvancedClipTargets(
     if (!aiV3ClipAdvancedCommandTypes.contains(command.type)) continue;
     if (command.arguments['clip_ref'] is Map) continue;
     if (command.type == 'clip.glue') {
-      final clipIds = (command.arguments['clip_ids'] as List? ?? const [])
+      final clipIds = command.arguments['sources'] is List
+          ? (command.arguments['sources'] as List)
+              .whereType<Map>()
+              .map((source) => source['clip_id'])
+              .whereType<String>()
+              .toList(growable: false)
+          : (command.arguments['clip_ids'] as List? ?? const [])
           .map((value) => value.toString())
           .toList(growable: false);
       final missing =

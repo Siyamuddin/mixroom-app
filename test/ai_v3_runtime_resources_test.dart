@@ -77,6 +77,89 @@ void main() {
     );
   });
 
+  test('binds and retires a generated group by stable string identity', () {
+    final runtime = AiV3WorkflowRuntime();
+    const ref = AiV3ResourceRef(commandId: 'create-group', output: 'group');
+    runtime.bind(
+      ref: ref,
+      kind: AiV3ResourceKind.group,
+      stableId: 'runtime-group',
+    );
+
+    expect(
+      runtime.resolve(ref, expectedKind: AiV3ResourceKind.group).stableId,
+      'runtime-group',
+    );
+    expect(
+      () => runtime.resolve(ref, expectedKind: AiV3ResourceKind.audioRow),
+      throwsStateError,
+    );
+
+    runtime.retire(ref);
+    expect(
+      () => runtime.resolve(ref, expectedKind: AiV3ResourceKind.group),
+      throwsStateError,
+    );
+  });
+
+  test('retires bindings whose stable resources were deleted', () {
+    final runtime = AiV3WorkflowRuntime();
+    const deleted = AiV3ResourceRef(commandId: 'place', output: 'audio_clip');
+    const preserved = AiV3ResourceRef(commandId: 'other', output: 'audio_clip');
+    runtime
+      ..bind(
+        ref: deleted,
+        kind: AiV3ResourceKind.audioClip,
+        stableId: 'deleted-clip',
+      )
+      ..bind(
+        ref: preserved,
+        kind: AiV3ResourceKind.audioClip,
+        stableId: 'preserved-clip',
+      )
+      ..retireStableIds(<Object>{'deleted-clip'});
+
+    expect(
+      () => runtime.resolve(deleted, expectedKind: AiV3ResourceKind.audioClip),
+      throwsStateError,
+    );
+    expect(
+      runtime.resolve(preserved, expectedKind: AiV3ResourceKind.audioClip).stableId,
+      'preserved-clip',
+    );
+  });
+
+  test('row retirement preserves a copy bound to another row', () {
+    final runtime = AiV3WorkflowRuntime();
+    const row = AiV3ResourceRef(commandId: 'create-row', output: 'row');
+    const source = AiV3ResourceRef(commandId: 'place', output: 'audio_clip');
+    const copy = AiV3ResourceRef(commandId: 'copy-away', output: 'copy_clip');
+    runtime
+      ..bind(ref: row, kind: AiV3ResourceKind.audioRow, stableId: 42)
+      ..bind(
+        ref: source,
+        kind: AiV3ResourceKind.audioClip,
+        stableId: 'source-clip',
+        parentRowRef: row,
+      )
+      ..bind(
+        ref: copy,
+        kind: AiV3ResourceKind.audioClip,
+        stableId: 'copy-clip',
+        parentRowKey: 'stable_row:100',
+      )
+      ..retireRowAndChildren(row);
+
+    expect(
+      () => runtime.resolve(source, expectedKind: AiV3ResourceKind.audioClip),
+      throwsStateError,
+    );
+    expect(
+      runtime.resolve(copy, expectedKind: AiV3ResourceKind.audioClip).stableId,
+      'copy-clip',
+    );
+  });
+
   test('deletes tracked generated artifacts after workflow failure', () async {
     final directory = await Directory.systemTemp.createTemp('mixroom_v3_refs_');
     addTearDown(() async {

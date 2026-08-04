@@ -53,13 +53,6 @@ List<String> aiV3VerifiedExecutionDetails(
     executionDetails.add(detail);
   }
 
-  for (final notice in actionNotices) {
-    addDetail(notice);
-  }
-  if (executionDetails.isNotEmpty) {
-    return List<String>.unmodifiable(executionDetails);
-  }
-
   final rawReceipts = bundle['receipts'];
   if (rawReceipts is List) {
     for (final rawReceipt in rawReceipts.whereType<Map>()) {
@@ -72,13 +65,28 @@ List<String> aiV3VerifiedExecutionDetails(
         }
         continue;
       }
-      final label = rawReceipt['preview_label']?.toString().trim() ?? '';
+      final verifiedLabel =
+          rawReceipt['verified_label']?.toString().trim() ?? '';
+      final label = verifiedLabel.isNotEmpty
+          ? verifiedLabel
+          : rawReceipt['preview_label']?.toString().trim() ?? '';
       if (label.isEmpty) continue;
       final status = rawReceipt['status']?.toString().trim() ?? '';
       addDetail(
         status == 'already_satisfied' ? '$label (already set)' : label,
       );
     }
+  }
+  if (executionDetails.isNotEmpty) {
+    return List<String>.unmodifiable(executionDetails);
+  }
+
+  // Runtime notices include useful legacy fallbacks, but may also contain
+  // transient preparation and rendering progress. A verified V3 receipt is
+  // the command-complete semantic record, so notices are used only when a
+  // bundle has no usable receipt details.
+  for (final notice in actionNotices) {
+    addDetail(notice);
   }
   return List<String>.unmodifiable(executionDetails);
 }
@@ -110,7 +118,9 @@ String aiV3AlreadySatisfiedConversationMessage(Map<String, dynamic> bundle) {
         continue;
       }
       final label = _normalizeAiV3ExecutionSummary(
-        rawReceipt['preview_label']?.toString() ?? '',
+        rawReceipt['verified_label']?.toString().trim().isNotEmpty == true
+            ? rawReceipt['verified_label'].toString()
+            : rawReceipt['preview_label']?.toString() ?? '',
       );
       if (label.isEmpty || details.contains(label)) continue;
       details.add(label);

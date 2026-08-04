@@ -1031,7 +1031,7 @@ void main() {
       );
     });
 
-    test('verified action notices replace fallback summaries and receipts', () {
+    test('verified receipts take precedence over runtime action notices', () {
       expect(
         aiV3VerifiedExecutionDetails(
           const <String, dynamic>{
@@ -1051,8 +1051,58 @@ void main() {
           ],
         ),
         <String>[
-          'Adjusted Gain from -1.0 dB to -1.5 dB on Automation Lead',
+          'Adjust Automation Lead by -0.5 dB',
         ],
+      );
+    });
+
+    test('verified details use compact receipt labels when provided', () {
+      expect(
+        aiV3VerifiedExecutionDetails(
+          const <String, dynamic>{
+            'receipts': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'command_id': 'separate',
+                'status': 'prepared',
+                'preview_label':
+                    'Separate a long source into two generated rows',
+                'verified_label': 'Separate vocals and instrumental',
+              },
+              <String, dynamic>{
+                'command_id': 'pitch',
+                'status': 'prepared',
+                'preview_label':
+                    'Set separate.instrumental_clip pitch to -1 semitones',
+                'verified_label':
+                    'Set instrumental stem pitch to -1 semitones',
+              },
+            ],
+          },
+          actionNotices: const <String>[
+            'Preparing stem separation.',
+            'Loading stem separation models.',
+            'Separating stems (17/17).',
+            'Pitch shifted 1 clip.',
+          ],
+        ),
+        <String>[
+          'Separate vocals and instrumental',
+          'Set instrumental stem pitch to -1 semitones',
+        ],
+      );
+    });
+
+    test('runtime action notices remain a receipt-free fallback', () {
+      expect(
+        aiV3VerifiedExecutionDetails(
+          const <String, dynamic>{'receipts': <Object>[]},
+          actionNotices: const <String>[
+            '• Added Reverb •',
+            '• Added Reverb •',
+            '• Added volume automation •',
+          ],
+        ),
+        <String>['Added Reverb', 'Added volume automation'],
       );
     });
 

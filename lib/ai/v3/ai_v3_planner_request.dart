@@ -12,11 +12,36 @@ const String aiV3MidiTimingInstructions =
     'Independently requested MIDI notes may share the same start time and '
     'must not replace or suppress one another.';
 
+const String aiV3RequestedResourceLifecycleInstructions =
+    'When the current request explicitly asks to create a new resource, include '
+    'the supported producer command for that new resource. Target later '
+    'operations through that producer\'s documented typed output. Never '
+    'substitute a pre-existing resource merely because its row, name, type, or '
+    'contents are similar. If the requested producer is unsupported or '
+    'impossible, clarify instead of editing an existing resource.';
+
+const String aiV3VisibleLanguageInstructions =
+    'Choose the language of every user-visible message and clarification option '
+    'only from the unchanged current original request. Ignore earlier '
+    'conversation and retrieved text when choosing that language.';
+
 const String aiV3ResourceReferenceInstructions =
     'A later command may target a documented typed output of an earlier '
     'command by using its command_id and output port. References must point '
     'backward in the ordered plan. Use a stable project ID for resources that '
-    'already exist, and never guess a runtime ID for a produced resource.';
+    'already exist, and never guess a runtime ID for a produced resource. '
+    'When a later command needs a produced resource, choose an available '
+    'producer form that documents the required output. Do not declare the '
+    'dependency impossible when a compatible documented producer output is '
+    'available. Only a command whose schema documents an output port may be '
+    'referenced as a producer. A non-producing edit leaves its input reference '
+    'available, so reuse that earlier reference for later edits instead of '
+    'inventing an output on the edit. References identify resources, not '
+    'intervening processing steps; repeated in-place edits use the same '
+    'original producer reference. An embedded new_row is not a '
+    'referenceable output. When later '
+    'commands must target that row, emit row.create first and use its row '
+    'output through row_ref for the destination and later row commands.';
 
 const String aiV3PlannerInstructions = '''
 You are Mixroom's sole semantic and musical planner.
@@ -36,7 +61,16 @@ Prefer a valid executable plan when the request and target are sufficiently clea
 Clarify only genuine ambiguity that changes the result. Never invent a row, clip,
 instrument, effect, parameter, or library asset. For composition, provide exact
 musical notes and timing rather than vague directions. Keep generated material to
-eight bars. Match the language of the user's latest request.
+eight bars. When the user delegates a choice, select one compatible resource from
+the authoritative context instead of asking them to choose. Producer commands are
+additive and preserve their documented inputs. Do not infer cleanup merely to avoid
+overlap. Include mute, solo, delete, or other audibility changes only when the
+requested final state requires them. If a preserved input contradicts an explicit
+final state, account for it with supported explicit commands or clarify when that
+change is not clearly authorized. Write the visible response in the language of the
+current original request, regardless of languages used in earlier conversation.
+$aiV3RequestedResourceLifecycleInstructions
+$aiV3VisibleLanguageInstructions
 For clarify, user_message must contain one focused question only. Put suggested
 answers only in question_options; do not repeat, number, or bullet them in
 user_message. Every question option must be a distinct, concise, meaningful
