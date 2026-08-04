@@ -940,6 +940,16 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             ),
           )
         }
+        "sendLiveMidiInputEvent" -> {
+          result.success(
+            JuceBridge.sendLiveMidiInputEventJNI(
+              args.boolValue("noteOn"),
+              args.intValue("channel", 1),
+              args.intValue("pitch", 60),
+              args.floatValue("velocity"),
+            ),
+          )
+        }
         "consumeLiveMidiInputEvents" -> {
           result.success(JuceBridge.consumeLiveMidiInputEventsJNI())
         }

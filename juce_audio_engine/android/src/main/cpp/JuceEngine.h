@@ -4679,6 +4679,10 @@ public:
                              int pitch,
                              float velocity,
                              int durationMs);
+    bool sendLiveMidiInputEvent(bool noteOn,
+                                int channel,
+                                int pitch,
+                                float velocity);
     struct LiveMidiInputEvent
     {
         int clipId = -1;

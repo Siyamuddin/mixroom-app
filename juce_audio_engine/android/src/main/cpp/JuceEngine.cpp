@@ -2110,6 +2110,7 @@ bool JuceEngine::updateMidiClipEvents(int clipId,
     prepareLiveClipProcessor(*replacement);
 
     std::shared_ptr<juce::AudioProcessor> detachedProcessor;
+    bool routedProcessorReady = false;
     {
         const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
 
@@ -2128,10 +2129,22 @@ bool JuceEngine::updateMidiClipEvents(int clipId,
         c.midiNotes = notes;
         c.midiParams = params;
         c.midiSourceTempoBpm = safeSourceTempo;
+        beginRoutedClipScheduleMutationLocked();
+        removeClipFromRoutedSchedule(c.rowId, clipId);
         detachedProcessor = std::atomic_exchange_explicit(
             &c.playerProcessor,
             std::shared_ptr<juce::AudioProcessor>(std::move(replacement)),
             std::memory_order_acq_rel);
+        addClipToRoutedSchedule(c);
+        endRoutedClipScheduleMutationLocked();
+
+        const auto routedSnapshot =
+            std::atomic_load_explicit(&routedClipItemSnapshot, std::memory_order_acquire);
+        const auto *routedItem =
+            routedSnapshot != nullptr ? routedSnapshot->findClip(clipId) : nullptr;
+        routedProcessorReady =
+            routedItem != nullptr &&
+            routedItem->processor == liveProcessorSharedForClip(c);
     }
 
     {
@@ -2140,7 +2153,7 @@ bool JuceEngine::updateMidiClipEvents(int clipId,
         drainRetiredLiveClipProcessorsLocked();
     }
 
-    return true;
+    return routedProcessorReady;
 }
 
 bool JuceEngine::setLiveMidiInputTargetClip(int clipId)
@@ -2156,6 +2169,18 @@ bool JuceEngine::setLiveMidiInputTargetClip(int clipId)
         if (item == nullptr ||
             !item->isMidi ||
             item->processor == nullptr)
+        {
+            return false;
+        }
+
+        if (clips.empty() || clipId >= (int)clips.size())
+            return false;
+        const auto &clip = clips[(size_t)clipId];
+        const auto currentProcessor = liveProcessorSharedForClip(clip);
+        if (!clip.alive ||
+            !clip.isMidi ||
+            currentProcessor == nullptr ||
+            item->processor != currentProcessor)
         {
             return false;
         }
@@ -2180,10 +2205,23 @@ bool JuceEngine::playPreviewMidiNote(int clipId,
         return false;
 
     auto &c = clips[(size_t)clipId];
-    if (!c.alive || !c.isMidi || liveProcessorForClip(c) == nullptr)
+    const auto currentProcessor = liveProcessorSharedForClip(c);
+    if (!c.alive || !c.isMidi || currentProcessor == nullptr)
         return false;
 
-    auto *proc = dynamic_cast<TimelineMidiClipProcessor *>(liveProcessorForClip(c));
+    const auto routedSnapshot =
+        std::atomic_load_explicit(&routedClipItemSnapshot, std::memory_order_acquire);
+    const auto *routedItem =
+        routedSnapshot != nullptr ? routedSnapshot->findClip(clipId) : nullptr;
+    if (routedItem == nullptr ||
+        routedItem->processor == nullptr ||
+        routedItem->processor != currentProcessor)
+    {
+        return false;
+    }
+
+    auto *proc = dynamic_cast<TimelineMidiClipProcessor *>(
+        routedItem->processor.get());
     if (proc == nullptr)
         return false;
 
@@ -2230,6 +2268,42 @@ bool JuceEngine::playPreviewMidiNote(int clipId,
                     activeProc->enqueueLiveMidiEvent(false, 1, safePitch, 0.0f);
                 });
         });
+    return true;
+}
+
+bool JuceEngine::sendLiveMidiInputEvent(bool noteOn,
+                                        int channel,
+                                        int pitch,
+                                        float velocity)
+{
+    const int clipId =
+        liveMidiInputTargetClip.load(std::memory_order_relaxed);
+    if (clipId < 0)
+        return false;
+
+    LiveMidiInputEvent event;
+    event.clipId = clipId;
+    event.noteOn = noteOn;
+    event.channel = juce::jlimit(1, 16, channel);
+    event.pitch = juce::jlimit(0, 127, pitch);
+    event.velocity = noteOn ? juce::jlimit(0.0f, 1.0f, velocity) : 0.0f;
+    event.transportSec = transportSec.load(std::memory_order_relaxed);
+
+    if (!prepareLiveMidiInputEventForAudioQueue(event) ||
+        !enqueueLiveMidiInputAudioEvent(event))
+        return false;
+
+    const std::lock_guard<std::mutex> lock(liveMidiInputQueueMutex);
+    event.preparedSample = {};
+    liveMidiInputPendingForFlutter.push_back(event);
+    constexpr size_t kMaxBufferedEvents = 4096;
+    if (liveMidiInputPendingForFlutter.size() > kMaxBufferedEvents)
+    {
+        liveMidiInputPendingForFlutter.erase(
+            liveMidiInputPendingForFlutter.begin(),
+            liveMidiInputPendingForFlutter.begin() +
+                (std::ptrdiff_t)(liveMidiInputPendingForFlutter.size() - kMaxBufferedEvents));
+    }
     return true;
 }
 
@@ -2330,6 +2404,16 @@ bool JuceEngine::prepareLiveMidiInputEventForAudioQueue(
 
     const auto *item = itemSnapshot->findClip(event.clipId);
     if (item == nullptr || !item->isMidi || item->processor == nullptr)
+        return false;
+
+    if (clips.empty() ||
+        event.clipId < 0 ||
+        event.clipId >= (int)clips.size())
+        return false;
+    const auto &clip = clips[(size_t)event.clipId];
+    if (!clip.alive ||
+        !clip.isMidi ||
+        item->processor != liveProcessorSharedForClip(clip))
         return false;
 
     auto *proc =
