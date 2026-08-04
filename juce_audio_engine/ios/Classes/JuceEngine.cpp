@@ -3620,10 +3620,19 @@ bool JuceEngine::playPreviewMidiNote(int clipId,
         if (auto *timelineProc =
                 dynamic_cast<TimelineMidiClipProcessor *>(liveProcessorForClip(c)))
         {
-            if (noteOn)
-                timelineProc->preloadLiveMidiPitch(midiPitch, midiVelocity);
-            timelineProc->enqueueLiveMidiEvent(noteOn, 1, midiPitch, midiVelocity);
-            return true;
+            TimelineMidiClipProcessor::PreparedLiveSample preparedSample;
+            if (noteOn &&
+                !timelineProc->prepareLiveMidiSample(
+                    midiPitch,
+                    midiVelocity,
+                    preparedSample))
+                return false;
+            return timelineProc->enqueueLiveMidiEvent(
+                noteOn,
+                1,
+                midiPitch,
+                midiVelocity,
+                preparedSample);
         }
         if (auto *hostedProc =
                 dynamic_cast<ExternalMidiPluginClipProcessor *>(liveProcessorForClip(c)))
@@ -3637,7 +3646,8 @@ bool JuceEngine::playPreviewMidiNote(int clipId,
     if (!enqueueLiveEvent(false, safePitch, 0.0f))
         return false;
 
-    enqueueLiveEvent(true, safePitch, safeVelocity);
+    if (!enqueueLiveEvent(true, safePitch, safeVelocity))
+        return false;
     juce::Timer::callAfterDelay(
         safeDurationMs,
         [clipId, safePitch]
@@ -3796,6 +3806,33 @@ bool JuceEngine::sendLiveMidiInputEvent(bool noteOn,
         velocity);
 }
 
+bool JuceEngine::prepareLiveMidiInputEventForAudioQueue(
+    LiveMidiInputEvent &event)
+{
+    if (!event.noteOn || event.velocity <= 0.0f)
+        return true;
+
+    const auto itemSnapshot =
+        std::atomic_load_explicit(&routedClipItemSnapshot, std::memory_order_acquire);
+    if (itemSnapshot == nullptr)
+        return false;
+
+    const auto *item = itemSnapshot->findClip(event.clipId);
+    if (item == nullptr || !item->isMidi || item->processor == nullptr)
+        return false;
+
+    if (auto *timelineProc =
+            dynamic_cast<TimelineMidiClipProcessor *>(item->processor.get()))
+    {
+        return timelineProc->prepareLiveMidiSample(
+            event.pitch,
+            event.velocity,
+            event.preparedSample);
+    }
+    return dynamic_cast<ExternalMidiPluginClipProcessor *>(
+               item->processor.get()) != nullptr;
+}
+
 bool JuceEngine::sendLiveMidiInputEventForClip(int clipId,
                                                bool noteOn,
                                                int channel,
@@ -3813,10 +3850,13 @@ bool JuceEngine::sendLiveMidiInputEventForClip(int clipId,
     event.velocity = noteOn ? juce::jlimit(0.0f, 1.0f, velocity) : 0.0f;
     event.transportSec = transportSec.load(std::memory_order_relaxed);
 
-    juce::ignoreUnused(enqueueLiveMidiInputAudioEvent(event));
+    if (!prepareLiveMidiInputEventForAudioQueue(event) ||
+        !enqueueLiveMidiInputAudioEvent(event))
+        return false;
 
     {
         const std::lock_guard<std::mutex> lock(liveMidiInputQueueMutex);
+        event.preparedSample = {};
         liveMidiInputPendingForFlutter.push_back(event);
 
         constexpr size_t kMaxBufferedEvents = 4096;
@@ -3957,7 +3997,8 @@ void JuceEngine::dispatchQueuedLiveMidiInputEventsForAudioThread()
                 event.noteOn,
                 event.channel,
                 event.pitch,
-                event.velocity);
+                event.velocity,
+                event.preparedSample);
             continue;
         }
         if (auto *hostedProc =
@@ -3998,9 +4039,11 @@ void JuceEngine::handleIncomingMidiMessage(juce::MidiInput *source,
     event.velocity = juce::jlimit(0.0f, 1.0f, (float)message.getFloatVelocity());
     event.transportSec = transportSec.load(std::memory_order_relaxed);
 
-    juce::ignoreUnused(enqueueLiveMidiInputAudioEvent(event));
+    if (prepareLiveMidiInputEventForAudioQueue(event))
+        juce::ignoreUnused(enqueueLiveMidiInputAudioEvent(event));
 
     const std::lock_guard<std::mutex> lock(liveMidiInputQueueMutex);
+    event.preparedSample = {};
     liveMidiInputPendingForFlutter.push_back(event);
     constexpr size_t kMaxBufferedEvents = 4096;
     if (liveMidiInputPendingForFlutter.size() > kMaxBufferedEvents)
