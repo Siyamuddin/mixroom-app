@@ -113,6 +113,15 @@ void main() {
             lengthSec: 2.0,
           );
           expect(loaded, isTrue);
+          final updated = await JuceAudioEngine.updateMidiClipEvents(
+            clipId,
+            instrumentId: instrumentId,
+            instrumentName: instrumentName,
+            notes: <Map<String, dynamic>>[_note(clipId, existingPitch)],
+            params: params,
+            sourceTempoBpm: 120.0,
+          );
+          expect(updated, isTrue);
           expect(
             await JuceAudioEngine.setLiveMidiInputTargetClip(clipId),
             isTrue,
@@ -131,6 +140,25 @@ void main() {
             'attackMs': 4.0,
             'releaseMs': 900.0,
           },
+        );
+        results.add(
+          await _measureStrike(
+            label: 'upright-timeline-playback',
+            rowIndex: pianoRow,
+            strike: () async {
+              expect(
+                await JuceAudioEngine.setLiveMidiInputTargetClip(-1),
+                isTrue,
+              );
+              await JuceAudioEngine.setTransportSeconds(10.0);
+              return JuceAudioEngine.play();
+            },
+          ),
+        );
+        await JuceAudioEngine.pause();
+        expect(
+          await JuceAudioEngine.setLiveMidiInputTargetClip(clipIds[0]),
+          isTrue,
         );
         results.add(
           await _measureStrike(
@@ -260,6 +288,6 @@ void main() {
         await JuceAudioEngine.shutdown();
       }
     },
-    skip: !Platform.isMacOS,
+    skip: !(Platform.isMacOS || Platform.isAndroid || Platform.isIOS),
   );
 }
