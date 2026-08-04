@@ -559,6 +559,7 @@ class AiV3CommandPreparer {
       final args = command.arguments;
       final commandActions = <AssistantAction>[];
       String label;
+      String verifiedLabel;
       var receiptStatus = 'prepared';
       ({
         Map<String, dynamic> target,
@@ -664,6 +665,7 @@ class AiV3CommandPreparer {
           if (stretchAudio) projectAudioForcedTempoFollow = true;
           symbolicBpm = nextBpm;
           label = 'Set project tempo to ${args['bpm']} BPM';
+          verifiedLabel = label;
           break;
         case 'transport.set_playing':
           if (recording) {
@@ -683,6 +685,7 @@ class AiV3CommandPreparer {
             ),
           );
           label = playing ? 'Start playback' : 'Pause playback';
+          verifiedLabel = playing ? 'Started playback' : 'Paused playback';
           break;
         case 'transport.restart':
           if (recording) {
@@ -703,6 +706,10 @@ class AiV3CommandPreparer {
               simulatedLoopEnabled && simulatedLoopEndMs > simulatedLoopStartMs
               ? 'Pause playback at the loop start'
               : 'Pause playback at the project start';
+          verifiedLabel =
+              simulatedLoopEnabled && simulatedLoopEndMs > simulatedLoopStartMs
+              ? 'Paused playback at the loop start'
+              : 'Paused playback at the project start';
           break;
         case 'transport.set_metronome_enabled':
           final enabled = args['enabled'] as bool;
@@ -717,6 +724,7 @@ class AiV3CommandPreparer {
             ),
           );
           label = '${enabled ? 'Enable' : 'Disable'} the metronome';
+          verifiedLabel = '${enabled ? 'Enabled' : 'Disabled'} the metronome';
           break;
         case 'transport.set_loop_enabled':
           final enabled = args['enabled'] as bool;
@@ -739,6 +747,7 @@ class AiV3CommandPreparer {
             ),
           );
           label = '${enabled ? 'Enable' : 'Disable'} loop playback';
+          verifiedLabel = '${enabled ? 'Enabled' : 'Disabled'} loop playback';
           break;
         case 'row.adjust_gain_db':
           final resolved = resolveRowCommandTarget();
@@ -766,6 +775,8 @@ class AiV3CommandPreparer {
             ),
           );
           label = 'Adjust ${resolved.label} by ${args['delta_db']} dB';
+          verifiedLabel =
+              'Adjusted ${resolved.label} by ${args['delta_db']} dB';
           break;
         case 'row.set_gain_db':
           final resolved = resolveRowCommandTarget();
@@ -788,6 +799,7 @@ class AiV3CommandPreparer {
             ),
           );
           label = 'Set ${resolved.label} gain to ${args['gain_db']} dB';
+          verifiedLabel = label;
           break;
         case 'row.adjust_pan':
           final resolved = resolveRowCommandTarget();
@@ -815,6 +827,8 @@ class AiV3CommandPreparer {
             ),
           );
           label = 'Adjust ${resolved.label} pan by ${args['delta_signed']}';
+          verifiedLabel =
+              'Adjusted ${resolved.label} pan by ${args['delta_signed']}';
           break;
         case 'row.set_pan':
           final resolved = resolveRowCommandTarget();
@@ -838,6 +852,7 @@ class AiV3CommandPreparer {
             ),
           );
           label = 'Set ${resolved.label} pan to ${args['pan_signed']}';
+          verifiedLabel = label;
           break;
         case 'row.set_muted':
           final muted = args['muted'] as bool;
@@ -866,6 +881,7 @@ class AiV3CommandPreparer {
             }
           }
           label = '${muted ? 'Mute' : 'Unmute'} ${resolved.label}';
+          verifiedLabel = '${muted ? 'Muted' : 'Unmuted'} ${resolved.label}';
           break;
         case 'row.set_soloed':
           final soloed = args['soloed'] as bool;
@@ -893,6 +909,7 @@ class AiV3CommandPreparer {
             }
           }
           label = '${soloed ? 'Solo' : 'Unsolo'} ${resolved.label}';
+          verifiedLabel = '${soloed ? 'Soloed' : 'Unsoloed'} ${resolved.label}';
           break;
         case 'row.rename':
           final resolved = resolveRowCommandTarget();
@@ -914,6 +931,7 @@ class AiV3CommandPreparer {
             ),
           );
           label = 'Rename ${resolved.label} to $newName';
+          verifiedLabel = 'Renamed ${resolved.label} to $newName';
           break;
         case 'row.set_role_override':
           final rowId = args['row_id'] as int;
@@ -936,6 +954,9 @@ class AiV3CommandPreparer {
           label = role.isEmpty
               ? 'Clear role override on ${_rowLabel(rowById, rowId)}'
               : 'Set ${_rowLabel(rowById, rowId)} role to $role';
+          verifiedLabel = role.isEmpty
+              ? 'Cleared role override on ${_rowLabel(rowById, rowId)}'
+              : label;
           break;
         case 'row.apply_phone_mic_cleanup':
           final rowId = args['row_id'] as int;
@@ -978,6 +999,8 @@ class AiV3CommandPreparer {
           );
           label =
               'Clean all ${audioClipIds.length} audio clip${audioClipIds.length == 1 ? '' : 's'} on ${_rowLabel(rowById, rowId)}';
+          verifiedLabel =
+              'Cleaned all ${audioClipIds.length} audio clip${audioClipIds.length == 1 ? '' : 's'} on ${_rowLabel(rowById, rowId)}';
           break;
         case 'row.select':
           final rowId = args['row_id'] as int;
@@ -996,6 +1019,7 @@ class AiV3CommandPreparer {
             );
           }
           label = 'Select ${_rowLabel(rowById, rowId)}';
+          verifiedLabel = 'Selected ${_rowLabel(rowById, rowId)}';
           break;
         case 'row.set_color':
           final rowId = args['row_id'] as int;
@@ -1018,6 +1042,9 @@ class AiV3CommandPreparer {
           label = color == 'none'
               ? 'Clear color on ${_rowLabel(rowById, rowId)}'
               : 'Set ${_rowLabel(rowById, rowId)} color to $color';
+          verifiedLabel = color == 'none'
+              ? 'Cleared color on ${_rowLabel(rowById, rowId)}'
+              : label;
           break;
         case 'row.create':
           if (simulatedRowCount >= maximumRows) {
@@ -1077,6 +1104,9 @@ class AiV3CommandPreparer {
           label = laneKind == 'midi'
               ? 'Create MIDI row $name'
               : 'Create audio row $name';
+          verifiedLabel = laneKind == 'midi'
+              ? 'Created MIDI row $name'
+              : 'Created audio row $name';
           break;
         case 'row.delete':
           final resolved = resolveRowCommandTarget();
@@ -1172,6 +1202,7 @@ class AiV3CommandPreparer {
           simulatedRowCount -= 1;
           hasPriorTopologyMutation = true;
           label = 'Delete ${resolved.label}';
+          verifiedLabel = 'Deleted ${resolved.label}';
           break;
         case 'group.create':
           final usesTypedMembers = args['members'] is List;
@@ -1231,6 +1262,7 @@ class AiV3CommandPreparer {
             if (requestedName.isEmpty || requestedName == existingName) {
               receiptStatus = 'already_satisfied';
               label = 'Keep existing group $existingName';
+              verifiedLabel = 'Kept existing group $existingName';
               break;
             }
             throw const AiV3PreparationException(
@@ -1327,6 +1359,9 @@ class AiV3CommandPreparer {
           label = dissolvedGroupIds.isEmpty
               ? 'Create group $name from ${orderedKeys.length} rows'
               : 'Create group $name and dissolve ${dissolvedGroupIds.length} superseded group(s)';
+          verifiedLabel = dissolvedGroupIds.isEmpty
+              ? 'Created group $name from ${orderedKeys.length} rows'
+              : 'Created group $name and dissolved ${dissolvedGroupIds.length} superseded group(s)';
           break;
         case 'group.remove_row':
           final groupRef = args['group_ref'] is Map
@@ -1416,6 +1451,9 @@ class AiV3CommandPreparer {
           label = dissolves
               ? 'Remove $memberKey and dissolve ${group['name']}'
               : 'Remove $memberKey from ${group['name']}';
+          verifiedLabel = dissolves
+              ? 'Removed $memberKey and dissolved ${group['name']}'
+              : 'Removed $memberKey from ${group['name']}';
           break;
         case 'group.set_collapsed':
           final groupRef = args['group_ref'] is Map
@@ -1466,6 +1504,8 @@ class AiV3CommandPreparer {
             }
           }
           label = '${collapsed ? 'Collapse' : 'Expand'} ${group['name']}';
+          verifiedLabel =
+              '${collapsed ? 'Collapsed' : 'Expanded'} ${group['name']}';
           break;
         case 'clip.move_by_beats':
           final rawRef = args['clip_ref'];
@@ -1511,6 +1551,9 @@ class AiV3CommandPreparer {
           label = clipRef == null
               ? 'Move ${_clipLabel(clipById, clipId!)} by ${args['delta_beats']} beats'
               : 'Move ${clipRef.commandId}.${clipRef.output} by ${args['delta_beats']} beats';
+          verifiedLabel = clipRef == null
+              ? 'Moved ${_clipLabel(clipById, clipId!)} by ${args['delta_beats']} beats'
+              : 'Moved ${clipRef.commandId}.${clipRef.output} by ${args['delta_beats']} beats';
           break;
         case 'clip.trim_to_range':
           final rawRef = args['clip_ref'];
@@ -1608,6 +1651,9 @@ class AiV3CommandPreparer {
           label = clipRef == null
               ? 'Trim ${_clipLabel(clipById, clipId!)} to beats $startBeat–$endBeat'
               : 'Trim ${clipRef.commandId}.${clipRef.output} to beats $startBeat–$endBeat';
+          verifiedLabel = clipRef == null
+              ? 'Trimmed ${_clipLabel(clipById, clipId!)} to beats $startBeat–$endBeat'
+              : 'Trimmed ${clipRef.commandId}.${clipRef.output} to beats $startBeat–$endBeat';
           break;
         case 'clip.split_at':
           final rawRef = args['clip_ref'];
@@ -1783,6 +1829,7 @@ class AiV3CommandPreparer {
           label = clipRef == null
               ? 'Split ${_clipLabel(clipById, clipId!)} at beat $atBeat'
               : 'Split ${clipRef.commandId}.${clipRef.output} at beat $atBeat';
+          verifiedLabel = label;
           break;
         case 'clip.duplicate_to':
           final rawRef = args['clip_ref'];
@@ -1946,6 +1993,9 @@ class AiV3CommandPreparer {
           label = clipRef == null
               ? 'Duplicate ${_clipLabel(clipById, clipId!)} to ${_rowLabel(rowById, destinationRowId!)} at beat $startBeat'
               : 'Duplicate ${clipRef.commandId}.${clipRef.output} at beat $startBeat';
+          verifiedLabel = clipRef == null
+              ? 'Duplicated ${_clipLabel(clipById, clipId!)} to ${_rowLabel(rowById, destinationRowId!)} at beat $startBeat'
+              : 'Duplicated ${clipRef.commandId}.${clipRef.output} at beat $startBeat';
           break;
         case 'clip.delete':
           final rawRef = args['clip_ref'];
@@ -1990,6 +2040,9 @@ class AiV3CommandPreparer {
           label = clipRef == null
               ? 'Delete ${_clipLabel(clipById, clipId!)}'
               : 'Delete ${clipRef.commandId}.${clipRef.output}';
+          verifiedLabel = clipRef == null
+              ? 'Deleted ${_clipLabel(clipById, clipId!)}'
+              : 'Deleted ${clipRef.commandId}.${clipRef.output}';
           break;
         case 'clip.glue':
           final usesTypedSources = args['sources'] is List;
@@ -2159,6 +2212,8 @@ class AiV3CommandPreparer {
           hasPriorTopologyMutation = true;
           label =
               'Glue ${rawSources.length} audio clips as ${labelValue.isEmpty ? 'Glued Clip' : labelValue}';
+          verifiedLabel =
+              'Glued ${rawSources.length} audio clips as ${labelValue.isEmpty ? 'Glued Clip' : labelValue}';
           break;
         case 'clip.separate_stems':
           final rawRef = args['clip_ref'];
@@ -2264,6 +2319,7 @@ class AiV3CommandPreparer {
               : '${clipRef.commandId}.${clipRef.output}';
           label =
               'Separate $sourceLabel into $vocalsLabel and $instrumentalLabel on two new rows; preserve the source clip';
+          verifiedLabel = 'Separated vocals and instrumental';
           break;
         case 'clip.convert_to_midi':
           final rawRef = args['clip_ref'];
@@ -2380,6 +2436,8 @@ class AiV3CommandPreparer {
           simulatedClipCount += 1;
           label =
               'Convert ${clipId == null ? '${clipRef!.commandId}.${clipRef.output}' : _clipLabel(clipById, clipId)} to MIDI with $instrumentId on a new row below the source; preserve the source clip';
+          verifiedLabel =
+              'Converted ${clipId == null ? '${clipRef!.commandId}.${clipRef.output}' : _clipLabel(clipById, clipId)} to MIDI with $instrumentId on a new row below the source; preserved the source clip';
           break;
         case 'clip.set_pitch_semitones':
         case 'clip.adjust_pitch_semitones':
@@ -2436,6 +2494,7 @@ class AiV3CommandPreparer {
               ? _clipLabel(clipById, clipId!)
               : '${clipRef.commandId}.${clipRef.output}';
           label = 'Set $targetLabel pitch to $finalPitch semitones';
+          verifiedLabel = label;
           break;
         case 'clip.set_timeline_length_beats':
         case 'clip.scale_timeline_length':
@@ -2505,6 +2564,9 @@ class AiV3CommandPreparer {
             label = absoluteLengthBeats != null
                 ? 'Set ${clipRef.commandId}.${clipRef.output} timeline length to $absoluteLengthBeats beats${preservePitch ? ' while preserving pitch' : ' with repitching'}'
                 : 'Scale ${clipRef.commandId}.${clipRef.output} timeline length by $factor${preservePitch ? ' while preserving pitch' : ' with repitching'}';
+            verifiedLabel = absoluteLengthBeats != null
+                ? label
+                : 'Scaled ${clipRef.commandId}.${clipRef.output} timeline length by $factor${preservePitch ? ' while preserving pitch' : ' with repitching'}';
             break;
           }
           final stableClipId = clipId!;
@@ -2595,6 +2657,7 @@ class AiV3CommandPreparer {
           }
           label =
               'Set ${_clipLabel(clipById, stableClipId)} timeline length to $finalLengthBeats beats${preservePitch ? ' while preserving pitch' : ' with repitching'}';
+          verifiedLabel = label;
           break;
         case 'clip.set_source_tempo_bpm':
           final rawRef = args['clip_ref'];
@@ -2639,6 +2702,7 @@ class AiV3CommandPreparer {
             }
             label =
                 'Set ${clipRef.commandId}.${clipRef.output} source tempo to $sourceTempo BPM';
+            verifiedLabel = label;
             break;
           }
           final stableClipId = clipId!;
@@ -2672,6 +2736,7 @@ class AiV3CommandPreparer {
           }
           label =
               'Set ${_clipLabel(clipById, stableClipId)} source tempo to $sourceTempo BPM';
+          verifiedLabel = label;
           break;
         case 'clip.set_tempo_follow_mode':
           final rawRef = args['clip_ref'];
@@ -2716,6 +2781,7 @@ class AiV3CommandPreparer {
               ..boundsRuntimeAuthoritative = true;
             label =
                 'Set ${clipRef.commandId}.${clipRef.output} tempo-follow mode to $mode';
+            verifiedLabel = label;
             break;
           }
           final stableClipId = clipId!;
@@ -2781,6 +2847,7 @@ class AiV3CommandPreparer {
           }
           label =
               'Set ${_clipLabel(clipById, stableClipId)} tempo-follow mode to $mode';
+          verifiedLabel = label;
           break;
         case 'clip.align_tempo_to_project':
         case 'project.set_tempo_from_clip':
@@ -2825,6 +2892,9 @@ class AiV3CommandPreparer {
             label = command.type == 'project.set_tempo_from_clip'
                 ? 'Set the project tempo from ${clipRef.commandId}.${clipRef.output} and follow in $mode mode'
                 : 'Align ${clipRef.commandId}.${clipRef.output} to the project tempo in $mode mode';
+            verifiedLabel = command.type == 'project.set_tempo_from_clip'
+                ? 'Set the project tempo from ${clipRef.commandId}.${clipRef.output} with $mode tempo following'
+                : 'Aligned ${clipRef.commandId}.${clipRef.output} to the project tempo in $mode mode';
             break;
           }
           final clipId = args['clip_id'] as String;
@@ -2887,6 +2957,9 @@ class AiV3CommandPreparer {
           label = command.type == 'project.set_tempo_from_clip'
               ? 'Detect ${_clipLabel(clipById, clipId)} at ${_formatNumber(detectedTempo)} BPM, set the project to ${detectedTempo.round()} BPM, and follow in $mode mode'
               : 'Detect ${_clipLabel(clipById, clipId)} at ${_formatNumber(detectedTempo)} BPM and align it to the project in $mode mode';
+          verifiedLabel = command.type == 'project.set_tempo_from_clip'
+              ? 'Detected ${_clipLabel(clipById, clipId)} at ${_formatNumber(detectedTempo)} BPM, set the project to ${detectedTempo.round()} BPM, and enabled $mode tempo following'
+              : 'Detected ${_clipLabel(clipById, clipId)} at ${_formatNumber(detectedTempo)} BPM and aligned it to the project in $mode mode';
           break;
         case 'clip.trim_silence':
           final rawRef = args['clip_ref'];
@@ -2923,6 +2996,8 @@ class AiV3CommandPreparer {
               ..boundsRuntimeAuthoritative = true;
             label =
                 'Trim ${args['edges']} silence from ${clipRef.commandId}.${clipRef.output} with ${_formatNumber((args['padding_ms'] as num).toDouble())} ms padding';
+            verifiedLabel =
+                'Trimmed ${args['edges']} silence from ${clipRef.commandId}.${clipRef.output} with ${_formatNumber((args['padding_ms'] as num).toDouble())} ms padding';
             break;
           }
           final clipId = args['clip_id'] as String;
@@ -2991,6 +3066,8 @@ class AiV3CommandPreparer {
           }
           label =
               'Trim $edges silence from ${_clipLabel(clipById, clipId)} with ${_formatNumber(paddingMs)} ms padding';
+          verifiedLabel =
+              'Trimmed $edges silence from ${_clipLabel(clipById, clipId)} with ${_formatNumber(paddingMs)} ms padding';
           break;
         case 'clip.align_first_sound':
           final rawRef = args['clip_ref'];
@@ -3028,6 +3105,8 @@ class AiV3CommandPreparer {
               ..boundsRuntimeAuthoritative = true;
             label =
                 'Align the first sound of ${clipRef.commandId}.${clipRef.output}';
+            verifiedLabel =
+                'Aligned the first sound of ${clipRef.commandId}.${clipRef.output}';
             break;
           }
           final clipId = args['clip_id'] as String;
@@ -3094,6 +3173,8 @@ class AiV3CommandPreparer {
           }
           label =
               'Align the first sound of ${_clipLabel(clipById, clipId)} to ${destination['kind'] == 'project_beat' ? 'beat ${_formatNumber(destinationBeat)}' : destination['kind']}';
+          verifiedLabel =
+              'Aligned the first sound of ${_clipLabel(clipById, clipId)} to ${destination['kind'] == 'project_beat' ? 'beat ${_formatNumber(destinationBeat)}' : destination['kind']}';
           break;
         case 'midi.transpose':
           final rawRef = args['clip_ref'];
@@ -3163,6 +3244,9 @@ class AiV3CommandPreparer {
           label = clipRef == null
               ? 'Transpose ${_clipLabel(clipById, clipId!)} by $semitones semitones'
               : 'Transpose generated MIDI clip by $semitones semitones';
+          verifiedLabel = clipRef == null
+              ? 'Transposed ${_clipLabel(clipById, clipId!)} by $semitones semitones'
+              : 'Transposed generated MIDI clip by $semitones semitones';
           break;
         case 'midi.create_clip':
           final arrangementLimit =
@@ -3212,6 +3296,8 @@ class AiV3CommandPreparer {
           simulatedClipCount += 1;
           label =
               'Create MIDI clip with ${(args['notes'] as List).length} notes';
+          verifiedLabel =
+              'Created MIDI clip with ${(args['notes'] as List).length} notes';
           break;
         case 'midi.replace_notes':
         case 'midi.append_notes':
@@ -3428,6 +3514,20 @@ class AiV3CommandPreparer {
                   ? 'Chop notes in ${_clipLabel(clipById, clipId!)}'
                   : 'Chop notes in ${clipRef.commandId}.${clipRef.output}',
           };
+          verifiedLabel = switch (command.type) {
+            'midi.replace_notes' =>
+              clipRef == null
+                  ? 'Replaced notes in ${_clipLabel(clipById, clipId!)}'
+                  : 'Replaced notes in ${clipRef.commandId}.${clipRef.output}',
+            'midi.append_notes' =>
+              clipRef == null
+                  ? 'Appended notes to ${_clipLabel(clipById, clipId!)}'
+                  : 'Appended notes to ${clipRef.commandId}.${clipRef.output}',
+            _ =>
+              clipRef == null
+                  ? 'Chopped notes in ${_clipLabel(clipById, clipId!)}'
+                  : 'Chopped notes in ${clipRef.commandId}.${clipRef.output}',
+          };
           break;
         case 'effect.ensure_configured':
           final resolved = resolveRowCommandTarget();
@@ -3474,6 +3574,7 @@ class AiV3CommandPreparer {
             ),
           );
           label = 'Add/configure $effectId on ${resolved.label}';
+          verifiedLabel = 'Added/configured $effectId on ${resolved.label}';
           break;
         case 'effect.remove':
         case 'effect.set_bypassed':
@@ -3511,6 +3612,8 @@ class AiV3CommandPreparer {
             chain.removeAt(effectIndex);
             label =
                 'Remove ${effect['display_name'] ?? effectId} from ${_rowLabel(rowById, rowId)}';
+            verifiedLabel =
+                'Removed ${effect['display_name'] ?? effectId} from ${_rowLabel(rowById, rowId)}';
           } else {
             final bypassed = args['bypassed'] as bool;
             if (effect['bypassed'] == bypassed) {
@@ -3533,6 +3636,8 @@ class AiV3CommandPreparer {
             }
             label =
                 '${bypassed ? 'Bypass' : 'Enable'} ${effect['display_name'] ?? effectId} on ${_rowLabel(rowById, rowId)}';
+            verifiedLabel =
+                '${bypassed ? 'Bypassed' : 'Enabled'} ${effect['display_name'] ?? effectId} on ${_rowLabel(rowById, rowId)}';
           }
           break;
         case 'automation.gain_fade':
@@ -3579,6 +3684,7 @@ class AiV3CommandPreparer {
             ),
           );
           label = 'Add gain fade on ${resolved.label}';
+          verifiedLabel = 'Added gain fade on ${resolved.label}';
           break;
         case 'automation.set_points':
           final resolved = resolveRowCommandTarget();
@@ -3607,6 +3713,7 @@ class AiV3CommandPreparer {
             ),
           );
           label = 'Set ${points.length} automation points on ${resolved.label}';
+          verifiedLabel = label;
           break;
         case 'automation.clear':
           final resolved = resolveRowCommandTarget();
@@ -3624,6 +3731,7 @@ class AiV3CommandPreparer {
             ),
           );
           label = 'Clear automation on ${resolved.label}';
+          verifiedLabel = 'Cleared automation on ${resolved.label}';
           break;
         case 'sample.place':
           final resolved = destination(args['destination'], midi: false);
@@ -3665,6 +3773,8 @@ class AiV3CommandPreparer {
           simulatedClipCount += items.length;
           label =
               'Place ${items.length} library sample${items.length == 1 ? '' : 's'}';
+          verifiedLabel =
+              'Placed ${items.length} library sample${items.length == 1 ? '' : 's'}';
           break;
         case 'sample.replace':
           final rawRef = args['clip_ref'];
@@ -3730,6 +3840,8 @@ class AiV3CommandPreparer {
           final assetName = asset['filename']?.toString().trim();
           label =
               'Replace ${clipRef == null ? _clipLabel(clipById, clipId!) : '${clipRef.commandId}.${clipRef.output}'} with ${assetName == null || assetName.isEmpty ? assetId : assetName}';
+          verifiedLabel =
+              'Replaced ${clipRef == null ? _clipLabel(clipById, clipId!) : '${clipRef.commandId}.${clipRef.output}'} with ${assetName == null || assetName.isEmpty ? assetId : assetName}';
           break;
         case 'mix.apply_goal':
           if (hasPriorTopologyMutation) {
@@ -3843,6 +3955,7 @@ class AiV3CommandPreparer {
               ? ''
               : ' using ${_rowLabel(rowById, preparedReference['row_id'] as int)} as reference';
           label = 'Mix $targetLabel$referenceLabel';
+          verifiedLabel = 'Mixed $targetLabel$referenceLabel';
           break;
         default:
           throw const AiV3PreparationException('v3_command_not_supported');
@@ -3856,8 +3969,7 @@ class AiV3CommandPreparer {
         'expanded_action_count': commandActions.length,
         'preview_label': label,
         'verified_label': _aiV3VerifiedReceiptLabel(
-          commandType: command.type,
-          previewLabel: label,
+          verifiedLabel: verifiedLabel,
           symbolicResources: symbolicResources,
         ),
       });
@@ -4363,15 +4475,10 @@ String _clipLabel(Map<String, Map<String, dynamic>> clips, String id) =>
     : 'clip $id';
 
 String _aiV3VerifiedReceiptLabel({
-  required String commandType,
-  required String previewLabel,
+  required String verifiedLabel,
   required Map<String, _AiV3SymbolicResource> symbolicResources,
 }) {
-  if (commandType == 'clip.separate_stems') {
-    return 'Separated vocals and instrumental';
-  }
-
-  var label = previewLabel;
+  var label = verifiedLabel;
   final resources = symbolicResources.entries.toList(growable: false)
     ..sort((a, b) => b.key.length.compareTo(a.key.length));
   for (final entry in resources) {
@@ -4381,59 +4488,7 @@ String _aiV3VerifiedReceiptLabel({
       _aiV3SymbolicResourceDisplayLabel(entry.key, entry.value),
     );
   }
-  return _aiV3CompletedReceiptLabel(label);
-}
-
-String _aiV3CompletedReceiptLabel(String label) {
-  const completedPrefixes = <String, String>{
-    'Add/configure ': 'Added/configured ',
-    'Start ': 'Started ',
-    'Pause ': 'Paused ',
-    'Enable ': 'Enabled ',
-    'Disable ': 'Disabled ',
-    'Adjust ': 'Adjusted ',
-    'Mute ': 'Muted ',
-    'Unmute ': 'Unmuted ',
-    'Solo ': 'Soloed ',
-    'Unsolo ': 'Unsoloed ',
-    'Rename ': 'Renamed ',
-    'Clear ': 'Cleared ',
-    'Clean ': 'Cleaned ',
-    'Select ': 'Selected ',
-    'Create ': 'Created ',
-    'Delete ': 'Deleted ',
-    'Keep ': 'Kept ',
-    'Remove ': 'Removed ',
-    'Collapse ': 'Collapsed ',
-    'Expand ': 'Expanded ',
-    'Move ': 'Moved ',
-    'Trim ': 'Trimmed ',
-    'Duplicate ': 'Duplicated ',
-    'Glue ': 'Glued ',
-    'Convert ': 'Converted ',
-    'Scale ': 'Scaled ',
-    'Align ': 'Aligned ',
-    'Detect ': 'Detected ',
-    'Transpose ': 'Transposed ',
-    'Replace ': 'Replaced ',
-    'Append ': 'Appended ',
-    'Chop ': 'Chopped ',
-    'Bypass ': 'Bypassed ',
-    'Add ': 'Added ',
-    'Place ': 'Placed ',
-    'Mix ': 'Mixed ',
-  };
-  var completed = label;
-  for (final entry in completedPrefixes.entries) {
-    if (!completed.startsWith(entry.key)) continue;
-    completed = '${entry.value}${completed.substring(entry.key.length)}';
-    break;
-  }
-  return completed
-      .replaceAll(' and dissolve ', ' and dissolved ')
-      .replaceAll('; preserve ', '; preserved ')
-      .replaceAll(' and follow in ', ' and followed in ')
-      .replaceAll(' and align it ', ' and aligned it ');
+  return label;
 }
 
 String _aiV3SymbolicResourceDisplayLabel(
