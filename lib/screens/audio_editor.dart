@@ -3918,6 +3918,33 @@ typedef AudioEditorBasicPitchOverride = Future<List<BasicPitchNoteEvent>>
   required Float32List mono16k,
 });
 
+@visibleForTesting
+bool showProjectSettingsAudioRoutingLauncher({
+  required bool showInlineAudioRouting,
+  required bool isIOS,
+}) => showInlineAudioRouting || isIOS;
+
+@visibleForTesting
+Duration audioEditorTransportEndPoint({
+  required Duration contentEnd,
+  required double bpm,
+}) {
+  final minimumTimelineEnd = Duration(
+    milliseconds: msFor128Bars(bpm).ceil(),
+  );
+  return contentEnd > minimumTimelineEnd ? contentEnd : minimumTimelineEnd;
+}
+
+@visibleForTesting
+bool audioEditorPlayheadAtOrPastTransportEnd({
+  required bool hasTimelineClips,
+  required Duration playhead,
+  required Duration transportEnd,
+}) {
+  if (!hasTimelineClips || transportEnd <= Duration.zero) return false;
+  return playhead >= transportEnd - const Duration(milliseconds: 8);
+}
+
 class AudioEditorScreen extends StatefulWidget {
   final String mode;
   final Directory projectDir;
@@ -4813,6 +4840,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return Duration(milliseconds: endMs.ceil());
   }
 
+  Duration _transportEndPoint() {
+    return audioEditorTransportEndPoint(
+      contentEnd: _timelineEndPoint(),
+      bpm: _tempo,
+    );
+  }
+
   Duration _playbackStartFallbackPoint() {
     if (_loopEnabled && _loopEndMs > _loopStartMs) {
       return Duration(milliseconds: math.max(0, _loopStartMs));
@@ -4820,11 +4854,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return Duration.zero;
   }
 
-  bool _playheadAtOrPastTimelineEnd(Duration playhead) {
-    if (!_hasTimelineClips) return false;
-    final endPoint = _timelineEndPoint();
-    if (endPoint <= Duration.zero) return false;
-    return playhead >= endPoint - const Duration(milliseconds: 8);
+  bool _playheadAtOrPastTransportEnd(Duration playhead) {
+    return audioEditorPlayheadAtOrPastTransportEnd(
+      hasTimelineClips: _hasTimelineClips,
+      playhead: playhead,
+      transportEnd: _transportEndPoint(),
+    );
   }
 
   bool get _usesContainedExportPanel {
@@ -8913,7 +8948,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _refreshFxUiForPlaybackTick();
 
       // ===== END / LOOP LOGIC (same as before) =====
-      final endPoint = _timelineEndPoint();
+      final endPoint = _transportEndPoint();
       final withinEndGuard =
           _transportUiStopwatch.elapsed < _transportEndCheckGraceUntil;
 
@@ -16869,7 +16904,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         currentVisualClock >= Duration(milliseconds: _loopEndMs)) {
       _syncTransportClock(Duration(milliseconds: _loopStartMs), playing: false);
     } else if (targetPlaying &&
-        _playheadAtOrPastTimelineEnd(currentVisualClock)) {
+        _playheadAtOrPastTransportEnd(currentVisualClock)) {
       _syncTransportClock(_playbackStartFallbackPoint(), playing: false);
     } else if (!targetPlaying) {
       _syncTransportClock(currentVisualClock, playing: false);
@@ -16933,7 +16968,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _globalAudioClock >= Duration(milliseconds: _loopEndMs)) {
       final loopStart = Duration(milliseconds: _loopStartMs);
       _syncTransportClock(loopStart, playing: false);
-    } else if (_playheadAtOrPastTimelineEnd(_globalAudioClock)) {
+    } else if (_playheadAtOrPastTransportEnd(_globalAudioClock)) {
       _syncTransportClock(_playbackStartFallbackPoint(), playing: false);
     }
     if (!commandIsCurrent()) return;
@@ -38378,9 +38413,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!_isProjectSettingsOpen) return const SizedBox.shrink();
     final showRecoveryLauncher =
         PlatformCapabilities.current.isDesktop || _projectLoadIssues.isNotEmpty;
-    final showProjectSettingsAudioRouting =
+    final showInlineAudioRouting =
         PlatformCapabilities.current.isDesktop ||
             mixroomUsesTabletLandscapeShell(context);
+    final showAudioRoutingLauncher =
+        showProjectSettingsAudioRoutingLauncher(
+          showInlineAudioRouting: showInlineAudioRouting,
+          isIOS: Platform.isIOS,
+        );
     final usesTabletDawLayout = _usesTabletDesktopDawShell(context);
     final usesTabletDesktopLayout = usesTabletDawLayout;
     final _TopPopupLayout popupLayout = _resolveTopPopupLayout(
@@ -38450,7 +38490,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 ),
                               ),
                               const SizedBox(height: 10),
-                              if (showProjectSettingsAudioRouting) ...[
+                              if (showAudioRoutingLauncher) ...[
                                 _buildAudioRoutingLauncher(),
                                 const SizedBox(height: 10),
                               ],
@@ -38482,7 +38522,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 ),
                               ),
                               const SizedBox(height: 10),
-                              if (showProjectSettingsAudioRouting) ...[
+                              if (showInlineAudioRouting) ...[
                                 _buildInputSelector(),
                                 if (_shouldShowInputChannelRouteSelector()) ...[
                                   const SizedBox(height: 9),

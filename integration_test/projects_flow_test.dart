@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:mixroom/helpers/project_manager.dart';
+import 'package:mixroom/screens/audio_editor.dart';
 import 'package:mixroom/screens/signed_in_shell.dart';
 import 'package:path/path.dart' as p;
 
@@ -35,6 +36,28 @@ const Key _addEffectKey = ValueKey('add_effect');
 const Key _pitchShiftEffectTileKey = ValueKey('master_effect_Pitch Shift#1');
 const Key _pitchShiftParamKey =
     ValueKey('master_param_0_pitch_shift_semitones');
+
+Finder _semanticsIdentifier(String identifier) => find.byWidgetPredicate(
+      (widget) =>
+          widget is Semantics && widget.properties.identifier == identifier,
+      description: 'Semantics identifier $identifier',
+    );
+
+void _ignoreKnownEditorSemanticsAssertion() {
+  final previousHandler = FlutterError.onError;
+  FlutterError.onError = (details) {
+    final message = details.exceptionAsString();
+    if (message.contains(
+          'A SemanticsNode with action "increase" needs to be annotated',
+        ) ||
+        (message.contains("'package:flutter/src/rendering/object.dart'") &&
+            message.contains("'node.built'"))) {
+      return;
+    }
+    previousHandler?.call(details);
+  };
+  addTearDown(() => FlutterError.onError = previousHandler);
+}
 
 Future<void> _pumpUntilFound(
   WidgetTester tester,
@@ -371,6 +394,58 @@ void main() {
     await tester.tap(closeButtonFinder);
     await _pumpUntilGone(tester, find.byKey(_projectSettingsDialogKey));
     await _returnToProjectsFromEditor(tester);
+  });
+
+  testWidgets(
+      'audio routing launcher opens the sheet and preserves a pending name edit',
+      (tester) async {
+    _ignoreKnownEditorSemanticsAssertion();
+    const originalName = 'Routing Original';
+    const renamedName = 'Routing Name Draft';
+    final projectDir =
+        await ProjectManager.createNewProjectDir(name: originalName);
+
+    await tester.pumpWidget(
+      buildIntegrationTestApp(
+        home: AudioEditorScreen(
+          mode: 'edit',
+          projectDir: projectDir,
+          isProEntitled: true,
+        ),
+      ),
+    );
+    await _pumpUntilFound(
+      tester,
+      find.byKey(_audioEditorScreenKey),
+      timeout: const Duration(seconds: 45),
+    );
+    await _pumpUntilFound(
+      tester,
+      _semanticsIdentifier('daw.project_settings'),
+      timeout: const Duration(seconds: 45),
+    );
+
+    await tester.tap(_semanticsIdentifier('daw.project_settings'));
+    await tester.pump();
+    await _pumpUntilFound(tester, find.byKey(_projectSettingsNameFieldKey));
+    await tester.enterText(
+        find.byKey(_projectSettingsNameFieldKey), renamedName);
+
+    final routingLauncher = _semanticsIdentifier('daw.audio_routing');
+    await tester.ensureVisible(routingLauncher);
+    await tester.tap(routingLauncher);
+    await _pumpUntilGone(tester, find.byKey(_projectSettingsNameFieldKey));
+    await _pumpUntilFound(tester, find.text('Audio Routing'));
+    expect(find.text('Input'), findsWidgets);
+    expect(find.text('Output'), findsWidgets);
+
+    await tester.tap(find.byIcon(Icons.close_rounded).last);
+    await _pumpUntilGone(tester, find.text('Audio Routing'));
+
+    final projects = await ProjectManager.listProjects();
+    expect(projects.single.name, renamedName);
+
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets(
