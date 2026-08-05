@@ -19,6 +19,7 @@ import 'package:mixroom/core/analytics/analytics_events.dart';
 import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/core/crash_reporting/crash_reporting_service.dart';
 import 'package:mixroom/helpers/midi_clip_arming.dart';
+import 'package:mixroom/helpers/midi_preview_readiness.dart';
 import 'package:mixroom/helpers/automation_clip_overlap.dart';
 import 'package:mixroom/helpers/automation_point_sanitizer.dart';
 import 'package:mixroom/helpers/automation_target_labels.dart';
@@ -5557,7 +5558,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   final Set<int> _deferredHostedInstrumentEngineClipIds = <int>{};
   final Map<int, String> _restoredHostedInstrumentStateByClipId =
       <int, String>{};
-  Future<void>? _liveMidiPreviewRoutePrepareFuture;
+  Future<bool>? _liveMidiPreviewRoutePrepareFuture;
   bool _timelineMagnetEnabled = false;
   int _timelineQuantizeDivisionsPerBar = 4;
 
@@ -19283,31 +19284,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!_isMidiClipRecording) {
       if (!PlatformCapabilities.current.isDesktop) {
         if (clip.engineClipId >= 0) {
-          await _ensureLiveMidiClipReadyForPreview(clip);
-          await JuceAudioEngine.playPreviewMidiNote(
-            clip.engineClipId,
-            pitch: pitch.clamp(0, 127),
-            velocity: velocity.clamp(0.0, 1.0),
-            durationMs: 220,
-          );
+          await _playPianoRollPreviewForClip(clip, pitch, velocity);
         }
         return;
       }
       if (_liveMidiEventPlaybackSupported && clip.engineClipId >= 0) {
-        await _ensureLiveMidiClipReadyForPreview(clip);
-        final targetReady = await _setLiveMidiInputTargetClipIfNeeded(
-          clip.engineClipId,
-          clearPendingEvents: false,
+        final liveReady = await _ensureLiveMidiClipReadyForPreview(clip);
+        if (!liveReady) return;
+        final sent = await JuceAudioEngine.sendLiveMidiInputEvent(
+          noteOn: true,
+          channel: 1,
+          pitch: pitch,
+          velocity: velocity,
         );
-        if (targetReady) {
-          final sent = await JuceAudioEngine.sendLiveMidiInputEvent(
-            noteOn: true,
-            channel: 1,
-            pitch: pitch,
-            velocity: velocity,
-          );
-          if (sent) return;
-        }
+        if (sent) return;
       }
       await _previewPianoRollNote(pitch, velocity);
       return;
@@ -72024,17 +72014,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
-  Future<void> _prepareLiveMidiPreviewRoute() {
-    if (!_liveMidiEventPlaybackSupported) return Future<void>.value();
-    if (kIsWeb || (!Platform.isAndroid && !Platform.isIOS)) {
-      return Future<void>.value();
+  Future<bool> _prepareLiveMidiPreviewRoute() {
+    if (!_liveMidiEventPlaybackSupported) return Future<bool>.value(false);
+    if (kIsWeb || !midiPreviewNeedsMobileRoute(defaultTargetPlatform)) {
+      return Future<bool>.value(true);
     }
     final pending = _liveMidiPreviewRoutePrepareFuture;
     if (pending != null) return pending;
 
-    final next = JuceAudioEngine.preparePlaybackRoute(
-      reason: 'midiPreview',
-    ).catchError((_) => false).then<void>((_) {});
+    final next = _ensurePlaybackRouteReady(reason: 'midiPreview');
     _liveMidiPreviewRoutePrepareFuture = next.whenComplete(() {
       if (identical(_liveMidiPreviewRoutePrepareFuture, next)) {
         _liveMidiPreviewRoutePrepareFuture = null;
@@ -72056,10 +72044,52 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!mounted || !_audioTracks.contains(clip)) return false;
     if (!clip.isMidi || clip.engineClipId < 0) return false;
 
-    await _prepareLiveMidiPreviewRoute();
-    final updated = await _updateMidiClipEventsLive(clip);
-    if (updated) return true;
-    return _reloadMidiTrackLive(clip);
+    return ensureMidiPreviewReady(
+      prepareRoute: _prepareLiveMidiPreviewRoute,
+      updateProcessor: () => _updateMidiClipEventsLive(clip),
+      reloadProcessor: () => _reloadMidiTrackLive(clip),
+      assignLiveTarget: () => _setLiveMidiInputTargetClipIfNeeded(
+        clip.engineClipId,
+        clearPendingEvents: false,
+        force: true,
+      ),
+      isStillValid: () => mounted && _audioTracks.contains(clip),
+    );
+  }
+
+  Future<bool> _playPianoRollPreviewForClip(
+    AudioTrack clip,
+    int pitch,
+    double velocity,
+  ) async {
+    if (!await _ensureLiveMidiClipReadyForPreview(clip)) return false;
+    final safePitch = pitch.clamp(0, 127);
+    final safeVelocity = velocity.clamp(0.0, 1.0);
+    final played = await JuceAudioEngine.playPreviewMidiNote(
+      clip.engineClipId,
+      pitch: safePitch,
+      velocity: safeVelocity,
+      durationMs: 220,
+    );
+    if (played) return true;
+
+    if (!await _reloadMidiTrackLive(clip) ||
+        !mounted ||
+        !_audioTracks.contains(clip)) {
+      return false;
+    }
+    final targetReady = await _setLiveMidiInputTargetClipIfNeeded(
+      clip.engineClipId,
+      clearPendingEvents: false,
+      force: true,
+    );
+    if (!targetReady) return false;
+    return JuceAudioEngine.playPreviewMidiNote(
+      clip.engineClipId,
+      pitch: safePitch,
+      velocity: safeVelocity,
+      durationMs: 220,
+    );
   }
 
   Future<void> _previewPianoRollNote(int pitch, double velocity) async {
@@ -72073,22 +72103,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (_liveMidiEventPlaybackSupported && clip.engineClipId >= 0) {
-      await _ensureLiveMidiClipReadyForPreview(clip);
-      final played = await JuceAudioEngine.playPreviewMidiNote(
-        clip.engineClipId,
-        pitch: pitch.clamp(0, 127),
-        velocity: velocity.clamp(0.0, 1.0),
-        durationMs: 220,
-      );
-      if (played) return;
-      final reloaded = await _reloadMidiTrackLive(clip);
-      if (!reloaded) return;
-      await JuceAudioEngine.playPreviewMidiNote(
-        clip.engineClipId,
-        pitch: pitch.clamp(0, 127),
-        velocity: velocity.clamp(0.0, 1.0),
-        durationMs: 220,
-      );
+      await _playPianoRollPreviewForClip(clip, pitch, velocity);
     }
   }
 

@@ -572,7 +572,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     if (JuceBridge.isRecordingJNI()) {
-      return !hadRoutingAnomaly
+      return !hadRoutingAnomaly && JuceBridge.preparePlaybackGraphJNI(reason)
     }
 
     val outputName = JuceBridge.getCurrentOutputDeviceNameJNI().trim()
@@ -580,7 +580,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     val shouldReopenPlaybackRoute =
       hadRoutingAnomaly || outputName.isEmpty() || !hasActiveOutputRoute || hasLingeringInputRoute
     if (!shouldReopenPlaybackRoute) {
-      return true
+      return JuceBridge.preparePlaybackGraphJNI(reason)
     }
 
     if (hasLingeringInputRoute) {
@@ -592,7 +592,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     val resetOk = JuceBridge.hardResetPlaybackOnlyRouteJNI("preparePlaybackRoute:$reason")
     normalizeAudioModeAfterRecordingStop()
-    return resetOk
+    return resetOk && JuceBridge.preparePlaybackGraphJNI(reason)
   }
 
   private fun restoreBluetoothPlaybackAfterRecordingStop() {
@@ -937,6 +937,16 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
               args.intValue("pitch", 60),
               args.floatValue("velocity", 0.9f),
               args.intValue("durationMs", 900),
+            ),
+          )
+        }
+        "sendLiveMidiInputEvent" -> {
+          result.success(
+            JuceBridge.sendLiveMidiInputEventJNI(
+              args.boolValue("noteOn"),
+              args.intValue("channel", 1),
+              args.intValue("pitch", 60),
+              args.floatValue("velocity"),
             ),
           )
         }
