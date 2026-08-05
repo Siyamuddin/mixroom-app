@@ -68,6 +68,8 @@ import 'package:mixroom/ai/v3/ai_v3_adaptive_midi_planner.dart';
 import 'package:mixroom/ai/v3/ai_v3_planner_service.dart';
 import 'package:mixroom/ai/v3/ai_v3_contract.dart';
 import 'package:mixroom/ai/v3/ai_v3_preparer.dart';
+import 'package:mixroom/ai/v3/ai_v3_resources.dart';
+import 'package:mixroom/ai/v3/ai_v3_runtime_resources.dart';
 import 'package:mixroom/ai/v3/ai_v3_transaction.dart';
 import 'package:mixroom/widgets/ai_v3_clarification_options.dart';
 import 'package:mixroom/widgets/desktop_scrollable_slider.dart';
@@ -3873,10 +3875,40 @@ typedef AudioEditorStemSeparatorOverride = Future<void> Function({
   required String instrumentalOutputPath,
 });
 
+typedef AudioEditorSampleDurationOverride =
+    Future<Duration?> Function(String filePath);
+
 typedef AudioEditorBasicPitchOverride = Future<List<BasicPitchNoteEvent>>
     Function({
   required Float32List mono16k,
 });
+
+@visibleForTesting
+bool showProjectSettingsAudioRoutingLauncher({
+  required bool showInlineAudioRouting,
+  required bool isMobilePlatform,
+}) => showInlineAudioRouting || isMobilePlatform;
+
+@visibleForTesting
+Duration audioEditorTransportEndPoint({
+  required Duration contentEnd,
+  required double bpm,
+}) {
+  final minimumTimelineEnd = Duration(
+    milliseconds: msFor128Bars(bpm).ceil(),
+  );
+  return contentEnd > minimumTimelineEnd ? contentEnd : minimumTimelineEnd;
+}
+
+@visibleForTesting
+bool audioEditorPlayheadAtOrPastTransportEnd({
+  required bool hasTimelineClips,
+  required Duration playhead,
+  required Duration transportEnd,
+}) {
+  if (!hasTimelineClips || transportEnd <= Duration.zero) return false;
+  return playhead >= transportEnd - const Duration(milliseconds: 8);
+}
 
 class AudioEditorScreen extends StatefulWidget {
   final String mode;
@@ -3886,6 +3918,7 @@ class AudioEditorScreen extends StatefulWidget {
   final VoidCallback? onUpgradeRequested;
   final AudioEditorEvaluationController? evaluationController;
   final AudioEditorStemSeparatorOverride? stemSeparatorOverride;
+  final AudioEditorSampleDurationOverride? sampleDurationOverride;
   final AudioEditorBasicPitchOverride? basicPitchOverride;
 
   const AudioEditorScreen(
@@ -3897,6 +3930,7 @@ class AudioEditorScreen extends StatefulWidget {
       this.onUpgradeRequested,
       this.evaluationController,
       this.stemSeparatorOverride,
+      this.sampleDurationOverride,
       this.basicPitchOverride})
       : super(key: key);
   @override
@@ -4749,6 +4783,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return Duration(milliseconds: endMs.ceil());
   }
 
+  Duration _transportEndPoint() {
+    return audioEditorTransportEndPoint(
+      contentEnd: _timelineEndPoint(),
+      bpm: _tempo,
+    );
+  }
+
   Duration _playbackStartFallbackPoint() {
     if (_loopEnabled && _loopEndMs > _loopStartMs) {
       return Duration(milliseconds: math.max(0, _loopStartMs));
@@ -4756,11 +4797,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return Duration.zero;
   }
 
-  bool _playheadAtOrPastTimelineEnd(Duration playhead) {
-    if (!_hasTimelineClips) return false;
-    final endPoint = _timelineEndPoint();
-    if (endPoint <= Duration.zero) return false;
-    return playhead >= endPoint - const Duration(milliseconds: 8);
+  bool _playheadAtOrPastTransportEnd(Duration playhead) {
+    return audioEditorPlayheadAtOrPastTransportEnd(
+      hasTimelineClips: _hasTimelineClips,
+      playhead: playhead,
+      transportEnd: _transportEndPoint(),
+    );
   }
 
   bool get _usesContainedExportPanel {
@@ -5843,6 +5885,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   List<Map<String, dynamic>> _instrumentCatalog =
       _cloneInstrumentCatalog(kInstrumentCatalog);
   bool _instrumentCatalogReady = false;
+  bool _instrumentPickerDialogOpen = false;
   List<Map<String, dynamic>> _desktopScannedPlugins = <Map<String, dynamic>>[];
   List<Map<String, dynamic>> _desktopHostedInstrumentCatalog =
       <Map<String, dynamic>>[];
@@ -8125,6 +8168,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_v3ExecutionInProgress) return;
     await _commitPendingProjectTempoUndo();
     final action = await _undoManager.undo();
+    if (action != null) {
+      _updateOverallDurationIfNeeded(forceRebuild: true);
+    }
     if (!mounted || action == null) return;
     await _refreshEffectCachesForUndoAction(action);
     final message =
@@ -8149,6 +8195,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_v3ExecutionInProgress) return;
     await _commitPendingProjectTempoUndo();
     final action = await _undoManager.redo();
+    if (action != null) {
+      _updateOverallDurationIfNeeded(forceRebuild: true);
+    }
     if (!mounted || action == null) return;
     await _refreshEffectCachesForUndoAction(action);
     final message =
@@ -8772,7 +8821,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _refreshFxUiForPlaybackTick();
 
       // ===== END / LOOP LOGIC (same as before) =====
-      final endPoint = _timelineEndPoint();
+      final endPoint = _transportEndPoint();
       final withinEndGuard =
           _transportUiStopwatch.elapsed < _transportEndCheckGraceUntil;
 
@@ -8878,6 +8927,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               proxyPath: LlmConfig.aiV3ProxyPath,
               authTokenProvider: authService.getIdTokenOrNull,
               refreshAuthTokenProvider: authService.refreshIdTokenOrNull,
+              resourceRefsEnabled: LlmConfig.aiV3ResourceRefsEnabled,
             )
           : null,
       aiV3CompactShadowPlanner: LlmConfig.aiV3CompactShadowEvaluationEnabled &&
@@ -8892,6 +8942,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   Duration(seconds: LlmConfig.requestTimeoutSeconds),
               commandTypes: aiV3CommonCommandTypes,
               architecture: 'v3_compact_common_shadow',
+              resourceRefsEnabled: LlmConfig.aiV3ResourceRefsEnabled,
             )
           : null,
       aiV3AdaptiveShadowPlanner: LlmConfig.aiV3AdaptiveShadowEnabled &&
@@ -8904,6 +8955,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               reasoningEffort: LlmConfig.aiV3ReasoningEffort,
               requestTimeout:
                   Duration(seconds: LlmConfig.requestTimeoutSeconds),
+              resourceRefsEnabled: LlmConfig.aiV3ResourceRefsEnabled,
             )
           : null,
       aiV3AdaptiveShadowComparisonPlanner:
@@ -8920,6 +8972,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   reasoningEffort: LlmConfig.aiV3ReasoningEffort,
                   requestTimeout:
                       Duration(seconds: LlmConfig.requestTimeoutSeconds),
+                  resourceRefsEnabled: LlmConfig.aiV3ResourceRefsEnabled,
                 )
               : null,
       aiV3Capture: AiV3Capture(
@@ -11586,12 +11639,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       setState(() {
         _dawTutorialAwaitingChatReply = true;
         _dawTutorialChatAdvanceInFlight = false;
-        _dawTutorialAssistantCountAtPromptSend =
-            _chatTextMessageCount(authorId: 'assistant');
-      });
-      _scheduleDawOnboardingAdvance(
-        delay: const Duration(milliseconds: 700),
+        _dawTutorialAssistantCountAtPromptSend = _chatTextMessageCount(
+          authorId: 'assistant',
       );
+      });
+      _scheduleDawOnboardingAdvance(delay: const Duration(milliseconds: 700));
     }
   }
 
@@ -12907,7 +12959,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     ? automation
                     : [
                         AutomationPoint(x: 0.0, volume: 1.0),
-                        AutomationPoint(x: 1.0, volume: 1.0)
+                        AutomationPoint(x: 1.0, volume: 1.0),
                       ];
                 loadedTracksForWaveforms.add(tr);
               }
@@ -13043,7 +13095,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               ? automation
               : [
                   AutomationPoint(x: 0.0, volume: 1.0),
-                  AutomationPoint(x: 1.0, volume: 1.0)
+                  AutomationPoint(x: 1.0, volume: 1.0),
                 ];
           loadedTracksForWaveforms.add(tr);
           debugPrint(
@@ -13754,9 +13806,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
-  Future<void> _refreshPersistedEffectSnapshotForRow(int row) async {
+  Future<void> _refreshPersistedEffectSnapshotForRow(
+    int row, {
+    bool forceIndividualRow = false,
+  }) async {
     if (row < 0 || row >= _rowCount) return;
-    final snapshot = await captureRowSnapshot(row, rowId: _rowIdAt(row));
+    final snapshot = await captureRowSnapshot(
+      row,
+      rowId: _rowIdAt(row),
+      forceIndividualRow: forceIndividualRow,
+    );
     if (snapshot.rowId >= 0) {
       _rowEffectSnapshotsByRowId[snapshot.rowId] = snapshot;
     }
@@ -14926,6 +14985,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           effectIndex: effectIndex,
           oldState: _commandBool(command, 'oldState') ?? false,
           newState: _commandBool(command, 'newState') ?? false,
+          forceIndividualRow:
+              _commandBool(command, 'forceIndividualRow') ?? false,
           onChange: () => _handlePersistedRowEffectUndo(row),
         );
       case 'phoneMicCleanupMetadata':
@@ -14965,6 +15026,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           effectOccurrence: occurrence,
           oldState: _commandBool(command, 'oldState') ?? false,
           newState: _commandBool(command, 'newState') ?? false,
+          forceIndividualRow:
+              _commandBool(command, 'forceIndividualRow') ?? false,
           onChange: () => _handlePersistedRowEffectUndo(row),
         );
       case 'rowEffectInsert':
@@ -14978,6 +15041,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           pathOrName: pathOrName,
           insertedIndex: _commandInt(command, 'insertedIndex'),
           inserted: _commandBool(command, 'inserted') ?? true,
+          forceIndividualRow:
+              _commandBool(command, 'forceIndividualRow') ?? false,
           onChange: () => _handlePersistedRowEffectUndo(row),
         );
       case 'rowEffectRemove':
@@ -14995,6 +15060,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           row: row,
           effectIndex: effectIndex,
           pathOrName: pathOrName,
+          forceIndividualRow:
+              _commandBool(command, 'forceIndividualRow') ?? false,
           onChange: () => _handlePersistedRowEffectUndo(row),
         );
       case 'rowEffectInstanceRemove':
@@ -15021,6 +15088,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           removedEffect: EffectSnapshotJson.fromJson(
             Map<String, dynamic>.from(removedRaw),
           ),
+          forceIndividualRow:
+              _commandBool(command, 'forceIndividualRow') ?? false,
           onChange: () {
             _refreshAudioEditorView();
             _refreshRowFx(row);
@@ -15046,6 +15115,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           row: row,
           from: from,
           to: to,
+          forceIndividualRow:
+              _commandBool(command, 'forceIndividualRow') ?? false,
           onChange: () => _handlePersistedRowEffectUndo(row),
         );
       case 'rowEffectParam':
@@ -15069,6 +15140,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           paramId: paramId,
           oldValue: command['oldValue'],
           newValue: command['newValue'],
+          forceIndividualRow:
+              _commandBool(command, 'forceIndividualRow') ?? false,
           onChange: () => _handlePersistedRowEffectParamUndo(
             row: row,
             effectIndex: effectIndex,
@@ -16658,7 +16731,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         currentVisualClock >= Duration(milliseconds: _loopEndMs)) {
       _syncTransportClock(Duration(milliseconds: _loopStartMs), playing: false);
     } else if (targetPlaying &&
-        _playheadAtOrPastTimelineEnd(currentVisualClock)) {
+        _playheadAtOrPastTransportEnd(currentVisualClock)) {
       _syncTransportClock(_playbackStartFallbackPoint(), playing: false);
     } else if (!targetPlaying) {
       _syncTransportClock(currentVisualClock, playing: false);
@@ -16722,7 +16795,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _globalAudioClock >= Duration(milliseconds: _loopEndMs)) {
       final loopStart = Duration(milliseconds: _loopStartMs);
       _syncTransportClock(loopStart, playing: false);
-    } else if (_playheadAtOrPastTimelineEnd(_globalAudioClock)) {
+    } else if (_playheadAtOrPastTransportEnd(_globalAudioClock)) {
       _syncTransportClock(_playbackStartFallbackPoint(), playing: false);
     }
     if (!commandIsCurrent()) return;
@@ -17834,14 +17907,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                               .white
                                                                               .withValues(alpha: 0.05),
                                                                           selectedColor:
-                                                                              exportBlue.withValues(alpha: 0.26),
-                                                                          side:
-                                                                              BorderSide(
-                                                                            color:
-                                                                                Colors.white.withValues(alpha: 0.16),
+                                                                          exportBlue.withValues(
+                                                                            alpha:
+                                                                                0.26,
                                                                           ),
-                                                                          onSelected:
-                                                                              (_) {
+                                                                      side: BorderSide(
+                                                                        color: Colors
+                                                                            .white
+                                                                            .withValues(
+                                                                              alpha: 0.16,
+                                                                            ),
+                                                                      ),
+                                                                      onSelected: (_) {
                                                                             setSheetState(() {
                                                                               selectedNormalizeTargetDb = preset;
                                                                             });
@@ -20546,6 +20623,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       newTrack.stretchToProjectTempo = clip.stretchToProjectTempo;
       newTrack.tempoStretchPreservePitch = clip.tempoStretchPreservePitch;
       newTrack.tempoWarpMode = clip.tempoWarpMode;
+      newTrack.volumeAutomation = clip.volumeAutomation
+          .map((point) => point.copy())
+          .toList();
 
       await _syncClipEngineStateAfterLoad(newTrack);
 
@@ -22413,21 +22493,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final hiVel = _readSfzNumeric(r, 'hivel', 127).round().clamp(0, 127);
         final regionVolDb = _readSfzNumeric(r, 'volume', globalVol);
         final gainLinear = math
-            .pow(
-              10.0,
-              (regionVolDb.clamp(-24.0, 12.0)) / 20.0,
-            )
+            .pow(10.0, (regionVolDb.clamp(-24.0, 12.0)) / 20.0)
             .toDouble();
-        final attackSec = _readSfzNumeric(r, 'ampeg_attack', globalAttackSec)
-            .clamp(0.0, 4.0)
-            .toDouble();
-        final releaseSec = _readSfzNumeric(r, 'ampeg_release', globalReleaseSec)
-            .clamp(0.02, 12.0)
-            .toDouble();
-        final pitchKeytrack = _readSfzNumeric(r, 'pitch_keytrack', 100.0)
-            .clamp(-1200.0, 1200.0)
-            .toDouble();
-        final pitchOffsetSemitones = (_readSfzNumeric(r, 'transpose', 0.0) +
+        final attackSec = _readSfzNumeric(
+          r,
+          'ampeg_attack',
+          globalAttackSec,
+        ).clamp(0.0, 4.0).toDouble();
+        final releaseSec = _readSfzNumeric(
+          r,
+          'ampeg_release',
+          globalReleaseSec,
+        ).clamp(0.02, 12.0).toDouble();
+        final pitchKeytrack = _readSfzNumeric(
+          r,
+          'pitch_keytrack',
+          100.0,
+        ).clamp(-1200.0, 1200.0).toDouble();
+        final pitchOffsetSemitones =
+            (_readSfzNumeric(r, 'transpose', 0.0) +
                 (_readSfzNumeric(r, 'tune', 0.0) / 100.0))
             .clamp(-48.0, 48.0)
             .toDouble();
@@ -25079,6 +25163,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _syncRemovedClipFadesAfterUndo(AudioTrack clip) async {
+    _updateOverallDurationIfNeeded(removedClips: <AudioTrack>[clip]);
     await _syncClipFadesForRowsToEngine({_clipRowIdForFadeSync(clip)});
     _clipFadeRowIdByEngineId.remove(clip.engineClipId);
   }
@@ -28866,6 +28951,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return _sampleDurationCache[filePath];
     }
 
+    final override = widget.sampleDurationOverride;
+    if (override != null) {
+      final duration = await override(filePath);
+      final resolved = duration != null && duration > Duration.zero
+          ? duration
+          : null;
+      _sampleDurationCache[filePath] = resolved;
+      return resolved;
+    }
+
     try {
       await _startSecurityScopedAccessForFile(filePath);
       final escaped = filePath.replaceAll('"', r'\"');
@@ -29331,8 +29426,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<Map<String, dynamic>?> _showInstrumentPickerDialog() async {
-    if (!mounted) return null;
+    if (!mounted || _instrumentPickerDialogOpen) return null;
+    _instrumentPickerDialogOpen = true;
+    try {
+      return await _showInstrumentPickerDialogImpl();
+    } finally {
+      _instrumentPickerDialogOpen = false;
+    }
+  }
+
+  Future<Map<String, dynamic>?> _showInstrumentPickerDialogImpl() async {
     await _ensureDesktopHostedInstrumentCatalogLoaded();
+    if (!mounted) return null;
     final catalog = _uiInstrumentCatalog();
     if (catalog.isEmpty) return null;
     final categories = _instrumentPickerCategories();
@@ -33034,11 +33139,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         height: iconSize,
                                         decoration: BoxDecoration(
                                           color: Colors.white.withValues(
-                                            alpha:
-                                                hoveredOrPressed ? 0.14 : 0.10,
+                                            alpha: hoveredOrPressed
+                                                ? 0.14
+                                                : 0.10,
                                           ),
-                                          borderRadius:
-                                              BorderRadius.circular(10),
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
                                         ),
                                         child: Icon(
                                           Icons.surround_sound_outlined,
@@ -37703,9 +37810,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!_isProjectSettingsOpen) return const SizedBox.shrink();
     final showRecoveryLauncher =
         PlatformCapabilities.current.isDesktop || _projectLoadIssues.isNotEmpty;
-    final showProjectSettingsAudioRouting =
+    final showInlineAudioRouting =
         PlatformCapabilities.current.isDesktop ||
             mixroomUsesTabletLandscapeShell(context);
+    final showAudioRoutingLauncher =
+        showProjectSettingsAudioRoutingLauncher(
+          showInlineAudioRouting: showInlineAudioRouting,
+          isMobilePlatform: Platform.isIOS || Platform.isAndroid,
+        );
     final usesTabletDawLayout = _usesTabletDesktopDawShell(context);
     final usesTabletDesktopLayout = usesTabletDawLayout;
     final _TopPopupLayout popupLayout = _resolveTopPopupLayout(
@@ -37773,7 +37885,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 ),
                               ),
                               const SizedBox(height: 10),
-                              if (showProjectSettingsAudioRouting) ...[
+                              if (showAudioRoutingLauncher) ...[
                                 _buildAudioRoutingLauncher(),
                                 const SizedBox(height: 10),
                               ],
@@ -37803,7 +37915,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 ),
                               ),
                               const SizedBox(height: 10),
-                              if (showProjectSettingsAudioRouting) ...[
+                              if (showInlineAudioRouting) ...[
                                 _buildInputSelector(),
                                 if (_shouldShowInputChannelRouteSelector()) ...[
                                   const SizedBox(height: 9),
@@ -38820,11 +38932,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       'Search plugins',
                                     ),
                                     hintStyle: TextStyle(
-                                      color:
-                                          Colors.white.withValues(alpha: 0.45),
+                                      color: Colors.white.withValues(
+                                        alpha: 0.45,
+                                      ),
                                     ),
-                                    prefixIcon:
-                                        const Icon(Icons.search_rounded),
+                                    prefixIcon: const Icon(
+                                      Icons.search_rounded,
+                                    ),
                                     prefixIconConstraints:
                                         const BoxConstraints.tightFor(
                                       width: 38,
@@ -42797,8 +42911,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<List<EditorUndoAction>> _ensureAiCanonicalChainOrderOnRow(
     int row, {
     bool executeWithoutAdd = true,
+    bool forceIndividualRow = false,
   }) async {
-    final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
+    final effects = await JuceAudioEngine.getTrackEffectsForRow(
+      row,
+      forceIndividualRow: forceIndividualRow,
+    );
     if (effects.length < 2) return const <EditorUndoAction>[];
     final desired = _canonicalAiEffectOrder(effects);
     if (_sameStringList(effects, desired)) return const <EditorUndoAction>[];
@@ -42813,6 +42931,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         row: row,
         from: from,
         to: targetIndex,
+        forceIndividualRow: forceIndividualRow,
         onChange: () {
           setState(() {});
           _refreshRowFx(row);
@@ -43833,6 +43952,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     int? chatFlowId,
     List<Map<String, dynamic>>? v3RuntimeExpectations,
     Map<String, List<String>>? v3ExecutionSummariesByCommandId,
+    AiV3WorkflowRuntime? v3WorkflowRuntime,
   }) async {
     _assistantActionNoticeCaptureDepth += 1;
     final batchExecutionNotices =
@@ -43844,12 +43964,351 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final executionMessagesBefore = _assistantActionExecutionMessageCount;
     try {
       var hadFailure = false;
-      for (final action in actions) {
+      for (var actionIndex = 0; actionIndex < actions.length; actionIndex++) {
+        final action = actions[actionIndex];
         final type = action.type.trim().toLowerCase();
-        final data = _toActionMap(action.data);
+        var data = _toActionMap(action.data);
+        String? resolvedResourceClipId;
+        int? resolvedResourceRowId;
+        String? resolvedResourceGroupId;
+        AiV3ResourceKind? resolvedResourceKind;
+        AiV3ResourceRef? resolvedResourceRef;
+        AiV3RuntimeResourceBinding? resolvedResourceBinding;
+        Map<String, dynamic>? splitRuntimeState;
+        Map<String, dynamic>? duplicateRuntimeState;
+        Map<String, dynamic>? glueRuntimeState;
         try {
           if (chatFlowId != null) {
             _throwIfChatFlowStopped(chatFlowId);
+          }
+          final unresolvedTarget = _actionTarget(data);
+          final rawResourceRef = unresolvedTarget['resource_ref'];
+          if (rawResourceRef != null) {
+            final consumerType =
+                data['resource_consumer_type']?.toString().trim() ?? '';
+            final consumerSpec = aiV3ResourceConsumerSpecs[consumerType];
+            if (consumerSpec == null ||
+                consumerSpec.actionType != type ||
+                consumerSpec.operation != data['operation'] ||
+                v3WorkflowRuntime == null) {
+              throw StateError('v3_resource_action_unsupported');
+            }
+            late final AiV3ResourceRef resourceRef;
+            try {
+              resourceRef = AiV3ResourceRef.fromJson(rawResourceRef);
+            } on FormatException {
+              throw StateError('v3_resource_ref_invalid');
+            }
+            final binding = v3WorkflowRuntime.resolveAccepted(
+              resourceRef,
+              acceptedKinds: consumerSpec.acceptedKinds,
+            );
+            resolvedResourceBinding = binding;
+            resolvedResourceKind = binding.kind;
+            resolvedResourceRef = resourceRef;
+            if (binding.kind == AiV3ResourceKind.audioRow ||
+                binding.kind == AiV3ResourceKind.midiRow) {
+              final rowId = binding.stableId;
+              if (rowId is! int) {
+                throw StateError('v3_resource_binding_invalid');
+              }
+              final rowIndex = _rowIndexForId(rowId);
+              final expectsMidi = binding.kind == AiV3ResourceKind.midiRow;
+              if (!_isValidRowIndex(rowIndex) ||
+                  _rows[rowIndex].isInstrumentLane != expectsMidi) {
+                throw StateError('v3_resource_binding_unavailable');
+              }
+              resolvedResourceRowId = rowId;
+              final resolvedRowTarget = <String, dynamic>{
+                ...unresolvedTarget,
+                'scope': 'row',
+                'row_id': rowId,
+                'row_index': rowIndex,
+                if (expectsMidi &&
+                    _rows[rowIndex].instrumentId.trim().isNotEmpty)
+                  'instrument_id': _rows[rowIndex].instrumentId,
+              }..remove('resource_ref');
+              data = <String, dynamic>{
+                ...data,
+                'target': resolvedRowTarget,
+                if (type == 'sample_insert')
+                  'items': <Map<String, dynamic>>[
+                    for (final raw
+                        in (data['items'] as List? ?? const <Object>[]))
+                      if (raw is Map)
+                        <String, dynamic>{
+                          ...Map<String, dynamic>.from(raw),
+                          'row_index': rowIndex,
+                          'target': <String, dynamic>{
+                            'scope': 'row',
+                            'row_id': rowId,
+                            'row_index': rowIndex,
+                          },
+                        },
+                  ],
+              };
+            } else if (binding.kind == AiV3ResourceKind.group) {
+              final groupId = binding.stableId;
+              if (groupId is! String ||
+                  !_trackGroups.any((group) => group.id == groupId)) {
+                throw StateError('v3_resource_binding_unavailable');
+              }
+              resolvedResourceGroupId = groupId;
+              data = <String, dynamic>{
+                ...data,
+                'group_id': groupId,
+                'target': <String, dynamic>{
+                  'scope': 'group',
+                  'group_id': groupId,
+                },
+              };
+            } else {
+              final clipId = binding.stableId;
+              if (clipId is! String) {
+                throw StateError('v3_resource_binding_invalid');
+              }
+              final clipIndex = _clipIndexForPersistentId(clipId);
+              if (!_isValidClipIndex(clipIndex) ||
+                  _audioTracks[clipIndex].isMidi !=
+                      (binding.kind == AiV3ResourceKind.midiClip)) {
+                throw StateError('v3_resource_binding_unavailable');
+              }
+              resolvedResourceClipId = clipId;
+              data = <String, dynamic>{
+                ...data,
+                'target': <String, dynamic>{'scope': 'clip', 'clip_id': clipId},
+              };
+              if (type == 'v3_clip_convert_to_midi' ||
+                  type == 'v3_clip_separate_stems') {
+                final liveClip = _audioTracks[clipIndex];
+                data = <String, dynamic>{
+                  ...data,
+                  'source_clip_id': clipId,
+                  'source_row_id': liveClip.rowId,
+                  'source_row_index': liveClip.rowIndex,
+                  'start_ms': liveClip.offset * 1000.0,
+                  'duration_ms': _clipTimelineDurationMs(liveClip).toDouble(),
+                };
+              }
+            }
+          }
+          if (type == 'v3_group_edit' &&
+              data['operation'] == 'create' &&
+              data['member_targets'] is List) {
+            if (v3WorkflowRuntime == null) {
+              throw StateError('v3_resource_producer_context_missing');
+            }
+            final rowIds = <int>[];
+            for (final rawTarget in data['member_targets'] as List) {
+              final memberTarget = _toActionMap(rawTarget);
+              final rawRef = memberTarget['resource_ref'];
+              int? rowId;
+              if (rawRef != null) {
+                late final AiV3ResourceRef ref;
+                try {
+                  ref = AiV3ResourceRef.fromJson(rawRef);
+                } on FormatException {
+                  throw StateError('v3_resource_ref_invalid');
+                }
+                final binding = v3WorkflowRuntime.resolveAccepted(
+                  ref,
+                  acceptedKinds: const <AiV3ResourceKind>{
+                    AiV3ResourceKind.audioRow,
+                    AiV3ResourceKind.midiRow,
+                  },
+                );
+                rowId = binding.stableId as int?;
+              } else {
+                rowId = _toActionInt(memberTarget['row_id']);
+              }
+              if (rowId == null || _rowIndexForId(rowId) < 0) {
+                throw StateError('v3_resource_binding_unavailable');
+              }
+              rowIds.add(rowId);
+            }
+            if (rowIds.length < 2 || rowIds.toSet().length != rowIds.length) {
+              throw StateError('v3_group_create_members_invalid');
+            }
+            final currentOrder = _rows.map((row) => row.rowId).toList();
+            final ordered = rowIds.toList()
+              ..sort(
+                (left, right) => currentOrder
+                    .indexOf(left)
+                    .compareTo(currentOrder.indexOf(right)),
+              );
+            final memberSet = ordered.toSet();
+            final insertionIndex = ordered
+                .map(currentOrder.indexOf)
+                .reduce(math.min);
+            final expectedOrder =
+                currentOrder
+                    .where((rowId) => !memberSet.contains(rowId))
+                    .toList(growable: true)
+                  ..insertAll(insertionIndex, ordered);
+            data = <String, dynamic>{
+              ...data,
+              'row_ids': ordered,
+              'expected_row_order': expectedOrder,
+            };
+          }
+          if (type == 'v3_group_edit' &&
+              data['operation'] == 'remove_row' &&
+              data['row_target'] is Map) {
+            final rowTarget = _toActionMap(data['row_target']);
+            final rawRef = rowTarget['resource_ref'];
+            int? rowId;
+            if (rawRef != null) {
+              if (v3WorkflowRuntime == null) {
+                throw StateError('v3_resource_producer_context_missing');
+              }
+              late final AiV3ResourceRef ref;
+              try {
+                ref = AiV3ResourceRef.fromJson(rawRef);
+              } on FormatException {
+                throw StateError('v3_resource_ref_invalid');
+              }
+              final binding = v3WorkflowRuntime.resolveAccepted(
+                ref,
+                acceptedKinds: const <AiV3ResourceKind>{
+                  AiV3ResourceKind.audioRow,
+                  AiV3ResourceKind.midiRow,
+                },
+              );
+              rowId = binding.stableId as int?;
+            } else {
+              rowId = _toActionInt(rowTarget['row_id']);
+            }
+            if (rowId == null || _rowIndexForId(rowId) < 0) {
+              throw StateError('v3_resource_binding_unavailable');
+            }
+            final groupId =
+                resolvedResourceGroupId ??
+                data['group_id']?.toString().trim() ??
+                '';
+            final group = _trackGroups
+                .where((candidate) => candidate.id == groupId)
+                .firstOrNull;
+            if (group == null || !group.rowIds.contains(rowId)) {
+              throw StateError('v3_group_membership_mismatch');
+            }
+            final remaining = group.rowIds
+                .where((candidate) => candidate != rowId)
+                .toList(growable: false);
+            data = <String, dynamic>{
+              ...data,
+              'row_id': rowId,
+              'dissolves_group': remaining.length < 2,
+              'expected_member_row_ids': remaining.length < 2
+                  ? const <int>[]
+                  : remaining,
+            };
+          }
+          if (type == 'clip_edit' &&
+              _normalizeClipEditOperation(
+                    data['operation']?.toString() ?? '',
+                  ) ==
+                  'cut' &&
+              (data['command_id']?.toString().trim().isNotEmpty ?? false)) {
+            if (v3WorkflowRuntime == null) {
+              throw StateError('v3_resource_producer_context_missing');
+            }
+            if (resolvedResourceRef != null && v3RuntimeExpectations != null) {
+              data = _withAiV3AuthoritativeResourceBounds(
+                data,
+                _aiV3GeneratedResourceExpectation(
+                  v3RuntimeExpectations,
+                  resolvedResourceRef,
+                ),
+              );
+            }
+            splitRuntimeState = _prepareAiV3SplitRuntimeState(
+              data,
+              inputRef: resolvedResourceRef,
+            );
+            splitRuntimeState['parent_row_key'] =
+                resolvedResourceBinding?.parentRowKey;
+          }
+          if (type == 'clip_edit' &&
+              _normalizeClipEditOperation(
+                    data['operation']?.toString() ?? '',
+                  ) ==
+                  'duplicate' &&
+              (data['command_id']?.toString().trim().isNotEmpty ?? false)) {
+            if (v3WorkflowRuntime == null) {
+              throw StateError('v3_resource_producer_context_missing');
+            }
+            if (resolvedResourceRef != null && v3RuntimeExpectations != null) {
+              data = _withAiV3AuthoritativeResourceBounds(
+                data,
+                _aiV3GeneratedResourceExpectation(
+                  v3RuntimeExpectations,
+                  resolvedResourceRef,
+                ),
+              );
+            }
+            duplicateRuntimeState = _prepareAiV3DuplicateRuntimeState(data);
+            final explicitDestinationRowId = _toActionInt(data['row_id']);
+            duplicateRuntimeState['parent_row_key'] =
+                explicitDestinationRowId == null
+                ? resolvedResourceBinding?.parentRowKey
+                : 'stable_row:$explicitDestinationRowId';
+          }
+          if (type == 'clip_edit' &&
+              _normalizeClipEditOperation(
+                    data['operation']?.toString() ?? '',
+                  ) ==
+                  'trim' &&
+              resolvedResourceRef != null) {
+            data = _prepareAiV3ReferencedTrimRuntimeData(
+              data,
+              expectedResource: v3RuntimeExpectations == null
+                  ? null
+                  : _aiV3GeneratedResourceExpectation(
+                      v3RuntimeExpectations,
+                      resolvedResourceRef,
+                    ),
+            );
+          }
+          if (type == 'midi_compose' &&
+              data['runtime_authoritative_midi'] == true &&
+              resolvedResourceRef != null) {
+            if (v3RuntimeExpectations == null) {
+              throw StateError('v3_resource_expectation_missing');
+            }
+            data = _materializeAiV3RuntimeAuthoritativeMidiAction(
+              data,
+              _aiV3GeneratedResourceExpectation(
+                v3RuntimeExpectations,
+                resolvedResourceRef,
+              ),
+            );
+          }
+          if (type == 'clip_edit' &&
+              data['runtime_authoritative_audio_timing'] == true &&
+              resolvedResourceRef != null) {
+            if (v3RuntimeExpectations == null) {
+              throw StateError('v3_resource_expectation_missing');
+            }
+            data = _materializeAiV3RuntimeAuthoritativeAudioTimingAction(
+              data,
+              _aiV3GeneratedResourceExpectation(
+                v3RuntimeExpectations,
+                resolvedResourceRef,
+              ),
+            );
+          }
+          if (type == 'v3_clip_glue' && data['sources'] is List) {
+            if (v3WorkflowRuntime == null || v3RuntimeExpectations == null) {
+              throw StateError('v3_resource_producer_context_missing');
+            }
+            glueRuntimeState = _prepareAiV3GlueRuntimeState(
+              data,
+              expectations: v3RuntimeExpectations,
+              workflowRuntime: v3WorkflowRuntime,
+            );
+            data = Map<String, dynamic>.from(
+              glueRuntimeState['materialized_data'] as Map,
+            );
           }
           switch (type) {
             case 'tutorial':
@@ -43860,12 +44319,186 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               break;
             case 'clip_edit':
               await _applyClipEditAction(data);
+              if (splitRuntimeState != null) {
+                if (v3RuntimeExpectations == null ||
+                    v3WorkflowRuntime == null) {
+                  throw StateError('v3_resource_expectation_missing');
+                }
+                _bindAiV3SplitOutputs(
+                  splitRuntimeState,
+                  expectations: v3RuntimeExpectations,
+                  workflowRuntime: v3WorkflowRuntime,
+                  producerActionIndex: actionIndex,
+                );
+              }
+              if (duplicateRuntimeState != null) {
+                if (v3RuntimeExpectations == null ||
+                    v3WorkflowRuntime == null) {
+                  throw StateError('v3_resource_expectation_missing');
+                }
+                _bindAiV3DuplicateOutput(
+                  duplicateRuntimeState,
+                  expectations: v3RuntimeExpectations,
+                  workflowRuntime: v3WorkflowRuntime,
+                  producerActionIndex: actionIndex,
+                );
+              }
+              if (resolvedResourceClipId != null &&
+                  resolvedResourceRef != null &&
+                  v3RuntimeExpectations != null &&
+                  splitRuntimeState == null &&
+                  duplicateRuntimeState == null) {
+                final resourceExpectation = _aiV3GeneratedResourceExpectation(
+                  v3RuntimeExpectations,
+                  resolvedResourceRef,
+                );
+                final operation = _normalizeClipEditOperation(
+                  data['operation']?.toString() ?? '',
+                );
+                if (operation == 'pitch_shift') {
+                  final finalPitch = _toActionDouble(
+                    data['new_pitch_semitones'] ?? data['pitch_semitones'],
+                  );
+                  if (finalPitch == null) {
+                    throw StateError('v3_resource_pitch_missing');
+                  }
+                  resourceExpectation['pitch_semitones'] = finalPitch;
+                } else if (operation == 'move') {
+                  final start =
+                      _toActionDouble(resourceExpectation['start']) ?? 0.0;
+                  final end = _toActionDouble(resourceExpectation['end']);
+                  final delta = _toActionDouble(data['delta_ms']) ?? 0.0;
+                  resourceExpectation['start'] = math.max(
+                    0.0,
+                    start + delta / 1000.0,
+                  );
+                  if (end != null) {
+                    resourceExpectation['end'] = math.max(
+                      0.0,
+                      end + delta / 1000.0,
+                    );
+                  }
+                } else if (operation == 'delete') {
+                  resourceExpectation['present'] = false;
+                  for (final expectation in v3RuntimeExpectations) {
+                    if (expectation['kind'] == 'audio_converted_to_midi' &&
+                        expectation['producer_command_id'] ==
+                            resolvedResourceRef.commandId &&
+                        resolvedResourceRef.output == 'midi_clip') {
+                      expectation
+                        ..['result_clip_deleted'] = true
+                        ..['resource_transformed'] = true
+                        ..['expected_clip_count'] =
+                            (expectation['expected_clip_count'] as int) - 1;
+                    }
+                  }
+                } else if (operation == 'trim') {
+                  final expectedStart = _toActionDouble(
+                    data['expected_start_ms'] ?? data['requested_start_ms'],
+                  );
+                  final expectedEnd = _toActionDouble(
+                    data['expected_end_ms'] ?? data['requested_end_ms'],
+                  );
+                  final expectedTrimStart = _toActionDouble(
+                    data['expected_trim_start_ms'],
+                  );
+                  final expectedTrimEnd = _toActionDouble(
+                    data['expected_trim_end_ms'],
+                  );
+                  final expectedRawDuration = _toActionDouble(
+                    data['expected_raw_duration_sec'],
+                  );
+                  if (expectedStart == null ||
+                      expectedEnd == null ||
+                      expectedTrimStart == null ||
+                      expectedTrimEnd == null ||
+                      expectedRawDuration == null) {
+                    throw StateError('v3_resource_trim_bounds_invalid');
+                  }
+                  resourceExpectation
+                    ..['start'] = expectedStart / 1000.0
+                    ..['end'] = expectedEnd / 1000.0
+                    ..['trim_start_ms'] = expectedTrimStart
+                    ..['trim_end_ms'] = expectedTrimEnd
+                    ..['raw_duration_sec'] = expectedRawDuration;
+                } else if (operation == 'stretch' ||
+                    operation == 'set_source_tempo' ||
+                    operation == 'tempo_follow') {
+                  final expectedStart = _toActionDouble(
+                    data['expected_start_sec'],
+                  );
+                  final expectedEnd = _toActionDouble(data['expected_end_sec']);
+                  final expectedRawDuration = _toActionDouble(
+                    data['expected_raw_duration_sec'],
+                  );
+                  final expectedSourceTempo = _toActionDouble(
+                    data['expected_source_tempo_bpm'],
+                  );
+                  final expectedMode = data['expected_tempo_follow_mode']
+                      ?.toString();
+                  final expectedPreservePitch =
+                      data['expected_tempo_preserve_pitch'];
+                  final expectedFollows =
+                      data['expected_duration_follows_tempo'];
+                  if (expectedStart == null ||
+                      expectedEnd == null ||
+                      expectedRawDuration == null ||
+                      expectedSourceTempo == null ||
+                      expectedMode == null ||
+                      expectedPreservePitch is! bool ||
+                      expectedFollows is! bool) {
+                    throw StateError('v3_resource_timing_expectation_invalid');
+                  }
+                  resourceExpectation
+                    ..['start'] = expectedStart
+                    ..['end'] = expectedEnd
+                    ..['raw_duration_sec'] = expectedRawDuration
+                    ..['source_tempo_bpm'] = expectedSourceTempo
+                    ..['tempo_follow_mode'] = expectedMode
+                    ..['tempo_preserve_pitch'] = expectedPreservePitch
+                    ..['duration_follows_tempo'] = expectedFollows;
+                } else {
+                  throw StateError('v3_resource_action_unsupported');
+                }
+                _markAiV3ProducerOutputTransformed(
+                  v3RuntimeExpectations,
+                  resolvedResourceRef,
+                );
+              }
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
               }
               break;
             case 'project_edit':
+              final previousTempo = _tempo;
+              final projectTarget = _actionTarget(data);
+              final requestedTempo = data['operation'] == 'set_tempo'
+                  ? _toActionDouble(
+                      data['tempo_bpm'] ??
+                          projectTarget['tempo_bpm'] ??
+                          data['bpm'] ??
+                          projectTarget['bpm'],
+                    )
+                  : null;
               await _applyProjectEditAction(data);
+              if (requestedTempo != null &&
+                  requestedTempo.isFinite &&
+                  requestedTempo > 0.0 &&
+                  v3RuntimeExpectations != null) {
+                _composeAiV3RuntimeExpectationsForTempo(
+                  v3RuntimeExpectations,
+                  previousBpm: previousTempo,
+                  nextBpm: _clampTempo(requestedTempo),
+                  tempoActionIndex: actionIndex,
+                  forceAudioTempoFollow: _toActionBool(
+                    data['time_stretch_audio'],
+                  ),
+                  preserveAudioPitch: _toActionBool(
+                    data['preserve_pitch'],
+                    fallback: true,
+                  ),
+                );
+              }
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
               }
@@ -43884,18 +44517,45 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               break;
             case 'row_mute':
               await _applyRowMuteAction(data);
+              if (resolvedResourceRef != null &&
+                  resolvedResourceRowId != null &&
+                  v3RuntimeExpectations != null) {
+                _updateAiV3GeneratedRowExpectation(
+                  v3RuntimeExpectations,
+                  resolvedResourceRef,
+                  data,
+                );
+              }
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
               }
               break;
             case 'row_solo':
               await _applyRowSoloAction(data);
+              if (resolvedResourceRef != null &&
+                  resolvedResourceRowId != null &&
+                  v3RuntimeExpectations != null) {
+                _updateAiV3GeneratedRowExpectation(
+                  v3RuntimeExpectations,
+                  resolvedResourceRef,
+                  data,
+                );
+              }
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
               }
               break;
             case 'row_rename':
               await _applyRowRenameAction(data);
+              if (resolvedResourceRef != null &&
+                  resolvedResourceRowId != null &&
+                  v3RuntimeExpectations != null) {
+                _updateAiV3GeneratedRowExpectation(
+                  v3RuntimeExpectations,
+                  resolvedResourceRef,
+                  data,
+                );
+              }
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
               }
@@ -43941,14 +44601,102 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           .map((clip) => clip.clipId)
                           .toSet();
               await _applyRowDeleteAction(data);
+              v3WorkflowRuntime?.retireStableIds(deletedClipIds);
+              if (deletedRowId != null && v3RuntimeExpectations != null) {
+                for (final expectation in v3RuntimeExpectations) {
+                  if (expectation['kind'] != 'group_created' ||
+                      expectation['member_row_ids'] is! List) {
+                    continue;
+                  }
+                  final members = (expectation['member_row_ids'] as List)
+                      .whereType<int>()
+                      .where((rowId) => rowId != deletedRowId)
+                      .toList(growable: false);
+                  if (members.length ==
+                      (expectation['member_row_ids'] as List).length) {
+                    continue;
+                  }
+                  if (members.length < 2) {
+                    expectation['kind'] = 'group_absent';
+                    final deletedGroupId = expectation['group_id'];
+                    if (deletedGroupId is String) {
+                      v3WorkflowRuntime?.retireStableIds(<Object>[
+                        deletedGroupId,
+                      ]);
+                    }
+                  } else {
+                    expectation['member_row_ids'] = members;
+                    final expectedOrder = expectation['expected_row_order'];
+                    if (expectedOrder is List) {
+                      expectation['expected_row_order'] = expectedOrder
+                          .whereType<int>()
+                          .where((rowId) => rowId != deletedRowId)
+                          .toList(growable: false);
+                    }
+                  }
+                }
+              }
               if (v3RuntimeExpectations != null &&
                   deletedRowId != null &&
                   deletedRowIndex != null) {
+                if (resolvedResourceRef != null) {
+                  final bundle = v3RuntimeExpectations
+                      .where((candidate) => candidate['kind'] == 'bundle')
+                      .firstOrNull;
+                  if (bundle == null) {
+                    throw StateError('v3_resource_expectation_missing');
+                  }
+                  bundle['expected_deleted_rows'] =
+                      (bundle['expected_deleted_rows'] as int) + 1;
+                  bundle['expected_deleted_clips'] =
+                      (bundle['expected_deleted_clips'] as int) +
+                      deletedClipIds.length;
+                  v3RuntimeExpectations.removeWhere(
+                    (expectation) =>
+                        expectation['kind'] == 'row_created' &&
+                        expectation['runtime_row_id'] == deletedRowId,
+                  );
+                  v3RuntimeExpectations.add(<String, dynamic>{
+                    'kind': 'row_deleted',
+                    'row_id': deletedRowId,
+                  });
+                  for (final expectation in v3RuntimeExpectations) {
+                    if (expectation['kind'] == 'audio_converted_to_midi' &&
+                        expectation['result_row_id'] == deletedRowId) {
+                      expectation
+                        ..['result_row_deleted'] = true
+                        ..['result_clip_deleted'] = true
+                        ..['resource_transformed'] = true
+                        ..['expected_row_count'] =
+                            (expectation['expected_row_count'] as int) - 1
+                        ..['expected_clip_count'] =
+                            (expectation['expected_clip_count'] as int) - 1;
+                      continue;
+                    }
+                    if (expectation['kind'] != 'stems_separated') continue;
+                    if (expectation['vocals_row_id'] == deletedRowId) {
+                      expectation
+                        ..['vocals_row_deleted'] = true
+                        ..['vocals_clip_transformed'] = true
+                        ..['expected_row_count'] =
+                            (expectation['expected_row_count'] as int) - 1;
+                    } else if (expectation['instrumental_row_id'] ==
+                        deletedRowId) {
+                      expectation
+                        ..['instrumental_row_deleted'] = true
+                        ..['instrumental_clip_transformed'] = true
+                        ..['expected_row_count'] =
+                            (expectation['expected_row_count'] as int) - 1;
+                    }
+                  }
+                  v3WorkflowRuntime?.retireRowAndChildren(resolvedResourceRef);
+                }
                 _removeAiV3DeletedRowExpectations(
                   v3RuntimeExpectations,
                   rowId: deletedRowId,
                   rowIndex: deletedRowIndex,
                   clipIds: deletedClipIds,
+                  deletionActionIndex: actionIndex,
                 );
               }
               if (chatFlowId != null) {
@@ -43958,14 +44706,55 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             case 'row_create':
               final createdRowId = await _applyRowCreateAction(data);
               if (createdRowId != null && v3RuntimeExpectations != null) {
+                final producerCommandId =
+                    data['command_id']?.toString().trim() ?? '';
                 final expectation = v3RuntimeExpectations
                     .where(
                       (candidate) =>
                           candidate['kind'] == 'row_created' &&
-                          candidate['runtime_row_id'] == null,
+                          candidate['runtime_row_id'] == null &&
+                          (producerCommandId.isEmpty ||
+                              candidate['producer_command_id'] ==
+                                  producerCommandId),
                     )
                     .firstOrNull;
                 expectation?['runtime_row_id'] = createdRowId;
+                if (producerCommandId.isNotEmpty) {
+                  if (v3WorkflowRuntime == null || expectation == null) {
+                    throw StateError('v3_resource_expectation_missing');
+                  }
+                  final rowIndex = _rowIndexForId(createdRowId);
+                  final isMidi = data['lane_kind'] == 'instrument';
+                  if (!_isValidRowIndex(rowIndex) ||
+                      _rows[rowIndex].isInstrumentLane != isMidi ||
+                      _rows[rowIndex].name.trim() !=
+                          data['name']?.toString().trim() ||
+                      (isMidi &&
+                          _rows[rowIndex].instrumentId !=
+                              data['instrument_id'])) {
+                    throw StateError('v3_resource_binding_target_mismatch');
+                  }
+                  final ref = AiV3ResourceRef(
+                    commandId: producerCommandId,
+                    output: 'row',
+                  );
+                  final kind = isMidi
+                      ? AiV3ResourceKind.midiRow
+                      : AiV3ResourceKind.audioRow;
+                  v3WorkflowRuntime.bind(
+                    ref: ref,
+                    kind: kind,
+                    stableId: createdRowId,
+                  );
+                  _registerAiV3GeneratedRowExpectation(
+                    v3RuntimeExpectations,
+                    ref: ref,
+                    stableId: createdRowId,
+                    kind: kind,
+                    name: _rows[rowIndex].name.trim(),
+                    instrumentId: _rows[rowIndex].instrumentId,
+                  );
+                }
               }
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
@@ -43973,12 +44762,118 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               break;
             case 'v3_group_edit':
               await _applyAiV3GroupEditAction(data);
+              final groupOperation = data['operation']?.toString() ?? '';
+              final groupId = data['group_id']?.toString().trim() ?? '';
+              if (groupOperation == 'create' &&
+                  (data['command_id']?.toString().trim().isNotEmpty ?? false)) {
+                if (v3WorkflowRuntime == null || groupId.isEmpty) {
+                  throw StateError('v3_resource_producer_context_missing');
+                }
+                final group = _trackGroups
+                    .where((candidate) => candidate.id == groupId)
+                    .firstOrNull;
+                if (group == null ||
+                    !listEquals(
+                      group.rowIds,
+                      (data['row_ids'] as List).whereType<int>().toList(),
+                    )) {
+                  throw StateError('v3_resource_binding_target_mismatch');
+                }
+                v3WorkflowRuntime.bind(
+                  ref: AiV3ResourceRef(
+                    commandId: data['command_id'].toString().trim(),
+                    output: 'group',
+                  ),
+                  kind: AiV3ResourceKind.group,
+                  stableId: groupId,
+                );
+                if (v3RuntimeExpectations != null) {
+                  final groupedRowIds = (data['row_ids'] as List)
+                      .whereType<int>()
+                      .toSet();
+                  for (final expectation in v3RuntimeExpectations) {
+                    if (expectation['kind'] == 'row_created' &&
+                        groupedRowIds.contains(expectation['runtime_row_id'])) {
+                      expectation['position_transformed'] = true;
+                    }
+                  }
+                }
+              } else if (groupOperation == 'remove_row' &&
+                  resolvedResourceRef != null &&
+                  data['dissolves_group'] == true) {
+                v3WorkflowRuntime?.retire(resolvedResourceRef);
+              }
+              if (v3RuntimeExpectations != null) {
+                if (groupOperation == 'remove_row' && groupId.isNotEmpty) {
+                  final createdExpectation = v3RuntimeExpectations
+                      .where(
+                        (expectation) =>
+                            expectation['kind'] == 'group_created' &&
+                            expectation['group_id'] == groupId,
+                      )
+                      .firstOrNull;
+                  if (createdExpectation != null) {
+                    if (data['dissolves_group'] == true) {
+                      createdExpectation['kind'] = 'group_absent';
+                    } else {
+                      final remainingMembers = List<int>.from(
+                        data['expected_member_row_ids'] as List? ??
+                            const <int>[],
+                      );
+                      createdExpectation['member_row_ids'] = remainingMembers;
+                    }
+                  }
+                }
+                final matchingExpectation = v3RuntimeExpectations.where((
+                  expectation,
+                ) {
+                  final kind = expectation['kind'];
+                  return (groupOperation == 'create' &&
+                          kind == 'group_created' &&
+                          expectation['group_id'] == null) ||
+                      (groupOperation == 'remove_row' &&
+                          kind == 'group_row_removed' &&
+                          expectation['group_id'] == null) ||
+                      (groupOperation == 'set_collapsed' &&
+                          kind == 'group_collapsed' &&
+                          expectation['group_id'] == null);
+                }).firstOrNull;
+                if (matchingExpectation != null) {
+                  matchingExpectation['group_id'] = groupId;
+                  if (groupOperation == 'create') {
+                    matchingExpectation['member_row_ids'] = List<int>.from(
+                      data['row_ids'] as List,
+                    );
+                    matchingExpectation['expected_row_order'] = List<int>.from(
+                      data['expected_row_order'] as List,
+                    );
+                  } else if (groupOperation == 'remove_row') {
+                    matchingExpectation['row_id'] = data['row_id'];
+                    matchingExpectation['dissolves_group'] =
+                        data['dissolves_group'];
+                    matchingExpectation['expected_member_row_ids'] =
+                        List<int>.from(
+                          data['expected_member_row_ids'] as List? ??
+                              const <int>[],
+                        );
+                  }
+                }
+              }
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
               }
               break;
             case 'row_mix':
               await _applyRowMixAction(data);
+              if (resolvedResourceRef != null &&
+                  resolvedResourceRowId != null &&
+                  v3RuntimeExpectations != null) {
+                _updateAiV3GeneratedRowExpectation(
+                  v3RuntimeExpectations,
+                  resolvedResourceRef,
+                  data,
+                );
+              }
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
               }
@@ -44003,7 +44898,87 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               }
               break;
             case 'sample_insert':
+              final producerCommandId =
+                  data['command_id']?.toString().trim() ?? '';
+              final beforeAudioClipIds =
+                  producerCommandId.isNotEmpty && v3WorkflowRuntime != null
+                  ? _audioTracks
+                        .where((clip) => !clip.isMidi)
+                        .map((clip) => clip.clipId)
+                        .toSet()
+                  : const <String>{};
               await _applySampleInsertAction(data);
+              if (producerCommandId.isNotEmpty &&
+                  v3WorkflowRuntime != null &&
+                  v3RuntimeExpectations != null) {
+                final sampleExpectation = v3RuntimeExpectations
+                    .where(
+                      (candidate) =>
+                          candidate['kind'] == 'samples_created' &&
+                          candidate['producer_command_id'] == producerCommandId,
+                    )
+                    .firstOrNull;
+                final items = (sampleExpectation?['items'] as List?)
+                    ?.whereType<Map>()
+                    .toList(growable: false);
+                if (sampleExpectation == null ||
+                    items == null ||
+                    items.length != 1) {
+                  throw StateError('v3_resource_expectation_missing');
+                }
+                final item = Map<String, dynamic>.from(items.single);
+                final created = _audioTracks
+                    .where(
+                      (clip) =>
+                          !clip.isMidi &&
+                          !beforeAudioClipIds.contains(clip.clipId),
+                    )
+                    .toList(growable: false);
+                if (created.length != 1) {
+                  throw StateError('v3_resource_binding_missing_output');
+                }
+                final clip = created.single;
+                if (clip.rowIndex != item['row'] ||
+                    (clip.offset - (item['start'] as num).toDouble()).abs() >
+                        0.002) {
+                  throw StateError('v3_resource_binding_target_mismatch');
+                }
+                final ref = AiV3ResourceRef(
+                  commandId: producerCommandId,
+                  output: 'audio_clip',
+                );
+                v3WorkflowRuntime.bind(
+                  ref: ref,
+                  kind: AiV3ResourceKind.audioClip,
+                  stableId: clip.clipId,
+                  parentRowRef:
+                      resolvedResourceKind == AiV3ResourceKind.audioRow
+                      ? resolvedResourceRef
+                      : null,
+                );
+                sampleExpectation['runtime_clip_id'] = clip.clipId;
+                final importedDuration = await _resolveSampleDuration(
+                  clip.file.path,
+                );
+                if (importedDuration == null ||
+                    importedDuration <= Duration.zero ||
+                    clip.trimStart < Duration.zero ||
+                    clip.trimEnd >
+                        importedDuration + const Duration(milliseconds: 2)) {
+                  throw StateError('v3_resource_binding_duration_invalid');
+                }
+                _registerAiV3GeneratedResourceExpectation(
+                  v3RuntimeExpectations,
+                  ref: ref,
+                  stableId: clip.clipId,
+                  kind: AiV3ResourceKind.audioClip,
+                  start: (item['start'] as num).toDouble(),
+                  end: clip.offset + _clipTimelineDurationSec(clip),
+                  producerActionIndex: actionIndex,
+                  durationFollowsTempo: _clipFollowsProjectTempo(clip),
+                  pitchSemitones: 0.0,
+                );
+              }
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
               }
@@ -44013,35 +44988,207 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   await _applyAiV3SampleReplaceAction(data);
               if (replacementExpectation != null &&
                   v3RuntimeExpectations != null) {
+                if (resolvedResourceRef == null) {
                 _addAiV3Expectation(
                   v3RuntimeExpectations,
                   replacementExpectation,
                 );
+                } else {
+                  final resourceExpectation = _aiV3GeneratedResourceExpectation(
+                    v3RuntimeExpectations,
+                    resolvedResourceRef,
+                  );
+                  _applyAiV3ReplacementResourceExpectation(
+                    resourceExpectation,
+                    replacementExpectation,
+                  );
+                  _markAiV3ProducerOutputTransformed(
+                    v3RuntimeExpectations,
+                    resolvedResourceRef,
+                  );
+                }
               }
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
               }
               break;
+            case 'v3_clip_audio_analysis':
+              if (resolvedResourceRef == null ||
+                  v3RuntimeExpectations == null) {
+                throw StateError('v3_resource_expectation_missing');
+              }
+              await _applyAiV3GeneratedAudioAnalysisAction(
+                data,
+                resourceRef: resolvedResourceRef,
+                expectations: v3RuntimeExpectations,
+                actionIndex: actionIndex,
+              );
+              _markAiV3ProducerOutputTransformed(
+                v3RuntimeExpectations,
+                resolvedResourceRef,
+              );
+              if (chatFlowId != null) {
+                _throwIfChatFlowStopped(chatFlowId);
+              }
+              break;
             case 'v3_clip_glue':
-              final glueExpectation = await _applyAiV3ClipGlueAction(data);
+              final glueExpectation = await _applyAiV3ClipGlueAction(
+                data,
+                workflowRuntime: glueRuntimeState == null
+                    ? null
+                    : v3WorkflowRuntime,
+              );
               if (v3RuntimeExpectations != null) {
-                _addAiV3Expectation(
-                  v3RuntimeExpectations,
-                  glueExpectation,
+                if (glueRuntimeState == null) {
+                  _addAiV3Expectation(v3RuntimeExpectations, glueExpectation);
+                } else {
+                  if (v3WorkflowRuntime == null) {
+                    throw StateError('v3_resource_expectation_missing');
+                  }
+                  _bindAiV3GlueOutput(
+                    glueRuntimeState,
+                    glueExpectation: glueExpectation,
+                    expectations: v3RuntimeExpectations,
+                    workflowRuntime: v3WorkflowRuntime,
+                    producerActionIndex: actionIndex,
                 );
+              }
               }
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
               }
               break;
             case 'v3_clip_separate_stems':
-              final stemExpectation =
-                  await _applyAiV3ClipSeparateStemsAction(data);
-              if (v3RuntimeExpectations != null) {
-                _addAiV3Expectation(
+              final stemExpectation = await _applyAiV3ClipSeparateStemsAction(
+                data,
+                workflowRuntime: v3WorkflowRuntime,
+              );
+              if (resolvedResourceRef != null &&
+                  v3RuntimeExpectations != null) {
+                _markAiV3ProducerOutputTransformed(
                   v3RuntimeExpectations,
-                  stemExpectation,
+                  resolvedResourceRef,
                 );
+              }
+              final commandId = data['command_id']?.toString().trim() ?? '';
+              if (commandId.isEmpty || v3WorkflowRuntime == null) {
+                if (data['command_id'] != null) {
+                  throw StateError('v3_resource_producer_context_missing');
+                }
+              } else {
+                for (final pathKey in const <String>[
+                  'vocals_file',
+                  'instrumental_file',
+                ]) {
+                  v3WorkflowRuntime.trackGeneratedArtifact(
+                    stemExpectation[pathKey]?.toString() ?? '',
+                  );
+                }
+                final outputs = <String, (AiV3ResourceKind, Object?)>{
+                  'vocals_clip': (
+                    AiV3ResourceKind.audioClip,
+                    stemExpectation['vocals_clip_id'],
+                  ),
+                  'instrumental_clip': (
+                    AiV3ResourceKind.audioClip,
+                    stemExpectation['instrumental_clip_id'],
+                  ),
+                  'vocals_row': (
+                    AiV3ResourceKind.audioRow,
+                    stemExpectation['vocals_row_id'],
+                  ),
+                  'instrumental_row': (
+                    AiV3ResourceKind.audioRow,
+                    stemExpectation['instrumental_row_id'],
+                  ),
+                };
+                for (final output in outputs.entries) {
+                  final stableId = output.value.$2;
+                  if (stableId == null) {
+                    throw StateError('v3_resource_binding_missing_output');
+                  }
+                  v3WorkflowRuntime.bind(
+                    ref: AiV3ResourceRef(
+                      commandId: commandId,
+                      output: output.key,
+                    ),
+                    kind: output.value.$1,
+                    stableId: stableId,
+                    parentRowRef: output.key == 'vocals_clip'
+                        ? AiV3ResourceRef(
+                            commandId: commandId,
+                            output: 'vocals_row',
+                          )
+                        : output.key == 'instrumental_clip'
+                        ? AiV3ResourceRef(
+                            commandId: commandId,
+                            output: 'instrumental_row',
+                          )
+                        : null,
+                  );
+                }
+              }
+              if (v3RuntimeExpectations != null) {
+                if (commandId.isNotEmpty) {
+                  stemExpectation['producer_command_id'] = commandId;
+                  stemExpectation['producer_action_index'] = actionIndex;
+                  for (final output in <String, Object?>{
+                    'vocals_row': stemExpectation['vocals_row_id'],
+                    'instrumental_row': stemExpectation['instrumental_row_id'],
+                  }.entries) {
+                    final rowId = output.value;
+                    if (rowId is! int) {
+                      throw StateError('v3_resource_binding_missing_output');
+                    }
+                    final rowIndex = _rowIndexForId(rowId);
+                    if (!_isValidRowIndex(rowIndex) ||
+                        _rows[rowIndex].isInstrumentLane) {
+                      throw StateError('v3_resource_binding_target_mismatch');
+                    }
+                    _registerAiV3GeneratedRowExpectation(
+                      v3RuntimeExpectations,
+                      ref: AiV3ResourceRef(
+                        commandId: commandId,
+                        output: output.key,
+                      ),
+                      stableId: rowId,
+                      kind: AiV3ResourceKind.audioRow,
+                      name: _rows[rowIndex].name.trim(),
+                      instrumentId: '',
+                    );
+                  }
+                }
+                _addAiV3Expectation(v3RuntimeExpectations, stemExpectation);
+                for (final output in <String, Object?>{
+                  'vocals_clip': stemExpectation['vocals_clip_id'],
+                  'instrumental_clip': stemExpectation['instrumental_clip_id'],
+                }.entries) {
+                  final clipId = output.value;
+                  if (clipId is! String || clipId.isEmpty) {
+                    throw StateError('v3_resource_binding_missing_output');
+                  }
+                  if (commandId.isNotEmpty) {
+                    final outputLengthKey = output.key == 'vocals_clip'
+                        ? 'vocals_length'
+                        : 'instrumental_length';
+                    _registerAiV3GeneratedResourceExpectation(
+                  v3RuntimeExpectations,
+                      ref: AiV3ResourceRef(
+                        commandId: commandId,
+                        output: output.key,
+                      ),
+                      stableId: clipId,
+                      kind: AiV3ResourceKind.audioClip,
+                      start: (stemExpectation['start'] as num).toDouble(),
+                      end:
+                          (stemExpectation['start'] as num).toDouble() +
+                          (stemExpectation[outputLengthKey] as num).toDouble(),
+                      producerActionIndex: actionIndex,
+                      durationFollowsTempo: false,
+                      pitchSemitones: 0.0,
+                );
+              }
+                }
               }
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
@@ -44050,6 +45197,85 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             case 'v3_clip_convert_to_midi':
               final conversionExpectation =
                   await _applyAiV3ClipConvertToMidiAction(data);
+              if (resolvedResourceRef != null &&
+                  v3RuntimeExpectations != null) {
+                _markAiV3ProducerOutputTransformed(
+                  v3RuntimeExpectations,
+                  resolvedResourceRef,
+                );
+              }
+              final commandId = data['command_id']?.toString().trim() ?? '';
+              if (commandId.isNotEmpty) {
+                if (v3WorkflowRuntime == null ||
+                    v3RuntimeExpectations == null) {
+                  throw StateError('v3_resource_producer_context_missing');
+                }
+                final resultClipId =
+                    conversionExpectation['result_clip_id']?.toString() ?? '';
+                final resultIndex = _clipIndexForPersistentId(resultClipId);
+                if (!_isValidClipIndex(resultIndex) ||
+                    !_audioTracks[resultIndex].isMidi) {
+                  throw StateError('v3_resource_binding_missing_output');
+                }
+                final result = _audioTracks[resultIndex];
+                final rowIndex = _rowIndexForId(result.rowId);
+                if (!_isValidRowIndex(rowIndex) ||
+                    !_rows[rowIndex].isInstrumentLane ||
+                    result.instrumentId != data['instrument_id']) {
+                  throw StateError('v3_resource_binding_target_mismatch');
+                }
+                final rowRef = AiV3ResourceRef(
+                  commandId: commandId,
+                  output: 'midi_row',
+                );
+                final clipRef = AiV3ResourceRef(
+                  commandId: commandId,
+                  output: 'midi_clip',
+                );
+                v3WorkflowRuntime
+                  ..bind(
+                    ref: rowRef,
+                    kind: AiV3ResourceKind.midiRow,
+                    stableId: result.rowId,
+                  )
+                  ..bind(
+                    ref: clipRef,
+                    kind: AiV3ResourceKind.midiClip,
+                    stableId: resultClipId,
+                    parentRowRef: rowRef,
+                  );
+                conversionExpectation
+                  ..['producer_command_id'] = commandId
+                  ..['producer_action_index'] = actionIndex
+                  ..['result_row_id'] = result.rowId;
+                for (final expectation in v3RuntimeExpectations) {
+                  if (expectation['kind'] == 'row_created') {
+                    expectation
+                      ..['expect_selected'] = false
+                      ..['require_exact_position'] = false;
+                  }
+                }
+                _registerAiV3GeneratedRowExpectation(
+                  v3RuntimeExpectations,
+                  ref: rowRef,
+                  stableId: result.rowId,
+                  kind: AiV3ResourceKind.midiRow,
+                  name: _rows[rowIndex].name.trim(),
+                  instrumentId: result.instrumentId,
+                );
+                _registerAiV3GeneratedResourceExpectation(
+                  v3RuntimeExpectations,
+                  ref: clipRef,
+                  stableId: resultClipId,
+                  kind: AiV3ResourceKind.midiClip,
+                  start: result.offset,
+                  end: result.offset + _clipTimelineDurationSec(result),
+                  producerActionIndex: actionIndex,
+                  durationFollowsTempo: true,
+                  rowId: result.rowId,
+                  midiNotes: _aiV3MidiNotePayload(result),
+                );
+              }
               if (v3RuntimeExpectations != null) {
                 _addAiV3Expectation(
                   v3RuntimeExpectations,
@@ -44149,6 +45375,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               final automationExpectation =
                   await _applyAiV3AutomationPointsAction(data);
               if (v3RuntimeExpectations != null) {
+                automationExpectation['producer_action_index'] = actionIndex;
                 _addAiV3Expectation(
                   v3RuntimeExpectations,
                   automationExpectation,
@@ -44160,12 +45387,166 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               break;
             case 'automation_edit':
               await _applyAutomationEditAction(data);
+              if (v3RuntimeExpectations != null) {
+                final target = _actionTarget(data);
+                final rowId = _toActionInt(target['row_id']);
+                final row = rowId == null ? null : _rowIndexForId(rowId);
+                if (row != null && _isValidRowIndex(row)) {
+                  _addAiV3Expectation(v3RuntimeExpectations, <String, dynamic>{
+                    'kind': 'automation_points',
+                    'producer_action_index': actionIndex,
+                    'row': row,
+                    'row_id': rowId,
+                    'automation_target_id':
+                        target['automation_target_id']?.toString() ?? 'volume',
+                    'points': (data['points'] as List? ?? const <Object>[])
+                        .whereType<Map>()
+                        .map(
+                          (point) => <String, dynamic>{
+                            'x': _toActionDouble(
+                              point['time_ms'] ?? point['x_ms'] ?? point['x'],
+                            ),
+                            'value': _toActionDouble(
+                              point['value'] ?? point['volume'],
+                            ),
+                          },
+                        )
+                        .toList(growable: false),
+                  });
+                }
+              }
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
               }
               break;
             case 'midi_compose':
+              final operation = data['operation']?.toString() ?? '';
+              final producerCommandId =
+                  data['command_id']?.toString().trim() ?? '';
+              final beforeMidiClipIds =
+                  operation == 'create_clip' &&
+                      producerCommandId.isNotEmpty &&
+                      v3WorkflowRuntime != null
+                  ? _audioTracks
+                        .where((clip) => clip.isMidi)
+                        .map((clip) => clip.clipId)
+                        .toSet()
+                  : const <String>{};
               await _applyMidiComposeAction(data, chatFlowId: chatFlowId);
+              if (beforeMidiClipIds.isNotEmpty ||
+                  (operation == 'create_clip' &&
+                      producerCommandId.isNotEmpty &&
+                      v3WorkflowRuntime != null)) {
+                final created = _audioTracks
+                    .where(
+                      (clip) =>
+                          clip.isMidi &&
+                          !beforeMidiClipIds.contains(clip.clipId),
+                    )
+                    .toList(growable: false);
+                if (created.length != 1) {
+                  throw StateError('v3_resource_binding_missing_output');
+                }
+                final createdClip = created.single;
+                final createdClipId = createdClip.clipId;
+                v3WorkflowRuntime!.bind(
+                  ref: AiV3ResourceRef(
+                    commandId: producerCommandId,
+                    output: 'midi_clip',
+                  ),
+                  kind: AiV3ResourceKind.midiClip,
+                  stableId: createdClipId,
+                  parentRowRef: resolvedResourceKind == AiV3ResourceKind.midiRow
+                      ? resolvedResourceRef
+                      : null,
+                );
+                if (v3RuntimeExpectations != null) {
+                  final expectation = v3RuntimeExpectations
+                      .where(
+                        (candidate) =>
+                            candidate['kind'] == 'midi_clip_created' &&
+                            candidate['producer_command_id'] ==
+                                producerCommandId,
+                      )
+                      .firstOrNull;
+                  if (expectation == null) {
+                    throw StateError('v3_resource_expectation_missing');
+                  }
+                  final expectedStart = (expectation['start'] as num)
+                      .toDouble();
+                  final expectedLength = (expectation['length'] as num)
+                      .toDouble();
+                  if ((createdClip.offset - expectedStart).abs() > 0.002 ||
+                      (_clipTimelineDurationSec(createdClip) - expectedLength)
+                              .abs() >
+                          0.003 ||
+                      createdClip.rowIndex != expectation['row'] ||
+                      createdClip.instrumentId !=
+                          expectation['instrument_id']) {
+                    throw StateError('v3_resource_binding_target_mismatch');
+                  }
+                  expectation['runtime_clip_id'] = createdClipId;
+                  _registerAiV3GeneratedResourceExpectation(
+                    v3RuntimeExpectations,
+                    ref: AiV3ResourceRef(
+                      commandId: producerCommandId,
+                      output: 'midi_clip',
+                    ),
+                    stableId: createdClipId,
+                    kind: AiV3ResourceKind.midiClip,
+                    start: createdClip.offset,
+                    end:
+                        createdClip.offset +
+                        _clipTimelineDurationSec(createdClip),
+                    producerActionIndex: actionIndex,
+                    durationFollowsTempo: true,
+                    midiNotes: (expectation['notes'] as List)
+                        .whereType<Map>()
+                        .map((note) => Map<String, dynamic>.from(note))
+                        .toList(growable: false),
+                  );
+                }
+              }
+              if ((operation == 'transpose_notes' ||
+                      operation == 'replace_notes') &&
+                  resolvedResourceClipId != null &&
+                  resolvedResourceRef != null &&
+                  resolvedResourceKind == AiV3ResourceKind.midiClip &&
+                  v3RuntimeExpectations != null) {
+                final expectedNotes = (data['expected_notes'] as List?)
+                    ?.whereType<Map>()
+                    .map((note) => Map<String, dynamic>.from(note))
+                    .toList(growable: false);
+                if (expectedNotes == null) {
+                  throw StateError('v3_resource_midi_notes_missing');
+                }
+                final resourceExpectation = _aiV3GeneratedResourceExpectation(
+                  v3RuntimeExpectations,
+                  resolvedResourceRef,
+                );
+                resourceExpectation
+                  ..['midi_notes'] = aiV3CanonicalMidiNotes(expectedNotes)
+                  ..['midi_content_end_beats'] =
+                      _toActionDouble(
+                        data['expected_midi_content_end_beats'],
+                      ) ??
+                      _aiV3MidiContentEndBeats(expectedNotes);
+                final rawFinalLength = data['final_length_beats'];
+                if (rawFinalLength != null) {
+                  final finalLength = (rawFinalLength as num).toDouble();
+                  final start = (resourceExpectation['start'] as num)
+                      .toDouble();
+                  if (!finalLength.isFinite || finalLength <= 0) {
+                    throw StateError('v3_resource_midi_length_invalid');
+                  }
+                  resourceExpectation['end'] =
+                      start + finalLength * 60.0 / _tempo;
+                }
+                _markAiV3ProducerOutputTransformed(
+                  v3RuntimeExpectations,
+                  resolvedResourceRef,
+                );
+              }
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
               }
@@ -44460,8 +45841,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .trim()
         .toLowerCase()
         .replaceAll(RegExp(r'[^a-z0-9]+'), '_');
-    if (operation != 'mute' && operation != 'unmute' && operation != 'toggle') {
-      _insertAssistantChatText("I couldn't apply that row mute edit.");
+    if (operation != 'mute' &&
+        operation != 'unmute' &&
+        operation != 'toggle' &&
+        operation != 'set_muted') {
+      _insertAssistantChatText(
+        L10n.translate(context, "I couldn't apply that row mute edit."),
+      );
+      return;
+    }
+    final requestedMuted = data['muted'];
+    if (operation == 'set_muted' && requestedMuted is! bool) {
+      _insertAssistantChatText(
+        L10n.translate(context, "I couldn't apply that row mute edit."),
+      );
       return;
     }
 
@@ -44476,12 +45869,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     for (final row in rows) {
       final current = row < _rowMuted.length ? _rowMuted[row] : false;
-      final nextMuted = operation == 'toggle' ? !current : operation == 'mute';
+      final nextMuted = operation == 'toggle'
+          ? !current
+          : operation == 'set_muted'
+          ? requestedMuted as bool
+          : operation == 'mute';
       await _setRowMutedFromUi(row, nextMuted);
     }
     final actionText = operation == 'toggle'
         ? 'Toggled mute'
-        : operation == 'mute'
+        : operation == 'mute' ||
+              (operation == 'set_muted' && requestedMuted == true)
             ? 'Muted'
             : 'Unmuted';
     _insertSystemChatText(
@@ -44496,6 +45894,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .toLowerCase()
         .replaceAll(RegExp(r'[^a-z0-9]+'), '_');
     final operation = switch (token) {
+      'set_soloed' => 'set_soloed',
       'solo' ||
       'solo_row' ||
       'solo_track' ||
@@ -44517,8 +45916,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         'toggle',
       _ => token,
     };
-    if (operation != 'solo' && operation != 'unsolo' && operation != 'toggle') {
-      _insertAssistantChatText("I couldn't apply that row solo edit.");
+    if (operation != 'solo' &&
+        operation != 'unsolo' &&
+        operation != 'toggle' &&
+        operation != 'set_soloed') {
+      _insertAssistantChatText(
+        L10n.translate(context, "I couldn't apply that row solo edit."),
+      );
+      return;
+    }
+    final requestedSoloed = data['soloed'];
+    if (operation == 'set_soloed' && requestedSoloed is! bool) {
+      _insertAssistantChatText(
+        L10n.translate(context, "I couldn't apply that row solo edit."),
+      );
       return;
     }
 
@@ -44533,12 +45944,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     for (final row in rows) {
       final current = row < _rowSoloed.length ? _rowSoloed[row] : false;
-      final nextSoloed = operation == 'toggle' ? !current : operation == 'solo';
+      final nextSoloed = operation == 'toggle'
+          ? !current
+          : operation == 'set_soloed'
+          ? requestedSoloed as bool
+          : operation == 'solo';
       await _setRowSoloedFromUi(row, nextSoloed);
     }
     final actionText = operation == 'toggle'
         ? 'Toggled solo'
-        : operation == 'solo'
+        : operation == 'solo' ||
+              (operation == 'set_soloed' && requestedSoloed == true)
             ? 'Soloed'
             : 'Unsoloed';
     _insertSystemChatText(
@@ -45754,15 +47170,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _applyEffectEditAction(<String, dynamic>{
       'operation': 'add',
       'effect_name': effectId,
-      'target': <String, dynamic>{
-        ...target,
-        'scope': 'row',
-        'row_index': row,
-      },
+      'force_individual_row': true,
+      'target': <String, dynamic>{...target, 'scope': 'row', 'row_index': row},
     });
     final parameters = Map<String, dynamic>.from(rawParameters);
-    if (parameters.isEmpty) return const <Map<String, dynamic>>[];
-    final actions = parameters.entries.map((entry) {
+    final presenceExpectation = <String, dynamic>{
+      'kind': 'effect',
+      'row': row,
+      'force_individual_row': true,
+      if (target['row_id'] is int) 'row_id': target['row_id'],
+      'value': effectId,
+    };
+    if (parameters.isEmpty) {
+      return <Map<String, dynamic>>[presenceExpectation];
+    }
+    final actions = parameters.entries
+        .map((entry) {
       final value = entry.value;
       if (value is! num || !value.isFinite) {
         throw StateError('v3_effect_parameter_invalid');
@@ -45778,6 +47201,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         // prevents a normalized V3 command from failing on sparse metadata.
         'value': value.toDouble().clamp(0.0, 1.0),
         'skip_if_missing_effect': false,
+            'force_individual_row': true,
       });
     }).toList(growable: false);
     final report = await applyMixingResult(
@@ -45791,7 +47215,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (report.skippedReasons.isNotEmpty || report.applied != actions.length) {
       throw StateError('v3_effect_parameter_apply_failed');
     }
-    return report.appliedMutations;
+    return <Map<String, dynamic>>[
+      presenceExpectation,
+      ...report.appliedMutations,
+    ];
   }
 
   Future<void> _applyAiV3EffectInstanceEditAction(
@@ -45812,9 +47239,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         effectId.isEmpty) {
       throw StateError('v3_effect_instance_target_invalid');
     }
-    final instanceIds =
-        await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
-    final effectIds = await JuceAudioEngine.getTrackEffectIdsForRow(row);
+    final instanceIds = await JuceAudioEngine.getTrackEffectInstanceIdsForRow(
+      row,
+      forceIndividualRow: true,
+    );
+    final effectIds = await JuceAudioEngine.getTrackEffectIdsForRow(
+      row,
+      forceIndividualRow: true,
+    );
     final index = instanceIds.indexOf(instanceId);
     if (index < 0 ||
         index >= effectIds.length ||
@@ -45838,8 +47270,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (requested is! bool) {
           throw StateError('v3_effect_bypass_value_invalid');
         }
-        final current =
-            await JuceAudioEngine.getRowEffectBypassState(row, index);
+        final current = await JuceAudioEngine.getRowEffectBypassState(
+          row,
+          index,
+          forceIndividualRow: true,
+        );
         if (current == requested) return;
         await _undoManager.execute(
           BypassEffectInstanceAction(
@@ -45849,12 +47284,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             effectOccurrence: occurrence,
             oldState: current,
             newState: requested,
+            forceIndividualRow: true,
             onChange: onChange,
           ),
         );
         break;
       case 'remove':
-        final snapshot = await captureRowSnapshot(row, rowId: expectedRowId);
+        final snapshot = await captureRowSnapshot(
+          row,
+          rowId: expectedRowId,
+          forceIndividualRow: true,
+        );
         if (index >= snapshot.effects.length ||
             snapshot.effects[index].effectId != effectId) {
           throw StateError('v3_effect_instance_snapshot_mismatch');
@@ -45866,6 +47306,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             effectInstanceId: instanceId,
             effectOccurrence: occurrence,
             removedEffect: snapshot.effects[index],
+            forceIndividualRow: true,
             onChange: () {
               _refreshAudioEditorView();
               _refreshRowFx(row);
@@ -46170,9 +47611,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         scope == 'master_bus' ||
         scope == 'master-bus' ||
         scope == 'masterbus';
-    final groupId = isMaster ? null : _resolveRowGroupIdFromAction(data);
-    final groupBusRow =
-        groupId == null ? null : _trackGroupLeadRowIndexForId(groupId);
+    final forceIndividualRow = data['force_individual_row'] == true;
+    final groupId = isMaster || forceIndividualRow
+        ? null
+        : _resolveRowGroupIdFromAction(data);
+    final groupBusRow = groupId == null
+        ? null
+        : _trackGroupLeadRowIndexForId(groupId);
 
     final row =
         isMaster ? null : groupBusRow ?? _resolveRowIndexFromActionTarget(data);
@@ -46188,7 +47633,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     final effects = isMaster
         ? await JuceAudioEngine.getMasterEffects()
-        : await JuceAudioEngine.getTrackEffectsForRow(row!);
+        : await JuceAudioEngine.getTrackEffectsForRow(
+            row!,
+            forceIndividualRow: forceIndividualRow,
+          );
     final effectIndex = _resolveEffectIndexFromActionData(effects, data);
 
     if (operation == 'remove') {
@@ -46222,6 +47670,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               row: row!,
               effectIndex: effectIndex,
               pathOrName: effectName,
+              forceIndividualRow: forceIndividualRow,
               onChange: onTrackChange,
             );
       final beforeCount = effects
@@ -46232,7 +47681,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _undoManager.executeWithoutAdd(action);
       final effectsAfter = isMaster
           ? await JuceAudioEngine.getMasterEffects()
-          : await JuceAudioEngine.getTrackEffectsForRow(row!);
+          : await JuceAudioEngine.getTrackEffectsForRow(
+              row!,
+              forceIndividualRow: forceIndividualRow,
+            );
       final afterCount = effectsAfter
           .where(
             (e) => e.trim().toLowerCase() == effectName.trim().toLowerCase(),
@@ -46301,6 +47753,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             : await _ensureAiCanonicalChainOrderOnRow(
                 row!,
                 executeWithoutAdd: false,
+                forceIndividualRow: forceIndividualRow,
               );
         if (reorderActions.isNotEmpty) {
           await _undoManager.execute(
@@ -46326,12 +47779,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           : InsertEffectAction(
               row: row!,
               pathOrName: effectName,
+              forceIndividualRow: forceIndividualRow,
               onChange: onTrackChange,
             );
       await _undoManager.execute(action);
       final effectsAfter = isMaster
           ? await JuceAudioEngine.getMasterEffects()
-          : await JuceAudioEngine.getTrackEffectsForRow(row!);
+          : await JuceAudioEngine.getTrackEffectsForRow(
+              row!,
+              forceIndividualRow: forceIndividualRow,
+            );
       final inserted = effectsAfter.any(
         (e) => e.trim().toLowerCase() == effectName.trim().toLowerCase(),
       );
@@ -46346,6 +47803,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           : await _ensureAiCanonicalChainOrderOnRow(
               row!,
               executeWithoutAdd: false,
+              forceIndividualRow: forceIndividualRow,
             );
       if (reorderActions.isNotEmpty) {
         for (final reorderAction in reorderActions) {
@@ -46391,7 +47849,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final effectName = effects[effectIndex];
       final currentState = isMaster
           ? await JuceAudioEngine.getMasterEffectBypassState(effectIndex)
-          : await JuceAudioEngine.getRowEffectBypassState(row!, effectIndex);
+          : await JuceAudioEngine.getRowEffectBypassState(
+              row!,
+              effectIndex,
+              forceIndividualRow: forceIndividualRow,
+            );
       final nextState = switch (operation) {
         'bypass' => true,
         'unbypass' => false,
@@ -46418,6 +47880,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               effectIndex: effectIndex,
               oldState: currentState,
               newState: nextState,
+              forceIndividualRow: forceIndividualRow,
               onChange: onTrackChange,
             );
       await _undoManager.execute(action);
@@ -46515,6 +47978,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     AudioTrack clip,
   ) async {
     if (clip.isMidi) return null;
+    if (!await _ensureAiV3ClipWaveformReady(clip)) return null;
     final bounds = _estimateAutoTrimBoundsMs(clip, paddingMs: 0.0);
     if (bounds == null ||
         !bounds.key.isFinite ||
@@ -46533,6 +47997,58 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  Future<bool> _ensureAiV3ClipWaveformReady(AudioTrack clip) async {
+    if (clip.isMidi || !clip.file.existsSync()) return false;
+    if (clip.normWaveformData.isNotEmpty &&
+        !_isAllZeroWaveform(clip.normWaveformData)) {
+      return true;
+    }
+
+    final cacheKey = _normalizedClipPath(clip.file.path);
+    final cached = _waveformCacheByPath[cacheKey];
+    if (cached != null && cached.isNotEmpty && !_isAllZeroWaveform(cached)) {
+      clip
+        ..normWaveformData = cached
+        ..didExtractWaveform = true;
+      return true;
+    }
+
+    try {
+      final pending = _waveformFutureByPath[cacheKey];
+      if (pending != null) {
+        final waveform = await pending;
+        if (waveform != null &&
+            waveform.isNotEmpty &&
+            !_isAllZeroWaveform(waveform)) {
+          clip
+            ..normWaveformData = waveform
+            ..didExtractWaveform = true;
+          return true;
+        }
+        return false;
+      }
+      await _ensureClipWaveformForNormalizeVisual(clip);
+      return clip.normWaveformData.isNotEmpty &&
+          !_isAllZeroWaveform(clip.normWaveformData);
+    } catch (error) {
+      debugPrint('V3 waveform preparation failed: $error');
+      return false;
+    }
+  }
+
+  ({int trimStartMs, int trimEndMs}) _canonicalAudioTrimBounds(
+    AudioTrack clip, {
+    required double trimStartMs,
+    required double trimEndMs,
+  }) {
+    final fullMs = _clipFullDurationMsForTrim(clip).clamp(1.0, 1e12);
+    final safeTrimStart = trimStartMs.clamp(0.0, fullMs - 50.0).toDouble();
+    final safeTrimEnd = trimEndMs
+        .clamp(safeTrimStart + 50.0, fullMs)
+        .toDouble();
+    return (trimStartMs: safeTrimStart.round(), trimEndMs: safeTrimEnd.round());
+  }
+
   Future<void> _applyTrimActionForClip(
     int clipIndex, {
     required double newTrimStartMs,
@@ -46542,10 +48058,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
     final clip = _audioTracks[clipIndex];
 
-    final fullMs = _clipFullDurationMsForTrim(clip).clamp(1.0, 1e12);
-    final safeTrimStart = newTrimStartMs.clamp(0.0, fullMs - 50.0).toDouble();
-    final safeTrimEnd =
-        newTrimEndMs.clamp(safeTrimStart + 50.0, fullMs).toDouble();
+    final canonical = _canonicalAudioTrimBounds(
+      clip,
+      trimStartMs: newTrimStartMs,
+      trimEndMs: newTrimEndMs,
+    );
 
     await _undoManager.execute(
       TrimClipAction(
@@ -46554,8 +48071,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         oldTrimStart: clip.trimStart,
         oldTrimEnd: clip.trimEnd,
         oldOffset: clip.offset,
-        newTrimStart: Duration(milliseconds: safeTrimStart.round()),
-        newTrimEnd: Duration(milliseconds: safeTrimEnd.round()),
+        newTrimStart: Duration(milliseconds: canonical.trimStartMs),
+        newTrimEnd: Duration(milliseconds: canonical.trimEndMs),
         newOffset: newOffsetSec,
         onChange: () {
           unawaited(_syncClipTimingToEngine(clipIndex));
@@ -49426,7 +50943,42 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       'file': replaced.file.path,
       'label': replaced.label,
       'clip_count': _audioTracks.length,
+      'expected_payload': afterPayload,
     };
+  }
+
+  void _applyAiV3ReplacementResourceExpectation(
+    Map<String, dynamic> resourceExpectation,
+    Map<String, dynamic> replacementExpectation,
+  ) {
+    final rawPayload = replacementExpectation['expected_payload'];
+    if (rawPayload is! Map) {
+      throw StateError('v3_sample_replace_expectation_missing');
+    }
+    final payload = Map<String, dynamic>.from(rawPayload);
+    final start = _toActionDouble(payload['offset']);
+    final trimStartMs = _toActionDouble(payload['trimStartMs']);
+    final trimEndMs = _toActionDouble(payload['trimEndMs']);
+    if (start == null ||
+        trimStartMs == null ||
+        trimEndMs == null ||
+        trimEndMs - trimStartMs < 50.0) {
+      throw StateError('v3_sample_replace_expectation_invalid');
+    }
+    final rawDurationSec = (trimEndMs - trimStartMs) / 1000.0;
+    resourceExpectation
+      ..['start'] = start
+      ..['end'] = start + rawDurationSec
+      ..['file'] = replacementExpectation['file']
+      ..['label'] = replacementExpectation['label']
+      ..['raw_duration_sec'] = rawDurationSec
+      ..['trim_start_ms'] = trimStartMs
+      ..['trim_end_ms'] = trimEndMs
+      ..['source_tempo_bpm'] = 0.0
+      ..['tempo_follow_mode'] = 'off'
+      ..['tempo_preserve_pitch'] = false
+      ..['duration_follows_tempo'] = false
+      ..['alignment_offset_ms'] = 0.0;
   }
 
   bool _aiV3ClipMatchesPersistedPayload(
@@ -49729,8 +51281,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<Map<String, dynamic>> _applyAiV3ClipGlueAction(
-    Map<String, dynamic> data,
-  ) async {
+    Map<String, dynamic> data, {
+    AiV3WorkflowRuntime? workflowRuntime,
+  }) async {
     final target = _actionTarget(data);
     final rawIds =
         data['source_clip_ids'] ?? target['source_clip_ids'] ?? const [];
@@ -49783,6 +51336,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         'glued_${DateTime.now().microsecondsSinceEpoch}_${const Uuid().v4()}.wav',
       ),
     );
+    workflowRuntime?.trackGeneratedArtifact(outputFile.path);
     final snapshotJson = _buildGlueExportClipSnapshotJson(
       selectedIndices: indexed.map((item) => item.index).toSet(),
       selectionStartSec: selectionStartSec,
@@ -49799,6 +51353,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final rendered = File(
       renderedPath.trim().isNotEmpty ? renderedPath.trim() : outputFile.path,
     );
+    workflowRuntime?.trackGeneratedArtifact(rendered.path);
     if (!await rendered.exists() || await rendered.length() <= 44) {
       throw StateError('v3_clip_glue_render_failed');
     }
@@ -50082,8 +51637,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<Map<String, dynamic>> _applyAiV3ClipSeparateStemsAction(
-    Map<String, dynamic> data,
-  ) async {
+    Map<String, dynamic> data, {
+    AiV3WorkflowRuntime? workflowRuntime,
+  }) async {
     final target = _actionTarget(data);
     final clipId = (target['clip_id'] ?? data['clip_id']).toString().trim();
     final clipIndex = _clipIndexForPersistentId(clipId);
@@ -50118,8 +51674,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         '${DateTime.now().microsecondsSinceEpoch}_${const Uuid().v4()}';
     final dryInput = File(p.join(audioDir.path, '.stem_input_$nonce.wav'));
     final vocalsFile = File(p.join(audioDir.path, 'stem_vocals_$nonce.wav'));
-    final instrumentalFile =
-        File(p.join(audioDir.path, 'stem_instrumental_$nonce.wav'));
+    final instrumentalFile = File(
+      p.join(audioDir.path, 'stem_instrumental_$nonce.wav'),
+    );
+    workflowRuntime
+      ?..trackGeneratedArtifact(vocalsFile.path)
+      ..trackGeneratedArtifact(instrumentalFile.path);
     final snapshotJson = _buildGlueExportClipSnapshotJson(
       selectedIndices: <int>{clipIndex},
       selectionStartSec: source.offset,
@@ -50257,6 +51817,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       rethrow;
     }
+    final vocalsIndex = _clipIndexForPersistentId(
+      vocalsPayload['clipId'].toString(),
+    );
+    final instrumentalIndex = _clipIndexForPersistentId(
+      instrumentalPayload['clipId'].toString(),
+    );
+    if (!_isValidClipIndex(vocalsIndex) ||
+        !_isValidClipIndex(instrumentalIndex)) {
+      throw StateError('v3_clip_stems_result_state_invalid');
+    }
     return <String, dynamic>{
       'kind': 'stems_separated',
       'source_clip_id': clipId,
@@ -50265,12 +51835,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       'before_row_ids': beforeRowIds,
       'vocals_clip_id': vocalsPayload['clipId'],
       'instrumental_clip_id': instrumentalPayload['clipId'],
+      'vocals_row_id': _audioTracks[vocalsIndex].rowId,
+      'instrumental_row_id': _audioTracks[instrumentalIndex].rowId,
       'vocals_label': vocalsPayload['label'],
       'instrumental_label': instrumentalPayload['label'],
       'vocals_file': vocalsFile.path,
       'instrumental_file': instrumentalFile.path,
       'start': source.offset,
       'length': expectedDurationMs / 1000.0,
+      'vocals_length': outputDurations[0].inMilliseconds / 1000.0,
+      'instrumental_length': outputDurations[1].inMilliseconds / 1000.0,
       'expected_row_count': beforeRowIds.length + 2,
       'expected_clip_count': _audioTracks.length,
     };
@@ -52154,7 +53728,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (row < 0 || row >= _rowCount) return const <Map<String, dynamic>>[];
     final targets = _rowAutomationTargets[row] ??
         <String, _AutomationTargetMeta>{
-          'volume': _volumeAutomationTargetMeta()
+          'volume': _volumeAutomationTargetMeta(),
         };
     final values =
         targets.values.where(_isAutomationTargetVisibleInMenu).toList(
@@ -52190,7 +53764,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (row < 0 || row >= _rowCount) return;
     final targets = _rowAutomationTargets[row] ??
         <String, _AutomationTargetMeta>{
-          'volume': _volumeAutomationTargetMeta()
+          'volume': _volumeAutomationTargetMeta(),
         };
     final selectedMeta = targets[targetId];
     if (selectedMeta == null ||
@@ -52429,14 +54003,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     for (int sourceRow = 0; sourceRow < _rowCount; sourceRow++) {
-      final explicit =
-          _storedAutomationPointsForTargetOrNull(sourceRow, targetId);
-      if (explicit == null) continue;
-      return _sanitizeAutomationPointsForTarget(
+      final explicit = _storedAutomationPointsForTargetOrNull(
         sourceRow,
         targetId,
-        explicit,
       );
+      if (explicit == null) continue;
+      return _sanitizeAutomationPointsForTarget(sourceRow, targetId, explicit);
     }
 
     return _sanitizeAutomationPointsForTarget(
@@ -57144,11 +58716,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     final originalRange = _pitchLabNoteLocalRangeMs(originalNote);
     final editedRange = _pitchLabNoteLocalRangeMs(editedNote);
-    final sourceTimelineDurationMs = _clipTimelineDurationMs(sourceClip)
-        .clamp(1.0, 12.0 * 60.0 * 1000.0)
+    final sourceTimelineDurationMs = _clipTimelineDurationMs(
+      sourceClip,
+    ).clamp(1.0, 12.0 * 60.0 * 1000.0).toDouble();
+    final sourceStartMs = originalRange.startMs
+        .clamp(0.0, sourceTimelineDurationMs)
         .toDouble();
-    final sourceStartMs =
-        originalRange.startMs.clamp(0.0, sourceTimelineDurationMs).toDouble();
     final sourceEndMs = originalRange.endMs
         .clamp(sourceStartMs + 8.0, sourceTimelineDurationMs)
         .toDouble();
@@ -57930,11 +59503,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final targets = explicitMany
         ? clipIndices
         : <int>[
-            _resolveSingleClipIndexWithFallback(
-                  data,
-                  requireAudio: true,
-                ) ??
-                clipIndices.first
+            _resolveSingleClipIndexWithFallback(data, requireAudio: true) ??
+                clipIndices.first,
           ];
 
     int success = 0;
@@ -59224,6 +60794,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
         case 'adjust_effect_param_by_name':
           {
+            final forceIndividualRow = a.data['force_individual_row'] == true;
             final rowCandidates = rowCandidatesFromAction(a.data);
             if (rowCandidates.isEmpty) {
               skipAction('No target track for plugin parameter change.');
@@ -59253,6 +60824,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 effectNameContains: effectContains,
                 exactParameterName: exactParamName,
                 parameterNameContainsAny: containsAny,
+                forceIndividualRow: forceIndividualRow,
               );
               if (resolved == null) {
                 continue;
@@ -59353,6 +60925,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 paramId: paramId,
                 oldValue: current,
                 newValue: next,
+                forceIndividualRow: forceIndividualRow,
                 onChange: () {
                   setState(() {});
                   _refreshRowFx(row);
@@ -59366,9 +60939,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               final interval =
                   (_toActionDouble(picked['interval']) ?? 0.0).abs();
               final currentInstanceIds =
-                  await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
-              final currentIndex =
-                  currentInstanceIds.indexOf(resolved.effectInstanceId!);
+                  await JuceAudioEngine.getTrackEffectInstanceIdsForRow(
+                    row,
+                    forceIndividualRow: forceIndividualRow,
+                  );
+              final currentIndex = currentInstanceIds.indexOf(
+                resolved.effectInstanceId!,
+              );
               if (currentIndex < 0) {
                 throw StateError('mix_effect_identity_missing');
               }
@@ -59377,6 +60954,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 await JuceAudioEngine.getTrackPluginParameters(
                   row,
                   currentIndex,
+                  forceIndividualRow: forceIndividualRow,
                 ),
               );
               final appliedParameter = appliedParameters
@@ -59399,6 +60977,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 'kind': 'effect_parameter_value',
                 'row': row,
                 'master': false,
+                if (forceIndividualRow) 'force_individual_row': true,
                 'effect_instance_id': resolved.effectInstanceId,
                 'effect_id': resolved.effectId,
                 'effect_name': resolved.effectName,
@@ -60405,14 +61984,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required String effectNameContains,
     String? exactParameterName,
     List<String>? parameterNameContainsAny,
+    bool forceIndividualRow = false,
   }) async {
     final deadline = DateTime.now().add(_kAiMixEffectReadyTimeout);
     do {
       try {
         final values = await Future.wait<dynamic>(<Future<dynamic>>[
-          JuceAudioEngine.getTrackEffectsForRow(row),
-          JuceAudioEngine.getTrackEffectIdsForRow(row),
-          JuceAudioEngine.getTrackEffectInstanceIdsForRow(row),
+          JuceAudioEngine.getTrackEffectsForRow(
+            row,
+            forceIndividualRow: forceIndividualRow,
+          ),
+          JuceAudioEngine.getTrackEffectIdsForRow(
+            row,
+            forceIndividualRow: forceIndividualRow,
+          ),
+          JuceAudioEngine.getTrackEffectInstanceIdsForRow(
+            row,
+            forceIndividualRow: forceIndividualRow,
+          ),
         ]).timeout(_kAiMixEffectProbeTimeout);
         final effects = (values[0] as List).cast<String>();
         final effectIds = (values[1] as List).cast<String>();
@@ -60428,6 +62017,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           final rawParameters = await JuceAudioEngine.getTrackPluginParameters(
             row,
             effectIndex,
+            forceIndividualRow: forceIndividualRow,
           ).timeout(_kAiMixEffectProbeTimeout);
           final parameters = exposedEffectParameters(
             effects[effectIndex],
@@ -61122,6 +62712,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     .toList(growable: false),
             },
         ],
+    'overall_duration_ms': _audioOnlyOverallDuration.inMilliseconds,
         'undo_depth': _undoManager.undoSnapshotRecords.length,
         'redo_depth': _undoManager.redoSnapshotRecords.length,
         'transport': <String, dynamic>{
@@ -61135,6 +62726,54 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         },
         'master_effects': _aiV3MasterEffectsJson(),
       };
+
+  String _localizedAiV3ReceiptLabel(
+    Map<dynamic, dynamic> receipt,
+    String fallback,
+  ) {
+    final key = receipt['verified_l10n_key']?.toString().trim() ?? '';
+    if (key.isEmpty) return fallback;
+    final rawArgs = receipt['verified_l10n_args'];
+    const localizableResourceLabels = <String>{
+      'vocal stem',
+      'instrumental stem',
+      'vocal row',
+      'instrumental row',
+      'generated row',
+      'generated audio row',
+      'generated MIDI row',
+      'generated clip',
+      'generated audio clip',
+      'generated MIDI clip',
+      'left split clip',
+      'right split clip',
+      'copied clip',
+      'glued clip',
+      'generated group',
+    };
+    final args = rawArgs is Map
+        ? rawArgs.map(
+            (name, value) {
+              final text = value.toString();
+              return MapEntry(
+                name.toString(),
+                localizableResourceLabels.contains(text)
+                    ? L10n.translate(context, text)
+                    : text,
+              );
+            },
+          )
+        : const <String, String>{};
+    return L10n.translateWithParams(context, key, args);
+  }
+
+  String _localizedAiV3AlreadySatisfiedLabel(String label) {
+    return L10n.translateWithParams(
+      context,
+      '{label} (already set)',
+      <String, String>{'label': label},
+    );
+  }
 
   Future<void> _presentAiV3Handoff(
     Map<String, dynamic> handoff, {
@@ -61316,6 +62955,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     final expectations = await _captureAiV3Expectations(actions);
+    final workflowRuntime = AiV3WorkflowRuntime();
     final executionSummariesByCommandId = <String, List<String>>{};
     final deferredActionNotices = <String>[];
     final deferredExecutionNotices = <String>[];
@@ -61344,7 +62984,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             actions,
             chatFlowId: chatFlowId,
             v3RuntimeExpectations: expectations,
-            v3ExecutionSummariesByCommandId: executionSummariesByCommandId,
+                    v3ExecutionSummariesByCommandId:
+                        executionSummariesByCommandId,
+                    v3WorkflowRuntime: workflowRuntime,
           );
           if (!applied) throw StateError('v3_action_not_fully_applied');
         }),
@@ -61357,6 +62999,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         },
         observe: () => _observeAiV3Expectations(expectations),
         rollback: (action) => action.undo(),
+                rollbackAll: _undoEditorActionsInReverse,
         commit: (captured) async {
           final persistentActions = captured
               .where((action) => action is! _AiV3TransportRollbackAction)
@@ -61372,15 +63015,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final verifiedActionNotices = deferredActionNotices.isNotEmpty
           ? deferredActionNotices
           : deferredExecutionNotices;
+      final localizedExecutionSummaries =
+          Localizations.localeOf(context).languageCode == 'en'
+              ? executionSummariesByCommandId
+              : const <String, List<String>>{};
       final executionDetails = aiV3VerifiedExecutionDetails(
         bundle,
-        executionSummariesByCommandId: executionSummariesByCommandId,
+        executionSummariesByCommandId: localizedExecutionSummaries,
         actionNotices: verifiedActionNotices,
+        receiptLabelLocalizer: _localizedAiV3ReceiptLabel,
+        alreadySatisfiedLocalizer: _localizedAiV3AlreadySatisfiedLabel,
       );
       final conversationMessage = aiV3VerifiedConversationMessage(
         bundle,
-        executionSummariesByCommandId: executionSummariesByCommandId,
+        executionSummariesByCommandId: localizedExecutionSummaries,
         actionNotices: verifiedActionNotices,
+        receiptLabelLocalizer: _localizedAiV3ReceiptLabel,
+        alreadySatisfiedLocalizer: _localizedAiV3AlreadySatisfiedLabel,
       );
       final completionMessage = aiV3VerifiedCompletionMessage(bundle);
       _chatPipeline.recordAiV3Execution(
@@ -61399,11 +63050,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         conversationMessage: conversationMessage,
       );
       final count = (bundle['receipts'] as List?)?.length ?? actions.length;
-      final applied =
-          count == 1 ? 'Applied 1 change.' : 'Applied $count changes.';
+      final applied = L10n.translateWithParams(
+        context,
+        count == 1 ? 'Applied 1 change.' : 'Applied {count} changes.',
+        <String, String>{'count': '$count'},
+      );
       _insertExecutionDetailSystemText(
         source: 'ai_v3_verified_execution',
-        collapsedTitle: 'Applied ${executionDetails.length} verified changes',
+        collapsedTitle: L10n.translateWithParams(
+          context,
+          executionDetails.length == 1
+              ? 'Applied 1 verified change'
+              : 'Applied {count} verified changes',
+          <String, String>{'count': '${executionDetails.length}'},
+        ),
         detailLines: executionDetails,
       );
       _insertAssistantChatText(
@@ -61421,6 +63081,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         Map<String, dynamic>> catch (error, stackTrace) {
       releaseTransactionNoticeCapture();
       if (executionStopwatch.isRunning) executionStopwatch.stop();
+      _updateOverallDurationIfNeeded(forceRebuild: true);
+      final artifactCleanupComplete = await workflowRuntime
+          .deleteGeneratedArtifacts();
       try {
         await _refreshAiV3ExpectedEffectSnapshots(expectations);
       } catch (refreshError) {
@@ -61439,12 +63102,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           'observed_mutations': error.observed,
           'verification': 'failed',
           'rollback': error.rollbackIncomplete ? 'incomplete' : 'complete',
+          'artifact_cleanup': artifactCleanupComplete
+              ? 'complete'
+              : 'incomplete',
           'execution_elapsed_ms': executionStopwatch.elapsedMilliseconds,
         },
       );
       _reportAiChatFailure(error, stackTrace, stage: 'v3_execution');
       _insertAiFailureSystemText(
-        error.rollbackIncomplete
+        error.rollbackIncomplete || !artifactCleanupComplete
             ? 'The changes failed and could not be fully rolled back. Review the project state.'
             : _aiV3RolledBackFailureMessage(error.cause),
       );
@@ -61567,7 +63233,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     int? rowIdForIndex(int? row) =>
         row != null && _isValidRowIndex(row) ? _rowIdAt(row) : null;
 
-    for (final action in actions) {
+    for (var actionIndex = 0; actionIndex < actions.length; actionIndex++) {
+      final action = actions[actionIndex];
       final data = _toActionMap(action.data);
       final target = _actionTarget(data);
       final row = _resolveRowIndexFromActionTarget(data);
@@ -61575,7 +63242,47 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         case 'project_edit':
           if (data['operation'] == 'set_tempo' && data['tempo_bpm'] is num) {
             projectTempoChanges = true;
-            simulatedProjectTempo = (data['tempo_bpm'] as num).toDouble();
+            final previousSimulatedTempo = simulatedProjectTempo;
+            final nextSimulatedTempo = (data['tempo_bpm'] as num).toDouble();
+            final forceAudioTempoFollow = _toActionBool(
+              data['time_stretch_audio'],
+            );
+            for (final entry in simulatedClipBounds.entries) {
+              final clipIndex = _audioTracks.indexWhere(
+                (clip) => clip.clipId == entry.key,
+              );
+              if (clipIndex < 0) continue;
+              final clip = _audioTracks[clipIndex];
+              final bounds = entry.value;
+              final start = bounds['start'];
+              final end = bounds['end'];
+              if (start == null || end == null) continue;
+              final wasFollowingTempo =
+                  clip.isMidi || simulatedTempoFollow[entry.key] == true;
+              final followsTempo =
+                  wasFollowingTempo || (!clip.isMidi && forceAudioTempoFollow);
+              final remappedStart = remapTimelineSecondsForTempoChange(
+                start,
+                previousBpm: previousSimulatedTempo,
+                nextBpm: nextSimulatedTempo,
+              );
+              bounds
+                ..['start'] = remappedStart
+                ..['end'] = followsTempo
+                    ? remapTimelineSecondsForTempoChange(
+                        end,
+                        previousBpm: previousSimulatedTempo,
+                        nextBpm: nextSimulatedTempo,
+                      )
+                    : remappedStart + (end - start);
+              if (!clip.isMidi && forceAudioTempoFollow) {
+                if (!wasFollowingTempo) {
+                  simulatedSourceTempos[entry.key] = previousSimulatedTempo;
+                }
+                simulatedTempoFollow[entry.key] = true;
+              }
+            }
+            simulatedProjectTempo = nextSimulatedTempo;
             expectations.removeWhere(
               (expectation) => expectation['kind'] == 'clip_bounds',
             );
@@ -61589,8 +63296,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           expectedNewRows += 1;
           expectations.add(<String, dynamic>{
             'kind': 'row_created',
-            'before_row_ids':
-                _rows.map((value) => value.rowId).toList(growable: false),
+            if ((data['command_id']?.toString().trim() ?? '').isNotEmpty)
+              'producer_command_id': data['command_id'].toString().trim(),
+            'before_row_ids': _rows
+                .map((value) => value.rowId)
+                .toList(growable: false),
             'name': data['name']?.toString().trim() ?? '',
             'lane_kind': data['lane_kind']?.toString() ?? 'audio',
             'instrument_id': data['instrument_id']?.toString() ?? '',
@@ -61617,6 +63327,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               rowId: rowId,
               rowIndex: deletedRowIndex,
               clipIds: deletedClipIds,
+              deletionActionIndex: actionIndex,
             );
             expectations.add(<String, dynamic>{
               'kind': 'row_deleted',
@@ -61631,37 +63342,45 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           if (operation == 'create') {
             expectations.add(<String, dynamic>{
               'kind': 'group_created',
-              'group_id': data['group_id'],
+              'group_id': data['member_targets'] is List
+                  ? null
+                  : data['group_id'],
               'name': data['name'],
-              'member_row_ids': List<int>.from(data['row_ids'] as List),
-              'expected_row_order':
-                  List<int>.from(data['expected_row_order'] as List),
+              'member_row_ids': data['row_ids'] is List
+                  ? List<int>.from(data['row_ids'] as List)
+                  : null,
+              'expected_row_order': data['expected_row_order'] is List
+                  ? List<int>.from(data['expected_row_order'] as List)
+                  : null,
             });
           } else if (operation == 'remove_row') {
             expectations.add(<String, dynamic>{
               'kind': 'group_row_removed',
-              'group_id': data['group_id'],
+              'group_id': data['target'] is Map ? null : data['group_id'],
               'row_id': data['row_id'],
-              'dissolves_group': data['dissolves_group'] == true,
-              'expected_member_row_ids': List<int>.from(
-                data['expected_member_row_ids'] as List? ?? const <int>[],
-              ),
+              'dissolves_group': data['dissolves_group'],
+              'expected_member_row_ids': data['expected_member_row_ids'] is List
+                  ? List<int>.from(data['expected_member_row_ids'] as List)
+                  : null,
             });
           } else if (operation == 'set_collapsed') {
             expectations.add(<String, dynamic>{
               'kind': 'group_collapsed',
-              'group_id': data['group_id'],
+              'group_id': data['target'] is Map ? null : data['group_id'],
               'collapsed': data['collapsed'],
             });
           }
           break;
         case 'row_mute':
+          if (target['resource_ref'] is Map) break;
           if (row != null) {
             _addAiV3Expectation(expectations, <String, dynamic>{
               'kind': 'row_mute',
               'row': row,
               if (target['row_id'] is int) 'row_id': target['row_id'],
-              'value': data['operation'] == 'mute',
+              'value': data['operation'] == 'set_muted'
+                  ? data['muted'] == true
+                  : data['operation'] == 'mute',
             });
           }
           break;
@@ -61686,16 +63405,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           }
           break;
         case 'row_solo':
+          if (target['resource_ref'] is Map) break;
           if (row != null) {
             _addAiV3Expectation(expectations, <String, dynamic>{
               'kind': 'row_solo',
               'row': row,
               if (target['row_id'] is int) 'row_id': target['row_id'],
-              'value': data['operation'] == 'solo',
+              'value': data['operation'] == 'set_soloed'
+                  ? data['soloed'] == true
+                  : data['operation'] == 'solo',
             });
           }
           break;
         case 'row_rename':
+          if (target['resource_ref'] is Map) break;
           if (row != null) {
             _addAiV3Expectation(expectations, <String, dynamic>{
               'kind': 'row_name',
@@ -61716,6 +63439,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           }
           break;
         case 'row_mix':
+          if (target['resource_ref'] is Map) break;
           if (row == null) break;
           final operation = _normalizeRowMixOperation(data['operation']);
           if (operation == 'set_pan' || operation == 'adjust_pan') {
@@ -61754,6 +63478,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           final operation = _normalizeClipEditOperation(
             data['operation']?.toString().trim().toLowerCase() ?? '',
           );
+          if (target['resource_ref'] is Map) {
+            if (operation == 'cut' || operation == 'duplicate') {
+              expectedNewClips += 1;
+            } else if (operation == 'delete') {
+              expectedDeletedClips += 1;
+            }
+            break;
+          }
           final targetClipId = target['clip_id']?.toString().trim() ?? '';
           final index = targetClipId.isEmpty
               ? _toActionInt(target['clip_index'])
@@ -61846,7 +63578,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               row: clip.rowIndex,
               start: cut,
               length: clipEnd - cut,
-            ));
+                producerActionIndex: actionIndex,
+                producerCommandId: data['command_id']?.toString(),
+              ),
+            );
             expectedNewClips += 1;
             recordCreatedClipForRow(clip.rowId, 1);
           } else if (operation == 'duplicate') {
@@ -61861,7 +63596,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               row: destinationRow,
               start: start,
               length: clipEnd - clipStart,
-            ));
+                producerActionIndex: actionIndex,
+                producerCommandId: data['command_id']?.toString(),
+              ),
+            );
             expectedNewClips += 1;
             recordCreatedClipForRow(rowIdForIndex(destinationRow), 1);
           } else if (operation == 'delete') {
@@ -61918,12 +63656,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               'kind': 'clip_stretch',
               'clip_id': clip.clipId,
               'length': durationSeconds,
-              'preserve_pitch':
-                  _toActionBool(data['preserve_pitch'], fallback: true),
-              'warp_mode': _toActionBool(
+              'preserve_pitch': _toActionBool(
                 data['preserve_pitch'],
                 fallback: true,
-              )
+              ),
+              'warp_mode': _toActionBool(data['preserve_pitch'], fallback: true)
                   ? kTempoWarpModeComplex
                   : kTempoWarpModeRepitch,
             });
@@ -62014,7 +63751,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   .map((value) => value.toString())
                   .where((value) => value.isNotEmpty)
                   .toSet();
-          expectedDeletedClips += sourceIds.length;
+          final typedSourceCount = data['sources'] is List
+              ? (data['sources'] as List).length
+              : sourceIds.length;
+          expectedDeletedClips += typedSourceCount;
           expectedNewClips += 1;
           for (final sourceId in sourceIds) {
             simulatedAliveClipIds.remove(sourceId);
@@ -62113,8 +63853,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final lengthBeats = _toActionDouble(data['length_beats']) ?? 0.0;
             expectations.add(<String, dynamic>{
               'kind': 'midi_clip_created',
-              'before_clip_ids':
-                  _audioTracks.map((clip) => clip.clipId).toList(),
+              'producer_action_index': actionIndex,
+              if ((data['command_id']?.toString().trim() ?? '').isNotEmpty)
+                'producer_command_id': data['command_id'].toString().trim(),
+              'before_clip_ids': _audioTracks
+                  .map((clip) => clip.clipId)
+                  .toList(),
               'row': targetRow,
               'start': startMs / 1000.0,
               'length': lengthBeats * 60.0 / simulatedProjectTempo,
@@ -62156,6 +63900,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           }
           expectations.add(<String, dynamic>{
             'kind': 'samples_created',
+            'producer_action_index': actionIndex,
+            if ((data['command_id']?.toString().trim() ?? '').isNotEmpty)
+              'producer_command_id': data['command_id'].toString().trim(),
             'before_clip_ids': _audioTracks.map((clip) => clip.clipId).toList(),
             'items': sampleItems,
           });
@@ -62168,10 +63915,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           }
           break;
         case 'v3_effect_configure':
-          if (row != null) {
+          if (row != null && target['resource_ref'] == null) {
             expectations.add(<String, dynamic>{
               'kind': 'effect',
               'row': row,
+              'force_individual_row': true,
               if (_isValidRowIndex(row)) 'row_id': _rowIdAt(row),
               'value': data['effect_id'].toString(),
             });
@@ -62227,9 +63975,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           );
           break;
         case 'automation_edit':
-          if (row != null) {
+          if (row != null && target['resource_ref'] == null) {
             _addAiV3Expectation(expectations, <String, dynamic>{
               'kind': 'automation_points',
+              'producer_action_index': actionIndex,
               'row': row,
               if (target['row_id'] is int) 'row_id': target['row_id'],
               'automation_target_id':
@@ -62338,6 +64087,1353 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return null;
   }
 
+  String _aiV3ResourceExpectationKey(AiV3ResourceRef ref) =>
+      '${ref.commandId}.${ref.output}';
+
+  List<Map<String, dynamic>> _aiV3MidiNotePayload(AudioTrack clip) =>
+      aiV3CanonicalMidiNotes(
+        clip.midiNotes.map(
+          (note) => <String, dynamic>{
+            'pitch': note.pitch,
+            'start_beat': note.startBeat,
+            'length_beats': note.lengthBeats,
+            'velocity': note.velocity,
+          },
+        ),
+      );
+
+  double _aiV3MidiContentEndBeats(Iterable<Map<String, dynamic>> notes) =>
+      notes.fold<double>(
+        0.0,
+        (latest, note) => math.max(
+          latest,
+          (_toActionDouble(note['start_beat']) ?? 0.0) +
+              (_toActionDouble(note['length_beats']) ?? 0.0),
+        ),
+      );
+
+  Map<String, dynamic> _aiV3SplitPreservedClipState(
+    AudioTrack clip,
+  ) => <String, dynamic>{
+    'row_id': clip.rowId,
+    'row_index': clip.rowIndex,
+    if (!clip.isMidi) 'file': clip.file.path,
+    if (!clip.isMidi) 'original_file': clip.originalFile.path,
+    if (!clip.isMidi) 'audio_duration_ms': clip.audioDuration.inMilliseconds,
+    'gain': clip.gain,
+    'normalize_volume': clip.normalizeVolume,
+    'normalize_gain': clip.normalizeGain,
+    'pre_normalize_gain': clip.preNormalizeGain,
+    'pitch_semitones': clip.pitchSemitones,
+    'is_reversed': clip.isReversed,
+    'source_tempo_bpm': clip.sourceTempoBpm,
+    'stretch_to_project_tempo': clip.stretchToProjectTempo,
+    'tempo_stretch_preserve_pitch': clip.tempoStretchPreservePitch,
+    'tempo_warp_mode': clip.tempoWarpMode,
+    'recording_latency_ms': clip.recordingLatencyMs,
+    'alignment_offset_ms': clip.alignmentOffsetMs,
+    'audio_enhancement_preset': clip.audioEnhancementPreset,
+    'label': clip.label,
+    'clip_kind': clip.clipKind.name,
+    'instrument_id': clip.instrumentId,
+    'instrument_name': clip.instrumentName,
+    'instrument_params': clip.instrumentParams,
+    'hosted_instrument_state': clip.hostedInstrumentStateBase64,
+    'midi_notes': _aiV3MidiNotePayload(clip),
+    'volume_automation': clip.volumeAutomation
+        .map((point) => point.toJson())
+        .toList(),
+  };
+
+  Map<String, dynamic> _aiV3DuplicatePreservedClipState(AudioTrack clip) {
+    final state = _aiV3SplitPreservedClipState(clip)
+      ..remove('row_id')
+      ..remove('row_index');
+    state
+      ..['trim_start_ms'] = clip.trimStart.inMilliseconds
+      ..['trim_end_ms'] = clip.trimEnd.inMilliseconds;
+    return state;
+  }
+
+  void _markAiV3ProducerOutputTransformed(
+    List<Map<String, dynamic>> expectations,
+    AiV3ResourceRef ref,
+  ) {
+    for (final expectation in expectations) {
+      if (expectation['producer_command_id'] != ref.commandId) continue;
+      if (expectation['kind'] == 'midi_clip_created' &&
+          ref.output == 'midi_clip') {
+        expectation['resource_transformed'] = true;
+      } else if (expectation['kind'] == 'audio_converted_to_midi' &&
+          ref.output == 'midi_clip') {
+        expectation['resource_transformed'] = true;
+      } else if (expectation['kind'] == 'clip_created') {
+        expectation['resource_transformed'] = true;
+      } else if (expectation['kind'] == 'samples_created' &&
+          ref.output == 'audio_clip') {
+        expectation['resource_transformed'] = true;
+      } else if (expectation['kind'] == 'stems_separated' &&
+          const <String>{
+            'vocals_clip',
+            'instrumental_clip',
+          }.contains(ref.output)) {
+        expectation['${ref.output}_transformed'] = true;
+      } else if (expectation['kind'] == 'clips_glued' &&
+          ref.output == 'glued_clip') {
+        expectation['resource_transformed'] = true;
+      }
+    }
+  }
+
+  Map<String, dynamic> _prepareAiV3GlueRuntimeState(
+    Map<String, dynamic> data, {
+    required List<Map<String, dynamic>> expectations,
+    required AiV3WorkflowRuntime workflowRuntime,
+  }) {
+    final commandId = data['command_id']?.toString().trim() ?? '';
+    final rawSources = data['sources'];
+    if (commandId.isEmpty || rawSources is! List || rawSources.length < 2) {
+      throw StateError('v3_clip_glue_target_invalid');
+    }
+    final sourceIds = <String>[];
+    final sourceRefs = <AiV3ResourceRef>[];
+    final parentRowKeys = <String>{};
+    final starts = <double>[];
+    final ends = <double>[];
+    int? rowId;
+    for (final rawSource in rawSources) {
+      if (rawSource is! Map) {
+        throw StateError('v3_clip_glue_target_invalid');
+      }
+      final source = Map<String, dynamic>.from(rawSource);
+      String clipId;
+      AiV3ResourceRef? ref;
+      if (source['resource_ref'] != null) {
+        try {
+          ref = AiV3ResourceRef.fromJson(source['resource_ref']);
+        } on FormatException {
+          throw StateError('v3_resource_ref_invalid');
+        }
+        final binding = workflowRuntime.resolve(
+          ref,
+          expectedKind: AiV3ResourceKind.audioClip,
+        );
+        if (binding.stableId is! String) {
+          throw StateError('v3_resource_binding_invalid');
+        }
+        clipId = binding.stableId as String;
+        sourceRefs.add(ref);
+        if (binding.parentRowKey != null) {
+          parentRowKeys.add(binding.parentRowKey!);
+        }
+        final expected = _aiV3GeneratedResourceExpectation(expectations, ref);
+        if (expected['present'] != true ||
+            expected['clip_id']?.toString() != clipId) {
+          throw StateError('v3_resource_binding_unavailable');
+        }
+      } else {
+        clipId = source['clip_id']?.toString().trim() ?? '';
+      }
+      final clipIndex = _clipIndexForPersistentId(clipId);
+      if (clipId.isEmpty ||
+          !_isValidClipIndex(clipIndex) ||
+          _audioTracks[clipIndex].isMidi) {
+        throw StateError('v3_resource_binding_unavailable');
+      }
+      final clip = _audioTracks[clipIndex];
+      final start = clip.offset;
+      final end = start + _clipTimelineDurationSec(clip);
+      if (!start.isFinite || !end.isFinite || end <= start) {
+        throw StateError('v3_clip_glue_bounds_invalid');
+      }
+      if (ref != null) {
+        final expected = _aiV3GeneratedResourceExpectation(expectations, ref);
+        final expectedStart = _toActionDouble(expected['start']);
+        final expectedEnd = _toActionDouble(expected['end']);
+        if (expectedStart == null ||
+            expectedEnd == null ||
+            (start - expectedStart).abs() > 0.002 ||
+            (end - expectedEnd).abs() > 0.003) {
+          throw StateError('v3_resource_binding_target_mismatch');
+        }
+      }
+      if (rowId != null && rowId != clip.rowId) {
+        throw StateError('v3_clip_glue_row_mismatch');
+      }
+      rowId = clip.rowId;
+      sourceIds.add(clipId);
+      starts.add(start);
+      ends.add(end);
+    }
+    if (sourceIds.toSet().length != sourceIds.length || rowId == null) {
+      throw StateError('v3_clip_glue_target_invalid');
+    }
+    final start = starts.reduce(math.min);
+    final end = ends.reduce(math.max);
+    if (end - start <= 0.05) {
+      throw StateError('v3_clip_glue_bounds_invalid');
+    }
+    final rowIndex = _rowIndexForId(rowId);
+    if (!_isValidRowIndex(rowIndex) || _rows[rowIndex].isInstrumentLane) {
+      throw StateError('v3_clip_glue_row_mismatch');
+    }
+    return <String, dynamic>{
+      'command_id': commandId,
+      'source_clip_ids': sourceIds,
+      'source_refs': sourceRefs,
+      'row_id': rowId,
+      'parent_row_key': parentRowKeys.length == 1
+          ? parentRowKeys.single
+          : 'stable_row:$rowId',
+      'materialized_data': <String, dynamic>{
+        ...data,
+        'source_clip_ids': sourceIds,
+        'start_ms': start * 1000.0,
+        'duration_ms': (end - start) * 1000.0,
+        'target': <String, dynamic>{
+          'scope': 'row',
+          'row_id': rowId,
+          'row_index': rowIndex,
+          'source_clip_ids': sourceIds,
+        },
+      },
+    };
+  }
+
+  void _bindAiV3GlueOutput(
+    Map<String, dynamic> state, {
+    required Map<String, dynamic> glueExpectation,
+    required List<Map<String, dynamic>> expectations,
+    required AiV3WorkflowRuntime workflowRuntime,
+    required int producerActionIndex,
+  }) {
+    final commandId = state['command_id'] as String;
+    final sourceIds = (state['source_clip_ids'] as List).cast<String>();
+    final sourceRefs = (state['source_refs'] as List).cast<AiV3ResourceRef>();
+    final resultId = glueExpectation['result_clip_id']?.toString() ?? '';
+    final rowId = glueExpectation['row_id'] as int?;
+    final resultIndex = _clipIndexForPersistentId(resultId);
+    if (resultId.isEmpty ||
+        rowId == null ||
+        !_isValidClipIndex(resultIndex) ||
+        _audioTracks[resultIndex].isMidi ||
+        _audioTracks[resultIndex].rowId != rowId ||
+        _audioTracks.any((clip) => sourceIds.contains(clip.clipId))) {
+      throw StateError('v3_resource_binding_missing_output');
+    }
+    final result = _audioTracks[resultIndex];
+    final expectedStart = _toActionDouble(glueExpectation['start']);
+    final expectedLength = _toActionDouble(glueExpectation['length']);
+    if (expectedStart == null ||
+        expectedLength == null ||
+        (result.offset - expectedStart).abs() > 0.002 ||
+        (_clipTimelineDurationSec(result) - expectedLength).abs() > 0.1) {
+      throw StateError('v3_resource_binding_target_mismatch');
+    }
+    for (final sourceRef in sourceRefs) {
+      _markAiV3ProducerOutputTransformed(expectations, sourceRef);
+      _aiV3GeneratedResourceExpectation(expectations, sourceRef)['present'] =
+          false;
+      workflowRuntime.retire(sourceRef);
+    }
+    workflowRuntime.retireStableIds(sourceIds);
+    final resultRef = AiV3ResourceRef(
+      commandId: commandId,
+      output: 'glued_clip',
+    );
+    workflowRuntime.bind(
+      ref: resultRef,
+      kind: AiV3ResourceKind.audioClip,
+      stableId: resultId,
+      parentRowKey: state['parent_row_key'] as String?,
+    );
+    glueExpectation
+      ..['producer_command_id'] = commandId
+      ..['resource_transformed'] = false;
+    _addAiV3Expectation(expectations, glueExpectation);
+    _registerAiV3GeneratedResourceExpectation(
+      expectations,
+      ref: resultRef,
+      stableId: resultId,
+      kind: AiV3ResourceKind.audioClip,
+      rowId: rowId,
+      start: result.offset,
+      end: result.offset + _clipTimelineDurationSec(result),
+      producerActionIndex: producerActionIndex,
+      durationFollowsTempo: _clipFollowsProjectTempo(result),
+      pitchSemitones: result.pitchSemitones,
+      trimStartMs: result.trimStart.inMilliseconds.toDouble(),
+      trimEndMs: result.trimEnd.inMilliseconds.toDouble(),
+    );
+  }
+
+  Map<String, dynamic> _prepareAiV3DuplicateRuntimeState(
+    Map<String, dynamic> data,
+  ) {
+    final commandId = data['command_id']?.toString().trim() ?? '';
+    final target = _actionTarget(data);
+    final clipId = target['clip_id']?.toString().trim() ?? '';
+    final clipIndex = _clipIndexForPersistentId(clipId);
+    if (commandId.isEmpty || !_isValidClipIndex(clipIndex)) {
+      throw StateError('v3_resource_binding_unavailable');
+    }
+    final clip = _audioTracks[clipIndex];
+    final destinationRow =
+        _resolveRowIndexFromActionTarget(data, fallbackClipIndex: clipIndex) ??
+        clip.rowIndex;
+    if (!_isValidRowIndex(destinationRow) ||
+        (_rows[destinationRow].kind == TimelineRowKind.instrument) !=
+            clip.isMidi) {
+      throw StateError('v3_resource_binding_target_mismatch');
+    }
+    final startMs = _toActionDouble(data['paste_start_ms']);
+    if (startMs == null || !startMs.isFinite || startMs < 0.0) {
+      throw StateError('v3_resource_binding_target_mismatch');
+    }
+    final predictedStartMs = _toActionDouble(data['predicted_input_start_ms']);
+    final predictedEndMs = _toActionDouble(data['predicted_input_end_ms']);
+    final liveEnd = clip.offset + _clipTimelineDurationSec(clip);
+    if ((predictedStartMs != null &&
+            (clip.offset - predictedStartMs / 1000.0).abs() > 0.002) ||
+        (predictedEndMs != null &&
+            (liveEnd - predictedEndMs / 1000.0).abs() > 0.003)) {
+      throw StateError('v3_resource_binding_target_mismatch');
+    }
+    return <String, dynamic>{
+      'command_id': commandId,
+      'input_clip_id': clipId,
+      'kind': clip.isMidi
+          ? AiV3ResourceKind.midiClip
+          : AiV3ResourceKind.audioClip,
+      'destination_row': destinationRow,
+      'destination_row_id': _rowIdAt(destinationRow),
+      'start': startMs / 1000.0,
+      'length': _clipTimelineDurationSec(clip),
+      'before_clip_ids': _audioTracks
+          .map((candidate) => candidate.clipId)
+          .toSet(),
+      'preserved_state': _aiV3DuplicatePreservedClipState(clip),
+    };
+  }
+
+  void _bindAiV3DuplicateOutput(
+    Map<String, dynamic> state, {
+    required List<Map<String, dynamic>> expectations,
+    required AiV3WorkflowRuntime workflowRuntime,
+    required int producerActionIndex,
+  }) {
+    final commandId = state['command_id'] as String;
+    final inputClipId = state['input_clip_id'] as String;
+    final kind = state['kind'] as AiV3ResourceKind;
+    final destinationRow = state['destination_row'] as int;
+    final destinationRowId = state['destination_row_id'] as int;
+    final start = state['start'] as double;
+    final length = state['length'] as double;
+    final beforeClipIds = state['before_clip_ids'] as Set<String>;
+    final preservedState = state['preserved_state'] as Map<String, dynamic>;
+    final inputIndex = _clipIndexForPersistentId(inputClipId);
+    final created = _audioTracks
+        .where((clip) => !beforeClipIds.contains(clip.clipId))
+        .toList(growable: false);
+    if (!_isValidClipIndex(inputIndex) || created.length != 1) {
+      throw StateError('v3_resource_binding_missing_output');
+    }
+    final input = _audioTracks[inputIndex];
+    final copy = created.single;
+    final expectedMidi = kind == AiV3ResourceKind.midiClip;
+    if (copy.rowIndex != destinationRow ||
+        copy.rowId != destinationRowId ||
+        copy.isMidi != expectedMidi ||
+        (copy.offset - start).abs() > 0.002 ||
+        (_clipTimelineDurationSec(copy) - length).abs() > 0.003 ||
+        jsonEncode(_aiV3DuplicatePreservedClipState(input)) !=
+            jsonEncode(preservedState) ||
+        jsonEncode(_aiV3DuplicatePreservedClipState(copy)) !=
+            jsonEncode(preservedState)) {
+      throw StateError('v3_resource_binding_target_mismatch');
+    }
+
+    final ref = AiV3ResourceRef(commandId: commandId, output: 'copy_clip');
+    workflowRuntime.bind(
+      ref: ref,
+      kind: kind,
+      stableId: copy.clipId,
+      parentRowKey: state['parent_row_key'] as String?,
+    );
+    final producerExpectation = expectations
+        .where(
+          (expectation) =>
+              expectation['kind'] == 'clip_created' &&
+              expectation['producer_command_id'] == commandId,
+        )
+        .singleOrNull;
+    if (producerExpectation != null) {
+      producerExpectation['runtime_clip_id'] = copy.clipId;
+    }
+    _registerAiV3GeneratedResourceExpectation(
+      expectations,
+      ref: ref,
+      stableId: copy.clipId,
+      kind: kind,
+      rowId: destinationRowId,
+      start: start,
+      end: start + length,
+      producerActionIndex: producerActionIndex,
+      durationFollowsTempo: _clipFollowsProjectTempo(copy),
+      pitchSemitones: expectedMidi ? null : copy.pitchSemitones,
+      midiNotes: expectedMidi ? _aiV3MidiNotePayload(copy) : null,
+      trimStartMs: expectedMidi
+          ? null
+          : copy.trimStart.inMilliseconds.toDouble(),
+      trimEndMs: expectedMidi ? null : copy.trimEnd.inMilliseconds.toDouble(),
+    );
+  }
+
+  Map<String, dynamic> _prepareAiV3ReferencedTrimRuntimeData(
+    Map<String, dynamic> data, {
+    required Map<String, dynamic>? expectedResource,
+  }) {
+    if (expectedResource == null) {
+      throw StateError('v3_resource_expectation_missing');
+    }
+    final target = _actionTarget(data);
+    final clipId = target['clip_id']?.toString().trim() ?? '';
+    final clipIndex = _clipIndexForPersistentId(clipId);
+    if (!_isValidClipIndex(clipIndex) || _audioTracks[clipIndex].isMidi) {
+      throw StateError('v3_resource_binding_unavailable');
+    }
+    final clip = _audioTracks[clipIndex];
+    final liveStartMs = clip.offset * 1000.0;
+    final liveEndMs = (clip.offset + _clipTimelineDurationSec(clip)) * 1000.0;
+    final expectedStart = _toActionDouble(expectedResource['start']);
+    final expectedEnd = _toActionDouble(expectedResource['end']);
+    final requestedStartMs = _toActionDouble(data['requested_start_ms']);
+    final requestedEndMs = _toActionDouble(data['requested_end_ms']);
+    if (expectedStart == null ||
+        expectedEnd == null ||
+        requestedStartMs == null ||
+        requestedEndMs == null ||
+        (liveStartMs - expectedStart * 1000.0).abs() > 2.0 ||
+        (liveEndMs - expectedEnd * 1000.0).abs() > 3.0 ||
+        requestedStartMs < liveStartMs - 0.001 ||
+        requestedEndMs > liveEndMs + 0.001 ||
+        requestedEndMs - requestedStartMs < 50.0) {
+      throw StateError('v3_resource_trim_bounds_invalid');
+    }
+    final timelineDeltaStartMs = requestedStartMs - liveStartMs;
+    final timelineDeltaEndMs = requestedEndMs - liveEndMs;
+    final deltaStartMs = _timelineTrimDeltaToSourceMs(
+      clip,
+      timelineDeltaStartMs,
+    );
+    final deltaEndMs = _timelineTrimDeltaToSourceMs(clip, timelineDeltaEndMs);
+    final nextTrimStartMs =
+        clip.trimStart.inMilliseconds.toDouble() + deltaStartMs;
+    final nextTrimEndMs = clip.trimEnd.inMilliseconds.toDouble() + deltaEndMs;
+    if (nextTrimStartMs < 0.0 ||
+        nextTrimEndMs - nextTrimStartMs < 50.0 ||
+        nextTrimEndMs > clip.audioDuration.inMilliseconds + 0.001) {
+      throw StateError('v3_resource_trim_bounds_invalid');
+    }
+    final canonical = _canonicalAudioTrimBounds(
+      clip,
+      trimStartMs: nextTrimStartMs,
+      trimEndMs: nextTrimEndMs,
+    );
+    final canonicalTrimStartMs = canonical.trimStartMs.toDouble();
+    final canonicalTrimEndMs = canonical.trimEndMs.toDouble();
+    final currentRawDurationMs = _rawClipDurationSec(clip) * 1000.0;
+    final timelineDurationMs = _clipTimelineDurationMs(clip);
+    final timelinePerSource = currentRawDurationMs <= 0.0
+        ? 1.0
+        : timelineDurationMs / currentRawDurationMs;
+    final expectedRawDurationMs = canonicalTrimEndMs - canonicalTrimStartMs;
+    final expectedEndMs =
+        requestedStartMs + expectedRawDurationMs * timelinePerSource;
+    return <String, dynamic>{
+      ...data,
+      'delta_trim_start_ms':
+          canonicalTrimStartMs - clip.trimStart.inMilliseconds,
+      'delta_trim_end_ms': canonicalTrimEndMs - clip.trimEnd.inMilliseconds,
+      'new_start_ms': requestedStartMs,
+      'expected_start_ms': requestedStartMs,
+      'expected_end_ms': expectedEndMs,
+      'expected_trim_start_ms': canonicalTrimStartMs,
+      'expected_trim_end_ms': canonicalTrimEndMs,
+      'expected_raw_duration_sec': expectedRawDurationMs / 1000.0,
+    };
+  }
+
+  Future<void> _applyAiV3GeneratedAudioAnalysisAction(
+    Map<String, dynamic> data, {
+    required AiV3ResourceRef resourceRef,
+    required List<Map<String, dynamic>> expectations,
+    required int actionIndex,
+  }) async {
+    final resourceExpectation = _aiV3GeneratedResourceExpectation(
+      expectations,
+      resourceRef,
+    );
+    final target = _actionTarget(data);
+    final clipId = target['clip_id']?.toString().trim() ?? '';
+    final clipIndex = _clipIndexForPersistentId(clipId);
+    if (!_isValidClipIndex(clipIndex) ||
+        _audioTracks[clipIndex].isMidi ||
+        resourceExpectation['clip_id'] != clipId ||
+        resourceExpectation['present'] == false) {
+      throw StateError('v3_resource_binding_unavailable');
+    }
+    final clip = _audioTracks[clipIndex];
+    final expectedStart = _toActionDouble(resourceExpectation['start']);
+    final expectedEnd = _toActionDouble(resourceExpectation['end']);
+    final liveEnd = clip.offset + _clipTimelineDurationSec(clip);
+    final sourceDuration = await _resolveSampleDuration(clip.file.path);
+    if (expectedStart == null ||
+        expectedEnd == null ||
+        (clip.offset - expectedStart).abs() > 0.002 ||
+        (liveEnd - expectedEnd).abs() > 0.003 ||
+        sourceDuration == null ||
+        sourceDuration <= Duration.zero ||
+        clip.trimStart < Duration.zero ||
+        clip.trimEnd > sourceDuration + const Duration(milliseconds: 2) ||
+        clip.trimEnd - clip.trimStart < const Duration(milliseconds: 50)) {
+      throw StateError('v3_resource_binding_target_mismatch');
+    }
+
+    final operation = data['operation']?.toString().trim() ?? '';
+    if (operation == 'trim_silence' || operation == 'align_first_sound') {
+      final analysis = await _analyzeAiV3ClipBoundaries(clip);
+      if (analysis == null) {
+        throw StateError('v3_clip_boundary_analysis_unavailable');
+      }
+      if (operation == 'trim_silence') {
+        final edges = data['edges']?.toString() ?? '';
+        final paddingMs = _toActionDouble(data['padding_ms']);
+        if (!const <String>{'start', 'end', 'both'}.contains(edges) ||
+            paddingMs == null ||
+            !paddingMs.isFinite ||
+            paddingMs < 0.0 ||
+            paddingMs > 500.0) {
+          throw StateError('v3_clip_boundary_analysis_invalid');
+        }
+        final oldTrimStartMs = clip.trimStart.inMilliseconds.toDouble();
+        final oldTrimEndMs = clip.trimEnd.inMilliseconds.toDouble();
+        var nextTrimStartMs = oldTrimStartMs;
+        var nextTrimEndMs = oldTrimEndMs;
+        if (edges == 'start' || edges == 'both') {
+          nextTrimStartMs = math.max(
+            oldTrimStartMs,
+            analysis.audibleStartMs - paddingMs,
+          );
+        }
+        if (edges == 'end' || edges == 'both') {
+          nextTrimEndMs = math.min(
+            oldTrimEndMs,
+            analysis.audibleEndMs + paddingMs,
+          );
+        }
+        final canonical = _canonicalAudioTrimBounds(
+          clip,
+          trimStartMs: nextTrimStartMs,
+          trimEndMs: nextTrimEndMs,
+        );
+        final sourceStartDeltaMs = canonical.trimStartMs - oldTrimStartMs;
+        final rawDurationMs = (canonical.trimEndMs - canonical.trimStartMs)
+            .toDouble();
+        final oldRawDurationMs = _rawClipDurationSec(clip) * 1000.0;
+        final timelinePerSource = oldRawDurationMs <= 0.0
+            ? 1.0
+            : _clipTimelineDurationMs(clip) / oldRawDurationMs;
+        final nextStart =
+            clip.offset + sourceStartDeltaMs * timelinePerSource / 1000.0;
+        if (rawDurationMs < 50.0 || nextStart < 0.0) {
+          throw StateError('v3_clip_boundary_analysis_unavailable');
+        }
+        if (sourceStartDeltaMs.abs() >= 0.5 ||
+            (canonical.trimEndMs - oldTrimEndMs).abs() >= 0.5) {
+          await _applyClipEditAction(<String, dynamic>{
+            'operation': 'trim',
+            'delta_trim_start_ms': sourceStartDeltaMs,
+            'delta_trim_end_ms': canonical.trimEndMs - oldTrimEndMs,
+            'new_start_ms': nextStart * 1000.0,
+            'target': <String, dynamic>{'scope': 'clip', 'clip_id': clipId},
+          });
+        }
+        resourceExpectation
+          ..['start'] = nextStart
+          ..['end'] = nextStart + rawDurationMs * timelinePerSource / 1000.0
+          ..['trim_start_ms'] = canonical.trimStartMs.toDouble()
+          ..['trim_end_ms'] = canonical.trimEndMs.toDouble()
+          ..['raw_duration_sec'] = rawDurationMs / 1000.0;
+        return;
+      }
+
+      final destinationRaw = data['destination'];
+      if (destinationRaw is! Map) {
+        throw StateError('v3_clip_first_sound_destination_invalid');
+      }
+      final destination = Map<String, dynamic>.from(destinationRaw);
+      final millisecondsPerBeat = 60000.0 / _clampTempo(_tempo);
+      final rawDurationMs = _rawClipDurationSec(clip) * 1000.0;
+      final timelinePerSource = rawDurationMs <= 0.0
+          ? 1.0
+          : _clipTimelineDurationMs(clip) / rawDurationMs;
+      final firstSoundTimelineMs =
+          analysis.firstSoundOffsetMs * timelinePerSource;
+      final currentFirstSoundBeat =
+          (clip.offset * 1000.0 + firstSoundTimelineMs) / millisecondsPerBeat;
+      final destinationBeat = switch (destination['kind']) {
+        'project_beat' => _toActionDouble(destination['beat']),
+        'nearest_beat' => currentFirstSoundBeat.roundToDouble(),
+        'nearest_bar' =>
+          (currentFirstSoundBeat / _timeSignatureNumerator).roundToDouble() *
+              _timeSignatureNumerator,
+        'playhead' =>
+          _globalAudioClock.inMilliseconds.toDouble() / millisecondsPerBeat,
+        'project_start' => 0.0,
+        _ => null,
+      };
+      if (destinationBeat == null || !destinationBeat.isFinite) {
+        throw StateError('v3_clip_first_sound_destination_invalid');
+      }
+      final nextStartMs =
+          destinationBeat * millisecondsPerBeat - firstSoundTimelineMs;
+      if (!nextStartMs.isFinite || nextStartMs < -0.5) {
+        throw StateError('v3_clip_first_sound_negative_start');
+      }
+      final nextStart = math.max(0.0, nextStartMs) / 1000.0;
+      final deltaMs = (nextStart - clip.offset) * 1000.0;
+      final nextAlignmentOffsetMs = clip.alignmentOffsetMs + deltaMs;
+      if (deltaMs.abs() >= 0.5) {
+        await _applyClipEditAction(<String, dynamic>{
+          'operation': 'move',
+          'delta_ms': deltaMs,
+          'new_alignment_offset_ms': nextAlignmentOffsetMs,
+          'target': <String, dynamic>{'scope': 'clip', 'clip_id': clipId},
+        });
+      }
+      final duration = expectedEnd - expectedStart;
+      resourceExpectation
+        ..['start'] = nextStart
+        ..['end'] = nextStart + duration
+        ..['alignment_offset_ms'] = nextAlignmentOffsetMs;
+      return;
+    }
+
+    if (operation != 'align_tempo_to_project' &&
+        operation != 'set_tempo_from_clip') {
+      throw StateError('v3_resource_action_unsupported');
+    }
+    final mode = data['mode']?.toString().trim() ?? '';
+    if (!const <String>{'repitch', 'preserve_pitch'}.contains(mode)) {
+      throw StateError('v3_clip_tempo_analysis_mode_invalid');
+    }
+    final detectedTempo = await _detectClipTempoBpm(clip);
+    if (detectedTempo == null ||
+        !detectedTempo.isFinite ||
+        detectedTempo < 40.0 ||
+        detectedTempo > 240.0) {
+      throw StateError('v3_clip_tempo_detection_unavailable');
+    }
+    final authoritativeRawDurationSec = _rawClipDurationSec(clip);
+    final stableTarget = <String, dynamic>{'scope': 'clip', 'clip_id': clipId};
+    await _applyClipEditAction(<String, dynamic>{
+      'operation': 'set_source_tempo',
+      'source_tempo_bpm': detectedTempo,
+      'target': stableTarget,
+    });
+    if (operation == 'set_tempo_from_clip') {
+      final previousTempo = _tempo;
+      final nextTempo = detectedTempo.round().clamp(40, 240).toDouble();
+      await _applyProjectEditAction(<String, dynamic>{
+        'operation': 'set_tempo',
+        'tempo_bpm': nextTempo,
+        'time_stretch_audio': false,
+        'preserve_pitch': mode == 'preserve_pitch',
+        'target': const <String, dynamic>{'scope': 'project'},
+      });
+      _composeAiV3RuntimeExpectationsForTempo(
+        expectations,
+        previousBpm: previousTempo,
+        nextBpm: nextTempo,
+        tempoActionIndex: actionIndex,
+        forceAudioTempoFollow: false,
+        preserveAudioPitch: mode == 'preserve_pitch',
+      );
+    }
+    await _applyClipEditAction(<String, dynamic>{
+      'operation': 'tempo_follow',
+      'mode': mode,
+      'target': stableTarget,
+    });
+    final composedStart =
+        _toActionDouble(resourceExpectation['start']) ?? clip.offset;
+    final finalDuration =
+        authoritativeRawDurationSec * detectedTempo / _clampTempo(_tempo);
+    if (!finalDuration.isFinite || finalDuration < 0.05) {
+      throw StateError('v3_clip_tempo_detection_unavailable');
+    }
+    resourceExpectation
+      ..['start'] = composedStart
+      ..['end'] = composedStart + finalDuration
+      ..['raw_duration_sec'] = authoritativeRawDurationSec
+      ..['source_tempo_bpm'] = detectedTempo
+      ..['tempo_follow_mode'] = mode
+      ..['tempo_preserve_pitch'] = mode == 'preserve_pitch'
+      ..['duration_follows_tempo'] = true;
+  }
+
+  Map<String, dynamic> _withAiV3AuthoritativeResourceBounds(
+    Map<String, dynamic> data,
+    Map<String, dynamic> expectedResource,
+  ) {
+    final start = _toActionDouble(expectedResource['start']);
+    final end = _toActionDouble(expectedResource['end']);
+    if (start == null || end == null || end <= start) {
+      throw StateError('v3_resource_expectation_missing');
+    }
+    return <String, dynamic>{
+      ...data,
+      'predicted_input_start_ms': start * 1000.0,
+      'predicted_input_end_ms': end * 1000.0,
+    };
+  }
+
+  Map<String, dynamic> _prepareAiV3SplitRuntimeState(
+    Map<String, dynamic> data, {
+    required AiV3ResourceRef? inputRef,
+  }) {
+    final commandId = data['command_id']?.toString().trim() ?? '';
+    final target = _actionTarget(data);
+    final clipId = target['clip_id']?.toString().trim() ?? '';
+    final clipIndex = _clipIndexForPersistentId(clipId);
+    if (commandId.isEmpty || !_isValidClipIndex(clipIndex)) {
+      throw StateError('v3_resource_binding_unavailable');
+    }
+    final clip = _audioTracks[clipIndex];
+    final start = clip.offset;
+    final end = start + _clipTimelineDurationSec(clip);
+    final cutMs = _toActionDouble(data['cut_ms']);
+    if (cutMs == null || !cutMs.isFinite) {
+      throw StateError('v3_resource_split_point_invalid');
+    }
+    final cut = cutMs / 1000.0;
+    final predictedStartMs = _toActionDouble(data['predicted_input_start_ms']);
+    final predictedEndMs = _toActionDouble(data['predicted_input_end_ms']);
+    if (cut - start < 0.05 ||
+        end - cut < 0.05 ||
+        (predictedStartMs != null &&
+            (start - predictedStartMs / 1000.0).abs() > 0.002) ||
+        (predictedEndMs != null &&
+            (end - predictedEndMs / 1000.0).abs() > 0.002)) {
+      throw StateError('v3_resource_split_point_invalid');
+    }
+    final rawDuration = (clip.trimEnd - clip.trimStart).inMilliseconds
+        .toDouble();
+    final ratio = ((cut - start) / (end - start)).clamp(0.0, 1.0);
+    if (rawDuration * ratio < 50.0 || rawDuration * (1.0 - ratio) < 50.0) {
+      throw StateError('v3_resource_split_point_invalid');
+    }
+    return <String, dynamic>{
+      'command_id': commandId,
+      'input_clip_id': clipId,
+      'input_ref': inputRef,
+      'kind': clip.isMidi
+          ? AiV3ResourceKind.midiClip
+          : AiV3ResourceKind.audioClip,
+      'row_id': clip.rowId,
+      'start': start,
+      'end': end,
+      'cut': cut,
+      'before_clip_ids': _audioTracks
+          .map((candidate) => candidate.clipId)
+          .toSet(),
+      'preserved_state': _aiV3SplitPreservedClipState(clip),
+    };
+  }
+
+  void _bindAiV3SplitOutputs(
+    Map<String, dynamic> state, {
+    required List<Map<String, dynamic>> expectations,
+    required AiV3WorkflowRuntime workflowRuntime,
+    required int producerActionIndex,
+  }) {
+    final commandId = state['command_id'] as String;
+    final inputClipId = state['input_clip_id'] as String;
+    final inputRef = state['input_ref'] as AiV3ResourceRef?;
+    final kind = state['kind'] as AiV3ResourceKind;
+    final rowId = state['row_id'] as int;
+    final start = state['start'] as double;
+    final end = state['end'] as double;
+    final cut = state['cut'] as double;
+    final beforeClipIds = state['before_clip_ids'] as Set<String>;
+    final preservedState = state['preserved_state'] as Map<String, dynamic>;
+    final leftIndex = _clipIndexForPersistentId(inputClipId);
+    final created = _audioTracks
+        .where((clip) => !beforeClipIds.contains(clip.clipId))
+        .toList(growable: false);
+    if (!_isValidClipIndex(leftIndex) || created.length != 1) {
+      throw StateError('v3_resource_binding_missing_output');
+    }
+    final left = _audioTracks[leftIndex];
+    final right = created.single;
+    final expectedMidi = kind == AiV3ResourceKind.midiClip;
+    if (left.rowId != rowId ||
+        right.rowId != rowId ||
+        left.isMidi != expectedMidi ||
+        right.isMidi != expectedMidi ||
+        (left.offset - start).abs() > 0.002 ||
+        (left.offset + _clipTimelineDurationSec(left) - cut).abs() > 0.003 ||
+        (right.offset - cut).abs() > 0.002 ||
+        (right.offset + _clipTimelineDurationSec(right) - end).abs() > 0.003 ||
+        jsonEncode(_aiV3SplitPreservedClipState(left)) !=
+            jsonEncode(preservedState) ||
+        jsonEncode(_aiV3SplitPreservedClipState(right)) !=
+            jsonEncode(preservedState)) {
+      throw StateError('v3_resource_binding_target_mismatch');
+    }
+
+    final leftRef = AiV3ResourceRef(commandId: commandId, output: 'left_clip');
+    final rightRef = AiV3ResourceRef(
+      commandId: commandId,
+      output: 'right_clip',
+    );
+    if (inputRef != null) workflowRuntime.retire(inputRef);
+    final parentRowKey = state['parent_row_key'] as String?;
+    workflowRuntime.bind(
+      ref: leftRef,
+      kind: kind,
+      stableId: left.clipId,
+      parentRowKey: parentRowKey,
+    );
+    workflowRuntime.bind(
+      ref: rightRef,
+      kind: kind,
+      stableId: right.clipId,
+      parentRowKey: parentRowKey,
+    );
+    final producerExpectation = expectations
+        .where(
+          (expectation) =>
+              expectation['kind'] == 'clip_created' &&
+              expectation['producer_command_id'] == commandId,
+        )
+        .singleOrNull;
+    if (producerExpectation != null) {
+      producerExpectation['runtime_clip_id'] = right.clipId;
+    }
+    if (inputRef != null) {
+      final inputKey = _aiV3ResourceExpectationKey(inputRef);
+      _markAiV3ProducerOutputTransformed(expectations, inputRef);
+      expectations.removeWhere(
+        (expectation) =>
+            expectation['kind'] == 'generated_resource_state' &&
+            expectation['resource_key'] == inputKey,
+      );
+    }
+    final notes = expectedMidi ? _aiV3MidiNotePayload(left) : null;
+    _registerAiV3GeneratedResourceExpectation(
+      expectations,
+      ref: leftRef,
+      stableId: left.clipId,
+      kind: kind,
+      start: start,
+      end: cut,
+      producerActionIndex: producerActionIndex,
+      durationFollowsTempo: _clipFollowsProjectTempo(left),
+      pitchSemitones: expectedMidi ? null : left.pitchSemitones,
+      midiNotes: notes,
+    );
+    _registerAiV3GeneratedResourceExpectation(
+      expectations,
+      ref: rightRef,
+      stableId: right.clipId,
+      kind: kind,
+      start: cut,
+      end: end,
+      producerActionIndex: producerActionIndex,
+      durationFollowsTempo: _clipFollowsProjectTempo(right),
+      pitchSemitones: expectedMidi ? null : right.pitchSemitones,
+      midiNotes: notes,
+    );
+  }
+
+  Map<String, dynamic> _aiV3GeneratedResourceExpectation(
+    List<Map<String, dynamic>> expectations,
+    AiV3ResourceRef ref,
+  ) {
+    final key = _aiV3ResourceExpectationKey(ref);
+    final matches = expectations
+        .where(
+          (expectation) =>
+              expectation['kind'] == 'generated_resource_state' &&
+              expectation['resource_key'] == key,
+        )
+        .toList(growable: false);
+    if (matches.length != 1) {
+      throw StateError('v3_resource_expectation_missing');
+    }
+    return matches.single;
+  }
+
+  String _aiV3AudioTempoFollowMode(AudioTrack clip) {
+    if (!_clipFollowsProjectTempo(clip)) return 'off';
+    return clip.tempoStretchPreservePitch ? 'preserve_pitch' : 'repitch';
+  }
+
+  Map<String, dynamic> _materializeAiV3RuntimeAuthoritativeAudioTimingAction(
+    Map<String, dynamic> data,
+    Map<String, dynamic> resourceExpectation,
+  ) {
+    final target = _actionTarget(data);
+    final clipId = target['clip_id']?.toString().trim() ?? '';
+    final clipIndex = _clipIndexForPersistentId(clipId);
+    if (!_isValidClipIndex(clipIndex) || _audioTracks[clipIndex].isMidi) {
+      throw StateError('v3_resource_binding_unavailable');
+    }
+    if (resourceExpectation['clip_id'] != clipId ||
+        resourceExpectation['present'] == false) {
+      throw StateError('v3_resource_binding_target_mismatch');
+    }
+    final clip = _audioTracks[clipIndex];
+    final start = clip.offset;
+    final currentDuration = _clipTimelineDurationSec(clip);
+    final expectedStart = _toActionDouble(resourceExpectation['start']);
+    final expectedEnd = _toActionDouble(resourceExpectation['end']);
+    if (expectedStart == null ||
+        expectedEnd == null ||
+        (start - expectedStart).abs() > 0.002 ||
+        (start + currentDuration - expectedEnd).abs() > 0.003) {
+      throw StateError('v3_resource_binding_target_mismatch');
+    }
+    final rawDuration = _rawClipDurationSec(clip);
+    if (!rawDuration.isFinite || rawDuration <= 0.0) {
+      throw StateError('v3_clip_stretch_source_invalid');
+    }
+
+    final operation = _normalizeClipEditOperation(
+      data['operation']?.toString() ?? '',
+    );
+    var finalDuration = currentDuration;
+    var finalSourceTempo = clip.sourceTempoBpm;
+    var finalMode = _aiV3AudioTempoFollowMode(clip);
+    var finalPreservePitch = clip.tempoStretchPreservePitch;
+    var finalFollowsTempo = _clipFollowsProjectTempo(clip);
+    final materialized = <String, dynamic>{...data};
+
+    if (operation == 'stretch') {
+      final requestedBeats = _toActionDouble(data['requested_length_beats']);
+      final requestedFactor = _toActionDouble(data['requested_length_factor']);
+      if ((requestedBeats == null) == (requestedFactor == null) ||
+          (requestedBeats != null && requestedBeats <= 0.0) ||
+          (requestedFactor != null && requestedFactor <= 0.0)) {
+        throw StateError('v3_clip_stretch_out_of_range');
+      }
+      finalDuration = requestedBeats != null
+          ? requestedBeats * 60.0 / _clampTempo(_tempo)
+          : currentDuration * requestedFactor!;
+      finalSourceTempo = finalDuration * _clampTempo(_tempo) / rawDuration;
+      final playbackRatio = rawDuration / finalDuration;
+      if (!finalDuration.isFinite ||
+          finalDuration < 0.05 ||
+          finalDuration > 36000.0 ||
+          finalSourceTempo < 20.0 ||
+          finalSourceTempo > 999.0 ||
+          playbackRatio < 0.05 ||
+          playbackRatio > 20.0) {
+        throw StateError('v3_clip_stretch_out_of_range');
+      }
+      finalPreservePitch = _toActionBool(
+        data['preserve_pitch'],
+        fallback: true,
+      );
+      finalMode = finalPreservePitch ? 'preserve_pitch' : 'repitch';
+      finalFollowsTempo = true;
+      materialized['timeline_duration_ms'] = finalDuration * 1000.0;
+    } else if (operation == 'set_source_tempo') {
+      final requestedTempo = _toActionDouble(data['source_tempo_bpm']);
+      if (requestedTempo == null ||
+          !requestedTempo.isFinite ||
+          requestedTempo < 20.0 ||
+          requestedTempo > 999.0) {
+        throw StateError('v3_clip_source_tempo_invalid');
+      }
+      finalSourceTempo = requestedTempo;
+      if (finalFollowsTempo) {
+        finalDuration = rawDuration * finalSourceTempo / _clampTempo(_tempo);
+      }
+    } else if (operation == 'tempo_follow') {
+      final requestedMode = data['mode']?.toString().trim() ?? '';
+      if (requestedMode != 'off' &&
+          requestedMode != 'preserve_pitch' &&
+          requestedMode != 'repitch') {
+        throw StateError('v3_clip_tempo_follow_mode_invalid');
+      }
+      if (requestedMode == 'off') {
+        finalMode = 'off';
+        finalFollowsTempo = false;
+        finalDuration = rawDuration;
+      } else {
+        finalPreservePitch = requestedMode == 'preserve_pitch';
+        finalMode = requestedMode;
+        finalFollowsTempo = true;
+        finalSourceTempo = clip.sourceTempoBpm > 0.0
+            ? _clampTempo(clip.sourceTempoBpm)
+            : _sourceTempoForCurrentClipTimeline(clip);
+        finalDuration = rawDuration * finalSourceTempo / _clampTempo(_tempo);
+      }
+    } else {
+      throw StateError('v3_resource_action_unsupported');
+    }
+
+    if (!finalDuration.isFinite ||
+        finalDuration < 0.05 ||
+        finalDuration > 36000.0) {
+      throw StateError('v3_clip_stretch_out_of_range');
+    }
+    if (finalFollowsTempo) {
+      final playbackRatio = rawDuration / finalDuration;
+      if (finalSourceTempo < 20.0 ||
+          finalSourceTempo > 999.0 ||
+          playbackRatio < 0.05 ||
+          playbackRatio > 20.0) {
+        throw StateError('v3_clip_stretch_out_of_range');
+      }
+    }
+    return <String, dynamic>{
+      ...materialized,
+      'expected_start_sec': start,
+      'expected_end_sec': start + finalDuration,
+      'expected_raw_duration_sec': rawDuration,
+      'expected_source_tempo_bpm': finalSourceTempo,
+      'expected_tempo_follow_mode': finalMode,
+      'expected_tempo_preserve_pitch': finalPreservePitch,
+      'expected_duration_follows_tempo': finalFollowsTempo,
+    };
+  }
+
+  Map<String, dynamic> _materializeAiV3RuntimeAuthoritativeMidiAction(
+    Map<String, dynamic> data,
+    Map<String, dynamic> resourceExpectation,
+  ) {
+    final rawNotes = resourceExpectation['midi_notes'];
+    if (rawNotes is! List) {
+      throw StateError('v3_resource_midi_notes_missing');
+    }
+    final currentNotes = aiV3CanonicalMidiNotes(
+      rawNotes.whereType<Map>().map((note) => Map<String, dynamic>.from(note)),
+    );
+    if (currentNotes.isEmpty) {
+      throw StateError('v3_resource_midi_notes_missing');
+    }
+    final start = _toActionDouble(resourceExpectation['start']);
+    final end = _toActionDouble(resourceExpectation['end']);
+    if (start == null || end == null || end <= start) {
+      throw StateError('v3_resource_midi_length_invalid');
+    }
+    final visibleLengthBeats = (end - start) * _tempo / 60.0;
+    var finalLengthBeats = visibleLengthBeats;
+    final measuredContentEnd = _aiV3MidiContentEndBeats(currentNotes);
+    final currentContentEnd = math.max(
+      measuredContentEnd,
+      _toActionDouble(resourceExpectation['midi_content_end_beats']) ?? 0.0,
+    );
+    var finalContentEnd = currentContentEnd;
+    final deferredCommand = data['deferred_midi_command']?.toString() ?? '';
+    late List<Map<String, dynamic>> nextNotes;
+    if (deferredCommand.isEmpty && data['operation'] == 'transpose_notes') {
+      final semitones = (_toActionDouble(data['semitones']) ?? 0.0).round();
+      nextNotes = aiV3CanonicalMidiNotes(
+        currentNotes.map(
+          (note) => <String, dynamic>{
+            ...note,
+            'pitch': ((note['pitch'] as num).toInt() + semitones)
+                .clamp(0, 127)
+                .toInt(),
+          },
+        ),
+      );
+    } else if (deferredCommand == 'midi.replace_notes') {
+      final requested = _midiNotesFromActionData(<String, dynamic>{
+        'notes': data['requested_notes'],
+      });
+      if (requested.isEmpty) {
+        throw StateError('v3_resource_midi_notes_missing');
+      }
+      nextNotes = aiV3CanonicalMidiNotes(
+        requested.map(
+          (note) => <String, dynamic>{
+            'pitch': note.pitch,
+            'start_beat': note.startBeat,
+            'length_beats': note.lengthBeats,
+            'velocity': note.velocity,
+          },
+        ),
+      );
+      finalContentEnd = _aiV3MidiContentEndBeats(nextNotes);
+      if (finalContentEnd > visibleLengthBeats + 0.000001) {
+        throw StateError('v3_resource_midi_note_out_of_bounds');
+      }
+    } else if (deferredCommand == 'midi.append_notes') {
+      final requested = _midiNotesFromActionData(<String, dynamic>{
+        'notes': data['requested_notes'],
+      });
+      if (requested.isEmpty) {
+        throw StateError('v3_resource_midi_notes_missing');
+      }
+      final requestedPayload = requested
+          .map(
+            (note) => <String, dynamic>{
+              'pitch': note.pitch,
+              'start_beat': note.startBeat,
+              'length_beats': note.lengthBeats,
+              'velocity': note.velocity,
+            },
+          )
+          .toList(growable: false);
+      final appendAnchor = math.max(visibleLengthBeats, currentContentEnd);
+      final appended = requestedPayload
+          .map(
+            (note) => <String, dynamic>{
+              ...note,
+              'start_beat':
+                  (note['start_beat'] as num).toDouble() + appendAnchor,
+            },
+          )
+          .toList(growable: false);
+      nextNotes = aiV3CanonicalMidiNotes(<Map<String, dynamic>>[
+        ...currentNotes,
+        ...appended,
+      ]);
+      final requestedSpan = requestedPayload.fold<double>(
+        0.0,
+        (latest, note) => math.max(
+          latest,
+          (note['start_beat'] as num).toDouble() +
+              (note['length_beats'] as num).toDouble(),
+        ),
+      );
+      finalLengthBeats = appendAnchor + requestedSpan;
+      finalContentEnd = _aiV3MidiContentEndBeats(nextNotes);
+    } else if (deferredCommand == 'midi.chop_notes') {
+      final sourceNotes = _midiNotesFromActionData(<String, dynamic>{
+        'notes': currentNotes,
+      });
+      final rawRange = data['range'];
+      final range = rawRange is Map
+          ? Map<String, dynamic>.from(rawRange)
+          : const <String, dynamic>{};
+      final rangeStart = _toActionDouble(range['start_beat']) ?? 0.0;
+      final rangeEnd = _toActionDouble(range['end_beat']);
+      final contentDomainEnd = math.max(visibleLengthBeats, currentContentEnd);
+      if (rangeStart < 0.0 ||
+          (rangeEnd != null &&
+              (rangeEnd <= rangeStart ||
+                  rangeEnd > contentDomainEnd + 0.000001))) {
+        throw StateError('v3_resource_midi_chop_range_invalid');
+      }
+      final chopData = <String, dynamic>{
+        ...data,
+        if (range['start_beat'] != null) 'start_beat': range['start_beat'],
+        if (range['end_beat'] != null) 'end_beat': range['end_beat'],
+      };
+      final chopped = _chopMidiNotesFromActionData(
+        chopData,
+        sourceNotes,
+        subdivision: _toActionInt(data['subdivision']),
+      );
+      nextNotes = aiV3CanonicalMidiNotes(
+        chopped.map(
+          (note) => <String, dynamic>{
+            'pitch': note.pitch,
+            'start_beat': note.startBeat,
+            'length_beats': note.lengthBeats,
+            'velocity': note.velocity,
+          },
+        ),
+      );
+      finalContentEnd = _aiV3MidiContentEndBeats(nextNotes);
+      if (finalContentEnd > currentContentEnd + 0.000001) {
+        throw StateError('v3_resource_midi_note_out_of_bounds');
+      }
+    } else {
+      throw StateError('v3_resource_midi_transform_invalid');
+    }
+    final normalizedNotes = _midiNotesFromActionData(<String, dynamic>{
+      'notes': nextNotes,
+    });
+    nextNotes = aiV3CanonicalMidiNotes(
+      normalizedNotes.map(
+        (note) => <String, dynamic>{
+          'pitch': note.pitch,
+          'start_beat': note.startBeat,
+          'length_beats': note.lengthBeats,
+          'velocity': note.velocity,
+        },
+      ),
+    );
+    finalContentEnd = _aiV3MidiContentEndBeats(nextNotes);
+    if (deferredCommand == 'midi.append_notes') {
+      finalLengthBeats = math.max(finalLengthBeats, finalContentEnd);
+    }
+    if (nextNotes.isEmpty ||
+        nextNotes.length > aiV3MaxRuntimeAuthoritativeMidiNotes) {
+      throw StateError('v3_resource_midi_result_limit');
+    }
+    return <String, dynamic>{
+      ...data,
+      if (deferredCommand.isNotEmpty) 'operation': 'replace_notes',
+      if (deferredCommand.isNotEmpty) 'notes': nextNotes,
+      'expected_notes': nextNotes,
+      'expected_midi_content_end_beats': finalContentEnd,
+      if (deferredCommand == 'midi.append_notes')
+        'final_length_beats': finalLengthBeats,
+    };
+  }
+
+  Map<String, dynamic> _aiV3GeneratedRowExpectation(
+    List<Map<String, dynamic>> expectations,
+    AiV3ResourceRef ref,
+  ) {
+    final key = _aiV3ResourceExpectationKey(ref);
+    final matches = expectations
+        .where(
+          (expectation) =>
+              expectation['kind'] == 'generated_row_state' &&
+              expectation['resource_key'] == key,
+        )
+        .toList(growable: false);
+    if (matches.length != 1) {
+      throw StateError('v3_resource_expectation_missing');
+    }
+    return matches.single;
+  }
+
+  void _registerAiV3GeneratedRowExpectation(
+    List<Map<String, dynamic>> expectations, {
+    required AiV3ResourceRef ref,
+    required int stableId,
+    required AiV3ResourceKind kind,
+    required String name,
+    required String instrumentId,
+  }) {
+    final key = _aiV3ResourceExpectationKey(ref);
+    if (stableId < 0 ||
+        (kind != AiV3ResourceKind.audioRow &&
+            kind != AiV3ResourceKind.midiRow) ||
+        expectations.any(
+          (expectation) =>
+              expectation['kind'] == 'generated_row_state' &&
+              expectation['resource_key'] == key,
+        )) {
+      throw StateError('v3_resource_expectation_invalid');
+    }
+    expectations.add(<String, dynamic>{
+      'kind': 'generated_row_state',
+      'resource_key': key,
+      'row_id': stableId,
+      'resource_kind': kind.name,
+      'name': name,
+      'instrument_id': instrumentId,
+      'gain': rowGainDbToUi(0.0),
+      'pan': 0.5,
+      'muted': false,
+      'soloed': false,
+    });
+  }
+
+  void _updateAiV3GeneratedRowExpectation(
+    List<Map<String, dynamic>> expectations,
+    AiV3ResourceRef ref,
+    Map<String, dynamic> data,
+  ) {
+    final expectation = _aiV3GeneratedRowExpectation(expectations, ref);
+    if (data['expected_name'] is String) {
+      expectation['name'] = data['expected_name'].toString().trim();
+    }
+    final gainDb = _toActionDouble(data['expected_gain_db']);
+    if (gainDb != null) expectation['gain'] = rowGainDbToUi(gainDb);
+    final panSigned = _toActionDouble(data['expected_pan_signed']);
+    if (panSigned != null) {
+      expectation['pan'] = ((panSigned.clamp(-1.0, 1.0) + 1.0) * 0.5)
+          .toDouble();
+    }
+    if (data['expected_muted'] is bool) {
+      expectation['muted'] = data['expected_muted'];
+    }
+    if (data['expected_soloed'] is bool) {
+      expectation['soloed'] = data['expected_soloed'];
+    }
+  }
+
+  void _registerAiV3GeneratedResourceExpectation(
+    List<Map<String, dynamic>> expectations, {
+    required AiV3ResourceRef ref,
+    required String stableId,
+    required AiV3ResourceKind kind,
+    required double start,
+    required int producerActionIndex,
+    required bool durationFollowsTempo,
+    int? rowId,
+    double? end,
+    double? pitchSemitones,
+    List<Map<String, dynamic>>? midiNotes,
+    double? trimStartMs,
+    double? trimEndMs,
+  }) {
+    final key = _aiV3ResourceExpectationKey(ref);
+    final clipIndex = _clipIndexForPersistentId(stableId);
+    final liveAudioClip =
+        kind == AiV3ResourceKind.audioClip &&
+            _isValidClipIndex(clipIndex) &&
+            !_audioTracks[clipIndex].isMidi
+        ? _audioTracks[clipIndex]
+        : null;
+    final canonicalMidiNotes = midiNotes == null
+        ? null
+        : aiV3CanonicalMidiNotes(
+            midiNotes.map((note) => Map<String, dynamic>.from(note)),
+          );
+    if (stableId.trim().isEmpty ||
+        !start.isFinite ||
+        (end != null && (!end.isFinite || end <= start)) ||
+        expectations.any(
+          (expectation) =>
+              expectation['kind'] == 'generated_resource_state' &&
+              expectation['resource_key'] == key,
+        )) {
+      throw StateError('v3_resource_expectation_invalid');
+    }
+    expectations.add(<String, dynamic>{
+      'kind': 'generated_resource_state',
+      'resource_key': key,
+      'clip_id': stableId,
+      'resource_kind': kind.name,
+      'producer_action_index': producerActionIndex,
+      'present': true,
+      'start': start,
+      'duration_follows_tempo': durationFollowsTempo,
+      if (rowId != null) 'row_id': rowId,
+      if (end != null) 'end': end,
+      if (pitchSemitones != null) 'pitch_semitones': pitchSemitones,
+      if (canonicalMidiNotes != null) ...<String, dynamic>{
+        'midi_notes': canonicalMidiNotes,
+        'midi_content_end_beats': _aiV3MidiContentEndBeats(canonicalMidiNotes),
+      },
+      if (trimStartMs != null) 'trim_start_ms': trimStartMs,
+      if (trimEndMs != null) 'trim_end_ms': trimEndMs,
+      if (liveAudioClip != null) ...<String, dynamic>{
+        'file': liveAudioClip.file.path,
+        'label': liveAudioClip.label,
+        'alignment_offset_ms': liveAudioClip.alignmentOffsetMs,
+        'raw_duration_sec': _rawClipDurationSec(liveAudioClip),
+        'source_tempo_bpm': liveAudioClip.sourceTempoBpm,
+        'tempo_follow_mode': _aiV3AudioTempoFollowMode(liveAudioClip),
+        'tempo_preserve_pitch': liveAudioClip.tempoStretchPreservePitch,
+      },
+    });
+  }
+
   int _aiV3ExpectationRow(Map<String, dynamic> expectation) {
     return expectation['row_id'] is int
         ? _rowIndexForId(expectation['row_id'] as int)
@@ -62374,11 +65470,182 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  void _composeAiV3RuntimeExpectationsForTempo(
+    List<Map<String, dynamic>> expectations, {
+    required double previousBpm,
+    required double nextBpm,
+    required int tempoActionIndex,
+    required bool forceAudioTempoFollow,
+    required bool preserveAudioPitch,
+  }) {
+    if ((previousBpm - nextBpm).abs() < 0.0001) return;
+
+    for (final expectation in expectations) {
+      final producerActionIndex = _toActionInt(
+        expectation['producer_action_index'],
+      );
+      if (producerActionIndex != null &&
+          producerActionIndex >= tempoActionIndex) {
+        continue;
+      }
+      final rawSourcePayload = expectation['source_payload'];
+      if (rawSourcePayload is Map) {
+        final sourcePayload = Map<String, dynamic>.from(rawSourcePayload);
+        if (forceAudioTempoFollow &&
+            sourcePayload['stretchToProjectTempo'] != true) {
+          sourcePayload
+            ..['sourceTempoBpm'] = previousBpm
+            ..['stretchToProjectTempo'] = true
+            ..['tempoStretchPreservePitch'] = preserveAudioPitch
+            ..['tempoWarpMode'] = preserveAudioPitch
+                ? kTempoWarpModeComplex
+                : kTempoWarpModeRepitch;
+        }
+        final offset = _toActionDouble(sourcePayload['offset']);
+        if (offset != null) {
+          sourcePayload['offset'] = remapTimelineSecondsForTempoChange(
+            offset,
+            previousBpm: previousBpm,
+            nextBpm: nextBpm,
+          );
+        }
+        final rawAutomation = sourcePayload['automation'];
+        if (rawAutomation is List) {
+          sourcePayload['automation'] = rawAutomation
+              .map((rawPoint) {
+                if (rawPoint is! Map) return rawPoint;
+                final point = Map<String, dynamic>.from(rawPoint);
+                final x = _toActionDouble(point['x']);
+                if (x != null) {
+                  point['x'] = remapTimelineMillisecondsForTempoChange(
+                    x,
+                    previousBpm: previousBpm,
+                    nextBpm: nextBpm,
+                  );
+                }
+                return point;
+              })
+              .toList(growable: false);
+        }
+        expectation['source_payload'] = sourcePayload;
+      }
+
+      if (expectation['kind'] == 'stems_separated') {
+        final start = _toActionDouble(expectation['start']);
+        if (start != null) {
+          expectation['start'] = remapTimelineSecondsForTempoChange(
+            start,
+            previousBpm: previousBpm,
+            nextBpm: nextBpm,
+          );
+        }
+        if (forceAudioTempoFollow) {
+          expectation
+            ..['outputs_follow_tempo'] = true
+            ..['outputs_preserve_pitch'] = preserveAudioPitch;
+        }
+        if (expectation['outputs_follow_tempo'] == true) {
+          for (final key in const <String>[
+            'vocals_length',
+            'instrumental_length',
+          ]) {
+            final length = _toActionDouble(expectation[key]);
+            if (length != null) {
+              expectation[key] = remapTimelineSecondsForTempoChange(
+                length,
+                previousBpm: previousBpm,
+                nextBpm: nextBpm,
+              );
+            }
+          }
+        }
+      }
+
+      if (expectation['kind'] == 'midi_clip_created') {
+        final start = _toActionDouble(expectation['start']);
+        final length = _toActionDouble(expectation['length']);
+        if (start != null) {
+          expectation['start'] = remapTimelineSecondsForTempoChange(
+            start,
+            previousBpm: previousBpm,
+            nextBpm: nextBpm,
+          );
+        }
+        if (length != null) {
+          expectation['length'] = remapTimelineSecondsForTempoChange(
+            length,
+            previousBpm: previousBpm,
+            nextBpm: nextBpm,
+          );
+        }
+      }
+
+      if (expectation['kind'] == 'generated_resource_state') {
+        final start = _toActionDouble(expectation['start']);
+        final end = _toActionDouble(expectation['end']);
+        final isMidi =
+            expectation['resource_kind'] == AiV3ResourceKind.midiClip.name;
+        if (forceAudioTempoFollow && !isMidi) {
+          final wasFollowing = expectation['duration_follows_tempo'] == true;
+          expectation
+            ..['duration_follows_tempo'] = true
+            ..['tempo_follow_mode'] = preserveAudioPitch
+                ? 'preserve_pitch'
+                : 'repitch'
+            ..['tempo_preserve_pitch'] = preserveAudioPitch;
+          if (!wasFollowing) expectation['source_tempo_bpm'] = previousBpm;
+        }
+        final durationFollowsTempo =
+            isMidi || expectation['duration_follows_tempo'] == true;
+        double? remappedStart;
+        if (start != null) {
+          remappedStart = remapTimelineSecondsForTempoChange(
+            start,
+            previousBpm: previousBpm,
+            nextBpm: nextBpm,
+          );
+          expectation['start'] = remappedStart;
+        }
+        if (end != null) {
+          expectation['end'] = durationFollowsTempo
+              ? remapTimelineSecondsForTempoChange(
+                  end,
+                  previousBpm: previousBpm,
+                  nextBpm: nextBpm,
+                )
+              : (remappedStart ?? start ?? 0.0) + (end - (start ?? 0.0));
+        }
+      }
+
+      if (expectation['kind'] == 'automation_points') {
+        final rawPoints = expectation['points'];
+        if (rawPoints is List) {
+          expectation['points'] = rawPoints
+              .map((rawPoint) {
+                if (rawPoint is! Map) return rawPoint;
+                final point = Map<String, dynamic>.from(rawPoint);
+                final x = _toActionDouble(point['x']);
+                if (x != null) {
+                  point['x'] = remapTimelineMillisecondsForTempoChange(
+                    x,
+                    previousBpm: previousBpm,
+                    nextBpm: nextBpm,
+                  );
+                }
+                return point;
+              })
+              .toList(growable: false);
+        }
+      }
+    }
+  }
+
   void _removeAiV3DeletedRowExpectations(
     List<Map<String, dynamic>> expectations, {
     required int rowId,
     required int rowIndex,
     required Set<String> clipIds,
+    required int deletionActionIndex,
   }) {
     for (final expectation in expectations) {
       if (expectation['kind'] == 'row_created' &&
@@ -62388,6 +65655,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ..['require_exact_position'] = false;
       }
       if (expectation['kind'] == 'samples_created') {
+        final producerActionIndex = _toActionInt(
+          expectation['producer_action_index'],
+        );
+        if (producerActionIndex != null &&
+            producerActionIndex > deletionActionIndex) {
+          continue;
+        }
         final remaining = (expectation['items'] as List? ?? const <Object>[])
             .whereType<Map>()
             .map((item) => Map<String, dynamic>.from(item))
@@ -62404,7 +65678,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (clipIds.contains(expectation['clip_id'])) return true;
       if ((kind == 'clip_created' || kind == 'midi_clip_created') &&
           expectation['row'] == rowIndex) {
-        return true;
+        final producerActionIndex = _toActionInt(
+          expectation['producer_action_index'],
+        );
+        return producerActionIndex == null ||
+            producerActionIndex <= deletionActionIndex;
       }
       final matchesRow = expectation['row_id'] == rowId ||
           (expectation['row_id'] is! int && expectation['row'] == rowIndex);
@@ -62630,10 +65908,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<List<Map<String, dynamic>>> _aiV3NativeRowEffectChain(int row) async {
-    final names = await JuceAudioEngine.getTrackEffectsForRow(row);
-    final effectIds = await JuceAudioEngine.getTrackEffectIdsForRow(row);
-    final instanceIds =
-        await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
+    final names = await JuceAudioEngine.getTrackEffectsForRow(
+      row,
+      forceIndividualRow: true,
+    );
+    final effectIds = await JuceAudioEngine.getTrackEffectIdsForRow(
+      row,
+      forceIndividualRow: true,
+    );
+    final instanceIds = await JuceAudioEngine.getTrackEffectInstanceIdsForRow(
+      row,
+      forceIndividualRow: true,
+    );
     if (effectIds.length != names.length ||
         instanceIds.length != names.length ||
         instanceIds.any((value) => value.trim().isEmpty)) {
@@ -62643,7 +65929,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     for (var index = 0; index < names.length; index++) {
       final parameters = exposedEffectParameters(
         names[index],
-        await JuceAudioEngine.getTrackPluginParameters(row, index),
+                await JuceAudioEngine.getTrackPluginParameters(
+                  row,
+                  index,
+                  forceIndividualRow: true,
+                ),
       )
           .map((parameter) => <String, dynamic>{
                 'id': parameter['id'],
@@ -62657,7 +65947,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         'effect_instance_id': instanceIds[index],
         'effect_id': effectIds[index],
         'display_name': names[index],
-        'bypassed': await JuceAudioEngine.getRowEffectBypassState(row, index),
+        'bypassed': await JuceAudioEngine.getRowEffectBypassState(
+          row,
+          index,
+          forceIndividualRow: true,
+        ),
         'parameters': parameters,
       });
     }
@@ -62681,6 +65975,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     var refreshMaster = false;
     for (final expectation in expectations) {
       switch (expectation['kind']) {
+        case 'effect':
         case 'mix_effect_presence':
         case 'mix_effects_empty':
         case 'mix_effect_parameter_resolved':
@@ -62696,7 +65991,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     }
     for (final row in rows) {
-      await _refreshPersistedEffectSnapshotForRow(row);
+      final forceIndividualRow = expectations.any(
+        (expectation) =>
+            expectation['row'] == row &&
+            expectation['force_individual_row'] == true,
+      );
+      await _refreshPersistedEffectSnapshotForRow(
+        row,
+        forceIndividualRow: forceIndividualRow,
+      );
     }
     if (refreshMaster) {
       await _refreshPersistedMasterEffectSnapshot();
@@ -62714,11 +66017,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required int row,
     required double start,
     required double length,
-  }) =>
-      <String, dynamic>{
+    required int producerActionIndex,
+    String? producerCommandId,
+  }) => <String, dynamic>{
         'kind': 'clip_created',
-        'before_clip_ids':
-            _audioTracks.map((value) => value.clipId).toList(growable: false),
+    'producer_action_index': producerActionIndex,
+    if (producerCommandId?.trim().isNotEmpty ?? false)
+      'producer_command_id': producerCommandId!.trim(),
+    'before_clip_ids': _audioTracks
+        .map((value) => value.clipId)
+        .toList(growable: false),
         'row': row,
         'start': start,
         'length': length,
@@ -62741,6 +66049,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     List<Map<String, dynamic>> expectations,
   ) async {
     const epsilon = 0.0005;
+    Map<String, dynamic>? generatedResource(String clipId) => expectations
+        .where(
+          (candidate) =>
+              candidate['kind'] == 'generated_resource_state' &&
+              candidate['clip_id'] == clipId,
+        )
+        .firstOrNull;
     for (final expectation in expectations) {
       switch (expectation['kind']) {
         case 'bundle':
@@ -62766,7 +66081,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           final createdIndex = _rowIndexForId(runtimeRowId);
           if (!_isValidRowIndex(createdIndex)) return false;
           final row = _rows[createdIndex];
-          if (row.name.trim() != expectation['name'] ||
+          final generatedRow = expectations
+              .where(
+                (candidate) =>
+                    candidate['kind'] == 'generated_row_state' &&
+                    candidate['row_id'] == runtimeRowId,
+              )
+              .firstOrNull;
+          final expectedName =
+              generatedRow?['name']?.toString() ?? expectation['name'];
+          if (row.name.trim() != expectedName ||
               row.kind.wireName != expectation['lane_kind'] ||
               (row.isInstrumentLane &&
                   row.instrumentId != expectation['instrument_id'])) {
@@ -62777,6 +66101,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   _rowIdAt(_selectedRow) != runtimeRowId)) {
             return false;
           }
+          if (expectation['position_transformed'] != true) {
           final position = expectation['position'];
           if (expectation['require_exact_position'] == true &&
               position == 'end') {
@@ -62802,6 +66127,28 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         : createdIndex <= anchorIndex))) {
               return false;
             }
+          }
+          }
+          break;
+        case 'generated_row_state':
+          final rowId = expectation['row_id'];
+          if (rowId is! int) return false;
+          final rowIndex = _rowIndexForId(rowId);
+          final expectsMidi =
+              expectation['resource_kind'] == AiV3ResourceKind.midiRow.name;
+          if (!_isValidRowIndex(rowIndex) ||
+              _rows[rowIndex].isInstrumentLane != expectsMidi ||
+              _rows[rowIndex].name.trim() != expectation['name'] ||
+              (expectsMidi &&
+                  _rows[rowIndex].instrumentId !=
+                      expectation['instrument_id']) ||
+              (_rowGain[rowIndex] - (expectation['gain'] as double)).abs() >
+                  epsilon ||
+              (_rowPan[rowIndex] - (expectation['pan'] as double)).abs() >
+                  epsilon ||
+              _rowMuted[rowIndex] != expectation['muted'] ||
+              _rowSoloed[rowIndex] != expectation['soloed']) {
+            return false;
           }
           break;
         case 'row_deleted':
@@ -62838,12 +66185,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               return false;
             }
           }
-          final memberIndices = members.map(_rowIndexForId).toList();
-          for (var index = 1; index < memberIndices.length; index++) {
-            if (memberIndices[index] != memberIndices[index - 1] + 1) {
-              return false;
-            }
-          }
           final expectedOrder = (expectation['expected_row_order'] as List)
               .whereType<int>()
               .toList(growable: false);
@@ -62853,6 +66194,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               .where(expectedIds.contains)
               .toList(growable: false);
           if (!listEquals(actualKnownOrder, expectedOrder)) return false;
+          break;
+        case 'group_absent':
+          final groupId = expectation['group_id']?.toString() ?? '';
+          if (groupId.isEmpty ||
+              _trackGroups.any((group) => group.id == groupId) ||
+              _rows.any((row) => row.groupId == groupId)) {
+            return false;
+          }
           break;
         case 'group_row_removed':
           final groupId = expectation['group_id'].toString();
@@ -63129,6 +66478,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           break;
         case 'effect_parameter_value':
           final master = expectation['master'] == true;
+          final forceIndividualRow =
+              expectation['force_individual_row'] == true;
           late final int effectIndex;
           if (master) {
             final effectIds = await JuceAudioEngine.getMasterEffectIds();
@@ -63144,11 +66495,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           } else {
             final row = _aiV3ExpectationRow(expectation);
             final instanceIds =
-                await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
-            final effectIds =
-                await JuceAudioEngine.getTrackEffectIdsForRow(row);
-            final expectedInstanceId =
-                expectation['effect_instance_id']?.toString();
+                await JuceAudioEngine.getTrackEffectInstanceIdsForRow(
+                  row,
+                  forceIndividualRow: forceIndividualRow,
+                );
+            final effectIds = await JuceAudioEngine.getTrackEffectIdsForRow(
+              row,
+              forceIndividualRow: forceIndividualRow,
+            );
+            final expectedInstanceId = expectation['effect_instance_id']
+                ?.toString();
             effectIndex = instanceIds.indexOf(expectedInstanceId ?? '');
             if (effectIndex < 0 ||
                 effectIndex >= effectIds.length ||
@@ -63161,6 +66517,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               : await JuceAudioEngine.getTrackPluginParameters(
                   _aiV3ExpectationRow(expectation),
                   effectIndex,
+                  forceIndividualRow: forceIndividualRow,
                 );
           final parameterId = expectation['parameter_id']?.toString() ?? '';
           final parameter = parameters.cast<Map<String, dynamic>>().where(
@@ -63359,23 +66716,43 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           }
           break;
         case 'clip_created':
+          final runtimeClipId =
+              expectation['runtime_clip_id']?.toString() ?? '';
+          final generated = generatedResource(runtimeClipId);
+          if (generated != null && generated['present'] == false) {
+            if (_audioTracks.any((clip) => clip.clipId == runtimeClipId)) {
+              return false;
+            }
+            break;
+          }
           if (_aiV3MatchingCreatedClips(expectation).isEmpty) return false;
           break;
         case 'midi_clip_created':
+          final runtimeClipId =
+              expectation['runtime_clip_id']?.toString() ?? '';
+          final generated = generatedResource(runtimeClipId);
+          if (generated != null && generated['present'] == false) {
+            if (_audioTracks.any((clip) => clip.clipId == runtimeClipId)) {
+              return false;
+            }
+            break;
+          }
           final before = (expectation['before_clip_ids'] as List)
               .map((id) => '$id')
               .toSet();
           final candidates = _audioTracks.where((clip) =>
               !before.contains(clip.clipId) &&
+                (expectation['runtime_clip_id'] == null ||
+                    clip.clipId == expectation['runtime_clip_id']) &&
               clip.isMidi &&
               clip.rowIndex == expectation['row'] &&
-              (clip.offset - (expectation['start'] as num).toDouble()).abs() <=
-                  0.002 &&
+                (expectation['resource_transformed'] == true ||
               (_clipTimelineDurationMs(clip) / 1000.0 -
                           (expectation['length'] as num).toDouble())
                       .abs() <=
-                  0.002 &&
-              clip.instrumentId == expectation['instrument_id']);
+                        0.002) &&
+                clip.instrumentId == expectation['instrument_id'],
+          );
           if (candidates.length != 1) return false;
           final actualNotes = candidates.single.midiNotes
               .map((note) => <String, dynamic>{
@@ -63385,7 +66762,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     'velocity': note.velocity,
                   })
               .toList(growable: false);
-          if (jsonEncode(actualNotes) != jsonEncode(expectation['notes'])) {
+          if (generated == null &&
+              jsonEncode(actualNotes) != jsonEncode(expectation['notes'])) {
             return false;
           }
           break;
@@ -63409,10 +66787,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               (expectation['source_clip_ids'] as List? ?? const <Object>[])
                   .map((value) => value.toString())
                   .toSet();
-          if (_audioTracks.any((clip) => sourceIds.contains(clip.clipId)) ||
-              _audioTracks.length != expectation['expected_clip_count']) {
+          if (_audioTracks.any((clip) => sourceIds.contains(clip.clipId))) {
             return false;
           }
+          final renderedFile = File(expectation['file'].toString());
+          if (!await renderedFile.exists() ||
+              await renderedFile.length() <= 44) {
+            return false;
+          }
+          if (expectation['resource_transformed'] == true) break;
           final matches = _audioTracks
               .where(
                 (clip) => clip.clipId == expectation['result_clip_id'],
@@ -63420,30 +66803,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               .toList(growable: false);
           if (matches.length != 1) return false;
           final clip = matches.single;
-          final renderedFile = File(expectation['file'].toString());
           if (clip.isMidi ||
               clip.rowId != expectation['row_id'] ||
               clip.label != expectation['label'] ||
-              (clip.offset - (expectation['start'] as num).toDouble()).abs() >
-                  0.002 ||
-              (_clipTimelineDurationMs(clip) / 1000.0 -
-                          (expectation['length'] as num).toDouble())
-                      .abs() >
-                  0.1 ||
-              clip.gain != kDefaultGainUi ||
-              clip.normalizeVolume ||
-              (clip.normalizeGain - 1.0).abs() > epsilon ||
-              (clip.pitchSemitones).abs() > epsilon ||
-              clip.isReversed ||
-              clip.stretchToProjectTempo ||
-              !await renderedFile.exists() ||
-              await renderedFile.length() <= 44) {
-            return false;
-          }
-          if (_timelinePrimarySelectedClipIndex < 0 ||
-              _timelinePrimarySelectedClipIndex >= _audioTracks.length ||
-              _audioTracks[_timelinePrimarySelectedClipIndex].clipId !=
-                  expectation['result_clip_id']) {
+              _normalizedClipPath(clip.file.path) !=
+                  _normalizedClipPath(renderedFile.path)) {
             return false;
           }
           break;
@@ -63456,12 +66820,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           if (sourceMatches.length != 1 ||
               !_aiV3ClipMatchesPersistedPayload(
                 sourceMatches.single,
-                Map<String, dynamic>.from(
-                  expectation['source_payload'] as Map,
-                ),
-              ) ||
-              _rowCount != expectation['expected_row_count'] ||
-              _audioTracks.length != expectation['expected_clip_count']) {
+                Map<String, dynamic>.from(expectation['source_payload'] as Map),
+              )) {
             return false;
           }
           final vocalsMatches = _audioTracks
@@ -63474,11 +66834,28 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 (clip) => clip.clipId == expectation['instrumental_clip_id'],
               )
               .toList(growable: false);
-          if (vocalsMatches.length != 1 || instrumentalMatches.length != 1) {
+          final vocalsExpected = generatedResource(
+            expectation['vocals_clip_id'].toString(),
+          );
+          final instrumentalExpected = generatedResource(
+            expectation['instrumental_clip_id'].toString(),
+          );
+          final vocalsPresent =
+              expectation['vocals_row_deleted'] != true &&
+              vocalsExpected?['present'] != false;
+          final instrumentalPresent =
+              expectation['instrumental_row_deleted'] != true &&
+              instrumentalExpected?['present'] != false;
+          if (vocalsMatches.length != (vocalsPresent ? 1 : 0) ||
+              instrumentalMatches.length != (instrumentalPresent ? 1 : 0)) {
             return false;
           }
-          final vocals = vocalsMatches.single;
-          final instrumental = instrumentalMatches.single;
+          final vocals = vocalsMatches.firstOrNull;
+          final instrumental = instrumentalMatches.firstOrNull;
+          final vocalsTransformed =
+              expectation['vocals_clip_transformed'] == true;
+          final instrumentalTransformed =
+              expectation['instrumental_clip_transformed'] == true;
           final sourceRow = _rowIndexForId(
             (expectation['source_row_id'] as num).toInt(),
           );
@@ -63491,53 +66868,70 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               .where(beforeRowIds.contains)
               .toList(growable: false);
           final vocalsFile = File(expectation['vocals_file'].toString());
-          final instrumentalFile =
-              File(expectation['instrumental_file'].toString());
-          bool neutral(AudioTrack clip) =>
-              !clip.isMidi &&
+          final instrumentalFile = File(
+            expectation['instrumental_file'].toString(),
+          );
+          bool neutral(AudioTrack clip, {required bool timingTransformed}) {
+            final expectsTempoFollow =
+                expectation['outputs_follow_tempo'] == true;
+            return !clip.isMidi &&
               clip.gain == kDefaultGainUi &&
               !clip.normalizeVolume &&
               (clip.normalizeGain - 1.0).abs() <= epsilon &&
-              clip.pitchSemitones.abs() <= epsilon &&
               !clip.isReversed &&
-              !clip.stretchToProjectTempo &&
+                (timingTransformed ||
+                    (clip.stretchToProjectTempo == expectsTempoFollow &&
+                        (!expectsTempoFollow ||
+                            clip.tempoStretchPreservePitch ==
+                                (expectation['outputs_preserve_pitch'] ==
+                                    true)))) &&
               clip.volumeAutomation.every(
                 (point) => (point.volume - 1.0).abs() <= epsilon,
               );
+          }
           if (!_isValidRowIndex(sourceRow) ||
-              vocals.rowIndex != sourceRow + 1 ||
-              instrumental.rowIndex != sourceRow + 2 ||
-              vocals.rowId == instrumental.rowId ||
+              (vocals != null &&
+                  (vocals.rowId != expectation['vocals_row_id'] ||
               vocals.label != expectation['vocals_label'] ||
-              instrumental.label != expectation['instrumental_label'] ||
-              (vocals.offset - (expectation['start'] as num).toDouble()).abs() >
-                  0.002 ||
-              (instrumental.offset - (expectation['start'] as num).toDouble())
-                      .abs() >
-                  0.002 ||
+                      (!vocalsTransformed &&
               (_clipTimelineDurationSec(vocals) -
-                          (expectation['length'] as num).toDouble())
+                                      (expectation['vocals_length'] as num)
+                                          .toDouble())
                       .abs() >
-                  0.1 ||
+                              0.1) ||
+                      !neutral(
+                        vocals,
+                        timingTransformed: vocalsTransformed,
+                      ))) ||
+              (instrumental != null &&
+                  (instrumental.rowId != expectation['instrumental_row_id'] ||
+                      instrumental.label != expectation['instrumental_label'] ||
+                      (!instrumentalTransformed &&
               (_clipTimelineDurationSec(instrumental) -
-                          (expectation['length'] as num).toDouble())
+                                      (expectation['instrumental_length']
+                                              as num)
+                                          .toDouble())
                       .abs() >
-                  0.1 ||
-              !neutral(vocals) ||
-              !neutral(instrumental) ||
+                              0.1) ||
+                      !neutral(
+                        instrumental,
+                        timingTransformed: instrumentalTransformed,
+                      ))) ||
+              (vocals != null &&
+                  instrumental != null &&
+                  vocals.rowId == instrumental.rowId) ||
               survivingRowIds.length != beforeRowIds.length ||
               !listEquals(survivingRowIds, beforeRowIds) ||
               !await vocalsFile.exists() ||
               await vocalsFile.length() <= 44 ||
               !await instrumentalFile.exists() ||
-              await instrumentalFile.length() <= 44 ||
-              !_isValidClipIndex(_timelinePrimarySelectedClipIndex) ||
-              _audioTracks[_timelinePrimarySelectedClipIndex].clipId !=
-                  expectation['instrumental_clip_id']) {
+              await instrumentalFile.length() <= 44) {
             return false;
           }
           break;
         case 'audio_converted_to_midi':
+          final resultDeleted = expectation['result_clip_deleted'] == true;
+          final resultTransformed = expectation['resource_transformed'] == true;
           final sourceMatches = _audioTracks
               .where(
                 (clip) => clip.clipId == expectation['source_clip_id'],
@@ -63549,18 +66943,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               )
               .toList(growable: false);
           if (sourceMatches.length != 1 ||
-              resultMatches.length != 1 ||
+              resultMatches.length != (resultDeleted ? 0 : 1) ||
               !_aiV3ClipMatchesPersistedPayload(
                 sourceMatches.single,
-                Map<String, dynamic>.from(
-                  expectation['source_payload'] as Map,
-                ),
-              ) ||
-              _rowCount != expectation['expected_row_count'] ||
-              _audioTracks.length != expectation['expected_clip_count']) {
+                Map<String, dynamic>.from(expectation['source_payload'] as Map),
+              )) {
             return false;
           }
-          final result = resultMatches.single;
           final sourceRow = _rowIndexForId(
             (expectation['source_row_id'] as num).toInt(),
           );
@@ -63572,6 +66961,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               .map((row) => row.rowId)
               .where(beforeRowIds.contains)
               .toList(growable: false);
+          if (!_isValidRowIndex(sourceRow) ||
+              survivingRowIds.length != beforeRowIds.length ||
+              !listEquals(survivingRowIds, beforeRowIds)) {
+            return false;
+          }
+          if (resultDeleted) break;
+          final result = resultMatches.single;
           final actualNotes = result.midiNotes
               .map((note) => <String, dynamic>{
                     'pitch': note.pitch,
@@ -63580,23 +66976,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     'velocity': note.velocity,
                   })
               .toList(growable: false);
-          if (!_isValidRowIndex(sourceRow) ||
-              !result.isMidi ||
+          if (!result.isMidi ||
               result.rowIndex != sourceRow + 1 ||
               result.label != expectation['result_label'] ||
               result.instrumentId != expectation['instrument_id'] ||
-              (result.offset - (expectation['start'] as num).toDouble()).abs() >
+              (!resultTransformed &&
+                  ((result.offset - (expectation['start'] as num).toDouble())
+                              .abs() >
                   0.002 ||
               (_clipTimelineDurationSec(result) -
                           (expectation['length'] as num).toDouble())
                       .abs() >
                   0.002 ||
-              jsonEncode(actualNotes) != jsonEncode(expectation['notes']) ||
-              survivingRowIds.length != beforeRowIds.length ||
-              !listEquals(survivingRowIds, beforeRowIds) ||
-              !_isValidClipIndex(_timelinePrimarySelectedClipIndex) ||
-              _audioTracks[_timelinePrimarySelectedClipIndex].clipId !=
-                  expectation['result_clip_id']) {
+                      jsonEncode(actualNotes) !=
+                          jsonEncode(expectation['notes'])))) {
             return false;
           }
           break;
@@ -63604,18 +66997,146 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           final before = (expectation['before_clip_ids'] as List)
               .map((id) => '$id')
               .toSet();
+          final runtimeClipId =
+              expectation['runtime_clip_id']?.toString() ?? '';
+          final generated = generatedResource(runtimeClipId);
+          if (expectation['resource_transformed'] == true &&
+              runtimeClipId.isNotEmpty &&
+              generated != null) {
+            final matchingIdentity = _audioTracks
+                .where(
+                  (clip) =>
+                      clip.clipId == runtimeClipId &&
+                      !before.contains(clip.clipId) &&
+                      !clip.isMidi,
+                )
+                .toList(growable: false);
+            if (generated['present'] == false) {
+              if (matchingIdentity.isNotEmpty) return false;
+            } else if (matchingIdentity.length != 1) {
+              return false;
+            }
+            break;
+          }
           final unmatched = _audioTracks
               .where((clip) => !before.contains(clip.clipId) && !clip.isMidi)
               .toList(growable: true);
           for (final raw in expectation['items'] as List) {
             final item = Map<String, dynamic>.from(raw as Map);
-            final index = unmatched.indexWhere((clip) =>
+            if (generated != null && generated['present'] == false) {
+              if (_audioTracks.any((clip) => clip.clipId == runtimeClipId)) {
+                return false;
+              }
+              continue;
+            }
+            final index = unmatched.indexWhere(
+              (clip) =>
+                  (runtimeClipId.isEmpty || clip.clipId == runtimeClipId) &&
                 clip.rowIndex == item['row'] &&
-                (clip.offset - (item['start'] as num).toDouble()).abs() <=
-                    0.002 &&
-                clip.file.path == item['file']);
+                  clip.file.path == item['file'],
+            );
             if (index < 0) return false;
             unmatched.removeAt(index);
+          }
+          break;
+        case 'generated_resource_state':
+          final clipId = expectation['clip_id']?.toString() ?? '';
+          final matches = _audioTracks
+              .where((clip) => clip.clipId == clipId)
+              .toList(growable: false);
+          if (expectation['present'] == false) {
+            if (matches.isNotEmpty) return false;
+            break;
+          }
+          if (matches.length != 1) return false;
+          final clip = matches.single;
+          final expectedMidi =
+              expectation['resource_kind'] == AiV3ResourceKind.midiClip.name;
+          final expectedRowId = _toActionInt(expectation['row_id']);
+          if (clip.isMidi != expectedMidi ||
+              (expectedRowId != null && clip.rowId != expectedRowId) ||
+              (clip.offset - (expectation['start'] as num).toDouble()).abs() >
+                  0.002) {
+            return false;
+          }
+          final expectedEnd = _toActionDouble(expectation['end']);
+          if (expectedEnd != null &&
+              (clip.offset + _clipTimelineDurationSec(clip) - expectedEnd)
+                      .abs() >
+                  0.003) {
+            return false;
+          }
+          final expectedPitch = _toActionDouble(expectation['pitch_semitones']);
+          if (expectedPitch != null &&
+              (clip.pitchSemitones - expectedPitch).abs() > epsilon) {
+            return false;
+          }
+          if (!expectedMidi) {
+            final expectedFile = expectation['file']?.toString();
+            final expectedLabel = expectation['label']?.toString();
+            final expectedAlignmentOffset = _toActionDouble(
+              expectation['alignment_offset_ms'],
+            );
+            final expectedRawDuration = _toActionDouble(
+              expectation['raw_duration_sec'],
+            );
+            final expectedSourceTempo = _toActionDouble(
+              expectation['source_tempo_bpm'],
+            );
+            final expectedMode = expectation['tempo_follow_mode']?.toString();
+            final expectedPreservePitch = expectation['tempo_preserve_pitch'];
+            if ((expectedFile != null &&
+                    _normalizedClipPath(clip.file.path) !=
+                        _normalizedClipPath(expectedFile)) ||
+                (expectedLabel != null && clip.label != expectedLabel) ||
+                (expectedAlignmentOffset != null &&
+                    (clip.alignmentOffsetMs - expectedAlignmentOffset).abs() >
+                        0.5) ||
+                (expectedRawDuration != null &&
+                    (_rawClipDurationSec(clip) - expectedRawDuration).abs() >
+                        0.002) ||
+                (expectedSourceTempo != null &&
+                    (clip.sourceTempoBpm - expectedSourceTempo).abs() >
+                        0.0001) ||
+                (expectedMode != null &&
+                    _aiV3AudioTempoFollowMode(clip) != expectedMode) ||
+                (expectedPreservePitch is bool &&
+                    clip.tempoStretchPreservePitch != expectedPreservePitch)) {
+              return false;
+            }
+          }
+          final expectedTrimStart = _toActionDouble(
+            expectation['trim_start_ms'],
+          );
+          final expectedTrimEnd = _toActionDouble(expectation['trim_end_ms']);
+          if ((expectedTrimStart != null &&
+                  (clip.trimStart.inMilliseconds - expectedTrimStart).abs() >
+                      1.0) ||
+              (expectedTrimEnd != null &&
+                  (clip.trimEnd.inMilliseconds - expectedTrimEnd).abs() >
+                      1.0)) {
+            return false;
+          }
+          final expectedNotes = expectation['midi_notes'];
+          if (expectedNotes is List) {
+            final actualNotes = _aiV3MidiNotePayload(clip);
+            final canonicalExpected = aiV3CanonicalMidiNotes(
+              expectedNotes.cast<Map>().map(
+                (note) => Map<String, dynamic>.from(note),
+              ),
+            );
+            if (jsonEncode(actualNotes) != jsonEncode(canonicalExpected)) {
+              return false;
+            }
+            final expectedContentEnd = _toActionDouble(
+              expectation['midi_content_end_beats'],
+            );
+            if (expectedContentEnd != null &&
+                (_aiV3MidiContentEndBeats(actualNotes) - expectedContentEnd)
+                        .abs() >
+                    0.000001) {
+              return false;
+            }
           }
           break;
         case 'clip_absent':
@@ -63627,21 +67148,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             (clip) => clip.clipId == expectation['clip_id'],
           );
           if (index < 0) return false;
-          final actual = _audioTracks[index]
-              .midiNotes
-              .map((note) => <String, dynamic>{
-                    'pitch': note.pitch,
-                    'start_beat': note.startBeat,
-                    'length_beats': note.lengthBeats,
-                    'velocity': note.velocity,
-                  })
-              .toList(growable: false);
-          if (jsonEncode(actual) != jsonEncode(expectation['value']))
-            return false;
+          final actual = _aiV3MidiNotePayload(_audioTracks[index]);
+          final expected = aiV3CanonicalMidiNotes(
+            (expectation['value'] as List).cast<Map>().map(
+              (note) => Map<String, dynamic>.from(note),
+            ),
+          );
+          if (jsonEncode(actual) != jsonEncode(expected)) return false;
           break;
         case 'effect':
           final effects = await JuceAudioEngine.getTrackEffectsForRow(
             _aiV3ExpectationRow(expectation),
+            forceIndividualRow: expectation['force_individual_row'] == true,
           );
           final needle = expectation['value'].toString().toLowerCase();
           if (!effects.any((effect) => effect.toLowerCase() == needle)) {
@@ -63693,16 +67211,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final expectedLabel = expectation['label'].toString();
     final expectedInstrument = expectation['instrument_id']?.toString() ?? '';
     final expectedMidiNotes = expectation['midi_notes'];
-    return _audioTracks.where((clip) {
+    final runtimeClipId = expectation['runtime_clip_id']?.toString() ?? '';
+    final resourceTransformed = expectation['resource_transformed'] == true;
+    return _audioTracks
+        .where((clip) {
       if (before.contains(clip.clipId) ||
+              (runtimeClipId.isNotEmpty && clip.clipId != runtimeClipId) ||
           clip.rowIndex != expectedRow ||
           clip.isMidi != expectedMidi ||
           clip.label != expectedLabel ||
-          (clip.offset - expectedStart).abs() > 0.002) {
+              (!resourceTransformed &&
+                  (clip.offset - expectedStart).abs() > 0.002)) {
         return false;
       }
       if (expectedMidi) {
         if (clip.instrumentId != expectedInstrument) return false;
+            if (!resourceTransformed) {
         final actualNotes = clip.midiNotes
             .map((note) => <String, dynamic>{
                   'pitch': note.pitch,
@@ -63714,10 +67238,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (jsonEncode(actualNotes) != jsonEncode(expectedMidiNotes)) {
           return false;
         }
+            }
       } else if (clip.file.path != expectedFile) {
         return false;
       }
-      return (_clipTimelineDurationMs(clip) / 1000.0 - expectedLength).abs() <=
+          return resourceTransformed ||
+              (_clipTimelineDurationMs(clip) / 1000.0 - expectedLength).abs() <=
           0.002;
     }).toList(growable: false);
   }
@@ -63796,6 +67322,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         case 'group_created':
         case 'group_row_removed':
         case 'group_collapsed':
+        case 'group_absent':
           final groupId = expectation['group_id'].toString();
           final group = _trackGroups
               .where((candidate) => candidate.id == groupId)
@@ -64152,7 +67679,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   'vocals_row_id': _audioTracks[vocalsIndex].rowId,
                   'instrumental_row_id': _audioTracks[instrumentalIndex].rowId,
                   'start': _audioTracks[vocalsIndex].offset,
-                  'length': _clipTimelineDurationSec(_audioTracks[vocalsIndex]),
+                  'vocals_length': _clipTimelineDurationSec(
+                    _audioTracks[vocalsIndex],
+                  ),
+                  'instrumental_length': _clipTimelineDurationSec(
+                    _audioTracks[instrumentalIndex],
+                  ),
                   'selected':
                       _timelinePrimarySelectedClipIndex == instrumentalIndex,
                 };
@@ -64189,6 +67721,50 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   })
               .toList(growable: false);
           break;
+        case 'generated_resource_state':
+          final clipId = expectation['clip_id']?.toString() ?? '';
+          final index = _clipIndexForPersistentId(clipId);
+          item['value'] = !_isValidClipIndex(index)
+              ? <String, dynamic>{'present': false}
+              : <String, dynamic>{
+                  'present': true,
+                  'clip_id': clipId,
+                  'resource_kind': _audioTracks[index].isMidi
+                      ? AiV3ResourceKind.midiClip.name
+                      : AiV3ResourceKind.audioClip.name,
+                  'start': _audioTracks[index].offset,
+                  'end':
+                      _audioTracks[index].offset +
+                      _clipTimelineDurationSec(_audioTracks[index]),
+                  'pitch_semitones': _audioTracks[index].pitchSemitones,
+                  if (!_audioTracks[index].isMidi) ...<String, dynamic>{
+                    'raw_duration_sec': _rawClipDurationSec(
+                      _audioTracks[index],
+                    ),
+                    'source_tempo_bpm': _audioTracks[index].sourceTempoBpm,
+                    'tempo_follow_mode': _aiV3AudioTempoFollowMode(
+                      _audioTracks[index],
+                    ),
+                    'tempo_preserve_pitch':
+                        _audioTracks[index].tempoStretchPreservePitch,
+                  },
+                  if (_audioTracks[index].isMidi)
+                    'midi_notes': _audioTracks[index].midiNotes
+                        .map(
+                          (note) => <String, dynamic>{
+                            'pitch': note.pitch,
+                            'start_beat': note.startBeat,
+                            'length_beats': note.lengthBeats,
+                            'velocity': note.velocity,
+                          },
+                        )
+                        .toList(growable: false),
+                  if (_audioTracks[index].isMidi)
+                    'midi_content_end_beats': _aiV3MidiContentEndBeats(
+                      _aiV3MidiNotePayload(_audioTracks[index]),
+                    ),
+                };
+          break;
         case 'clip_absent':
           item['value'] = !_audioTracks.any(
             (clip) => clip.clipId == expectation['clip_id'],
@@ -64217,7 +67793,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             item['value'] = null;
             break;
           }
-          final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
+          final forceIndividualRow =
+              expectation['force_individual_row'] == true;
+          final effects = await JuceAudioEngine.getTrackEffectsForRow(
+            row,
+            forceIndividualRow: forceIndividualRow,
+          );
           final needle = expectation['value'].toString().toLowerCase();
           final effectIndex =
               effects.indexWhere((effect) => effect.toLowerCase() == needle);
@@ -64227,6 +67808,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               : await JuceAudioEngine.getTrackPluginParameters(
                   row,
                   effectIndex,
+                  forceIndividualRow: forceIndividualRow,
                 );
           break;
         case 'automation_points':
@@ -64363,10 +67945,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 'soloed': group.soloed,
                 'collapsed': group.collapsed,
                 'effects': group.effects.map(effect).toList(growable: false),
-              })
+            },
+          )
           .toList(growable: false),
-      'master_effects':
-          _masterEffectSnapshot.effects.map(effect).toList(growable: false),
+      'master_effects': _masterEffectSnapshot.effects
+          .map(effect)
+          .toList(growable: false),
       'automation_clips': stableValue(_aiValidationAutomationClips()),
       'selection': <String, dynamic>{
         'selected_row_index': _selectedRow,
@@ -76612,15 +80196,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       visualDensity: VisualDensity.compact,
                       shape: const CircleBorder(
-                        side: BorderSide(
-                          color: Colors.white12,
+                        side: BorderSide(color: Colors.white12),
                         ),
                       ),
-                    ),
-                    child: const Icon(
-                      Icons.close_rounded,
-                      size: 14,
-                    ),
+                    child: const Icon(Icons.close_rounded, size: 14),
                   ),
                 );
 
@@ -77123,7 +80702,7 @@ class _PillDivider extends StatelessWidget {
           colors: [
             Colors.white.withOpacity(0.08),
             Colors.white.withOpacity(0.28),
-            Colors.white.withOpacity(0.08)
+            Colors.white.withOpacity(0.08),
           ],
         ),
       ),
@@ -78662,7 +82241,7 @@ class ExportSuccessScreen extends StatelessWidget {
               onPressed: () {
                 Navigator.pop(context, {
                   'title': titleController.text,
-                  'description': descController.text
+                  'description': descController.text,
                 });
               },
               child: Text(L10n.translate(context, 'Upload')),
@@ -78751,7 +82330,7 @@ class ExportSuccessScreen extends StatelessWidget {
                 onPressed: () async {
                   Navigator.pop(context);
                   await Share.shareXFiles(<XFile>[
-                    XFile(qrImage.path, name: p.basename(qrImage.path))
+                    XFile(qrImage.path, name: p.basename(qrImage.path)),
                   ]);
                 },
               ),
@@ -79722,13 +83301,11 @@ class EditorUndoManager extends ChangeNotifier {
       return List<EditorUndoAction>.unmodifiable(captured);
     } catch (error, stackTrace) {
       var rollbackIncomplete = false;
-      for (final action in captured.reversed) {
         try {
-          await action.undo();
+        await _undoEditorActionsInReverse(captured);
         } catch (_) {
           rollbackIncomplete = true;
         }
-      }
       if (rollbackIncomplete) {
         Error.throwWithStackTrace(
           _EditorUndoCaptureRollbackException(error),
@@ -82597,6 +86174,7 @@ class BypassEffectAction extends EditorUndoAction {
   final bool oldState;
   final bool newState;
   final VoidCallback onChange;
+  final bool forceIndividualRow;
 
   BypassEffectAction({
     required this.row,
@@ -82604,6 +86182,7 @@ class BypassEffectAction extends EditorUndoAction {
     required this.oldState,
     required this.newState,
     required this.onChange,
+    this.forceIndividualRow = false,
   });
 
   @override
@@ -82616,17 +86195,28 @@ class BypassEffectAction extends EditorUndoAction {
         'effectIndex': effectIndex,
         'oldState': oldState,
         'newState': newState,
+    if (forceIndividualRow) 'forceIndividualRow': true,
       };
 
   @override
   Future<void> redo() async {
-    await JuceAudioEngine.bypassRowEffect(row, effectIndex, newState);
+    await JuceAudioEngine.bypassRowEffect(
+      row,
+      effectIndex,
+      newState,
+      forceIndividualRow: forceIndividualRow,
+    );
     onChange();
   }
 
   @override
   Future<void> undo() async {
-    await JuceAudioEngine.bypassRowEffect(row, effectIndex, oldState);
+    await JuceAudioEngine.bypassRowEffect(
+      row,
+      effectIndex,
+      oldState,
+      forceIndividualRow: forceIndividualRow,
+    );
     onChange();
   }
 }
@@ -82636,10 +86226,16 @@ Future<int> _resolveExactRowEffectInstance({
   required String instanceId,
   required String effectId,
   required int occurrence,
+  bool forceIndividualRow = false,
 }) async {
-  final instanceIds =
-      await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
-  final effectIds = await JuceAudioEngine.getTrackEffectIdsForRow(row);
+  final instanceIds = await JuceAudioEngine.getTrackEffectInstanceIdsForRow(
+    row,
+    forceIndividualRow: forceIndividualRow,
+  );
+  final effectIds = await JuceAudioEngine.getTrackEffectIdsForRow(
+    row,
+    forceIndividualRow: forceIndividualRow,
+  );
   final exact = instanceId.isEmpty ? -1 : instanceIds.indexOf(instanceId);
   if (exact >= 0 && exact < effectIds.length && effectIds[exact] == effectId) {
     return exact;
@@ -82661,6 +86257,7 @@ class BypassEffectInstanceAction extends EditorUndoAction {
   final bool oldState;
   final bool newState;
   final VoidCallback onChange;
+  final bool forceIndividualRow;
 
   BypassEffectInstanceAction({
     required this.row,
@@ -82670,6 +86267,7 @@ class BypassEffectInstanceAction extends EditorUndoAction {
     required this.oldState,
     required this.newState,
     required this.onChange,
+    this.forceIndividualRow = false,
   });
 
   @override
@@ -82684,6 +86282,7 @@ class BypassEffectInstanceAction extends EditorUndoAction {
         'effectOccurrence': effectOccurrence,
         'oldState': oldState,
         'newState': newState,
+    if (forceIndividualRow) 'forceIndividualRow': true,
       };
 
   Future<void> _apply(bool value) async {
@@ -82692,13 +86291,27 @@ class BypassEffectInstanceAction extends EditorUndoAction {
       instanceId: effectInstanceId,
       effectId: effectId,
       occurrence: effectOccurrence,
+      forceIndividualRow: forceIndividualRow,
     );
     if (index < 0) throw StateError('effect_instance_missing');
-    await JuceAudioEngine.bypassRowEffect(row, index, value);
-    if (await JuceAudioEngine.getRowEffectBypassState(row, index) != value) {
+    await JuceAudioEngine.bypassRowEffect(
+      row,
+      index,
+      value,
+      forceIndividualRow: forceIndividualRow,
+    );
+    if (await JuceAudioEngine.getRowEffectBypassState(
+          row,
+          index,
+          forceIndividualRow: forceIndividualRow,
+        ) !=
+        value) {
       throw StateError('effect_instance_bypass_failed');
     }
-    final ids = await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
+    final ids = await JuceAudioEngine.getTrackEffectInstanceIdsForRow(
+      row,
+      forceIndividualRow: forceIndividualRow,
+    );
     if (index < ids.length && ids[index].trim().isNotEmpty) {
       effectInstanceId = ids[index].trim();
     }
@@ -82712,10 +86325,14 @@ class BypassEffectInstanceAction extends EditorUndoAction {
   Future<void> undo() => _apply(oldState);
 }
 
-class InsertEffectAction extends EditorUndoAction {
+abstract interface class _NativeEffectGraphMutationAction {}
+
+class InsertEffectAction extends EditorUndoAction
+    implements _NativeEffectGraphMutationAction {
   final int row;
   final String pathOrName;
   final VoidCallback onChange;
+  final bool forceIndividualRow;
 
   bool inserted = false;
   int? insertedIndex;
@@ -82726,6 +86343,7 @@ class InsertEffectAction extends EditorUndoAction {
     required this.onChange,
     this.inserted = false,
     this.insertedIndex,
+    this.forceIndividualRow = false,
   });
 
   @override
@@ -82740,14 +86358,21 @@ class InsertEffectAction extends EditorUndoAction {
       'pathOrName': pathOrName,
       'inserted': inserted,
       'insertedIndex': insertedIndex,
+      if (forceIndividualRow) 'forceIndividualRow': true,
     };
   }
 
   @override
   Future<void> redo() async {
-    final beforeCount =
-        (await JuceAudioEngine.getTrackEffectsForRow(row)).length;
-    inserted = await JuceAudioEngine.insertTrackEffect(row, pathOrName);
+    final beforeCount = (await JuceAudioEngine.getTrackEffectsForRow(
+      row,
+      forceIndividualRow: forceIndividualRow,
+    )).length;
+    inserted = await JuceAudioEngine.insertTrackEffect(
+      row,
+      pathOrName,
+      forceIndividualRow: forceIndividualRow,
+    );
     insertedIndex = inserted ? beforeCount : null;
 
     onChange();
@@ -82757,22 +86382,30 @@ class InsertEffectAction extends EditorUndoAction {
   Future<void> undo() async {
     if (insertedIndex == null) return;
 
-    await JuceAudioEngine.removeTrackEffect(row, insertedIndex!);
+    await JuceAudioEngine.removeTrackEffect(
+      row,
+      insertedIndex!,
+      forceIndividualRow: forceIndividualRow,
+    );
     onChange();
   }
 }
 
-class RemoveEffectAction extends EditorUndoAction {
+class RemoveEffectAction extends EditorUndoAction
+    implements _NativeEffectGraphMutationAction {
   final int row;
   final int effectIndex;
   final String pathOrName;
   final VoidCallback onChange;
+  final bool forceIndividualRow;
 
   RemoveEffectAction(
       {required this.row,
       required this.effectIndex,
       required this.pathOrName,
-      required this.onChange});
+    required this.onChange,
+    this.forceIndividualRow = false,
+  });
 
   @override
   String get description => 'Remove track effect';
@@ -82783,31 +86416,44 @@ class RemoveEffectAction extends EditorUndoAction {
         'row': row,
         'effectIndex': effectIndex,
         'pathOrName': pathOrName,
+    if (forceIndividualRow) 'forceIndividualRow': true,
       };
 
   @override
   Future<void> redo() async {
-    await JuceAudioEngine.removeTrackEffect(row, effectIndex);
+    await JuceAudioEngine.removeTrackEffect(
+      row,
+      effectIndex,
+      forceIndividualRow: forceIndividualRow,
+    );
     onChange();
   }
 
   @override
   Future<void> undo() async {
-    final insertedIndex =
-        (await JuceAudioEngine.getTrackEffectsForRow(row)).length;
-    final inserted = await JuceAudioEngine.insertTrackEffect(row, pathOrName);
+    final insertedIndex = (await JuceAudioEngine.getTrackEffectsForRow(
+      row,
+      forceIndividualRow: forceIndividualRow,
+    )).length;
+    final inserted = await JuceAudioEngine.insertTrackEffect(
+      row,
+      pathOrName,
+      forceIndividualRow: forceIndividualRow,
+    );
     if (inserted && insertedIndex != effectIndex) {
       await JuceAudioEngine.reorderTrackEffects(
         row,
         insertedIndex,
         effectIndex,
+        forceIndividualRow: forceIndividualRow,
       );
     }
     onChange();
   }
 }
 
-class RemoveEffectInstanceAction extends EditorUndoAction {
+class RemoveEffectInstanceAction extends EditorUndoAction
+    implements _NativeEffectGraphMutationAction {
   final int row;
   final int effectIndex;
   String effectInstanceId;
@@ -82816,6 +86462,7 @@ class RemoveEffectInstanceAction extends EditorUndoAction {
   final VoidCallback onChange;
   final Future<void> Function(String oldInstanceId, String newInstanceId)
       onInstanceRestored;
+  final bool forceIndividualRow;
 
   RemoveEffectInstanceAction({
     required this.row,
@@ -82825,6 +86472,7 @@ class RemoveEffectInstanceAction extends EditorUndoAction {
     required this.removedEffect,
     required this.onChange,
     required this.onInstanceRestored,
+    this.forceIndividualRow = false,
   });
 
   @override
@@ -82838,6 +86486,7 @@ class RemoveEffectInstanceAction extends EditorUndoAction {
         'effectInstanceId': effectInstanceId,
         'effectOccurrence': effectOccurrence,
         'removedEffect': removedEffect.toJson(),
+    if (forceIndividualRow) 'forceIndividualRow': true,
       };
 
   @override
@@ -82847,11 +86496,18 @@ class RemoveEffectInstanceAction extends EditorUndoAction {
       instanceId: effectInstanceId,
       effectId: removedEffect.effectId,
       occurrence: effectOccurrence,
+      forceIndividualRow: forceIndividualRow,
     );
     if (index < 0) throw StateError('effect_instance_missing');
-    await JuceAudioEngine.removeTrackEffect(row, index);
-    final remainingIds =
-        await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
+    await JuceAudioEngine.removeTrackEffect(
+      row,
+      index,
+      forceIndividualRow: forceIndividualRow,
+    );
+    final remainingIds = await JuceAudioEngine.getTrackEffectInstanceIdsForRow(
+      row,
+      forceIndividualRow: forceIndividualRow,
+    );
     if (remainingIds.contains(effectInstanceId)) {
       throw StateError('effect_instance_remove_failed');
     }
@@ -82860,13 +86516,23 @@ class RemoveEffectInstanceAction extends EditorUndoAction {
 
   @override
   Future<void> undo() async {
-    final before = await JuceAudioEngine.getTrackEffectsForRow(row);
-    final inserted =
-        await JuceAudioEngine.insertTrackEffect(row, removedEffect.effectId);
+    final before = await JuceAudioEngine.getTrackEffectsForRow(
+      row,
+      forceIndividualRow: forceIndividualRow,
+    );
+    final inserted = await JuceAudioEngine.insertTrackEffect(
+      row,
+      removedEffect.effectId,
+      forceIndividualRow: forceIndividualRow,
+    );
     if (!inserted) throw StateError('effect_instance_restore_insert_failed');
     var insertedIndex = before.length;
-    await _waitUntilAsync(() async {
-      final current = await JuceAudioEngine.getTrackEffectsForRow(row);
+    await _waitUntilAsync(
+      () async {
+        final current = await JuceAudioEngine.getTrackEffectsForRow(
+          row,
+          forceIndividualRow: forceIndividualRow,
+        );
       return current.length == before.length + 1;
     }, maxAttempts: 12, step: const Duration(milliseconds: 80));
     if (effectIndex != insertedIndex) {
@@ -82874,9 +86540,13 @@ class RemoveEffectInstanceAction extends EditorUndoAction {
         row,
         insertedIndex,
         effectIndex,
+        forceIndividualRow: forceIndividualRow,
       );
       insertedIndex = effectIndex;
-      final restoredIds = await JuceAudioEngine.getTrackEffectIdsForRow(row);
+      final restoredIds = await JuceAudioEngine.getTrackEffectIdsForRow(
+        row,
+        forceIndividualRow: forceIndividualRow,
+      );
       if (insertedIndex >= restoredIds.length ||
           restoredIds[insertedIndex] != removedEffect.effectId) {
         throw StateError('effect_instance_restore_order_failed');
@@ -82888,6 +86558,7 @@ class RemoveEffectInstanceAction extends EditorUndoAction {
         row,
         insertedIndex,
         stateBase64: removedEffect.stateBase64,
+        forceIndividualRow: forceIndividualRow,
       );
     }
     if (!stateRestored) {
@@ -82898,19 +86569,29 @@ class RemoveEffectInstanceAction extends EditorUndoAction {
           insertedIndex,
           entry.key,
           entry.value,
+          forceIndividualRow: forceIndividualRow,
         );
       }
     }
     if (removedEffect.bypassed) {
-      await JuceAudioEngine.bypassRowEffect(row, insertedIndex, true);
+      await JuceAudioEngine.bypassRowEffect(
+        row,
+        insertedIndex,
+        true,
+        forceIndividualRow: forceIndividualRow,
+      );
       if (!await JuceAudioEngine.getRowEffectBypassState(
         row,
         insertedIndex,
+        forceIndividualRow: forceIndividualRow,
       )) {
         throw StateError('effect_instance_restore_bypass_failed');
       }
     }
-    final ids = await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
+    final ids = await JuceAudioEngine.getTrackEffectInstanceIdsForRow(
+      row,
+      forceIndividualRow: forceIndividualRow,
+    );
     if (insertedIndex >= ids.length || ids[insertedIndex].trim().isEmpty) {
       throw StateError('effect_instance_restore_identity_missing');
     }
@@ -82921,17 +86602,21 @@ class RemoveEffectInstanceAction extends EditorUndoAction {
   }
 }
 
-class ReorderEffectAction extends EditorUndoAction {
+class ReorderEffectAction extends EditorUndoAction
+    implements _NativeEffectGraphMutationAction {
   final int row;
   final int from;
   final int to;
   final VoidCallback onChange;
+  final bool forceIndividualRow;
 
   ReorderEffectAction(
       {required this.row,
       required this.from,
       required this.to,
-      required this.onChange});
+    required this.onChange,
+    this.forceIndividualRow = false,
+  });
 
   @override
   String get description => 'Reorder track effect';
@@ -82942,22 +86627,34 @@ class ReorderEffectAction extends EditorUndoAction {
         'row': row,
         'from': from,
         'to': to,
+    if (forceIndividualRow) 'forceIndividualRow': true,
       };
 
   @override
   Future<void> redo() async {
-    await JuceAudioEngine.reorderTrackEffects(row, from, to);
+    await JuceAudioEngine.reorderTrackEffects(
+      row,
+      from,
+      to,
+      forceIndividualRow: forceIndividualRow,
+    );
     onChange();
   }
 
   @override
   Future<void> undo() async {
-    await JuceAudioEngine.reorderTrackEffects(row, to, from);
+    await JuceAudioEngine.reorderTrackEffects(
+      row,
+      to,
+      from,
+      forceIndividualRow: forceIndividualRow,
+    );
     onChange();
   }
 }
 
-class InsertMasterEffectAction extends EditorUndoAction {
+class InsertMasterEffectAction extends EditorUndoAction
+    implements _NativeEffectGraphMutationAction {
   final String pathOrName;
   final VoidCallback onChange;
 
@@ -83003,7 +86700,8 @@ class InsertMasterEffectAction extends EditorUndoAction {
   }
 }
 
-class RemoveMasterEffectAction extends EditorUndoAction {
+class RemoveMasterEffectAction extends EditorUndoAction
+    implements _NativeEffectGraphMutationAction {
   final int effectIndex;
   final String pathOrName;
   final VoidCallback onChange;
@@ -83088,7 +86786,8 @@ class RemoveMasterEffectAction extends EditorUndoAction {
   }
 }
 
-class ReorderMasterEffectAction extends EditorUndoAction {
+class ReorderMasterEffectAction extends EditorUndoAction
+    implements _NativeEffectGraphMutationAction {
   final int from;
   final int to;
   final VoidCallback onChange;
@@ -83166,6 +86865,7 @@ class SetEffectParamAction extends EditorUndoAction {
   final dynamic oldValue;
   final dynamic newValue;
   final VoidCallback onChange;
+  final bool forceIndividualRow;
 
   SetEffectParamAction({
     required this.row,
@@ -83177,6 +86877,7 @@ class SetEffectParamAction extends EditorUndoAction {
     required this.oldValue,
     required this.newValue,
     required this.onChange,
+    this.forceIndividualRow = false,
   });
 
   @override
@@ -83194,6 +86895,7 @@ class SetEffectParamAction extends EditorUndoAction {
         'paramId': paramId,
         'oldValue': oldValue,
         'newValue': newValue,
+    if (forceIndividualRow) 'forceIndividualRow': true,
       };
 
   Future<int> _currentEffectIndex() async {
@@ -83207,12 +86909,15 @@ class SetEffectParamAction extends EditorUndoAction {
       instanceId: expectedInstanceId,
       effectId: expectedEffectId,
       occurrence: effectOccurrence,
+      forceIndividualRow: forceIndividualRow,
     );
     if (index < 0) {
       throw StateError('row_effect_identity_missing');
     }
-    final instanceIds =
-        await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
+    final instanceIds = await JuceAudioEngine.getTrackEffectInstanceIdsForRow(
+      row,
+      forceIndividualRow: forceIndividualRow,
+    );
     if (index >= instanceIds.length || instanceIds[index].trim().isEmpty) {
       throw StateError('row_effect_identity_missing');
     }
@@ -83223,14 +86928,26 @@ class SetEffectParamAction extends EditorUndoAction {
   @override
   Future<void> redo() async {
     final index = await _currentEffectIndex();
-    await JuceAudioEngine.setTrackEffect(row, index, paramId, newValue);
+    await JuceAudioEngine.setTrackEffect(
+      row,
+      index,
+      paramId,
+      newValue,
+      forceIndividualRow: forceIndividualRow,
+    );
     onChange();
   }
 
   @override
   Future<void> undo() async {
     final index = await _currentEffectIndex();
-    await JuceAudioEngine.setTrackEffect(row, index, paramId, oldValue);
+    await JuceAudioEngine.setTrackEffect(
+      row,
+      index,
+      paramId,
+      oldValue,
+      forceIndividualRow: forceIndividualRow,
+    );
     onChange();
   }
 }
@@ -83553,6 +87270,55 @@ class MuteRowAction extends EditorUndoAction {
   }
 }
 
+bool _containsNativeEffectGraphMutation(Iterable<EditorUndoAction> actions) {
+  for (final action in actions) {
+    if (action is _NativeEffectGraphMutationAction) return true;
+    if (action is CompoundUndoAction &&
+        _containsNativeEffectGraphMutation(action.actions)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+Future<void> _undoEditorActionsInReverse(
+  List<EditorUndoAction> actions, {
+  bool forceGraphMutationBatch = false,
+}) async {
+  final shouldBatch =
+      forceGraphMutationBatch ||
+      (Platform.isMacOS && _containsNativeEffectGraphMutation(actions));
+  if (shouldBatch) {
+    await JuceAudioEngine.beginGraphMutationBatch();
+  }
+
+  Object? firstError;
+  StackTrace? firstStackTrace;
+  try {
+    for (final action in actions.reversed) {
+      try {
+        await action.undo();
+      } catch (error, stackTrace) {
+        firstError ??= error;
+        firstStackTrace ??= stackTrace;
+      }
+    }
+  } finally {
+    if (shouldBatch) {
+      try {
+        await JuceAudioEngine.endGraphMutationBatch();
+      } catch (error, stackTrace) {
+        firstError ??= error;
+        firstStackTrace ??= stackTrace;
+      }
+    }
+  }
+
+  if (firstError case final error?) {
+    Error.throwWithStackTrace(error, firstStackTrace ?? StackTrace.current);
+  }
+}
+
 class CompoundUndoAction extends EditorUndoAction {
   final String _description;
   final List<EditorUndoAction> actions;
@@ -83604,11 +87370,10 @@ class CompoundUndoAction extends EditorUndoAction {
       });
 
   @override
-  Future<void> undo() => _run(() async {
-        for (final a in actions.reversed) {
-          await a.undo();
-        }
-      });
+  Future<void> undo() => _undoEditorActionsInReverse(
+    actions,
+    forceGraphMutationBatch: batchGraphMutations,
+  );
 }
 
 class _RowEffectsAutomationSnapshotAction extends EditorUndoAction {
@@ -83650,9 +87415,16 @@ class _RowEffectsAutomationSnapshotAction extends EditorUndoAction {
 Future<RowEffectsSnapshot> captureRowSnapshot(
   int row, {
   int rowId = -1,
+  bool forceIndividualRow = false,
 }) async {
-  var effectIds = await JuceAudioEngine.getTrackEffectIdsForRow(row);
-  final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
+  var effectIds = await JuceAudioEngine.getTrackEffectIdsForRow(
+    row,
+    forceIndividualRow: forceIndividualRow,
+  );
+  final effects = await JuceAudioEngine.getTrackEffectsForRow(
+    row,
+    forceIndividualRow: forceIndividualRow,
+  );
   if (effectIds.length != effects.length) {
     effectIds = List<String>.from(effects);
   }
@@ -83660,10 +87432,22 @@ Future<RowEffectsSnapshot> captureRowSnapshot(
 
   final count = effects.length;
   for (int i = 0; i < count; i++) {
-    final params = await JuceAudioEngine.getTrackPluginParameters(row, i);
-    final isBypassed = await JuceAudioEngine.getRowEffectBypassState(row, i);
+    final params = await JuceAudioEngine.getTrackPluginParameters(
+      row,
+      i,
+      forceIndividualRow: forceIndividualRow,
+    );
+    final isBypassed = await JuceAudioEngine.getRowEffectBypassState(
+      row,
+      i,
+      forceIndividualRow: forceIndividualRow,
+    );
     final effectName = i < effects.length ? effects[i] : effectIds[i];
-    final stateBase64 = await JuceAudioEngine.getTrackEffectState(row, i);
+    final stateBase64 = await JuceAudioEngine.getTrackEffectState(
+      row,
+      i,
+      forceIndividualRow: forceIndividualRow,
+    );
     snapshots.add(
       EffectSnapshot(
         effectIds[i],
@@ -84631,9 +88415,10 @@ class _ChatBarState extends State<_ChatBar> {
                                                                   .bottomCenter,
                                                               colors: widget
                                                                       .isThinking
-                                                                  ? const <Color>[
+                                                                  ? const <
                                                                       Color
-                                                                          .fromRGBO(
+                                                                    >[
+                                                                      Color.fromRGBO(
                                                                         168,
                                                                         110,
                                                                         110,
@@ -84647,9 +88432,10 @@ class _ChatBarState extends State<_ChatBar> {
                                                                         0.92,
                                                                       ),
                                                                     ]
-                                                                  : const <Color>[
+                                                                  : const <
                                                                       Color
-                                                                          .fromRGBO(
+                                                                    >[
+                                                                      Color.fromRGBO(
                                                                         111,
                                                                         133,
                                                                         157,

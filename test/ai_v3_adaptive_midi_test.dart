@@ -712,6 +712,85 @@ Map<String, dynamic> _stemPlan({String clipId = 'clip-audio'}) =>
       'question_options': const <Object>[],
     };
 
+Map<String, dynamic> _stemPitchRefPlan() => <String, dynamic>{
+      'schema_version': aiV3PlanVersion,
+      'outcome': 'plan',
+      'user_message': 'Separated the stems and adjusted the generated clip.',
+      'commands': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'command_id': 'separate-vocal',
+          'type': 'clip.separate_stems',
+          'arguments': <String, dynamic>{'clip_id': 'clip-audio'},
+        },
+        <String, dynamic>{
+          'command_id': 'pitch-generated',
+          'type': 'clip.adjust_pitch_semitones',
+          'arguments': <String, dynamic>{
+            'clip_ref': <String, dynamic>{
+              'command_id': 'separate-vocal',
+              'output': 'instrumental_clip',
+            },
+            'delta_semitones': -1,
+          },
+        },
+      ],
+      'question_options': const <Object>[],
+    };
+
+Map<String, dynamic> _generatedMidiTransposeRefPlan() => <String, dynamic>{
+      'schema_version': aiV3PlanVersion,
+      'outcome': 'plan',
+      'user_message': 'Created and transposed the generated MIDI clip.',
+      'commands': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'command_id': 'create-row',
+          'type': 'row.create',
+          'arguments': <String, dynamic>{
+            'name': 'Chords',
+            'lane': <String, dynamic>{
+              'kind': 'midi',
+              'instrument_id': 'mixroom.basic_synth',
+            },
+            'position': <String, dynamic>{'kind': 'end'},
+          },
+        },
+        <String, dynamic>{
+          'command_id': 'create-clip',
+          'type': 'midi.create_clip',
+          'arguments': <String, dynamic>{
+            'destination': <String, dynamic>{
+              'row_ref': <String, dynamic>{
+                'command_id': 'create-row',
+                'output': 'row',
+              },
+            },
+            'start_beat': 0.0,
+            'length_beats': 1.0,
+            'notes': const <Map<String, dynamic>>[
+              <String, dynamic>{
+                'pitch': 60,
+                'start_beat': 0.0,
+                'length_beats': 1.0,
+                'velocity': 0.8,
+              },
+            ],
+          },
+        },
+        <String, dynamic>{
+          'command_id': 'transpose-clip',
+          'type': 'midi.transpose',
+          'arguments': <String, dynamic>{
+            'clip_ref': <String, dynamic>{
+              'command_id': 'create-clip',
+              'output': 'midi_clip',
+            },
+            'semitones': 2,
+          },
+        },
+      ],
+      'question_options': const <Object>[],
+    };
+
 Map<String, dynamic> _audioToMidiPlan({
   String clipId = 'clip-audio',
   String instrumentId = 'piano',
@@ -2698,6 +2777,84 @@ void main() {
 
     expect(result.callCount, 2);
     expect(result.plan.commands.single.type, 'clip.separate_stems');
+  });
+
+  test('adaptive continuation accepts a typed generated clip target', () async {
+    final fixture = await _fixture(includeAudioClip: true);
+    var call = 0;
+    final client = MockClient((_) async {
+      call++;
+      return http.Response(
+        jsonEncode(call == 1
+            ? _response(
+                'get_context_domains',
+                _clipAdvancedQuery(
+                  targets: const <Object>['clip-audio'],
+                ),
+              )
+            : _response('submit_plan_v3', _stemPitchRefPlan())),
+        200,
+      );
+    });
+
+    final result = await AiV3AdaptivePlannerService(
+      apiKey: 'test-key',
+      model: 'gpt-5.4-mini',
+      resourceRefsEnabled: true,
+      httpClient: client,
+    ).plan(
+      compactCore: fixture.compact,
+      snapshot: fixture.snapshot,
+      originalRequest: 'Perform the ordered generated-resource edit.',
+    );
+
+    expect(result.callCount, 2);
+    expect(result.plan.commands, hasLength(2));
+    expect(
+      result.plan.commands.last.arguments['clip_ref'],
+      <String, dynamic>{
+        'command_id': 'separate-vocal',
+        'output': 'instrumental_clip',
+      },
+    );
+  });
+
+  test('adaptive MIDI guard accepts a typed generated clip target', () async {
+    final fixture = await _fixture();
+    var call = 0;
+    final client = MockClient((_) async {
+      call++;
+      return http.Response(
+        jsonEncode(call == 1
+            ? _response('get_context_domains', _query())
+            : _response(
+                'submit_plan_v3',
+                _generatedMidiTransposeRefPlan(),
+              )),
+        200,
+      );
+    });
+
+    final result = await AiV3AdaptivePlannerService(
+      apiKey: 'test-key',
+      model: 'gpt-5.4-mini',
+      resourceRefsEnabled: true,
+      httpClient: client,
+    ).plan(
+      compactCore: fixture.compact,
+      snapshot: fixture.snapshot,
+      originalRequest: 'Create and transpose a generated MIDI clip.',
+    );
+
+    expect(result.callCount, 2);
+    expect(result.plan.commands, hasLength(3));
+    expect(
+      result.plan.commands.last.arguments['clip_ref'],
+      <String, dynamic>{
+        'command_id': 'create-clip',
+        'output': 'midi_clip',
+      },
+    );
   });
 
   test('advanced stem separation rejects a source omitted from retrieval',

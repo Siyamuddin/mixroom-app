@@ -529,12 +529,17 @@ class JuceAudioEngine {
 
   static Future<List<Map<String, dynamic>>> getTrackPluginParameters(
     int row,
-    int effectIndex,
-  ) async {
+    int effectIndex, {
+    bool forceIndividualRow = false,
+  }) async {
     try {
       final rawList = await _ch.invokeMethod<List<dynamic>>(
         'getTrackPluginParameters',
-        {'row': row, 'effect': effectIndex},
+        {
+          'row': row,
+          'effect': effectIndex,
+          if (forceIndividualRow) 'forceIndividualRow': true,
+        },
       );
       if (rawList == null) return [];
 
@@ -1701,11 +1706,16 @@ class JuceAudioEngine {
   // ===============================
   // NEW ROW (TRACK BUS) API
   // ===============================
-  static Future<bool> insertTrackEffect(int row, String path) async {
+  static Future<bool> insertTrackEffect(
+    int row,
+    String path, {
+    bool forceIndividualRow = false,
+  }) async {
     try {
       final ok = await _ch.invokeMethod<bool>('insertTrackEffect', {
         'row': row,
         'path': path,
+        if (forceIndividualRow) 'forceIndividualRow': true,
       });
       return ok ?? false;
     } on MissingPluginException catch (e) {
@@ -1717,11 +1727,16 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<void> removeTrackEffect(int row, int effectIndex) async {
+  static Future<void> removeTrackEffect(
+    int row,
+    int effectIndex, {
+    bool forceIndividualRow = false,
+  }) async {
     try {
       await _ch.invokeMethod('removeTrackEffect', {
         'row': row,
         'effect': effectIndex,
+        if (forceIndividualRow) 'forceIndividualRow': true,
       });
     } on MissingPluginException catch (e) {
       _logError('removeTrackEffect', e);
@@ -1730,12 +1745,18 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<void> reorderTrackEffects(int row, int from, int to) async {
+  static Future<void> reorderTrackEffects(
+    int row,
+    int from,
+    int to, {
+    bool forceIndividualRow = false,
+  }) async {
     try {
       await _ch.invokeMethod('reorderTrackEffects', {
         'row': row,
         'from': from,
         'to': to,
+        if (forceIndividualRow) 'forceIndividualRow': true,
       });
     } on MissingPluginException catch (e) {
       _logError('reorderTrackEffects', e);
@@ -1744,11 +1765,17 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<List<String>> getTrackEffectsForRow(int row) async {
+  static Future<List<String>> getTrackEffectsForRow(
+    int row, {
+    bool forceIndividualRow = false,
+  }) async {
     try {
       final list = await _ch.invokeListMethod<String>(
         'getTrackEffectsForRow',
-        {'row': row},
+        {
+          'row': row,
+          if (forceIndividualRow) 'forceIndividualRow': true,
+        },
       );
       return list ?? <String>[];
     } on MissingPluginException catch (e) {
@@ -1760,11 +1787,17 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<List<String>> getTrackEffectIdsForRow(int row) async {
+  static Future<List<String>> getTrackEffectIdsForRow(
+    int row, {
+    bool forceIndividualRow = false,
+  }) async {
     try {
       final list = await _ch.invokeListMethod<String>(
         'getTrackEffectIdsForRow',
-        {'row': row},
+        {
+          'row': row,
+          if (forceIndividualRow) 'forceIndividualRow': true,
+        },
       );
       return list ?? <String>[];
     } on MissingPluginException catch (e) {
@@ -1776,11 +1809,17 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<List<String>> getTrackEffectInstanceIdsForRow(int row) async {
+  static Future<List<String>> getTrackEffectInstanceIdsForRow(
+    int row, {
+    bool forceIndividualRow = false,
+  }) async {
     try {
       final list = await _ch.invokeListMethod<String>(
         'getTrackEffectInstanceIdsForRow',
-        {'row': row},
+        {
+          'row': row,
+          if (forceIndividualRow) 'forceIndividualRow': true,
+        },
       );
       return list ?? <String>[];
     } on MissingPluginException catch (e) {
@@ -1792,11 +1831,16 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<String> getTrackEffectState(int row, int effectIndex) async {
+  static Future<String> getTrackEffectState(
+    int row,
+    int effectIndex, {
+    bool forceIndividualRow = false,
+  }) async {
     try {
       final state = await _ch.invokeMethod<String>('getTrackEffectState', {
         'row': row,
         'effect': effectIndex,
+        if (forceIndividualRow) 'forceIndividualRow': true,
       });
       return (state ?? '').trim();
     } on MissingPluginException catch (e) {
@@ -1812,12 +1856,14 @@ class JuceAudioEngine {
     int row,
     int effectIndex, {
     required String stateBase64,
+    bool forceIndividualRow = false,
   }) async {
     try {
       final applied = await _ch.invokeMethod<bool>('setTrackEffectState', {
         'row': row,
         'effect': effectIndex,
         'stateBase64': stateBase64,
+        if (forceIndividualRow) 'forceIndividualRow': true,
       });
       return applied ?? false;
     } on MissingPluginException catch (e) {
@@ -1846,13 +1892,19 @@ class JuceAudioEngine {
   }
 
   static Future<void> setTrackEffect(
-      int row, int effectIndex, String paramId, dynamic value) async {
+    int row,
+    int effectIndex,
+    String paramId,
+    dynamic value, {
+    bool forceIndividualRow = false,
+  }) async {
     try {
       await _ch.invokeMethod('setTrackEffect', {
         'row': row,
         'effect': effectIndex,
         'paramId': paramId,
         'value': value,
+        if (forceIndividualRow) 'forceIndividualRow': true,
       });
     } on MissingPluginException catch (e) {
       _logError('setTrackEffect', e);
@@ -1862,12 +1914,17 @@ class JuceAudioEngine {
   }
 
   static Future<void> bypassRowEffect(
-      int row, int effectIndex, bool bypass) async {
+    int row,
+    int effectIndex,
+    bool bypass, {
+    bool forceIndividualRow = false,
+  }) async {
     try {
       await _ch.invokeMethod('bypassRowEffect', {
         'row': row,
         'effect': effectIndex,
         'bypass': bypass,
+        if (forceIndividualRow) 'forceIndividualRow': true,
       });
     } on MissingPluginException catch (e) {
       _logError('bypassRowEffect', e);
@@ -1876,13 +1933,18 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<bool> getRowEffectBypassState(int row, int effectIndex) async {
+  static Future<bool> getRowEffectBypassState(
+    int row,
+    int effectIndex, {
+    bool forceIndividualRow = false,
+  }) async {
     try {
       final res = await _ch.invokeMethod<bool>(
         'getRowEffectBypassState',
         {
           'row': row,
           'effect': effectIndex,
+          if (forceIndividualRow) 'forceIndividualRow': true,
         },
       );
       return res ?? false;

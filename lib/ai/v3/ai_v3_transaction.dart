@@ -42,6 +42,7 @@ class AiV3LocalTransaction<T, O> {
     required Future<bool> Function() verify,
     required Future<List<O>> Function() observe,
     required Future<void> Function(T action) rollback,
+    Future<void> Function(List<T> actions)? rollbackAll,
     required Future<void> Function(List<T> actions) commit,
   }) async {
     var captured = <T>[];
@@ -64,12 +65,20 @@ class AiV3LocalTransaction<T, O> {
       );
     } catch (error) {
       var rollbackIncomplete = error is AiV3RollbackIncompleteFailure;
+      if (captured.isNotEmpty && rollbackAll != null) {
+        try {
+          await rollbackAll(List<T>.unmodifiable(captured));
+        } catch (_) {
+          rollbackIncomplete = true;
+        }
+      } else {
       for (final action in captured.reversed) {
         try {
           await rollback(action);
         } catch (_) {
           rollbackIncomplete = true;
         }
+      }
       }
       throw AiV3TransactionFailure<O>(
         cause: error,

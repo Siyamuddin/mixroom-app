@@ -146,16 +146,16 @@ object JuceBridge {
     @JvmStatic external fun getRowsJNI(): ArrayList<HashMap<String, Any>>
 
     // Row FX and controls
-    @JvmStatic external fun insertTrackEffectJNI(row: Int, pluginPath: String): Boolean
-    @JvmStatic external fun removeTrackEffectJNI(row: Int, effectIndex: Int)
-    @JvmStatic external fun reorderTrackEffectsJNI(row: Int, fromIndex: Int, toIndex: Int)
-    @JvmStatic external fun getTrackEffectsForRowJNI(row: Int): ArrayList<String>
-    @JvmStatic external fun getTrackEffectIdsForRowJNI(row: Int): ArrayList<String>
-    @JvmStatic external fun getTrackEffectInstanceIdsForRowJNI(row: Int): ArrayList<String>
-    @JvmStatic external fun getTrackPluginParametersJNI(row: Int, effectIndex: Int): ArrayList<HashMap<String, Any>>
-    @JvmStatic external fun setTrackEffectJNI(row: Int, effectIndex: Int, paramId: String, value: Any)
-    @JvmStatic external fun bypassRowEffectJNI(row: Int, effectIndex: Int, bypass: Boolean)
-    @JvmStatic external fun getRowEffectBypassStateJNI(row: Int, effectIndex: Int): Boolean
+    @JvmStatic external fun insertTrackEffectJNI(row: Int, pluginPath: String, forceIndividualRow: Boolean): Boolean
+    @JvmStatic external fun removeTrackEffectJNI(row: Int, effectIndex: Int, forceIndividualRow: Boolean)
+    @JvmStatic external fun reorderTrackEffectsJNI(row: Int, fromIndex: Int, toIndex: Int, forceIndividualRow: Boolean)
+    @JvmStatic external fun getTrackEffectsForRowJNI(row: Int, forceIndividualRow: Boolean): ArrayList<String>
+    @JvmStatic external fun getTrackEffectIdsForRowJNI(row: Int, forceIndividualRow: Boolean): ArrayList<String>
+    @JvmStatic external fun getTrackEffectInstanceIdsForRowJNI(row: Int, forceIndividualRow: Boolean): ArrayList<String>
+    @JvmStatic external fun getTrackPluginParametersJNI(row: Int, effectIndex: Int, forceIndividualRow: Boolean): ArrayList<HashMap<String, Any>>
+    @JvmStatic external fun setTrackEffectJNI(row: Int, effectIndex: Int, paramId: String, value: Any, forceIndividualRow: Boolean)
+    @JvmStatic external fun bypassRowEffectJNI(row: Int, effectIndex: Int, bypass: Boolean, forceIndividualRow: Boolean)
+    @JvmStatic external fun getRowEffectBypassStateJNI(row: Int, effectIndex: Int, forceIndividualRow: Boolean): Boolean
     @JvmStatic external fun setTrackAutomationPointsJNI(row: Int, points: List<Map<String, Any>>)
     @JvmStatic external fun setTrackEffectAutomationPointsJNI(
         row: Int,

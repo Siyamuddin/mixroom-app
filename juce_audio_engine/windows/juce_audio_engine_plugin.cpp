@@ -1090,8 +1090,9 @@ void JuceAudioEnginePlugin::HandleMethodCall(
     if (method_call.method_name() == "getTrackPluginParameters") {
       const int row = FindInt(args, "row", 0);
       const int effect = FindInt(args, "effect", 0);
-      const auto parameters = CallOnMessageThreadSync([row, effect] {
-        return JuceEngine::get().getTrackPluginParameterInfo(row, effect);
+      const bool force_individual_row = FindBool(args, "forceIndividualRow", false);
+      const auto parameters = CallOnMessageThreadSync([row, effect, force_individual_row] {
+        return JuceEngine::get().getTrackPluginParameterInfo(row, effect, force_individual_row);
       });
       result->Success(
           flutter::EncodableValue(NamedValueSetArrayToParameterList(parameters)));
@@ -1690,8 +1691,9 @@ void JuceAudioEnginePlugin::HandleMethodCall(
     if (method_call.method_name() == "insertTrackEffect") {
       const int row = FindInt(args, "row", 0);
       const std::string path = FindString(args, "path");
+      const bool force_individual_row = FindBool(args, "forceIndividualRow", false);
       const bool ok = CallOnMessageThreadSync(
-          [row, path] { return JuceEngine::get().insertTrackEffect(row, ToJuceString(path)); });
+          [row, path, force_individual_row] { return JuceEngine::get().insertTrackEffect(row, ToJuceString(path), force_individual_row); });
       result->Success(flutter::EncodableValue(ok));
       return;
     }
@@ -1699,8 +1701,9 @@ void JuceAudioEnginePlugin::HandleMethodCall(
     if (method_call.method_name() == "removeTrackEffect") {
       const int row = FindInt(args, "row", 0);
       const int effect = FindInt(args, "effect", 0);
+      const bool force_individual_row = FindBool(args, "forceIndividualRow", false);
       CallOnMessageThreadSync(
-          [row, effect] { JuceEngine::get().removeTrackEffect(row, effect); });
+          [row, effect, force_individual_row] { JuceEngine::get().removeTrackEffect(row, effect, force_individual_row); });
       result->Success(flutter::EncodableValue());
       return;
     }
@@ -1709,8 +1712,9 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       const int row = FindInt(args, "row", 0);
       const int from = FindInt(args, "from", 0);
       const int to = FindInt(args, "to", 0);
-      CallOnMessageThreadSync([row, from, to] {
-        JuceEngine::get().reorderTrackEffects(row, from, to);
+      const bool force_individual_row = FindBool(args, "forceIndividualRow", false);
+      CallOnMessageThreadSync([row, from, to, force_individual_row] {
+        JuceEngine::get().reorderTrackEffects(row, from, to, force_individual_row);
       });
       result->Success(flutter::EncodableValue());
       return;
@@ -1718,24 +1722,27 @@ void JuceAudioEnginePlugin::HandleMethodCall(
 
     if (method_call.method_name() == "getTrackEffectsForRow") {
       const int row = FindInt(args, "row", 0);
+      const bool force_individual_row = FindBool(args, "forceIndividualRow", false);
       const auto values = CallOnMessageThreadSync(
-          [row] { return JuceEngine::get().getTrackEffectsForRow(row); });
+          [row, force_individual_row] { return JuceEngine::get().getTrackEffectsForRow(row, force_individual_row); });
       result->Success(flutter::EncodableValue(StringArrayToEncodableList(values)));
       return;
     }
 
     if (method_call.method_name() == "getTrackEffectIdsForRow") {
       const int row = FindInt(args, "row", 0);
+      const bool force_individual_row = FindBool(args, "forceIndividualRow", false);
       const auto values = CallOnMessageThreadSync(
-          [row] { return JuceEngine::get().getTrackEffectIdsForRow(row); });
+          [row, force_individual_row] { return JuceEngine::get().getTrackEffectIdsForRow(row, force_individual_row); });
       result->Success(flutter::EncodableValue(StringArrayToEncodableList(values)));
       return;
     }
 
     if (method_call.method_name() == "getTrackEffectInstanceIdsForRow") {
       const int row = FindInt(args, "row", 0);
+      const bool force_individual_row = FindBool(args, "forceIndividualRow", false);
       const auto values = CallOnMessageThreadSync(
-          [row] { return JuceEngine::get().getTrackEffectInstanceIdsForRow(row); });
+          [row, force_individual_row] { return JuceEngine::get().getTrackEffectInstanceIdsForRow(row, force_individual_row); });
       result->Success(flutter::EncodableValue(StringArrayToEncodableList(values)));
       return;
     }
@@ -1744,12 +1751,14 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       const int row = FindInt(args, "row", 0);
       const int effect = FindInt(args, "effect", 0);
       const std::string param_id = FindString(args, "paramId");
+      const bool force_individual_row = FindBool(args, "forceIndividualRow", false);
       const flutter::EncodableValue* raw_value = FindValue(args, "value");
       if (raw_value != nullptr) {
         const juce::var value = EncodableToJuceVar(*raw_value);
         CallOnMessageThreadSync([=] {
           JuceEngine::get().setTrackEffectParameter(row, effect,
-                                                    ToJuceString(param_id), value);
+                                                    ToJuceString(param_id), value,
+                                                    force_individual_row);
         });
       }
       result->Success(flutter::EncodableValue());
@@ -1760,8 +1769,9 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       const int row = FindInt(args, "row", 0);
       const int effect = FindInt(args, "effect", 0);
       const bool bypass = FindBool(args, "bypass", false);
-      CallOnMessageThreadSync([row, effect, bypass] {
-        JuceEngine::get().bypassRowEffect(row, effect, bypass);
+      const bool force_individual_row = FindBool(args, "forceIndividualRow", false);
+      CallOnMessageThreadSync([row, effect, bypass, force_individual_row] {
+        JuceEngine::get().bypassRowEffect(row, effect, bypass, force_individual_row);
       });
       result->Success(flutter::EncodableValue());
       return;
@@ -1770,8 +1780,9 @@ void JuceAudioEnginePlugin::HandleMethodCall(
     if (method_call.method_name() == "getRowEffectBypassState") {
       const int row = FindInt(args, "row", 0);
       const int effect = FindInt(args, "effect", 0);
+      const bool force_individual_row = FindBool(args, "forceIndividualRow", false);
       const bool value = CallOnMessageThreadSync(
-          [row, effect] { return JuceEngine::get().getRowEffectBypassState(row, effect); });
+          [row, effect, force_individual_row] { return JuceEngine::get().getRowEffectBypassState(row, effect, force_individual_row); });
       result->Success(flutter::EncodableValue(value));
       return;
     }

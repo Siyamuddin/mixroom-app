@@ -6144,21 +6144,23 @@ void JuceEngine::compactRowFxChain(int row)
         r.fxIds.removeRange(r.fxIds.size() - 1, 1);
 }
 
-juce::Array<juce::AudioProcessorGraph::NodeID> *JuceEngine::effectChainForRowApi(int rowIndex)
+juce::Array<juce::AudioProcessorGraph::NodeID> *JuceEngine::effectChainForRowApi(int rowIndex, bool forceIndividualRow)
 {
-    if (auto *group = trackGroupForLeadRowIndex(rowIndex))
-        return &group->fxChain;
     if (rowIndex < 0 || rowIndex >= (int)rows.size())
         return nullptr;
+    if (!forceIndividualRow)
+        if (auto *group = trackGroupForLeadRowIndex(rowIndex))
+            return &group->fxChain;
     return &rows[(size_t)rowIndex].fxChain;
 }
 
-juce::StringArray *JuceEngine::effectIdsForRowApi(int rowIndex)
+juce::StringArray *JuceEngine::effectIdsForRowApi(int rowIndex, bool forceIndividualRow)
 {
-    if (auto *group = trackGroupForLeadRowIndex(rowIndex))
-        return &group->fxIds;
     if (rowIndex < 0 || rowIndex >= (int)rows.size())
         return nullptr;
+    if (!forceIndividualRow)
+        if (auto *group = trackGroupForLeadRowIndex(rowIndex))
+            return &group->fxIds;
     return &rows[(size_t)rowIndex].fxIds;
 }
 
@@ -6321,7 +6323,7 @@ bool resolveKnownPluginDescription(const juce::KnownPluginList &list,
 }
 } // namespace
 
-bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath)
+bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath, bool forceIndividualRow)
 {
     constexpr auto batchUpdate = juce::AudioProcessorGraph::UpdateKind::none;
     const auto requestedId = pluginPath.trim();
@@ -6401,7 +6403,7 @@ bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath)
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return false;
     ensureRowBusNodesAttached(trackRow, batchUpdate);
-    auto *groupState = trackGroupForLeadRowIndex(trackRow);
+    auto *groupState = forceIndividualRow ? nullptr : trackGroupForLeadRowIndex(trackRow);
     if (groupState != nullptr)
         ensureTrackGroupBusNodesAttached(*groupState, batchUpdate);
     else
@@ -6460,7 +6462,7 @@ bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath)
     return true;
 }
 
-void JuceEngine::removeTrackEffect(int trackRow, int effectIndex)
+void JuceEngine::removeTrackEffect(int trackRow, int effectIndex, bool forceIndividualRow)
 {
     const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
     constexpr auto batchUpdate = juce::AudioProcessorGraph::UpdateKind::none;
@@ -6470,7 +6472,7 @@ void JuceEngine::removeTrackEffect(int trackRow, int effectIndex)
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return;
 
-    auto *groupState = trackGroupForLeadRowIndex(trackRow);
+    auto *groupState = forceIndividualRow ? nullptr : trackGroupForLeadRowIndex(trackRow);
     if (groupState != nullptr)
         compactTrackGroupFxChain(*groupState);
     else
@@ -6531,7 +6533,7 @@ void JuceEngine::removeTrackEffect(int trackRow, int effectIndex)
     commitGraphMutationLocked();
 }
 
-void JuceEngine::reorderTrackEffects(int trackRow, int fromIndex, int toIndex)
+void JuceEngine::reorderTrackEffects(int trackRow, int fromIndex, int toIndex, bool forceIndividualRow)
 {
     const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
 
@@ -6540,7 +6542,7 @@ void JuceEngine::reorderTrackEffects(int trackRow, int fromIndex, int toIndex)
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return;
 
-    auto *groupState = trackGroupForLeadRowIndex(trackRow);
+    auto *groupState = forceIndividualRow ? nullptr : trackGroupForLeadRowIndex(trackRow);
     if (groupState != nullptr)
         compactTrackGroupFxChain(*groupState);
     else
@@ -6610,14 +6612,14 @@ void JuceEngine::reorderTrackEffects(int trackRow, int fromIndex, int toIndex)
     commitGraphMutationLocked();
 }
 
-juce::StringArray JuceEngine::getTrackEffectsForRow(int trackRow)
+juce::StringArray JuceEngine::getTrackEffectsForRow(int trackRow, bool forceIndividualRow)
 {
     juce::StringArray names;
 
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return names;
 
-    auto *chainPtr = effectChainForRowApi(trackRow);
+    auto *chainPtr = effectChainForRowApi(trackRow, forceIndividualRow);
     if (chainPtr == nullptr)
         return names;
     auto &chain = *chainPtr;
@@ -6634,15 +6636,15 @@ juce::StringArray JuceEngine::getTrackEffectsForRow(int trackRow)
     return names;
 }
 
-juce::StringArray JuceEngine::getTrackEffectIdsForRow(int trackRow)
+juce::StringArray JuceEngine::getTrackEffectIdsForRow(int trackRow, bool forceIndividualRow)
 {
     juce::StringArray ids;
 
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return ids;
 
-    auto *chainPtr = effectChainForRowApi(trackRow);
-    auto *idsPtr = effectIdsForRowApi(trackRow);
+    auto *chainPtr = effectChainForRowApi(trackRow, forceIndividualRow);
+    auto *idsPtr = effectIdsForRowApi(trackRow, forceIndividualRow);
     if (chainPtr == nullptr || idsPtr == nullptr)
         return ids;
     auto &chain = *chainPtr;
@@ -6661,14 +6663,14 @@ juce::StringArray JuceEngine::getTrackEffectIdsForRow(int trackRow)
     return ids;
 }
 
-juce::StringArray JuceEngine::getTrackEffectInstanceIdsForRow(int trackRow)
+juce::StringArray JuceEngine::getTrackEffectInstanceIdsForRow(int trackRow, bool forceIndividualRow)
 {
     juce::StringArray ids;
 
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return ids;
 
-    auto *chainPtr = effectChainForRowApi(trackRow);
+    auto *chainPtr = effectChainForRowApi(trackRow, forceIndividualRow);
     if (chainPtr == nullptr)
         return ids;
     auto &chain = *chainPtr;
@@ -6682,7 +6684,8 @@ juce::StringArray JuceEngine::getTrackEffectInstanceIdsForRow(int trackRow)
 void JuceEngine::setTrackEffectParameter(int trackRow,
                                          int effectIndex,
                                          const juce::String &paramName,
-                                         const juce::var &newValue)
+                                         const juce::var &newValue,
+                                         bool forceIndividualRow)
 {
     const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
 
@@ -6691,7 +6694,7 @@ void JuceEngine::setTrackEffectParameter(int trackRow,
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return;
 
-    auto *chainPtr = effectChainForRowApi(trackRow);
+    auto *chainPtr = effectChainForRowApi(trackRow, forceIndividualRow);
     if (chainPtr == nullptr)
         return;
     auto &chain = *chainPtr;
@@ -6769,18 +6772,21 @@ void JuceEngine::setTrackEffectParameter(int trackRow,
     }
 }
 
-void JuceEngine::bypassRowEffect(int trackRow, int effectIndex, bool shouldBypass)
+void JuceEngine::bypassRowEffect(int trackRow, int effectIndex, bool shouldBypass, bool forceIndividualRow)
 {
     const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
 
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return;
 
-    if (auto *group = trackGroupForLeadRowIndex(trackRow))
-        compactTrackGroupFxChain(*group);
+    if (!forceIndividualRow)
+        if (auto *group = trackGroupForLeadRowIndex(trackRow))
+            compactTrackGroupFxChain(*group);
+        else
+            compactRowFxChain(trackRow);
     else
         compactRowFxChain(trackRow);
-    auto *chainPtr = effectChainForRowApi(trackRow);
+    auto *chainPtr = effectChainForRowApi(trackRow, forceIndividualRow);
     if (chainPtr == nullptr)
         return;
     auto &chain = *chainPtr;
@@ -6792,12 +6798,12 @@ void JuceEngine::bypassRowEffect(int trackRow, int effectIndex, bool shouldBypas
         node->setBypassed(shouldBypass);
 }
 
-bool JuceEngine::getRowEffectBypassState(int trackRow, int effectIndex)
+bool JuceEngine::getRowEffectBypassState(int trackRow, int effectIndex, bool forceIndividualRow)
 {
     if (trackRow < 0 || trackRow >= (int)rows.size())
         return false;
 
-    auto *chainPtr = effectChainForRowApi(trackRow);
+    auto *chainPtr = effectChainForRowApi(trackRow, forceIndividualRow);
     if (chainPtr == nullptr)
         return false;
     auto &chain = *chainPtr;
@@ -8973,7 +8979,7 @@ void JuceEngine::setClipStretchOptions(int clipIndex, double tempoRatio, bool pr
         p->setStretchOptions(c.tempoRatio, c.preservePitch);
 }
 
-juce::Array<juce::NamedValueSet> JuceEngine::getTrackPluginParameterInfo(int row, int effectIndex)
+juce::Array<juce::NamedValueSet> JuceEngine::getTrackPluginParameterInfo(int row, int effectIndex, bool forceIndividualRow)
 {
     // juceLogToFlutter("Hello from JuceEngine::getTrackPluginParameterInfo");
     juce::Array<juce::NamedValueSet> results;
@@ -8981,7 +8987,7 @@ juce::Array<juce::NamedValueSet> JuceEngine::getTrackPluginParameterInfo(int row
     if (row < 0 || row >= (int)rows.size())
         return results;
 
-    auto *chainPtr = effectChainForRowApi(row);
+    auto *chainPtr = effectChainForRowApi(row, forceIndividualRow);
     if (chainPtr == nullptr)
         return results;
     auto &chain = *chainPtr;

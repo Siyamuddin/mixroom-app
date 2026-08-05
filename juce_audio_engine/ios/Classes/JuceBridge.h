@@ -164,32 +164,39 @@
 + (double)getTransportSecondsObjC;
 
 // Row (track bus) FX and controls
-+ (BOOL)insertTrackEffectObjC:(NSInteger)trackRow path:(NSString *)pluginPath;
-+ (void)removeTrackEffectObjC:(NSInteger)trackRow effectIndex:(NSInteger)effectIndex;
++ (BOOL)insertTrackEffectObjC:(NSInteger)trackRow path:(NSString *)pluginPath forceIndividualRow:(BOOL)forceIndividualRow;
++ (void)removeTrackEffectObjC:(NSInteger)trackRow effectIndex:(NSInteger)effectIndex forceIndividualRow:(BOOL)forceIndividualRow;
 + (void)reorderTrackEffectsObjC:(NSInteger)trackRow
                       fromIndex:(NSInteger)fromIdx
-                        toIndex:(NSInteger)toIdx;
-+ (NSArray<NSString *> *)getTrackEffectsForRowObjC:(NSInteger)trackRow;
-+ (NSArray<NSString *> *)getTrackEffectIdsForRowObjC:(NSInteger)trackRow;
-+ (NSArray<NSString *> *)getTrackEffectInstanceIdsForRowObjC:(NSInteger)trackRow;
+                        toIndex:(NSInteger)toIdx
+             forceIndividualRow:(BOOL)forceIndividualRow;
++ (NSArray<NSString *> *)getTrackEffectsForRowObjC:(NSInteger)trackRow forceIndividualRow:(BOOL)forceIndividualRow;
++ (NSArray<NSString *> *)getTrackEffectIdsForRowObjC:(NSInteger)trackRow forceIndividualRow:(BOOL)forceIndividualRow;
++ (NSArray<NSString *> *)getTrackEffectInstanceIdsForRowObjC:(NSInteger)trackRow forceIndividualRow:(BOOL)forceIndividualRow;
 + (NSString *)getTrackEffectStateObjC:(NSInteger)trackRow
-                          effectIndex:(NSInteger)effectIndex;
+                          effectIndex:(NSInteger)effectIndex
+                   forceIndividualRow:(BOOL)forceIndividualRow;
 + (BOOL)setTrackEffectStateObjC:(NSInteger)trackRow
                     effectIndex:(NSInteger)effectIndex
-                    stateBase64:(NSString *)stateBase64;
+                    stateBase64:(NSString *)stateBase64
+             forceIndividualRow:(BOOL)forceIndividualRow;
 + (BOOL)openTrackPluginEditorObjC:(NSInteger)trackRow
                      effectIndex:(NSInteger)effectIndex;
 + (NSArray<NSDictionary *> *)getTrackPluginParametersObjC:(NSInteger)row
-                                              effectIndex:(NSInteger)effect;
+                                              effectIndex:(NSInteger)effect
+                                       forceIndividualRow:(BOOL)forceIndividualRow;
 + (void)setTrackEffectObjC:(NSInteger)trackRow
                effectIndex:(NSInteger)effectIndex
                    paramId:(NSString *)param
-                     value:(id)value;
+                     value:(id)value
+        forceIndividualRow:(BOOL)forceIndividualRow;
 + (void)bypassRowEffectObjC:(NSInteger)rowIndex
                 effectIndex:(NSInteger)effectIndex
-                     bypass:(BOOL)shouldBypass;
+                     bypass:(BOOL)shouldBypass
+         forceIndividualRow:(BOOL)forceIndividualRow;
 + (bool)getRowEffectBypassStateObjC:(NSInteger)rowIndex
-                        effectIndex:(NSInteger)effectIndex;
+                        effectIndex:(NSInteger)effectIndex
+                 forceIndividualRow:(BOOL)forceIndividualRow;
 + (void)setRowGainAutomationPointsObjC:(NSInteger)row
                                points:(NSArray<NSDictionary *> *)points;
 + (void)setRowGainObjC:(NSInteger)row gain:(float)gain;

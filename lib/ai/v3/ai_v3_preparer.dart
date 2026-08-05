@@ -1,10 +1,12 @@
 import 'dart:io';
 import 'dart:math' as math;
 
+import '../../helpers/timeline_tempo_mapping.dart';
 import '../../models/mixing_result.dart';
 import 'package:uuid/uuid.dart';
 import 'ai_v3_context.dart';
 import 'ai_v3_contract.dart';
+import 'ai_v3_resources.dart';
 
 class AiV3PreparationException implements Exception {
   const AiV3PreparationException(this.code);
@@ -54,10 +56,63 @@ class AiV3ClipBoundaryAnalysis {
   final double firstSoundOffsetMs;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-        'audible_start_ms': audibleStartMs,
-        'audible_end_ms': audibleEndMs,
-        'first_sound_offset_ms': firstSoundOffsetMs,
-      };
+    'audible_start_ms': audibleStartMs,
+    'audible_end_ms': audibleEndMs,
+    'first_sound_offset_ms': firstSoundOffsetMs,
+  };
+}
+
+class _AiV3SymbolicResource {
+  _AiV3SymbolicResource({
+    required this.kind,
+    required this.startMs,
+    this.durationMs,
+    this.durationFollowsTempo,
+    this.rowId,
+    this.rowIndex,
+    this.parentRowResourceKey,
+    this.pitchSemitones,
+    this.sourceTempoBpm,
+    this.tempoFollowMode,
+    this.tempoPreservePitch,
+    this.midiNotes,
+    this.midiNotesRuntimeAuthoritative = false,
+    this.boundsRuntimeAuthoritative = false,
+    this.rowName,
+    this.instrumentId,
+    this.gainDb,
+    this.panSigned,
+    this.muted,
+    this.soloed,
+    this.groupId,
+    this.groupMemberKeys,
+    this.groupCollapsed,
+  });
+
+  final AiV3ResourceKind kind;
+  double startMs;
+  double? durationMs;
+  bool? durationFollowsTempo;
+  final int? rowId;
+  int? rowIndex;
+  String? parentRowResourceKey;
+  bool available = true;
+  double? pitchSemitones;
+  double? sourceTempoBpm;
+  String? tempoFollowMode;
+  bool? tempoPreservePitch;
+  List<Map<String, dynamic>>? midiNotes;
+  bool midiNotesRuntimeAuthoritative;
+  bool boundsRuntimeAuthoritative;
+  String? rowName;
+  String? instrumentId;
+  double? gainDb;
+  double? panSigned;
+  bool? muted;
+  bool? soloed;
+  String? groupId;
+  List<Object>? groupMemberKeys;
+  bool? groupCollapsed;
 }
 
 class AiV3CommandPreparer {
@@ -74,6 +129,30 @@ class AiV3CommandPreparer {
       throw const AiV3PreparationException('v3_non_mutating_plan');
     }
     final preparedPlan = _canonicalizeEmbeddedDestinationRows(plan);
+    final referencedProducerCommandIds = <String>{};
+    for (final command in preparedPlan.commands) {
+      final references = <Object?>[
+        command.arguments['clip_ref'],
+        command.arguments['row_ref'],
+        if (command.arguments['destination'] is Map)
+          (command.arguments['destination'] as Map)['row_ref'],
+        if (command.arguments['sources'] is List)
+          ...(command.arguments['sources'] as List).whereType<Map>().map(
+            (source) => source['clip_ref'],
+          ),
+        if (command.type == 'group.create' &&
+            command.arguments['members'] is List)
+          ...(command.arguments['members'] as List).whereType<Map>().map(
+            (member) => member['row_ref'],
+          ),
+      ];
+      for (final rawRef in references.whereType<Map>()) {
+        final commandId = rawRef['command_id']?.toString().trim() ?? '';
+        if (commandId.isNotEmpty) {
+          referencedProducerCommandIds.add(commandId);
+        }
+      }
+    }
     final rows = (context.data['rows'] as List? ?? const <Object>[])
         .whereType<Map>()
         .map((value) => Map<String, dynamic>.from(value))
@@ -138,7 +217,7 @@ class AiV3CommandPreparer {
       for (final entry in groupById.entries)
         entry.key: Map<String, dynamic>.from(entry.value),
     };
-    final simulatedGroupIdByRow = <int, String>{};
+    final simulatedGroupIdByRow = <Object, String>{};
     for (final entry in simulatedGroupsById.entries) {
       final members = (entry.value['member_row_ids'] as List? ?? const [])
           .whereType<int>()
@@ -242,6 +321,8 @@ class AiV3CommandPreparer {
         ? Map<String, dynamic>.from(context.data['selection'] as Map)
         : const <String, dynamic>{};
     final bpm = (project['bpm'] as num).toDouble();
+    var symbolicBpm = bpm;
+    var projectAudioForcedTempoFollow = false;
     final rowCapacity = project['row_capacity'];
     if (rowCapacity is! Map ||
         rowCapacity['current_rows'] is! int ||
@@ -251,12 +332,17 @@ class AiV3CommandPreparer {
     }
     final maximumRows = rowCapacity['max_rows'] as int;
     var simulatedRowCount = rows.length;
+    var simulatedClipCount = clips.length;
     final deletedRowIds = <int>{};
     final unavailableClipIds = <String>{};
     final previouslyMutatedClipIds = <String>{};
     var hasPriorTopologyMutation = false;
     var hasPreparedStemSeparation = false;
     var hasPreparedAudioToMidi = false;
+    final symbolicResources = <String, _AiV3SymbolicResource>{};
+    final symbolicRowOrder = <Object>[
+      ...rows.map((row) => row['row_id']).whereType<int>(),
+    ];
     final simulatedRowOrder = rows
         .toList(growable: false)
         .map((row) => row['row_id'])
@@ -316,6 +402,35 @@ class AiV3CommandPreparer {
       };
     }
 
+    Map<String, dynamic> generatedRowAutomationTarget(
+      ({
+        Map<String, dynamic> target,
+        AiV3ResourceRef? ref,
+        _AiV3SymbolicResource? symbolic,
+        String label,
+      })
+      resolved,
+      String automationTargetId,
+    ) {
+      if (resolved.ref == null) {
+        return automationTarget(
+          resolved.target['row_id'] as int,
+          automationTargetId,
+        );
+      }
+      if (!const <String>{
+        'volume',
+        'mix:gain',
+        'mix:pan',
+      }.contains(automationTargetId)) {
+        throw const AiV3PreparationException('v3_automation_target_unknown');
+      }
+      return <String, dynamic>{
+        ...resolved.target,
+        'automation_target_id': automationTargetId,
+      };
+    }
+
     Map<String, dynamic> clipTarget(
       String clipId, {
       bool requireMidi = false,
@@ -344,6 +459,35 @@ class AiV3CommandPreparer {
       };
     }
 
+    ({AiV3ResourceRef ref, _AiV3SymbolicResource resource}) symbolicRowTarget(
+      Object? raw, {
+      required Set<AiV3ResourceKind> acceptedKinds,
+    }) {
+      late final AiV3ResourceRef ref;
+      try {
+        ref = AiV3ResourceRef.fromJson(raw);
+      } on FormatException {
+        throw const AiV3PreparationException('v3_resource_ref_unavailable');
+      }
+      final resource = symbolicResources['${ref.commandId}.${ref.output}'];
+      if (resource == null ||
+          !resource.available ||
+          !acceptedKinds.contains(resource.kind) ||
+          resource.rowIndex == null) {
+        throw const AiV3PreparationException('v3_resource_ref_unavailable');
+      }
+      return (ref: ref, resource: resource);
+    }
+
+    Map<String, dynamic> generatedRowActionTarget(
+      AiV3ResourceRef ref,
+      _AiV3SymbolicResource resource,
+    ) => <String, dynamic>{
+      'scope': 'row',
+      'row_index': resource.rowIndex,
+      'resource_ref': ref.toJson(),
+    };
+
     ({Map<String, dynamic> target, List<AssistantAction> setup}) destination(
       Object? raw, {
       required bool midi,
@@ -359,6 +503,22 @@ class AiV3CommandPreparer {
           throw const AiV3PreparationException('v3_audio_row_required');
         }
         return (target: target, setup: const <AssistantAction>[]);
+      }
+      if (value['row_ref'] is Map) {
+        final resolved = symbolicRowTarget(
+          value['row_ref'],
+          acceptedKinds: <AiV3ResourceKind>{
+            midi ? AiV3ResourceKind.midiRow : AiV3ResourceKind.audioRow,
+          },
+        );
+        return (
+          target: <String, dynamic>{
+            ...generatedRowActionTarget(resolved.ref, resolved.resource),
+            if ((resolved.resource.instrumentId ?? '').isNotEmpty)
+              'instrument_id': resolved.resource.instrumentId,
+          },
+          setup: const <AssistantAction>[],
+        );
       }
       final newRow = Map<String, dynamic>.from(value['new_row'] as Map);
       if (simulatedRowCount >= maximumRows) {
@@ -400,14 +560,65 @@ class AiV3CommandPreparer {
       final args = command.arguments;
       final commandActions = <AssistantAction>[];
       String label;
+      String verifiedLabel;
       var receiptStatus = 'prepared';
+      ({
+        Map<String, dynamic> target,
+        AiV3ResourceRef? ref,
+        _AiV3SymbolicResource? symbolic,
+        String label,
+      })
+      resolveRowCommandTarget() {
+        final rawRef = args['row_ref'];
+        if (rawRef is Map) {
+          final spec = aiV3ResourceConsumerSpecs[command.type];
+          if (spec == null) {
+            throw const AiV3PreparationException('v3_resource_ref_unavailable');
+          }
+          final resolved = symbolicRowTarget(
+            rawRef,
+            acceptedKinds: spec.acceptedKinds,
+          );
+          return (
+            target: generatedRowActionTarget(resolved.ref, resolved.resource),
+            ref: resolved.ref,
+            symbolic: resolved.resource,
+            label: '${resolved.ref.commandId}.${resolved.ref.output}',
+          );
+        }
+        final rowId = args['row_id'] as int;
+        return (
+          target: rowTarget(rowId),
+          ref: null,
+          symbolic: null,
+          label: _rowLabel(rowById, rowId),
+        );
+      }
+
+      final topologyConsumerSpec = aiV3ResourceConsumerSpecs[command.type];
+      final topologyReferenceContainer =
+          topologyConsumerSpec?.referenceContainerField == null
+          ? args
+          : args[topologyConsumerSpec!.referenceContainerField];
+      final hasTypedTopologyTarget =
+          topologyConsumerSpec != null &&
+              topologyReferenceContainer is Map &&
+              topologyReferenceContainer[topologyConsumerSpec.referenceField]
+                  is Map ||
+          (command.type == 'group.create' &&
+              args['members'] is List &&
+              (args['members'] as List).any(
+                (member) => member is Map && member['row_ref'] is Map,
+              )) ||
+          (command.type == 'group.remove_row' &&
+              (args['group_ref'] is Map || args['row_ref'] is Map));
       if ((hasPreparedStemSeparation || hasPreparedAudioToMidi) &&
+          !hasTypedTopologyTarget &&
           const <String>{
             'row.create',
             'row.delete',
             'group.create',
             'group.remove_row',
-            'clip.duplicate_to',
             'clip.glue',
             'clip.separate_stems',
             'clip.convert_to_midi',
@@ -417,17 +628,45 @@ class AiV3CommandPreparer {
       }
       switch (command.type) {
         case 'project.set_tempo':
-          commandActions.add(AssistantAction(
-            type: 'project_edit',
-            data: <String, dynamic>{
-              'operation': 'set_tempo',
-              'tempo_bpm': args['bpm'],
-              'time_stretch_audio': args['time_stretch_audio'],
-              'preserve_pitch': args['preserve_pitch'],
-              'target': const <String, dynamic>{'scope': 'project'},
-            },
-          ));
+          final nextBpm = (args['bpm'] as num).toDouble();
+          final stretchAudio = args['time_stretch_audio'] == true;
+          commandActions.add(
+            AssistantAction(
+              type: 'project_edit',
+              data: <String, dynamic>{
+                'operation': 'set_tempo',
+                'tempo_bpm': args['bpm'],
+                'time_stretch_audio': args['time_stretch_audio'],
+                'preserve_pitch': args['preserve_pitch'],
+                'target': const <String, dynamic>{'scope': 'project'},
+              },
+            ),
+          );
+          for (final resource in symbolicResources.values) {
+            resource.startMs = remapTimelineMillisecondsForTempoChange(
+              resource.startMs,
+              previousBpm: symbolicBpm,
+              nextBpm: nextBpm,
+            );
+            final durationFollowsTempo =
+                resource.kind == AiV3ResourceKind.midiClip ||
+                (resource.kind == AiV3ResourceKind.audioClip &&
+                    (stretchAudio || resource.durationFollowsTempo == true));
+            if (durationFollowsTempo && resource.durationMs != null) {
+              resource.durationMs = remapTimelineMillisecondsForTempoChange(
+                resource.durationMs!,
+                previousBpm: symbolicBpm,
+                nextBpm: nextBpm,
+              );
+            }
+            if (stretchAudio && resource.kind == AiV3ResourceKind.audioClip) {
+              resource.durationFollowsTempo = true;
+            }
+          }
+          if (stretchAudio) projectAudioForcedTempoFollow = true;
+          symbolicBpm = nextBpm;
           label = 'Set project tempo to ${args['bpm']} BPM';
+          verifiedLabel = label;
           break;
         case 'transport.set_playing':
           if (recording) {
@@ -445,6 +684,7 @@ class AiV3CommandPreparer {
             },
           ));
           label = playing ? 'Start playback' : 'Pause playback';
+          verifiedLabel = playing ? 'Started playback' : 'Paused playback';
           break;
         case 'transport.restart':
           if (recording) {
@@ -461,8 +701,12 @@ class AiV3CommandPreparer {
           ));
           label =
               simulatedLoopEnabled && simulatedLoopEndMs > simulatedLoopStartMs
-                  ? 'Pause playback at the loop start'
-                  : 'Pause playback at the project start';
+              ? 'Pause playback at the loop start'
+              : 'Pause playback at the project start';
+          verifiedLabel =
+              simulatedLoopEnabled && simulatedLoopEndMs > simulatedLoopStartMs
+              ? 'Paused playback at the loop start'
+              : 'Paused playback at the project start';
           break;
         case 'transport.set_metronome_enabled':
           final enabled = args['enabled'] as bool;
@@ -475,6 +719,7 @@ class AiV3CommandPreparer {
             },
           ));
           label = '${enabled ? 'Enable' : 'Disable'} the metronome';
+          verifiedLabel = '${enabled ? 'Enabled' : 'Disabled'} the metronome';
           break;
         case 'transport.set_loop_enabled':
           final enabled = args['enabled'] as bool;
@@ -495,99 +740,191 @@ class AiV3CommandPreparer {
             },
           ));
           label = '${enabled ? 'Enable' : 'Disable'} loop playback';
+          verifiedLabel = '${enabled ? 'Enabled' : 'Disabled'} loop playback';
           break;
         case 'row.adjust_gain_db':
-          final target = rowTarget(args['row_id'] as int);
-          commandActions.add(AssistantAction(
-            type: 'row_mix',
-            data: <String, dynamic>{
-              'operation': 'adjust_gain',
-              'delta_db': args['delta_db'],
-              'target': target,
-            },
-          ));
-          label =
-              'Adjust ${_rowLabel(rowById, args['row_id'] as int)} by ${args['delta_db']} dB';
+          final resolved = resolveRowCommandTarget();
+          final target = resolved.target;
+          final deltaDb = (args['delta_db'] as num).toDouble();
+          if (resolved.symbolic != null) {
+            resolved.symbolic!.gainDb =
+                ((resolved.symbolic!.gainDb ?? 0.0) + deltaDb).clamp(
+                  -60.0,
+                  6.0,
+                );
+          }
+          commandActions.add(
+            AssistantAction(
+              type: 'row_mix',
+              data: <String, dynamic>{
+                if (resolved.ref != null)
+                  'resource_consumer_type': command.type,
+                'operation': 'adjust_gain',
+                'delta_db': args['delta_db'],
+                if (resolved.symbolic != null)
+                  'expected_gain_db': resolved.symbolic!.gainDb,
+                'target': target,
+              },
+            ),
+          );
+          label = 'Adjust ${resolved.label} by ${args['delta_db']} dB';
+          verifiedLabel =
+              'Adjusted ${resolved.label} by ${args['delta_db']} dB';
           break;
         case 'row.set_gain_db':
-          final target = rowTarget(args['row_id'] as int);
-          commandActions.add(AssistantAction(
-            type: 'row_mix',
-            data: <String, dynamic>{
-              'operation': 'set_gain',
-              'gain_db': args['gain_db'],
-              'target': target,
-            },
-          ));
-          label =
-              'Set ${_rowLabel(rowById, args['row_id'] as int)} gain to ${args['gain_db']} dB';
+          final resolved = resolveRowCommandTarget();
+          final target = resolved.target;
+          if (resolved.symbolic != null) {
+            resolved.symbolic!.gainDb = (args['gain_db'] as num).toDouble();
+          }
+          commandActions.add(
+            AssistantAction(
+              type: 'row_mix',
+              data: <String, dynamic>{
+                if (resolved.ref != null)
+                  'resource_consumer_type': command.type,
+                'operation': 'set_gain',
+                'gain_db': args['gain_db'],
+                if (resolved.symbolic != null)
+                  'expected_gain_db': resolved.symbolic!.gainDb,
+                'target': target,
+              },
+            ),
+          );
+          label = 'Set ${resolved.label} gain to ${args['gain_db']} dB';
+          verifiedLabel = label;
           break;
         case 'row.adjust_pan':
-          final target = rowTarget(args['row_id'] as int);
-          commandActions.add(AssistantAction(
-            type: 'row_mix',
-            data: <String, dynamic>{
-              'operation': 'adjust_pan',
-              'delta': args['delta_signed'],
-              'target': target,
-            },
-          ));
-          label =
-              'Adjust ${_rowLabel(rowById, args['row_id'] as int)} pan by ${args['delta_signed']}';
+          final resolved = resolveRowCommandTarget();
+          final target = resolved.target;
+          final delta = (args['delta_signed'] as num).toDouble();
+          if (resolved.symbolic != null) {
+            resolved.symbolic!.panSigned =
+                ((resolved.symbolic!.panSigned ?? 0.0) + delta).clamp(
+                  -1.0,
+                  1.0,
+                );
+          }
+          commandActions.add(
+            AssistantAction(
+              type: 'row_mix',
+              data: <String, dynamic>{
+                if (resolved.ref != null)
+                  'resource_consumer_type': command.type,
+                'operation': 'adjust_pan',
+                'delta': args['delta_signed'],
+                if (resolved.symbolic != null)
+                  'expected_pan_signed': resolved.symbolic!.panSigned,
+                'target': target,
+              },
+            ),
+          );
+          label = 'Adjust ${resolved.label} pan by ${args['delta_signed']}';
+          verifiedLabel =
+              'Adjusted ${resolved.label} pan by ${args['delta_signed']}';
           break;
         case 'row.set_pan':
-          final target = rowTarget(args['row_id'] as int);
-          commandActions.add(AssistantAction(
-            type: 'row_mix',
-            data: <String, dynamic>{
-              'operation': 'set_pan',
-              'pan_signed': args['pan_signed'],
-              'target': target,
-            },
-          ));
-          label =
-              'Set ${_rowLabel(rowById, args['row_id'] as int)} pan to ${args['pan_signed']}';
+          final resolved = resolveRowCommandTarget();
+          final target = resolved.target;
+          if (resolved.symbolic != null) {
+            resolved.symbolic!.panSigned = (args['pan_signed'] as num)
+                .toDouble();
+          }
+          commandActions.add(
+            AssistantAction(
+              type: 'row_mix',
+              data: <String, dynamic>{
+                if (resolved.ref != null)
+                  'resource_consumer_type': command.type,
+                'operation': 'set_pan',
+                'pan_signed': args['pan_signed'],
+                if (resolved.symbolic != null)
+                  'expected_pan_signed': resolved.symbolic!.panSigned,
+                'target': target,
+              },
+            ),
+          );
+          label = 'Set ${resolved.label} pan to ${args['pan_signed']}';
+          verifiedLabel = label;
           break;
         case 'row.set_muted':
           final muted = args['muted'] as bool;
-          final rowId = args['row_id'] as int;
-          final target = rowTarget(rowId);
-          if (rowById[rowId]?['muted'] == muted) {
+          final resolved = resolveRowCommandTarget();
+          final target = resolved.target;
+          final currentMuted =
+              resolved.symbolic?.muted ?? rowById[args['row_id']]?['muted'];
+          if (currentMuted == muted) {
             receiptStatus = 'already_satisfied';
           } else {
-            commandActions.add(AssistantAction(
-              type: 'row_mute',
-              data: <String, dynamic>{
-                'operation': muted ? 'mute' : 'unmute',
-                'target': target,
-              },
-            ));
+            commandActions.add(
+              AssistantAction(
+                type: 'row_mute',
+                data: <String, dynamic>{
+                  if (resolved.ref != null)
+                    'resource_consumer_type': command.type,
+                  'operation': 'set_muted',
+                  'muted': muted,
+                  if (resolved.symbolic != null) 'expected_muted': muted,
+                  'target': target,
+                },
+              ),
+            );
+            if (resolved.symbolic != null) {
+              resolved.symbolic!.muted = muted;
+            }
           }
-          label = '${muted ? 'Mute' : 'Unmute'} ${_rowLabel(rowById, rowId)}';
+          label = '${muted ? 'Mute' : 'Unmute'} ${resolved.label}';
+          verifiedLabel = '${muted ? 'Muted' : 'Unmuted'} ${resolved.label}';
           break;
         case 'row.set_soloed':
           final soloed = args['soloed'] as bool;
-          commandActions.add(AssistantAction(
-            type: 'row_solo',
-            data: <String, dynamic>{
-              'operation': soloed ? 'solo' : 'unsolo',
-              'target': rowTarget(args['row_id'] as int),
-            },
-          ));
-          label =
-              '${soloed ? 'Solo' : 'Unsolo'} ${_rowLabel(rowById, args['row_id'] as int)}';
+          final resolved = resolveRowCommandTarget();
+          final currentSoloed =
+              resolved.symbolic?.soloed ?? rowById[args['row_id']]?['soloed'];
+          if (currentSoloed == soloed) {
+            receiptStatus = 'already_satisfied';
+          } else {
+            commandActions.add(
+              AssistantAction(
+                type: 'row_solo',
+                data: <String, dynamic>{
+                  if (resolved.ref != null)
+                    'resource_consumer_type': command.type,
+                  'operation': 'set_soloed',
+                  'soloed': soloed,
+                  if (resolved.symbolic != null) 'expected_soloed': soloed,
+                  'target': resolved.target,
+                },
+              ),
+            );
+            if (resolved.symbolic != null) {
+              resolved.symbolic!.soloed = soloed;
+            }
+          }
+          label = '${soloed ? 'Solo' : 'Unsolo'} ${resolved.label}';
+          verifiedLabel = '${soloed ? 'Soloed' : 'Unsoloed'} ${resolved.label}';
           break;
         case 'row.rename':
-          commandActions.add(AssistantAction(
-            type: 'row_rename',
-            data: <String, dynamic>{
-              'operation': 'rename',
-              'new_name': args['new_name'],
-              'target': rowTarget(args['row_id'] as int),
-            },
-          ));
-          label =
-              'Rename ${_rowLabel(rowById, args['row_id'] as int)} to ${args['new_name']}';
+          final resolved = resolveRowCommandTarget();
+          final newName = args['new_name'] as String;
+          if (resolved.symbolic != null) {
+            resolved.symbolic!.rowName = newName;
+          }
+          commandActions.add(
+            AssistantAction(
+              type: 'row_rename',
+              data: <String, dynamic>{
+                if (resolved.ref != null)
+                  'resource_consumer_type': command.type,
+                'operation': 'rename',
+                'new_name': newName,
+                if (resolved.symbolic != null) 'expected_name': newName,
+                'target': resolved.target,
+              },
+            ),
+          );
+          label = 'Rename ${resolved.label} to $newName';
+          verifiedLabel = 'Renamed ${resolved.label} to $newName';
           break;
         case 'row.set_instrument':
           final rowId = args['row_id'] as int;
@@ -637,6 +974,9 @@ class AiV3CommandPreparer {
           label = role.isEmpty
               ? 'Clear role override on ${_rowLabel(rowById, rowId)}'
               : 'Set ${_rowLabel(rowById, rowId)} role to $role';
+          verifiedLabel = role.isEmpty
+              ? 'Cleared role override on ${_rowLabel(rowById, rowId)}'
+              : label;
           break;
         case 'row.apply_phone_mic_cleanup':
           final rowId = args['row_id'] as int;
@@ -673,6 +1013,8 @@ class AiV3CommandPreparer {
           ));
           label =
               'Clean all ${audioClipIds.length} audio clip${audioClipIds.length == 1 ? '' : 's'} on ${_rowLabel(rowById, rowId)}';
+          verifiedLabel =
+              'Cleaned all ${audioClipIds.length} audio clip${audioClipIds.length == 1 ? '' : 's'} on ${_rowLabel(rowById, rowId)}';
           break;
         case 'row.select':
           final rowId = args['row_id'] as int;
@@ -689,6 +1031,7 @@ class AiV3CommandPreparer {
             ));
           }
           label = 'Select ${_rowLabel(rowById, rowId)}';
+          verifiedLabel = 'Selected ${_rowLabel(rowById, rowId)}';
           break;
         case 'row.set_color':
           final rowId = args['row_id'] as int;
@@ -709,6 +1052,9 @@ class AiV3CommandPreparer {
           label = color == 'none'
               ? 'Clear color on ${_rowLabel(rowById, rowId)}'
               : 'Set ${_rowLabel(rowById, rowId)} color to $color';
+          verifiedLabel = color == 'none'
+              ? 'Cleared color on ${_rowLabel(rowById, rowId)}'
+              : label;
           break;
         case 'row.create':
           if (simulatedRowCount >= maximumRows) {
@@ -725,9 +1071,11 @@ class AiV3CommandPreparer {
           final positionKind = position['kind'] as String;
           Map<String, dynamic> target;
           String editorPosition;
+          late final int predictedRowIndex;
           if (positionKind == 'end') {
             target = const <String, dynamic>{'scope': 'project'};
             editorPosition = 'end';
+            predictedRowIndex = symbolicRowOrder.length;
           } else {
             final anchorId = position['row_id'] as int;
             if (deletedRowIds.contains(anchorId)) {
@@ -735,83 +1083,185 @@ class AiV3CommandPreparer {
             }
             target = rowTarget(anchorId);
             editorPosition = positionKind == 'before' ? 'above' : 'below';
+            final anchorIndex = symbolicRowOrder.indexOf(anchorId);
+            if (anchorIndex < 0) {
+              throw const AiV3PreparationException('v3_row_id_unknown');
+            }
+            predictedRowIndex = positionKind == 'before'
+                ? anchorIndex
+                : anchorIndex + 1;
           }
-          commandActions.add(AssistantAction(
-            type: 'row_create',
-            data: <String, dynamic>{
-              'operation': 'create',
-              'position': editorPosition,
-              'name': name,
-              'lane_kind': laneKind == 'midi' ? 'instrument' : 'audio',
-              if (instrumentId.isNotEmpty) 'instrument_id': instrumentId,
-              'target': target,
-            },
-          ));
+          final symbolicRowKey = '${command.commandId}.row';
+          commandActions.add(
+            AssistantAction(
+              type: 'row_create',
+              data: <String, dynamic>{
+                if (referencedProducerCommandIds.contains(command.commandId))
+                  'command_id': command.commandId,
+                'operation': 'create',
+                'position': editorPosition,
+                'predicted_row_index': predictedRowIndex,
+                'name': name,
+                'lane_kind': laneKind == 'midi' ? 'instrument' : 'audio',
+                if (instrumentId.isNotEmpty) 'instrument_id': instrumentId,
+                'target': target,
+              },
+            ),
+          );
+          symbolicRowOrder.insert(predictedRowIndex, symbolicRowKey);
           simulatedRowCount += 1;
           hasPriorTopologyMutation = true;
           label = laneKind == 'midi'
               ? 'Create MIDI row $name'
               : 'Create audio row $name';
+          verifiedLabel = laneKind == 'midi'
+              ? 'Created MIDI row $name'
+              : 'Created audio row $name';
           break;
         case 'row.delete':
-          final rowId = args['row_id'] as int;
-          if (deletedRowIds.contains(rowId)) {
+          final resolved = resolveRowCommandTarget();
+          final rowId = args['row_id'] as int?;
+          if (rowId != null && deletedRowIds.contains(rowId)) {
             throw const AiV3PreparationException('v3_row_id_unknown');
           }
-          final target = rowTarget(rowId);
+          final target = resolved.target;
           if (simulatedRowCount <= 1) {
             throw const AiV3PreparationException(
               'v3_row_delete_last_remaining',
             );
           }
-          commandActions.add(AssistantAction(
-            type: 'row_delete',
-            data: <String, dynamic>{
-              'operation': 'delete',
-              'target': target,
-            },
-          ));
-          deletedRowIds.add(rowId);
-          simulatedRowOrder.remove(rowId);
-          final deletedGroupId = simulatedGroupIdByRow.remove(rowId);
-          if (deletedGroupId != null) {
-            final deletedGroup = simulatedGroupsById[deletedGroupId];
-            final remaining =
-                (deletedGroup?['member_row_ids'] as List? ?? const <Object>[])
-                    .whereType<int>()
-                    .where((candidate) => candidate != rowId)
-                    .toList(growable: false);
-            if (remaining.length < 2) {
-              simulatedGroupsById.remove(deletedGroupId);
-              for (final memberId in remaining) {
-                simulatedGroupIdByRow.remove(memberId);
+          commandActions.add(
+            AssistantAction(
+              type: 'row_delete',
+              data: <String, dynamic>{
+                if (resolved.ref != null)
+                  'resource_consumer_type': command.type,
+                'operation': 'delete',
+                'target': target,
+              },
+            ),
+          );
+          if (resolved.ref != null) {
+            final rowKey = '${resolved.ref!.commandId}.${resolved.ref!.output}';
+            resolved.symbolic!.available = false;
+            symbolicRowOrder.remove(rowKey);
+            for (final resource in symbolicResources.values) {
+              if (resource.parentRowResourceKey == rowKey) {
+                resource.available = false;
               }
-            } else {
-              simulatedGroupsById[deletedGroupId] = <String, dynamic>{
-                ...deletedGroup!,
-                'member_row_ids': remaining,
-              };
+            }
+            final deletedGroupId = simulatedGroupIdByRow.remove(rowKey);
+            if (deletedGroupId != null) {
+              final deletedGroup = simulatedGroupsById[deletedGroupId];
+              final remaining =
+                  (deletedGroup?['member_row_ids'] as List? ?? const <Object>[])
+                      .where((candidate) => candidate != rowKey)
+                      .toList(growable: false);
+              if (remaining.length < 2) {
+                simulatedGroupsById.remove(deletedGroupId);
+                for (final memberKey in remaining) {
+                  simulatedGroupIdByRow.remove(memberKey);
+                }
+                for (final resource in symbolicResources.values) {
+                  if (resource.kind == AiV3ResourceKind.group &&
+                      resource.groupId == deletedGroupId) {
+                    resource.available = false;
+                  }
+                }
+              } else {
+                simulatedGroupsById[deletedGroupId] = <String, dynamic>{
+                  ...deletedGroup!,
+                  'member_row_ids': remaining,
+                };
+                for (final resource in symbolicResources.values) {
+                  if (resource.kind == AiV3ResourceKind.group &&
+                      resource.groupId == deletedGroupId) {
+                    resource.groupMemberKeys = List<Object>.from(remaining);
+                  }
+                }
+              }
+            }
+          } else {
+            deletedRowIds.add(rowId!);
+            for (final resource in symbolicResources.values) {
+              if (resource.rowId == rowId) resource.available = false;
+            }
+            simulatedRowOrder.remove(rowId);
+            symbolicRowOrder.remove(rowId);
+            final deletedGroupId = simulatedGroupIdByRow.remove(rowId);
+            if (deletedGroupId != null) {
+              final deletedGroup = simulatedGroupsById[deletedGroupId];
+              final remaining =
+                  (deletedGroup?['member_row_ids'] as List? ?? const <Object>[])
+                      .whereType<int>()
+                      .where((candidate) => candidate != rowId)
+                      .toList(growable: false);
+              if (remaining.length < 2) {
+                simulatedGroupsById.remove(deletedGroupId);
+                for (final memberId in remaining) {
+                  simulatedGroupIdByRow.remove(memberId);
+                }
+              } else {
+                simulatedGroupsById[deletedGroupId] = <String, dynamic>{
+                  ...deletedGroup!,
+                  'member_row_ids': remaining,
+                };
+              }
             }
           }
           simulatedRowCount -= 1;
           hasPriorTopologyMutation = true;
-          label = 'Delete ${_rowLabel(rowById, rowId)}';
+          label = 'Delete ${resolved.label}';
+          verifiedLabel = 'Deleted ${resolved.label}';
           break;
         case 'group.create':
-          final requestedIds = (args['row_ids'] as List).cast<int>();
-          for (final rowId in requestedIds) {
-            if (!rowById.containsKey(rowId) || deletedRowIds.contains(rowId)) {
-              throw const AiV3PreparationException('v3_row_id_unknown');
+          final usesTypedMembers = args['members'] is List;
+          final rawMembers = usesTypedMembers
+              ? args['members'] as List
+              : (args['row_ids'] as List)
+                    .map((rowId) => <String, dynamic>{'row_id': rowId})
+                    .toList(growable: false);
+          final resolvedMembers =
+              <({Object key, Map<String, dynamic> target})>[];
+          for (final rawMember in rawMembers) {
+            final member = Map<String, dynamic>.from(rawMember as Map);
+            if (member['row_ref'] is Map) {
+              final resolved = symbolicRowTarget(
+                member['row_ref'],
+                acceptedKinds: const <AiV3ResourceKind>{
+                  AiV3ResourceKind.audioRow,
+                  AiV3ResourceKind.midiRow,
+                },
+              );
+              resolvedMembers.add((
+                key: '${resolved.ref.commandId}.${resolved.ref.output}',
+                target: generatedRowActionTarget(
+                  resolved.ref,
+                  resolved.resource,
+                ),
+              ));
+            } else {
+              final rowId = member['row_id'] as int;
+              resolvedMembers.add((key: rowId, target: rowTarget(rowId)));
             }
           }
-          final orderedIds = requestedIds.toList(growable: false)
-            ..sort((left, right) => simulatedRowOrder
-                .indexOf(left)
-                .compareTo(simulatedRowOrder.indexOf(right)));
-          final requestedSet = orderedIds.toSet();
+          final orderedMembers = resolvedMembers.toList(growable: false)
+            ..sort(
+              (left, right) => symbolicRowOrder
+                  .indexOf(left.key)
+                  .compareTo(symbolicRowOrder.indexOf(right.key)),
+            );
+          if (orderedMembers.any(
+            (member) => !symbolicRowOrder.contains(member.key),
+          )) {
+            throw const AiV3PreparationException('v3_row_id_unknown');
+          }
+          final orderedKeys = orderedMembers
+              .map((member) => member.key)
+              .toList();
+          final requestedSet = orderedKeys.toSet();
           final matchingGroup = simulatedGroupsById.values.where((group) {
             final members = (group['member_row_ids'] as List? ?? const [])
-                .whereType<int>()
                 .toSet();
             return members.length == requestedSet.length &&
                 members.containsAll(requestedSet);
@@ -822,6 +1272,7 @@ class AiV3CommandPreparer {
             if (requestedName.isEmpty || requestedName == existingName) {
               receiptStatus = 'already_satisfied';
               label = 'Keep existing group $existingName';
+              verifiedLabel = 'Kept existing group $existingName';
               break;
             }
             throw const AiV3PreparationException(
@@ -836,15 +1287,14 @@ class AiV3CommandPreparer {
               ? 'Group ${simulatedGroupsById.length + 1}'
               : requestedName;
           final affectedGroupIds = <String>{
-            for (final rowId in orderedIds)
-              if (simulatedGroupIdByRow[rowId] != null)
-                simulatedGroupIdByRow[rowId]!,
+            for (final key in orderedKeys)
+              if (simulatedGroupIdByRow[key] != null)
+                simulatedGroupIdByRow[key]!,
           };
           final dissolvedGroupIds = <String>[];
           for (final affectedId in affectedGroupIds) {
             final existing = simulatedGroupsById[affectedId]!;
             final oldMembers = (existing['member_row_ids'] as List? ?? const [])
-                .whereType<int>()
                 .toList(growable: false);
             final remaining = oldMembers
                 .where((rowId) => !requestedSet.contains(rowId))
@@ -852,103 +1302,185 @@ class AiV3CommandPreparer {
             if (remaining.length < 2) {
               simulatedGroupsById.remove(affectedId);
               dissolvedGroupIds.add(affectedId);
-              for (final rowId in oldMembers) {
-                simulatedGroupIdByRow.remove(rowId);
+              for (final key in oldMembers) {
+                simulatedGroupIdByRow.remove(key);
               }
             } else {
               simulatedGroupsById[affectedId] = <String, dynamic>{
                 ...existing,
                 'member_row_ids': remaining,
               };
-              for (final rowId in oldMembers) {
-                if (!remaining.contains(rowId)) {
-                  simulatedGroupIdByRow.remove(rowId);
+              for (final key in oldMembers) {
+                if (!remaining.contains(key)) {
+                  simulatedGroupIdByRow.remove(key);
                 }
               }
             }
           }
-          for (final rowId in orderedIds) {
-            simulatedGroupIdByRow[rowId] = groupId;
+          for (final key in orderedKeys) {
+            simulatedGroupIdByRow[key] = groupId;
           }
           simulatedGroupsById[groupId] = <String, dynamic>{
             'group_id': groupId,
             'name': name,
-            'member_row_ids': orderedIds,
+            'member_row_ids': orderedKeys,
             'collapsed': false,
           };
-          final insertionIndex = orderedIds
-              .map(simulatedRowOrder.indexOf)
+          final insertionIndex = orderedKeys
+              .map(symbolicRowOrder.indexOf)
               .reduce((left, right) => math.min(left, right).toInt());
-          simulatedRowOrder.removeWhere(requestedSet.contains);
-          simulatedRowOrder.insertAll(insertionIndex, orderedIds);
-          commandActions.add(AssistantAction(
-            type: 'v3_group_edit',
-            data: <String, dynamic>{
-              'operation': 'create',
-              'group_id': groupId,
-              'name': name,
-              'row_ids': orderedIds,
-              'expected_row_order': List<int>.from(simulatedRowOrder),
-              'affected_group_ids': affectedGroupIds.toList()..sort(),
-              'dissolved_group_ids': dissolvedGroupIds..sort(),
-            },
-          ));
+          symbolicRowOrder.removeWhere(requestedSet.contains);
+          symbolicRowOrder.insertAll(insertionIndex, orderedKeys);
+          if (orderedKeys.every((key) => key is int)) {
+            simulatedRowOrder
+              ..clear()
+              ..addAll(symbolicRowOrder.whereType<int>());
+          }
+          commandActions.add(
+            AssistantAction(
+              type: 'v3_group_edit',
+              data: <String, dynamic>{
+                'operation': 'create',
+                if (usesTypedMembers) 'command_id': command.commandId,
+                'group_id': groupId,
+                'name': name,
+                if (usesTypedMembers)
+                  'member_targets': orderedMembers
+                      .map((member) => member.target)
+                      .toList(growable: false),
+                if (!usesTypedMembers)
+                  'row_ids': orderedKeys.whereType<int>().toList(),
+                if (!usesTypedMembers)
+                  'expected_row_order': List<int>.from(simulatedRowOrder),
+                'affected_group_ids': affectedGroupIds.toList()..sort(),
+                'dissolved_group_ids': dissolvedGroupIds..sort(),
+              },
+            ),
+          );
+          symbolicResources['${command.commandId}.group'] =
+              _AiV3SymbolicResource(
+                kind: AiV3ResourceKind.group,
+                startMs: 0.0,
+                groupId: groupId,
+                groupMemberKeys: List<Object>.from(orderedKeys),
+                groupCollapsed: false,
+              );
           hasPriorTopologyMutation = true;
           label = dissolvedGroupIds.isEmpty
-              ? 'Create group $name from ${orderedIds.length} rows'
+              ? 'Create group $name from ${orderedKeys.length} rows'
               : 'Create group $name and dissolve ${dissolvedGroupIds.length} superseded group(s)';
+          verifiedLabel = dissolvedGroupIds.isEmpty
+              ? 'Created group $name from ${orderedKeys.length} rows'
+              : 'Created group $name and dissolved ${dissolvedGroupIds.length} superseded group(s)';
           break;
         case 'group.remove_row':
-          final groupId = args['group_id'].toString().trim();
-          final rowId = args['row_id'] as int;
+          final groupRef = args['group_ref'] is Map
+              ? AiV3ResourceRef.fromJson(args['group_ref'])
+              : null;
+          final groupSymbolic = groupRef == null
+              ? null
+              : symbolicResources['${groupRef.commandId}.${groupRef.output}'];
+          final groupId = groupRef == null
+              ? args['group_id'].toString().trim()
+              : groupSymbolic?.groupId ?? '';
+          if (groupRef != null &&
+              (groupSymbolic == null ||
+                  !groupSymbolic.available ||
+                  groupSymbolic.kind != AiV3ResourceKind.group)) {
+            throw const AiV3PreparationException('v3_resource_ref_unavailable');
+          }
+          final rowRef = args['row_ref'] is Map
+              ? AiV3ResourceRef.fromJson(args['row_ref'])
+              : null;
+          final rowSymbolic = rowRef == null
+              ? null
+              : symbolicRowTarget(
+                  args['row_ref'],
+                  acceptedKinds: const <AiV3ResourceKind>{
+                    AiV3ResourceKind.audioRow,
+                    AiV3ResourceKind.midiRow,
+                  },
+                );
+          final memberKey = rowRef == null
+              ? args['row_id'] as int
+              : '${rowRef.commandId}.${rowRef.output}';
           final group = simulatedGroupsById[groupId];
           if (group == null) {
             throw const AiV3PreparationException('v3_group_id_unknown');
           }
           final oldMembers =
-              (group['member_row_ids'] as List? ?? const <Object>[])
-                  .whereType<int>()
-                  .toList(growable: false);
-          if (!oldMembers.contains(rowId) ||
-              simulatedGroupIdByRow[rowId] != groupId) {
+              (group['member_row_ids'] as List? ?? const <Object>[]).toList(
+                growable: false,
+              );
+          if (!oldMembers.contains(memberKey) ||
+              simulatedGroupIdByRow[memberKey] != groupId) {
             throw const AiV3PreparationException(
               'v3_group_membership_mismatch',
             );
           }
           final remaining = oldMembers
-              .where((candidate) => candidate != rowId)
+              .where((candidate) => candidate != memberKey)
               .toList(growable: false);
           final dissolves = remaining.length < 2;
           if (dissolves) {
             simulatedGroupsById.remove(groupId);
-            for (final memberId in oldMembers) {
-              simulatedGroupIdByRow.remove(memberId);
+            for (final key in oldMembers) {
+              simulatedGroupIdByRow.remove(key);
             }
+            if (groupSymbolic != null) groupSymbolic.available = false;
           } else {
             simulatedGroupsById[groupId] = <String, dynamic>{
               ...group,
               'member_row_ids': remaining,
             };
-            simulatedGroupIdByRow.remove(rowId);
+            simulatedGroupIdByRow.remove(memberKey);
+            if (groupSymbolic != null) {
+              groupSymbolic.groupMemberKeys = List<Object>.from(remaining);
+            }
           }
-          commandActions.add(AssistantAction(
-            type: 'v3_group_edit',
-            data: <String, dynamic>{
-              'operation': 'remove_row',
-              'group_id': groupId,
-              'row_id': rowId,
-              'dissolves_group': dissolves,
-              'expected_member_row_ids':
-                  dissolves ? const <int>[] : List<int>.from(remaining),
-            },
-          ));
+          commandActions.add(
+            AssistantAction(
+              type: 'v3_group_edit',
+              data: <String, dynamic>{
+                'operation': 'remove_row',
+                if (groupRef == null) 'group_id': groupId,
+                if (groupRef != null)
+                  'target': <String, dynamic>{
+                    'scope': 'group',
+                    'resource_ref': groupRef.toJson(),
+                  },
+                if (groupRef != null) 'resource_consumer_type': command.type,
+                'row_target': rowRef == null
+                    ? rowTarget(args['row_id'] as int)
+                    : generatedRowActionTarget(rowRef, rowSymbolic!.resource),
+                'dissolves_group': dissolves,
+              },
+            ),
+          );
           hasPriorTopologyMutation = true;
           label = dissolves
-              ? 'Remove ${_rowLabel(rowById, rowId)} and dissolve ${group['name']}'
-              : 'Remove ${_rowLabel(rowById, rowId)} from ${group['name']}';
+              ? 'Remove $memberKey and dissolve ${group['name']}'
+              : 'Remove $memberKey from ${group['name']}';
+          verifiedLabel = dissolves
+              ? 'Removed $memberKey and dissolved ${group['name']}'
+              : 'Removed $memberKey from ${group['name']}';
           break;
         case 'group.set_collapsed':
-          final groupId = args['group_id'].toString().trim();
+          final groupRef = args['group_ref'] is Map
+              ? AiV3ResourceRef.fromJson(args['group_ref'])
+              : null;
+          final groupSymbolic = groupRef == null
+              ? null
+              : symbolicResources['${groupRef.commandId}.${groupRef.output}'];
+          final groupId = groupRef == null
+              ? args['group_id'].toString().trim()
+              : groupSymbolic?.groupId ?? '';
+          if (groupRef != null &&
+              (groupSymbolic == null ||
+                  !groupSymbolic.available ||
+                  groupSymbolic.kind != AiV3ResourceKind.group)) {
+            throw const AiV3PreparationException('v3_resource_ref_unavailable');
+          }
           final collapsed = args['collapsed'] as bool;
           final group = simulatedGroupsById[groupId];
           if (group == null) {
@@ -961,227 +1493,747 @@ class AiV3CommandPreparer {
               ...group,
               'collapsed': collapsed,
             };
-            commandActions.add(AssistantAction(
-              type: 'v3_group_edit',
-              data: <String, dynamic>{
-                'operation': 'set_collapsed',
-                'group_id': groupId,
-                'collapsed': collapsed,
-              },
-            ));
+            commandActions.add(
+              AssistantAction(
+                type: 'v3_group_edit',
+                data: <String, dynamic>{
+                  'operation': 'set_collapsed',
+                  if (groupRef == null) 'group_id': groupId,
+                  if (groupRef != null) 'resource_consumer_type': command.type,
+                  if (groupRef != null)
+                    'target': <String, dynamic>{
+                      'scope': 'group',
+                      'resource_ref': groupRef.toJson(),
+                    },
+                  'collapsed': collapsed,
+                },
+              ),
+            );
+            if (groupSymbolic != null) {
+              groupSymbolic.groupCollapsed = collapsed;
+            }
           }
           label = '${collapsed ? 'Collapse' : 'Expand'} ${group['name']}';
+          verifiedLabel =
+              '${collapsed ? 'Collapsed' : 'Expanded'} ${group['name']}';
           break;
         case 'clip.move_by_beats':
-          final clipId = args['clip_id'] as String;
-          commandActions.add(AssistantAction(
-            type: 'clip_edit',
-            data: <String, dynamic>{
-              'operation': 'move',
-              'delta_ms':
-                  (args['delta_beats'] as num).toDouble() * 60000.0 / bpm,
-              'target': clipTarget(clipId),
-            },
-          ));
-          label =
-              'Move ${_clipLabel(clipById, clipId)} by ${args['delta_beats']} beats';
+          final rawRef = args['clip_ref'];
+          final AiV3ResourceRef? clipRef = rawRef is Map
+              ? AiV3ResourceRef.fromJson(rawRef)
+              : null;
+          final String? clipId = args['clip_id'] is String
+              ? args['clip_id'] as String
+              : null;
+          final spec = aiV3ResourceConsumerSpecs[command.type]!;
+          final symbolic = clipRef == null
+              ? null
+              : symbolicResources['${clipRef.commandId}.${clipRef.output}'];
+          if (clipRef != null &&
+              (symbolic == null ||
+                  !symbolic.available ||
+                  !spec.acceptedKinds.contains(symbolic.kind))) {
+            throw const AiV3PreparationException('v3_resource_ref_unavailable');
+          }
+          final deltaMs =
+              (args['delta_beats'] as num).toDouble() *
+              60000.0 /
+              (clipRef == null ? bpm : symbolicBpm);
+          if (symbolic != null) symbolic.startMs += deltaMs;
+          commandActions.add(
+            AssistantAction(
+              type: 'clip_edit',
+              data: <String, dynamic>{
+                'command_id': command.commandId,
+                if (clipRef != null) 'resource_consumer_type': command.type,
+                'operation': 'move',
+                'delta_ms': deltaMs,
+                if (symbolic != null) 'predicted_start_ms': symbolic.startMs,
+                'target': clipRef == null
+                    ? clipTarget(clipId!)
+                    : <String, dynamic>{
+                        'scope': 'clip',
+                        'resource_ref': clipRef.toJson(),
+                      },
+              },
+            ),
+          );
+          label = clipRef == null
+              ? 'Move ${_clipLabel(clipById, clipId!)} by ${args['delta_beats']} beats'
+              : 'Move ${clipRef.commandId}.${clipRef.output} by ${args['delta_beats']} beats';
+          verifiedLabel = clipRef == null
+              ? 'Moved ${_clipLabel(clipById, clipId!)} by ${args['delta_beats']} beats'
+              : 'Moved ${clipRef.commandId}.${clipRef.output} by ${args['delta_beats']} beats';
           break;
         case 'clip.trim_to_range':
-          final clipId = args['clip_id'] as String;
-          final clip = clipById[clipId];
-          final target = clipTarget(clipId, requireAudio: true);
-          final currentStart = (clip?['start_beat'] as num?)?.toDouble();
-          final currentLength = (clip?['length_beats'] as num?)?.toDouble();
-          if (currentStart == null ||
-              currentLength == null ||
-              !currentStart.isFinite ||
-              !currentLength.isFinite ||
-              currentLength <= 0) {
+          final rawRef = args['clip_ref'];
+          final AiV3ResourceRef? clipRef = rawRef is Map
+              ? AiV3ResourceRef.fromJson(rawRef)
+              : null;
+          final String? clipId = args['clip_id'] is String
+              ? args['clip_id'] as String
+              : null;
+          final spec = aiV3ResourceConsumerSpecs[command.type]!;
+          final symbolic = clipRef == null
+              ? null
+              : symbolicResources['${clipRef.commandId}.${clipRef.output}'];
+          if (clipRef != null &&
+              (symbolic == null ||
+                  !symbolic.available ||
+                  !spec.acceptedKinds.contains(symbolic.kind))) {
+            throw const AiV3PreparationException('v3_resource_ref_unavailable');
+          }
+          final clip = clipId == null ? null : clipById[clipId];
+          final target = clipRef == null
+              ? clipTarget(clipId!, requireAudio: true)
+              : <String, dynamic>{
+                  'scope': 'clip',
+                  'resource_ref': clipRef.toJson(),
+                };
+          final currentStartBeat = (clip?['start_beat'] as num?)?.toDouble();
+          final currentStartMs =
+              symbolic?.startMs ??
+              (currentStartBeat == null
+                  ? null
+                  : currentStartBeat * 60000.0 / symbolicBpm);
+          final currentLengthBeats =
+              (clip?['timeline_length_beats'] as num?)?.toDouble() ??
+              (clip?['length_beats'] as num?)?.toDouble();
+          final currentDurationMs =
+              symbolic?.durationMs ??
+              (currentLengthBeats == null
+                  ? null
+                  : currentLengthBeats * 60000.0 / symbolicBpm);
+          if (currentStartMs == null ||
+              !currentStartMs.isFinite ||
+              (clipRef == null && currentDurationMs == null) ||
+              (currentDurationMs != null &&
+                  (!currentDurationMs.isFinite || currentDurationMs <= 0))) {
             throw const AiV3PreparationException('v3_clip_bounds_missing');
           }
-          final currentEnd = currentStart + currentLength;
           final startBeat = (args['start_beat'] as num).toDouble();
           final endBeat = (args['end_beat'] as num).toDouble();
-          final minimumLengthBeats = 50.0 * bpm / 60000.0;
-          const epsilon = 0.000001;
-          if (startBeat < currentStart - epsilon ||
-              endBeat > currentEnd + epsilon ||
-              endBeat - startBeat < minimumLengthBeats) {
+          final requestedStartMs = startBeat * 60000.0 / symbolicBpm;
+          final requestedEndMs = endBeat * 60000.0 / symbolicBpm;
+          final currentEndMs = currentDurationMs == null
+              ? null
+              : currentStartMs + currentDurationMs;
+          if (requestedStartMs < currentStartMs - 0.001 ||
+              (currentEndMs != null && requestedEndMs > currentEndMs + 0.001) ||
+              requestedEndMs - requestedStartMs < 50.0) {
             throw const AiV3PreparationException('v3_clip_trim_bounds_invalid');
           }
-          final millisecondsPerBeat = 60000.0 / bpm;
-          commandActions.add(AssistantAction(
-            type: 'clip_edit',
-            data: <String, dynamic>{
-              'operation': 'trim',
-              'delta_trim_start_ms':
-                  (startBeat - currentStart) * millisecondsPerBeat,
-              'delta_trim_end_ms': (endBeat - currentEnd) * millisecondsPerBeat,
-              'new_start_ms': startBeat * millisecondsPerBeat,
-              'target': target,
-            },
-          ));
-          label =
-              'Trim ${_clipLabel(clipById, clipId)} to beats $startBeat–$endBeat';
+          commandActions.add(
+            AssistantAction(
+              type: 'clip_edit',
+              data: clipRef == null
+                  ? <String, dynamic>{
+                      'operation': 'trim',
+                      'delta_trim_start_ms': requestedStartMs - currentStartMs,
+                      'delta_trim_end_ms': requestedEndMs - currentEndMs!,
+                      'new_start_ms': requestedStartMs,
+                      'target': target,
+                    }
+                  : <String, dynamic>{
+                      'command_id': command.commandId,
+                      'resource_consumer_type': command.type,
+                      'operation': 'trim',
+                      'requested_start_ms': requestedStartMs,
+                      'requested_end_ms': requestedEndMs,
+                      'predicted_input_start_ms': currentStartMs,
+                      if (currentEndMs != null)
+                        'predicted_input_end_ms': currentEndMs,
+                      if (currentEndMs != null)
+                        'delta_trim_start_ms':
+                            requestedStartMs - currentStartMs,
+                      if (currentEndMs != null)
+                        'delta_trim_end_ms': requestedEndMs - currentEndMs,
+                      'new_start_ms': requestedStartMs,
+                      'target': target,
+                    },
+            ),
+          );
+          if (symbolic != null) {
+            symbolic
+              ..startMs = requestedStartMs
+              ..durationMs = requestedEndMs - requestedStartMs;
+          }
+          label = clipRef == null
+              ? 'Trim ${_clipLabel(clipById, clipId!)} to beats $startBeat–$endBeat'
+              : 'Trim ${clipRef.commandId}.${clipRef.output} to beats $startBeat–$endBeat';
+          verifiedLabel = clipRef == null
+              ? 'Trimmed ${_clipLabel(clipById, clipId!)} to beats $startBeat–$endBeat'
+              : 'Trimmed ${clipRef.commandId}.${clipRef.output} to beats $startBeat–$endBeat';
           break;
         case 'clip.split_at':
-          final clipId = args['clip_id'] as String;
-          final clip = clipById[clipId];
-          final target = clipTarget(clipId);
-          final currentStart = (clip?['start_beat'] as num?)?.toDouble();
-          final currentLength = (clip?['length_beats'] as num?)?.toDouble();
-          if (currentStart == null ||
-              currentLength == null ||
-              !currentStart.isFinite ||
-              !currentLength.isFinite ||
-              currentLength <= 0) {
+          final rawRef = args['clip_ref'];
+          final AiV3ResourceRef? clipRef = rawRef is Map
+              ? AiV3ResourceRef.fromJson(rawRef)
+              : null;
+          final String? clipId = args['clip_id'] is String
+              ? args['clip_id'] as String
+              : null;
+          final spec = aiV3ResourceConsumerSpecs[command.type]!;
+          final symbolic = clipRef == null
+              ? null
+              : symbolicResources['${clipRef.commandId}.${clipRef.output}'];
+          if (clipRef != null &&
+              (symbolic == null ||
+                  !symbolic.available ||
+                  !spec.acceptedKinds.contains(symbolic.kind))) {
+            throw const AiV3PreparationException('v3_resource_ref_unavailable');
+          }
+          final clip = clipId == null ? null : clipById[clipId];
+          final kind =
+              symbolic?.kind ??
+              switch (clip?['kind']) {
+                'audio' => AiV3ResourceKind.audioClip,
+                'midi' => AiV3ResourceKind.midiClip,
+                _ => null,
+              };
+          final currentStartBeat = (clip?['start_beat'] as num?)?.toDouble();
+          final currentStartMs =
+              symbolic?.startMs ??
+              (currentStartBeat == null
+                  ? null
+                  : currentStartBeat * 60000.0 / symbolicBpm);
+          final currentLengthBeats =
+              (clip?['timeline_length_beats'] as num?)?.toDouble() ??
+              (clip?['length_beats'] as num?)?.toDouble();
+          final currentDurationFollowsTempo =
+              symbolic?.durationFollowsTempo ??
+              (kind == AiV3ResourceKind.midiClip ||
+                  clip?['stretch_to_project_tempo'] == true ||
+                  (kind == AiV3ResourceKind.audioClip &&
+                      projectAudioForcedTempoFollow));
+          final currentDurationMs =
+              symbolic?.durationMs ??
+              (currentLengthBeats == null
+                  ? null
+                  : currentLengthBeats *
+                        60000.0 /
+                        (currentDurationFollowsTempo ? symbolicBpm : bpm));
+          if (kind == null ||
+              currentStartMs == null ||
+              !currentStartMs.isFinite ||
+              (currentDurationMs != null &&
+                  (!currentDurationMs.isFinite || currentDurationMs <= 0))) {
             throw const AiV3PreparationException('v3_clip_bounds_missing');
           }
           final atBeat = (args['at_beat'] as num).toDouble();
-          final minimumLengthBeats = 50.0 * bpm / 60000.0;
-          if (atBeat - currentStart < minimumLengthBeats ||
-              currentStart + currentLength - atBeat < minimumLengthBeats) {
+          final cutMs = atBeat * 60000.0 / symbolicBpm;
+          final deferredRuntimeBounds =
+              symbolic?.boundsRuntimeAuthoritative == true;
+          final leftDurationMs = deferredRuntimeBounds
+              ? null
+              : cutMs - currentStartMs;
+          final rightDurationMs =
+              deferredRuntimeBounds || currentDurationMs == null
+              ? null
+              : currentDurationMs - leftDurationMs!;
+          if ((leftDurationMs != null && leftDurationMs < 50.0) ||
+              (rightDurationMs != null && rightDurationMs < 50.0)) {
             throw const AiV3PreparationException('v3_clip_split_point_invalid');
           }
-          commandActions.add(AssistantAction(
-            type: 'clip_edit',
-            data: <String, dynamic>{
-              'operation': 'cut',
-              'cut_ms': atBeat * 60000.0 / bpm,
-              'target': target,
-            },
-          ));
-          label = 'Split ${_clipLabel(clipById, clipId)} at beat $atBeat';
+          if (simulatedClipCount + 1 > 128) {
+            throw const AiV3PreparationException('v3_clip_capacity_exceeded');
+          }
+          commandActions.add(
+            AssistantAction(
+              type: 'clip_edit',
+              data: <String, dynamic>{
+                'command_id': command.commandId,
+                if (clipRef != null) 'resource_consumer_type': command.type,
+                'operation': 'cut',
+                'cut_ms': cutMs,
+                'predicted_input_start_ms': currentStartMs,
+                if (currentDurationMs != null)
+                  'predicted_input_end_ms': currentStartMs + currentDurationMs,
+                'target': clipRef == null
+                    ? clipTarget(clipId!)
+                    : <String, dynamic>{
+                        'scope': 'clip',
+                        'resource_ref': clipRef.toJson(),
+                      },
+              },
+            ),
+          );
+          if (symbolic != null) symbolic.available = false;
+          final inheritedPitch =
+              symbolic?.pitchSemitones ??
+              (clip?['pitch_semitones'] as num?)?.toDouble();
+          final inheritedNotes =
+              symbolic?.midiNotes ??
+              (kind == AiV3ResourceKind.midiClip
+                  ? _normalizedMidiNotes(
+                      clip?['midi_notes'] as List? ?? const <Object>[],
+                    )
+                  : null);
+          symbolicResources['${command.commandId}.left_clip'] =
+              _AiV3SymbolicResource(
+                kind: kind,
+                startMs: currentStartMs,
+                durationMs: leftDurationMs,
+                durationFollowsTempo: currentDurationFollowsTempo,
+                rowId: symbolic?.rowId ?? clip?['row_id'] as int?,
+                rowIndex:
+                    symbolic?.rowIndex ??
+                    rowById[clip?['row_id']]?['display_index'] as int?,
+                parentRowResourceKey: symbolic?.parentRowResourceKey,
+                pitchSemitones: inheritedPitch,
+                sourceTempoBpm:
+                    symbolic?.sourceTempoBpm ??
+                    (clip?['source_tempo_bpm'] as num?)?.toDouble(),
+                tempoFollowMode:
+                    symbolic?.tempoFollowMode ??
+                    (clip?['stretch_to_project_tempo'] == true
+                        ? (clip?['tempo_stretch_preserve_pitch'] == true
+                              ? 'preserve_pitch'
+                              : 'repitch')
+                        : 'off'),
+                tempoPreservePitch:
+                    symbolic?.tempoPreservePitch ??
+                    (clip?['tempo_stretch_preserve_pitch'] == true),
+                midiNotes: inheritedNotes
+                    ?.map((note) => Map<String, dynamic>.from(note))
+                    .toList(growable: false),
+                midiNotesRuntimeAuthoritative:
+                    symbolic?.midiNotesRuntimeAuthoritative == true,
+                boundsRuntimeAuthoritative:
+                    deferredRuntimeBounds || currentDurationMs == null,
+              );
+          symbolicResources['${command.commandId}.right_clip'] =
+              _AiV3SymbolicResource(
+                kind: kind,
+                startMs: cutMs,
+                durationMs: rightDurationMs,
+                durationFollowsTempo: currentDurationFollowsTempo,
+                rowId: symbolic?.rowId ?? clip?['row_id'] as int?,
+                rowIndex:
+                    symbolic?.rowIndex ??
+                    rowById[clip?['row_id']]?['display_index'] as int?,
+                parentRowResourceKey: symbolic?.parentRowResourceKey,
+                pitchSemitones: inheritedPitch,
+                sourceTempoBpm:
+                    symbolic?.sourceTempoBpm ??
+                    (clip?['source_tempo_bpm'] as num?)?.toDouble(),
+                tempoFollowMode:
+                    symbolic?.tempoFollowMode ??
+                    (clip?['stretch_to_project_tempo'] == true
+                        ? (clip?['tempo_stretch_preserve_pitch'] == true
+                              ? 'preserve_pitch'
+                              : 'repitch')
+                        : 'off'),
+                tempoPreservePitch:
+                    symbolic?.tempoPreservePitch ??
+                    (clip?['tempo_stretch_preserve_pitch'] == true),
+                midiNotes: inheritedNotes
+                    ?.map((note) => Map<String, dynamic>.from(note))
+                    .toList(growable: false),
+                midiNotesRuntimeAuthoritative:
+                    symbolic?.midiNotesRuntimeAuthoritative == true,
+                boundsRuntimeAuthoritative:
+                    deferredRuntimeBounds || currentDurationMs == null,
+              );
+          simulatedClipCount += 1;
+          label = clipRef == null
+              ? 'Split ${_clipLabel(clipById, clipId!)} at beat $atBeat'
+              : 'Split ${clipRef.commandId}.${clipRef.output} at beat $atBeat';
+          verifiedLabel = label;
           break;
         case 'clip.duplicate_to':
-          if (hasPriorTopologyMutation) {
+          final rawRef = args['clip_ref'];
+          final AiV3ResourceRef? clipRef = rawRef is Map
+              ? AiV3ResourceRef.fromJson(rawRef)
+              : null;
+          final String? clipId = args['clip_id'] is String
+              ? args['clip_id'] as String
+              : null;
+          if (clipRef == null && hasPriorTopologyMutation) {
             throw const AiV3PreparationException('v3_row_id_unknown');
           }
-          final clipId = args['clip_id'] as String;
-          final clip = clipById[clipId];
-          final target = clipTarget(clipId);
-          final destinationRowId = args['destination_row_id'] as int;
-          rowTarget(destinationRowId);
-          final destinationRow = rowById[destinationRowId];
-          if (destinationRow == null) {
-            throw const AiV3PreparationException('v3_row_id_unknown');
+          final spec = aiV3ResourceConsumerSpecs[command.type]!;
+          final symbolic = clipRef == null
+              ? null
+              : symbolicResources['${clipRef.commandId}.${clipRef.output}'];
+          if (clipRef != null &&
+              (symbolic == null ||
+                  !symbolic.available ||
+                  !spec.acceptedKinds.contains(symbolic.kind))) {
+            throw const AiV3PreparationException('v3_resource_ref_unavailable');
           }
-          final isMidi = clip?['kind'] == 'midi';
-          final destinationIsMidi = destinationRow['lane_kind'] == 'instrument';
-          if (isMidi != destinationIsMidi) {
-            throw const AiV3PreparationException(
-              'v3_clip_destination_lane_mismatch',
-            );
-          }
-          final startBeat = (args['start_beat'] as num).toDouble();
-          commandActions.add(AssistantAction(
-            type: 'clip_edit',
-            data: <String, dynamic>{
-              'operation': 'duplicate',
-              'paste_start_ms': startBeat * 60000.0 / bpm,
-              'row_index': destinationRow['display_index'],
-              'new_row_index': destinationRow['display_index'],
-              'target': target,
-            },
-          ));
-          label =
-              'Duplicate ${_clipLabel(clipById, clipId)} to ${_rowLabel(rowById, destinationRowId)} at beat $startBeat';
-          break;
-        case 'clip.delete':
-          final clipId = args['clip_id'] as String;
-          commandActions.add(AssistantAction(
-            type: 'clip_edit',
-            data: <String, dynamic>{
-              'operation': 'delete',
-              'target': clipTarget(clipId),
-            },
-          ));
-          unavailableClipIds.add(clipId);
-          label = 'Delete ${_clipLabel(clipById, clipId)}';
-          break;
-        case 'clip.glue':
-          if (hasPriorTopologyMutation) {
+          final clip = clipId == null ? null : clipById[clipId];
+          final kind =
+              symbolic?.kind ??
+              switch (clip?['kind']) {
+                'audio' => AiV3ResourceKind.audioClip,
+                'midi' => AiV3ResourceKind.midiClip,
+                _ => null,
+              };
+          if (kind == null) {
             throw const AiV3PreparationException('v3_clip_id_unknown');
           }
-          final requestedIds = (args['clip_ids'] as List)
-              .cast<String>()
-              .map((value) => value.trim())
-              .toList(growable: false);
-          if (requestedIds.any(previouslyMutatedClipIds.contains)) {
-            throw const AiV3PreparationException(
-              'v3_clip_glue_source_already_mutated',
-            );
-          }
-          final resolved = requestedIds.map((clipId) {
-            clipTarget(clipId, requireAudio: true);
-            return clipById[clipId]!;
-          }).toList(growable: false)
-            ..sort((left, right) {
-              final startComparison =
-                  ((left['start_beat'] as num?)?.toDouble() ?? 0).compareTo(
-                (right['start_beat'] as num?)?.toDouble() ?? 0,
+          final target = clipRef == null
+              ? clipTarget(clipId!)
+              : <String, dynamic>{
+                  'scope': 'clip',
+                  'resource_ref': clipRef.toJson(),
+                };
+          final destinationRowId = args['destination_row_id'] as int?;
+          final destinationRow = destinationRowId == null
+              ? null
+              : rowById[destinationRowId];
+          if (destinationRowId != null) {
+            rowTarget(destinationRowId);
+            if (destinationRow == null) {
+              throw const AiV3PreparationException('v3_row_id_unknown');
+            }
+            final destinationIsMidi =
+                destinationRow['lane_kind'] == 'instrument';
+            if ((kind == AiV3ResourceKind.midiClip) != destinationIsMidi) {
+              throw const AiV3PreparationException(
+                'v3_clip_destination_lane_mismatch',
               );
-              if (startComparison != 0) return startComparison;
-              return left['clip_id']
-                  .toString()
-                  .compareTo(right['clip_id'].toString());
-            });
-          final rowIds =
-              resolved.map((clip) => clip['row_id']).whereType<int>().toSet();
-          if (rowIds.length != 1) {
-            throw const AiV3PreparationException(
-              'v3_clip_glue_row_mismatch',
-            );
+            }
           }
-          final starts = resolved
-              .map((clip) => (clip['start_beat'] as num?)?.toDouble())
-              .toList(growable: false);
-          final ends = resolved.map((clip) {
-            final start = (clip['start_beat'] as num?)?.toDouble();
-            final length =
-                (clip['timeline_length_beats'] as num?)?.toDouble() ??
-                    (clip['length_beats'] as num?)?.toDouble();
-            return start == null || length == null ? null : start + length;
-          }).toList(growable: false);
-          if (starts.any((value) => value == null || !value.isFinite) ||
-              ends.any((value) => value == null || !value.isFinite)) {
-            throw const AiV3PreparationException(
-              'v3_clip_bounds_missing',
-            );
+          if (simulatedClipCount + 1 > 128) {
+            throw const AiV3PreparationException('v3_clip_capacity_exceeded');
           }
-          final startBeat =
-              starts.cast<double>().reduce((a, b) => math.min(a, b));
-          final endBeat = ends.cast<double>().reduce((a, b) => math.max(a, b));
-          if ((endBeat - startBeat) * 60000.0 / bpm <= 50.0) {
-            throw const AiV3PreparationException(
-              'v3_clip_glue_bounds_invalid',
-            );
-          }
-          final rowId = rowIds.single;
-          final labelValue = args['label']?.toString().trim() ?? '';
-          final orderedIds = resolved
-              .map((clip) => clip['clip_id'].toString())
-              .toList(growable: false);
-          commandActions.add(AssistantAction(
-            type: 'v3_clip_glue',
-            data: <String, dynamic>{
-              'source_clip_ids': orderedIds,
-              'label': labelValue.isEmpty ? 'Glued Clip' : labelValue,
-              'start_ms': startBeat * 60000.0 / bpm,
-              'duration_ms': (endBeat - startBeat) * 60000.0 / bpm,
-              'target': <String, dynamic>{
-                ...rowTarget(rowId),
-                'source_clip_ids': orderedIds,
+          final startBeat = (args['start_beat'] as num).toDouble();
+          final startMs = startBeat * 60000.0 / symbolicBpm;
+          final sourceStartBeat = (clip?['start_beat'] as num?)?.toDouble();
+          final sourceStartMs =
+              symbolic?.startMs ??
+              (sourceStartBeat == null
+                  ? null
+                  : sourceStartBeat * 60000.0 / symbolicBpm);
+          final sourceLengthBeats =
+              (clip?['timeline_length_beats'] as num?)?.toDouble() ??
+              (clip?['length_beats'] as num?)?.toDouble();
+          final durationMs =
+              symbolic?.durationMs ??
+              (sourceLengthBeats == null
+                  ? null
+                  : sourceLengthBeats *
+                        60000.0 /
+                        ((kind == AiV3ResourceKind.midiClip ||
+                                clip?['stretch_to_project_tempo'] == true ||
+                                (kind == AiV3ResourceKind.audioClip &&
+                                    projectAudioForcedTempoFollow))
+                            ? symbolicBpm
+                            : bpm));
+          commandActions.add(
+            AssistantAction(
+              type: 'clip_edit',
+              data: <String, dynamic>{
+                if (referencedProducerCommandIds.contains(command.commandId) ||
+                    clipRef != null)
+                  'command_id': command.commandId,
+                if (clipRef != null) 'resource_consumer_type': command.type,
+                'operation': 'duplicate',
+                'paste_start_ms': startMs,
+                if (destinationRow != null)
+                  'row_index': destinationRow['display_index'],
+                if (destinationRow != null)
+                  'new_row_index': destinationRow['display_index'],
+                if (clipRef != null && destinationRowId != null)
+                  'row_id': destinationRowId,
+                if (sourceStartMs != null)
+                  'predicted_input_start_ms': sourceStartMs,
+                if (durationMs != null)
+                  'predicted_input_end_ms': sourceStartMs! + durationMs,
+                'target': target,
               },
-            },
-          ));
-          unavailableClipIds.addAll(orderedIds);
-          previouslyMutatedClipIds.addAll(orderedIds);
+            ),
+          );
+          symbolicResources['${command.commandId}.copy_clip'] =
+              _AiV3SymbolicResource(
+                kind: kind,
+                startMs: startMs,
+                durationMs: durationMs,
+                durationFollowsTempo:
+                    symbolic?.durationFollowsTempo ??
+                    (kind == AiV3ResourceKind.midiClip ||
+                        clip?['stretch_to_project_tempo'] == true ||
+                        (kind == AiV3ResourceKind.audioClip &&
+                            projectAudioForcedTempoFollow)),
+                rowId:
+                    destinationRowId ??
+                    symbolic?.rowId ??
+                    clip?['row_id'] as int?,
+                rowIndex:
+                    destinationRow?['display_index'] as int? ??
+                    symbolic?.rowIndex ??
+                    rowById[clip?['row_id']]?['display_index'] as int?,
+                parentRowResourceKey: destinationRowId == null
+                    ? symbolic?.parentRowResourceKey
+                    : null,
+                pitchSemitones:
+                    symbolic?.pitchSemitones ??
+                    (clip?['pitch_semitones'] as num?)?.toDouble(),
+                sourceTempoBpm:
+                    symbolic?.sourceTempoBpm ??
+                    (clip?['source_tempo_bpm'] as num?)?.toDouble(),
+                tempoFollowMode:
+                    symbolic?.tempoFollowMode ??
+                    (clip?['stretch_to_project_tempo'] == true
+                        ? (clip?['tempo_stretch_preserve_pitch'] == true
+                              ? 'preserve_pitch'
+                              : 'repitch')
+                        : 'off'),
+                tempoPreservePitch:
+                    symbolic?.tempoPreservePitch ??
+                    (clip?['tempo_stretch_preserve_pitch'] == true),
+                midiNotes: symbolic?.midiNotes == null
+                    ? (kind == AiV3ResourceKind.midiClip
+                          ? _normalizedMidiNotes(
+                              clip?['midi_notes'] as List? ?? const <Object>[],
+                            )
+                          : null)
+                    : symbolic!.midiNotes!
+                          .map((note) => Map<String, dynamic>.from(note))
+                          .toList(growable: false),
+                midiNotesRuntimeAuthoritative:
+                    symbolic?.midiNotesRuntimeAuthoritative == true,
+                boundsRuntimeAuthoritative:
+                    symbolic?.boundsRuntimeAuthoritative == true ||
+                    durationMs == null,
+              );
+          simulatedClipCount += 1;
+          label = clipRef == null
+              ? 'Duplicate ${_clipLabel(clipById, clipId!)} to ${_rowLabel(rowById, destinationRowId!)} at beat $startBeat'
+              : 'Duplicate ${clipRef.commandId}.${clipRef.output} at beat $startBeat';
+          verifiedLabel = clipRef == null
+              ? 'Duplicated ${_clipLabel(clipById, clipId!)} to ${_rowLabel(rowById, destinationRowId!)} at beat $startBeat'
+              : 'Duplicated ${clipRef.commandId}.${clipRef.output} at beat $startBeat';
+          break;
+        case 'clip.delete':
+          final rawRef = args['clip_ref'];
+          final AiV3ResourceRef? clipRef = rawRef is Map
+              ? AiV3ResourceRef.fromJson(rawRef)
+              : null;
+          final String? clipId = args['clip_id'] is String
+              ? args['clip_id'] as String
+              : null;
+          final spec = aiV3ResourceConsumerSpecs[command.type]!;
+          final symbolic = clipRef == null
+              ? null
+              : symbolicResources['${clipRef.commandId}.${clipRef.output}'];
+          if (clipRef != null &&
+              (symbolic == null ||
+                  !symbolic.available ||
+                  !spec.acceptedKinds.contains(symbolic.kind))) {
+            throw const AiV3PreparationException('v3_resource_ref_unavailable');
+          }
+          commandActions.add(
+            AssistantAction(
+              type: 'clip_edit',
+              data: <String, dynamic>{
+                'command_id': command.commandId,
+                if (clipRef != null) 'resource_consumer_type': command.type,
+                'operation': 'delete',
+                'target': clipRef == null
+                    ? clipTarget(clipId!)
+                    : <String, dynamic>{
+                        'scope': 'clip',
+                        'resource_ref': clipRef.toJson(),
+                      },
+              },
+            ),
+          );
+          if (symbolic != null) {
+            symbolic.available = false;
+          } else {
+            unavailableClipIds.add(clipId!);
+          }
+          simulatedClipCount -= 1;
+          label = clipRef == null
+              ? 'Delete ${_clipLabel(clipById, clipId!)}'
+              : 'Delete ${clipRef.commandId}.${clipRef.output}';
+          verifiedLabel = clipRef == null
+              ? 'Deleted ${_clipLabel(clipById, clipId!)}'
+              : 'Deleted ${clipRef.commandId}.${clipRef.output}';
+          break;
+        case 'clip.glue':
+          final usesTypedSources = args['sources'] is List;
+          if (!usesTypedSources && hasPriorTopologyMutation) {
+            throw const AiV3PreparationException('v3_clip_id_unknown');
+          }
+          final rawSources = usesTypedSources
+              ? args['sources'] as List
+              : (args['clip_ids'] as List)
+                    .map((clipId) => <String, dynamic>{'clip_id': clipId})
+                    .toList(growable: false);
+          final preparedSources = <Map<String, dynamic>>[];
+          final stableIds = <String>[];
+          final referencedResources =
+              <({AiV3ResourceRef ref, _AiV3SymbolicResource resource})>[];
+          final rowKeys = <String>{};
+          final startsMs = <double>[];
+          final endsMs = <double>[];
+          var hasDeferredBounds = false;
+          for (final rawSource in rawSources) {
+            final source = Map<String, dynamic>.from(rawSource as Map);
+            if (source['clip_ref'] is Map) {
+              final ref = AiV3ResourceRef.fromJson(source['clip_ref']);
+              final symbolic =
+                  symbolicResources['${ref.commandId}.${ref.output}'];
+              if (symbolic == null ||
+                  !symbolic.available ||
+                  symbolic.kind != AiV3ResourceKind.audioClip ||
+                  symbolic.rowIndex == null) {
+                throw const AiV3PreparationException(
+                  'v3_resource_ref_unavailable',
+                );
+              }
+              referencedResources.add((ref: ref, resource: symbolic));
+              preparedSources.add(<String, dynamic>{
+                'resource_ref': ref.toJson(),
+              });
+              rowKeys.add(
+                symbolic.parentRowResourceKey ??
+                    (symbolic.rowId != null
+                        ? 'stable:${symbolic.rowId}'
+                        : 'index:${symbolic.rowIndex}'),
+              );
+              startsMs.add(symbolic.startMs);
+              if (symbolic.durationMs == null ||
+                  symbolic.boundsRuntimeAuthoritative) {
+                hasDeferredBounds = true;
+              } else {
+                endsMs.add(symbolic.startMs + symbolic.durationMs!);
+              }
+              continue;
+            }
+            final clipId = source['clip_id'].toString().trim();
+            if (previouslyMutatedClipIds.contains(clipId)) {
+              throw const AiV3PreparationException(
+                'v3_clip_glue_source_already_mutated',
+              );
+            }
+            clipTarget(clipId, requireAudio: true);
+            final clip = clipById[clipId]!;
+            final startBeat = (clip['start_beat'] as num?)?.toDouble();
+            final lengthBeats =
+                (clip['timeline_length_beats'] as num?)?.toDouble() ??
+                (clip['length_beats'] as num?)?.toDouble();
+            if (startBeat == null ||
+                lengthBeats == null ||
+                !startBeat.isFinite ||
+                !lengthBeats.isFinite) {
+              throw const AiV3PreparationException('v3_clip_bounds_missing');
+            }
+            final followsTempo =
+                clip['stretch_to_project_tempo'] == true ||
+                projectAudioForcedTempoFollow;
+            final startMs = startBeat * 60000.0 / symbolicBpm;
+            final durationMs =
+                lengthBeats * 60000.0 / (followsTempo ? symbolicBpm : bpm);
+            stableIds.add(clipId);
+            preparedSources.add(<String, dynamic>{'clip_id': clipId});
+            rowKeys.add('stable:${clip['row_id']}');
+            startsMs.add(startMs);
+            endsMs.add(startMs + durationMs);
+          }
+          if (rowKeys.length != 1) {
+            throw const AiV3PreparationException('v3_clip_glue_row_mismatch');
+          }
+          final predictedStartMs = startsMs.reduce(math.min);
+          final predictedEndMs = hasDeferredBounds
+              ? null
+              : endsMs.reduce(math.max);
+          if (predictedEndMs != null &&
+              predictedEndMs - predictedStartMs <= 50.0) {
+            throw const AiV3PreparationException('v3_clip_glue_bounds_invalid');
+          }
+          final firstReferenced = referencedResources.firstOrNull?.resource;
+          final stableRowId = stableIds.isEmpty
+              ? null
+              : clipById[stableIds.first]?['row_id'] as int?;
+          final rowId = firstReferenced?.rowId ?? stableRowId;
+          final rowIndex =
+              firstReferenced?.rowIndex ??
+              (rowId == null ? null : rowById[rowId]?['display_index'] as int?);
+          final labelValue = args['label']?.toString().trim() ?? '';
+          final legacyOrderedIds = stableIds.toList(growable: false)
+            ..sort((left, right) {
+              final leftStart =
+                  (clipById[left]?['start_beat'] as num?)?.toDouble() ?? 0.0;
+              final rightStart =
+                  (clipById[right]?['start_beat'] as num?)?.toDouble() ?? 0.0;
+              final comparison = leftStart.compareTo(rightStart);
+              return comparison != 0 ? comparison : left.compareTo(right);
+            });
+          commandActions.add(
+            AssistantAction(
+              type: 'v3_clip_glue',
+              data: usesTypedSources
+                  ? <String, dynamic>{
+                      'command_id': command.commandId,
+                      'sources': preparedSources,
+                      'label': labelValue.isEmpty ? 'Glued Clip' : labelValue,
+                      'predicted_start_ms': predictedStartMs,
+                      if (predictedEndMs != null)
+                        'predicted_duration_ms':
+                            predictedEndMs - predictedStartMs,
+                      'target': <String, dynamic>{
+                        'scope': 'row',
+                        if (rowId != null) 'row_id': rowId,
+                        if (rowIndex != null) 'row_index': rowIndex,
+                      },
+                    }
+                  : <String, dynamic>{
+                      'source_clip_ids': legacyOrderedIds,
+                      'label': labelValue.isEmpty ? 'Glued Clip' : labelValue,
+                      'start_ms': predictedStartMs,
+                      'duration_ms': predictedEndMs! - predictedStartMs,
+                      'target': <String, dynamic>{
+                        ...rowTarget(rowId!),
+                        'source_clip_ids': legacyOrderedIds,
+                      },
+                    },
+            ),
+          );
+          for (final source in referencedResources) {
+            source.resource.available = false;
+          }
+          unavailableClipIds.addAll(stableIds);
+          previouslyMutatedClipIds.addAll(stableIds);
+          if (usesTypedSources) {
+            symbolicResources['${command.commandId}.glued_clip'] =
+                _AiV3SymbolicResource(
+                  kind: AiV3ResourceKind.audioClip,
+                  startMs: predictedStartMs,
+                  durationMs: predictedEndMs == null
+                      ? null
+                      : predictedEndMs - predictedStartMs,
+                  durationFollowsTempo: false,
+                  rowId: rowId,
+                  rowIndex: rowIndex,
+                  parentRowResourceKey: firstReferenced?.parentRowResourceKey,
+                  pitchSemitones: 0.0,
+                  sourceTempoBpm: 0.0,
+                  tempoFollowMode: 'off',
+                  tempoPreservePitch: false,
+                  boundsRuntimeAuthoritative: true,
+                );
+          }
+          simulatedClipCount -= rawSources.length - 1;
+          hasPriorTopologyMutation = true;
           label =
-              'Glue ${orderedIds.length} clips on ${_rowLabel(rowById, rowId)} as ${labelValue.isEmpty ? 'Glued Clip' : labelValue} from beat $startBeat to $endBeat';
+              'Glue ${rawSources.length} audio clips as ${labelValue.isEmpty ? 'Glued Clip' : labelValue}';
+          verifiedLabel =
+              'Glued ${rawSources.length} audio clips as ${labelValue.isEmpty ? 'Glued Clip' : labelValue}';
           break;
         case 'clip.separate_stems':
-          if (hasPriorTopologyMutation) {
+          final rawRef = args['clip_ref'];
+          final AiV3ResourceRef? clipRef = rawRef is Map
+              ? AiV3ResourceRef.fromJson(rawRef)
+              : null;
+          final String? clipId = args['clip_id'] is String
+              ? args['clip_id'] as String
+              : null;
+          if (clipRef == null && hasPriorTopologyMutation) {
             throw const AiV3PreparationException('v3_clip_id_unknown');
           }
           if (!runtimeCapabilities.contains('daw.stem_separate')) {
@@ -1194,68 +2246,101 @@ class AiV3CommandPreparer {
               'v3_row_capacity_exceeded',
             );
           }
-          if (clips.length + 2 > 128) {
-            throw const AiV3PreparationException(
-              'v3_clip_capacity_exceeded',
-            );
+          if (simulatedClipCount + 2 > 128) {
+            throw const AiV3PreparationException('v3_clip_capacity_exceeded');
           }
-          final clipId = args['clip_id'] as String;
-          final clip = clipById[clipId];
-          final target = clipTarget(clipId, requireAudio: true);
-          final rowId = clip?['row_id'];
+          final symbolic = clipRef == null
+              ? null
+              : symbolicResources['${clipRef.commandId}.${clipRef.output}'];
+          if (clipRef != null &&
+              (symbolic == null ||
+                  !symbolic.available ||
+                  symbolic.kind != AiV3ResourceKind.audioClip)) {
+            throw const AiV3PreparationException('v3_resource_ref_unavailable');
+          }
+          final clip = clipId == null ? null : clipById[clipId];
+          final target = clipRef == null
+              ? clipTarget(clipId!, requireAudio: true)
+              : <String, dynamic>{
+                  'scope': 'clip',
+                  'resource_ref': clipRef.toJson(),
+                };
+          final rowId = symbolic?.rowId ?? clip?['row_id'];
           final startBeat = (clip?['start_beat'] as num?)?.toDouble();
           final lengthBeats =
               (clip?['timeline_length_beats'] as num?)?.toDouble();
           final sourcePath = clip?['source_file']?.toString().trim() ?? '';
-          if (rowId is! int ||
-              startBeat == null ||
-              !startBeat.isFinite ||
-              lengthBeats == null ||
-              !lengthBeats.isFinite ||
-              lengthBeats <= 0) {
-            throw const AiV3PreparationException(
-              'v3_clip_bounds_missing',
-            );
+          final startMs =
+              symbolic?.startMs ??
+              (startBeat == null ? null : startBeat * 60000.0 / symbolicBpm);
+          final durationMs =
+              symbolic?.durationMs ??
+              (lengthBeats == null
+                  ? null
+                  : lengthBeats * 60000.0 / symbolicBpm);
+          if (clipRef == null &&
+              (rowId is! int ||
+                  startMs == null ||
+                  !startMs.isFinite ||
+                  durationMs == null ||
+                  !durationMs.isFinite ||
+                  durationMs <= 0)) {
+            throw const AiV3PreparationException('v3_clip_bounds_missing');
           }
-          if (sourcePath.isEmpty) {
-            throw const AiV3PreparationException(
-              'v3_stem_source_unreadable',
-            );
+          if (clipRef == null && sourcePath.isEmpty) {
+            throw const AiV3PreparationException('v3_stem_source_unreadable');
           }
           final sourceAvailable = clip?['source_available'];
           final sourceFile = File(sourcePath);
           final absoluteSourceUnavailable = sourceFile.isAbsolute &&
               (!sourceFile.existsSync() || sourceFile.lengthSync() <= 44);
-          if (sourceAvailable == false || absoluteSourceUnavailable) {
-            throw const AiV3PreparationException(
-              'v3_stem_source_unreadable',
-            );
+          if (clipRef == null &&
+              (sourceAvailable == false || absoluteSourceUnavailable)) {
+            throw const AiV3PreparationException('v3_stem_source_unreadable');
           }
           final sourceName = clip?['name']?.toString().trim() ?? '';
           final baseName = sourceName.isEmpty ? 'Separated' : sourceName;
           final vocalsLabel = _boundedStemLabel(baseName, 'Vocals');
           final instrumentalLabel = _boundedStemLabel(baseName, 'Instrumental');
-          commandActions.add(AssistantAction(
-            type: 'v3_clip_separate_stems',
-            data: <String, dynamic>{
-              'source_clip_id': clipId,
-              'source_row_id': rowId,
-              'source_row_index': target['row_index'],
-              'start_ms': startBeat * 60000.0 / bpm,
-              'duration_ms': lengthBeats * 60000.0 / bpm,
-              'vocals_label': vocalsLabel,
-              'instrumental_label': instrumentalLabel,
-              'target': target,
-            },
-          ));
+          commandActions.add(
+            AssistantAction(
+              type: 'v3_clip_separate_stems',
+              data: <String, dynamic>{
+                'command_id': command.commandId,
+                if (clipRef != null) 'resource_consumer_type': command.type,
+                'operation': 'separate_stems',
+                if (clipId != null) 'source_clip_id': clipId,
+                if (rowId is int) 'source_row_id': rowId,
+                if (target['row_index'] is int)
+                  'source_row_index': target['row_index'],
+                if (startMs != null) 'start_ms': startMs,
+                if (durationMs != null) 'duration_ms': durationMs,
+                'vocals_label': vocalsLabel,
+                'instrumental_label': instrumentalLabel,
+                'target': target,
+              },
+            ),
+          );
           simulatedRowCount += 2;
+          simulatedClipCount += 2;
           hasPriorTopologyMutation = true;
           hasPreparedStemSeparation = true;
+          final sourceLabel = clipRef == null
+              ? _clipLabel(clipById, clipId!)
+              : '${clipRef.commandId}.${clipRef.output}';
           label =
-              'Separate ${_clipLabel(clipById, clipId)} into $vocalsLabel and $instrumentalLabel on two new rows; preserve the source clip';
+              'Separate $sourceLabel into $vocalsLabel and $instrumentalLabel on two new rows; preserve the source clip';
+          verifiedLabel = 'Separated vocals and instrumental';
           break;
         case 'clip.convert_to_midi':
-          if (hasPriorTopologyMutation) {
+          final rawRef = args['clip_ref'];
+          final AiV3ResourceRef? clipRef = rawRef is Map
+              ? AiV3ResourceRef.fromJson(rawRef)
+              : null;
+          final String? clipId = args['clip_id'] is String
+              ? args['clip_id'] as String
+              : null;
+          if (clipRef == null && hasPriorTopologyMutation) {
             throw const AiV3PreparationException('v3_clip_id_unknown');
           }
           if (!runtimeCapabilities.contains('daw.midi_compose.audio_to_midi')) {
@@ -1268,36 +2353,62 @@ class AiV3CommandPreparer {
               'v3_row_capacity_exceeded',
             );
           }
-          if (clips.length + 1 > 128) {
-            throw const AiV3PreparationException(
-              'v3_clip_capacity_exceeded',
-            );
+          if (simulatedClipCount + 1 > 128) {
+            throw const AiV3PreparationException('v3_clip_capacity_exceeded');
           }
-          final clipId = args['clip_id'] as String;
           final instrumentId = args['instrument_id'].toString().trim();
           if (!instruments.contains(instrumentId)) {
             throw const AiV3PreparationException(
               'v3_instrument_id_unknown',
             );
           }
-          final clip = clipById[clipId];
-          final target = clipTarget(clipId, requireAudio: true);
-          final rowId = clip?['row_id'];
-          final startBeat = (clip?['start_beat'] as num?)?.toDouble();
-          final lengthBeats =
-              (clip?['timeline_length_beats'] as num?)?.toDouble();
-          final sourcePath = clip?['source_file']?.toString().trim() ?? '';
-          if (rowId is! int ||
-              startBeat == null ||
-              !startBeat.isFinite ||
-              lengthBeats == null ||
-              !lengthBeats.isFinite ||
-              lengthBeats <= 0) {
-            throw const AiV3PreparationException(
-              'v3_clip_bounds_missing',
-            );
+          final symbolic = clipRef == null
+              ? null
+              : symbolicResources['${clipRef.commandId}.${clipRef.output}'];
+          if (clipRef != null &&
+              (symbolic == null ||
+                  !symbolic.available ||
+                  symbolic.kind != AiV3ResourceKind.audioClip)) {
+            throw const AiV3PreparationException('v3_resource_ref_unavailable');
           }
-          if (sourcePath.isEmpty) {
+          final clip = clipId == null ? null : clipById[clipId];
+          final target = clipRef == null
+              ? clipTarget(clipId!, requireAudio: true)
+              : <String, dynamic>{
+                  'scope': 'clip',
+                  'resource_ref': clipRef.toJson(),
+                };
+          final rowId = symbolic?.rowId ?? clip?['row_id'];
+          final startBeat = (clip?['start_beat'] as num?)?.toDouble();
+          final lengthBeats = (clip?['timeline_length_beats'] as num?)
+              ?.toDouble();
+          final startMs =
+              symbolic?.startMs ??
+              (startBeat == null ? null : startBeat * 60000.0 / symbolicBpm);
+          final durationMs =
+              symbolic?.durationMs ??
+              (lengthBeats == null
+                  ? null
+                  : lengthBeats *
+                        60000.0 /
+                        ((clip?['stretch_to_project_tempo'] == true ||
+                                projectAudioForcedTempoFollow)
+                            ? symbolicBpm
+                            : bpm));
+          final deferredRuntimeBounds =
+              clipRef != null &&
+              symbolic!.boundsRuntimeAuthoritative &&
+              durationMs == null;
+          final sourcePath = clip?['source_file']?.toString().trim() ?? '';
+          if (startMs == null ||
+              !startMs.isFinite ||
+              (!deferredRuntimeBounds &&
+                  (durationMs == null ||
+                      !durationMs.isFinite ||
+                      durationMs <= 0))) {
+            throw const AiV3PreparationException('v3_clip_bounds_missing');
+          }
+          if (clipRef == null && sourcePath.isEmpty) {
             throw const AiV3PreparationException(
               'v3_audio_to_midi_source_unreadable',
             );
@@ -1306,38 +2417,70 @@ class AiV3CommandPreparer {
           final sourceFile = File(sourcePath);
           final absoluteSourceUnavailable = sourceFile.isAbsolute &&
               (!sourceFile.existsSync() || sourceFile.lengthSync() <= 44);
-          if (sourceAvailable == false || absoluteSourceUnavailable) {
+          if (clipRef == null &&
+              (sourceAvailable == false || absoluteSourceUnavailable)) {
             throw const AiV3PreparationException(
               'v3_audio_to_midi_source_unreadable',
             );
           }
-          final sourceName = clip?['name']?.toString().trim() ?? '';
+          final sourceName = clip?['name']?.toString().trim() ?? 'Audio';
           final outputLabel = _boundedMidiConversionLabel(sourceName);
-          commandActions.add(AssistantAction(
-            type: 'v3_clip_convert_to_midi',
-            data: <String, dynamic>{
-              'source_clip_id': clipId,
-              'source_row_id': rowId,
-              'source_row_index': target['row_index'],
-              'start_ms': startBeat * 60000.0 / bpm,
-              'duration_ms': lengthBeats * 60000.0 / bpm,
-              'instrument_id': instrumentId,
-              'output_label': outputLabel,
-              'target': target,
-            },
-          ));
+          commandActions.add(
+            AssistantAction(
+              type: 'v3_clip_convert_to_midi',
+              data: <String, dynamic>{
+                'command_id': command.commandId,
+                if (clipRef != null) 'resource_consumer_type': command.type,
+                'operation': 'convert_to_midi',
+                if (clipId != null) 'source_clip_id': clipId,
+                if (rowId is int) 'source_row_id': rowId,
+                if (target['row_index'] is int)
+                  'source_row_index': target['row_index'],
+                'start_ms': startMs,
+                if (durationMs != null) 'duration_ms': durationMs,
+                'instrument_id': instrumentId,
+                'output_label': outputLabel,
+                'target': target,
+              },
+            ),
+          );
           simulatedRowCount += 1;
           hasPriorTopologyMutation = true;
           hasPreparedAudioToMidi = true;
+          simulatedClipCount += 1;
           label =
-              'Convert ${_clipLabel(clipById, clipId)} to MIDI with $instrumentId on a new row below the source; preserve the source clip';
+              'Convert ${clipId == null ? '${clipRef!.commandId}.${clipRef.output}' : _clipLabel(clipById, clipId)} to MIDI with $instrumentId on a new row below the source; preserve the source clip';
+          verifiedLabel =
+              'Converted ${clipId == null ? '${clipRef!.commandId}.${clipRef.output}' : _clipLabel(clipById, clipId)} to MIDI with $instrumentId on a new row below the source; preserved the source clip';
           break;
         case 'clip.set_pitch_semitones':
         case 'clip.adjust_pitch_semitones':
-          final clipId = args['clip_id'] as String;
-          final clip = clipById[clipId];
-          final target = clipTarget(clipId, requireAudio: true);
-          final currentPitch = (clip?['pitch_semitones'] as num?)?.toDouble();
+          final rawRef = args['clip_ref'];
+          final AiV3ResourceRef? clipRef = rawRef is Map
+              ? AiV3ResourceRef.fromJson(rawRef)
+              : null;
+          final String? clipId = args['clip_id'] is String
+              ? args['clip_id'] as String
+              : null;
+          final symbolic = clipRef == null
+              ? null
+              : symbolicResources['${clipRef.commandId}.${clipRef.output}'];
+          if (clipRef != null &&
+              (symbolic == null ||
+                  !symbolic.available ||
+                  symbolic.kind != AiV3ResourceKind.audioClip)) {
+            throw const AiV3PreparationException('v3_resource_ref_unavailable');
+          }
+          final clip = clipId == null ? null : clipById[clipId];
+          final target = clipRef == null
+              ? clipTarget(clipId!, requireAudio: true)
+              : <String, dynamic>{
+                  'scope': 'clip',
+                  'resource_ref': clipRef.toJson(),
+                };
+          final currentPitch = clipRef == null
+              ? (clip?['pitch_semitones'] as num?)?.toDouble()
+              : symbolic!.pitchSemitones;
           if (currentPitch == null || !currentPitch.isFinite) {
             throw const AiV3PreparationException('v3_clip_pitch_missing');
           }
@@ -1349,23 +2492,102 @@ class AiV3CommandPreparer {
               'v3_clip_pitch_out_of_range',
             );
           }
-          commandActions.add(AssistantAction(
-            type: 'clip_edit',
-            data: <String, dynamic>{
-              'operation': 'pitch_shift',
-              'mode': 'set',
-              'new_pitch_semitones': finalPitch,
-              'target': target,
-            },
-          ));
-          label =
-              'Set ${_clipLabel(clipById, clipId)} pitch to $finalPitch semitones';
+          if (symbolic != null) symbolic.pitchSemitones = finalPitch;
+          commandActions.add(
+            AssistantAction(
+              type: 'clip_edit',
+              data: <String, dynamic>{
+                'command_id': command.commandId,
+                if (clipRef != null) 'resource_consumer_type': command.type,
+                'operation': 'pitch_shift',
+                'mode': 'set',
+                'new_pitch_semitones': finalPitch,
+                'target': target,
+              },
+            ),
+          );
+          final targetLabel = clipRef == null
+              ? _clipLabel(clipById, clipId!)
+              : '${clipRef.commandId}.${clipRef.output}';
+          label = 'Set $targetLabel pitch to $finalPitch semitones';
+          verifiedLabel = label;
           break;
         case 'clip.set_timeline_length_beats':
         case 'clip.scale_timeline_length':
-          final clipId = args['clip_id'] as String;
-          final clip = clipById[clipId];
-          final target = clipTarget(clipId, requireAudio: true);
+          final rawRef = args['clip_ref'];
+          final AiV3ResourceRef? clipRef = rawRef is Map
+              ? AiV3ResourceRef.fromJson(rawRef)
+              : null;
+          final String? clipId = args['clip_id'] is String
+              ? args['clip_id'] as String
+              : null;
+          final symbolic = clipRef == null
+              ? null
+              : symbolicResources['${clipRef.commandId}.${clipRef.output}'];
+          if (clipRef != null &&
+              (symbolic == null ||
+                  !symbolic.available ||
+                  symbolic.kind != AiV3ResourceKind.audioClip)) {
+            throw const AiV3PreparationException('v3_resource_ref_unavailable');
+          }
+          if (clipRef != null) {
+            final preservePitch = args['preserve_pitch'] as bool;
+            final absoluteLengthBeats =
+                command.type == 'clip.set_timeline_length_beats'
+                ? (args['length_beats'] as num).toDouble()
+                : null;
+            final factor = command.type == 'clip.scale_timeline_length'
+                ? (args['factor'] as num).toDouble()
+                : null;
+            final predictedDurationMs = absoluteLengthBeats != null
+                ? absoluteLengthBeats * 60000.0 / symbolicBpm
+                : symbolic!.durationMs == null
+                ? null
+                : symbolic.durationMs! * factor!;
+            if (predictedDurationMs != null &&
+                (!predictedDurationMs.isFinite ||
+                    predictedDurationMs < 50.0 ||
+                    predictedDurationMs > 36000000.0)) {
+              throw const AiV3PreparationException(
+                'v3_clip_stretch_out_of_range',
+              );
+            }
+            commandActions.add(
+              AssistantAction(
+                type: 'clip_edit',
+                data: <String, dynamic>{
+                  'command_id': command.commandId,
+                  'resource_consumer_type': command.type,
+                  'operation': 'stretch',
+                  'runtime_authoritative_audio_timing': true,
+                  if (absoluteLengthBeats != null)
+                    'requested_length_beats': absoluteLengthBeats,
+                  if (factor != null) 'requested_length_factor': factor,
+                  'preserve_pitch': preservePitch,
+                  'target': <String, dynamic>{
+                    'scope': 'clip',
+                    'resource_ref': clipRef.toJson(),
+                  },
+                },
+              ),
+            );
+            symbolic!
+              ..durationMs = predictedDurationMs
+              ..durationFollowsTempo = true
+              ..tempoFollowMode = preservePitch ? 'preserve_pitch' : 'repitch'
+              ..tempoPreservePitch = preservePitch
+              ..boundsRuntimeAuthoritative = true;
+            label = absoluteLengthBeats != null
+                ? 'Set ${clipRef.commandId}.${clipRef.output} timeline length to $absoluteLengthBeats beats${preservePitch ? ' while preserving pitch' : ' with repitching'}'
+                : 'Scale ${clipRef.commandId}.${clipRef.output} timeline length by $factor${preservePitch ? ' while preserving pitch' : ' with repitching'}';
+            verifiedLabel = absoluteLengthBeats != null
+                ? label
+                : 'Scaled ${clipRef.commandId}.${clipRef.output} timeline length by $factor${preservePitch ? ' while preserving pitch' : ' with repitching'}';
+            break;
+          }
+          final stableClipId = clipId!;
+          final clip = clipById[stableClipId];
+          final target = clipTarget(stableClipId, requireAudio: true);
           final rawLengthBeats = (clip?['length_beats'] as num?)?.toDouble();
           final currentTimelineLengthBeats =
               (clip?['timeline_length_beats'] as num?)?.toDouble();
@@ -1417,7 +2639,7 @@ class AiV3CommandPreparer {
           } else {
             if (!projectStretchEnabled) {
               for (final other in clips) {
-                if (other['clip_id'] == clipId ||
+                if (other['clip_id'] == stableClipId ||
                     other['kind'] != 'audio' ||
                     other['stretch_to_project_tempo'] != true) {
                   continue;
@@ -1447,15 +2669,60 @@ class AiV3CommandPreparer {
             ));
           }
           label =
-              'Set ${_clipLabel(clipById, clipId)} timeline length to $finalLengthBeats beats${preservePitch ? ' while preserving pitch' : ' with repitching'}';
+              'Set ${_clipLabel(clipById, stableClipId)} timeline length to $finalLengthBeats beats${preservePitch ? ' while preserving pitch' : ' with repitching'}';
+          verifiedLabel = label;
           break;
         case 'clip.set_source_tempo_bpm':
-          final clipId = args['clip_id'] as String;
-          final clip = clipById[clipId];
-          final target = clipTarget(clipId, requireAudio: true);
+          final rawRef = args['clip_ref'];
+          final AiV3ResourceRef? clipRef = rawRef is Map
+              ? AiV3ResourceRef.fromJson(rawRef)
+              : null;
+          final String? clipId = args['clip_id'] is String
+              ? args['clip_id'] as String
+              : null;
+          final symbolic = clipRef == null
+              ? null
+              : symbolicResources['${clipRef.commandId}.${clipRef.output}'];
+          if (clipRef != null &&
+              (symbolic == null ||
+                  !symbolic.available ||
+                  symbolic.kind != AiV3ResourceKind.audioClip)) {
+            throw const AiV3PreparationException('v3_resource_ref_unavailable');
+          }
           final sourceTempo = (args['source_tempo_bpm'] as num).toDouble();
-          final currentSourceTempo =
-              (clip?['source_tempo_bpm'] as num?)?.toDouble();
+          if (clipRef != null) {
+            commandActions.add(
+              AssistantAction(
+                type: 'clip_edit',
+                data: <String, dynamic>{
+                  'command_id': command.commandId,
+                  'resource_consumer_type': command.type,
+                  'operation': 'set_source_tempo',
+                  'runtime_authoritative_audio_timing': true,
+                  'source_tempo_bpm': sourceTempo,
+                  'target': <String, dynamic>{
+                    'scope': 'clip',
+                    'resource_ref': clipRef.toJson(),
+                  },
+                },
+              ),
+            );
+            symbolic!
+              ..sourceTempoBpm = sourceTempo
+              ..boundsRuntimeAuthoritative = true;
+            if (symbolic.durationFollowsTempo == true) {
+              symbolic.durationMs = null;
+            }
+            label =
+                'Set ${clipRef.commandId}.${clipRef.output} source tempo to $sourceTempo BPM';
+            verifiedLabel = label;
+            break;
+          }
+          final stableClipId = clipId!;
+          final clip = clipById[stableClipId];
+          final target = clipTarget(stableClipId, requireAudio: true);
+          final currentSourceTempo = (clip?['source_tempo_bpm'] as num?)
+              ?.toDouble();
           final rawLengthBeats = (clip?['length_beats'] as num?)?.toDouble();
           if (currentSourceTempo == null ||
               !currentSourceTempo.isFinite ||
@@ -1479,13 +2746,58 @@ class AiV3CommandPreparer {
             ));
           }
           label =
-              'Set ${_clipLabel(clipById, clipId)} source tempo to $sourceTempo BPM';
+              'Set ${_clipLabel(clipById, stableClipId)} source tempo to $sourceTempo BPM';
+          verifiedLabel = label;
           break;
         case 'clip.set_tempo_follow_mode':
-          final clipId = args['clip_id'] as String;
-          final clip = clipById[clipId];
-          final target = clipTarget(clipId, requireAudio: true);
+          final rawRef = args['clip_ref'];
+          final AiV3ResourceRef? clipRef = rawRef is Map
+              ? AiV3ResourceRef.fromJson(rawRef)
+              : null;
+          final String? clipId = args['clip_id'] is String
+              ? args['clip_id'] as String
+              : null;
+          final symbolic = clipRef == null
+              ? null
+              : symbolicResources['${clipRef.commandId}.${clipRef.output}'];
+          if (clipRef != null &&
+              (symbolic == null ||
+                  !symbolic.available ||
+                  symbolic.kind != AiV3ResourceKind.audioClip)) {
+            throw const AiV3PreparationException('v3_resource_ref_unavailable');
+          }
           final mode = args['mode'] as String;
+          if (clipRef != null) {
+            commandActions.add(
+              AssistantAction(
+                type: 'clip_edit',
+                data: <String, dynamic>{
+                  'command_id': command.commandId,
+                  'resource_consumer_type': command.type,
+                  'operation': 'tempo_follow',
+                  'runtime_authoritative_audio_timing': true,
+                  'mode': mode,
+                  'target': <String, dynamic>{
+                    'scope': 'clip',
+                    'resource_ref': clipRef.toJson(),
+                  },
+                },
+              ),
+            );
+            symbolic!
+              ..durationMs = null
+              ..durationFollowsTempo = mode != 'off'
+              ..tempoFollowMode = mode
+              ..tempoPreservePitch = mode == 'preserve_pitch'
+              ..boundsRuntimeAuthoritative = true;
+            label =
+                'Set ${clipRef.commandId}.${clipRef.output} tempo-follow mode to $mode';
+            verifiedLabel = label;
+            break;
+          }
+          final stableClipId = clipId!;
+          final clip = clipById[stableClipId];
+          final target = clipTarget(stableClipId, requireAudio: true);
           final projectStretchEnabled =
               project['tempo_stretch_enabled'] == true;
           final configured = clip?['stretch_to_project_tempo'] == true;
@@ -1514,7 +2826,7 @@ class AiV3CommandPreparer {
             if (mode != 'off' && !projectStretchEnabled) {
               const lengthEpsilon = 0.000001;
               for (final other in clips) {
-                if (other['clip_id'] == clipId ||
+                if (other['clip_id'] == stableClipId ||
                     other['kind'] != 'audio' ||
                     other['stretch_to_project_tempo'] != true) {
                   continue;
@@ -1543,10 +2855,57 @@ class AiV3CommandPreparer {
             ));
           }
           label =
-              'Set ${_clipLabel(clipById, clipId)} tempo-follow mode to $mode';
+              'Set ${_clipLabel(clipById, stableClipId)} tempo-follow mode to $mode';
+          verifiedLabel = label;
           break;
         case 'clip.align_tempo_to_project':
         case 'project.set_tempo_from_clip':
+          final rawRef = args['clip_ref'];
+          final AiV3ResourceRef? clipRef = rawRef is Map
+              ? AiV3ResourceRef.fromJson(rawRef)
+              : null;
+          if (clipRef != null) {
+            final symbolic =
+                symbolicResources['${clipRef.commandId}.${clipRef.output}'];
+            if (symbolic == null ||
+                !symbolic.available ||
+                symbolic.kind != AiV3ResourceKind.audioClip) {
+              throw const AiV3PreparationException(
+                'v3_resource_ref_unavailable',
+              );
+            }
+            final mode = args['mode'] as String;
+            commandActions.add(
+              AssistantAction(
+                type: 'v3_clip_audio_analysis',
+                data: <String, dynamic>{
+                  'resource_consumer_type': command.type,
+                  'operation': command.type == 'project.set_tempo_from_clip'
+                      ? 'set_tempo_from_clip'
+                      : 'align_tempo_to_project',
+                  'mode': mode,
+                  'target': <String, dynamic>{
+                    'scope': 'clip',
+                    'resource_ref': clipRef.toJson(),
+                  },
+                },
+              ),
+            );
+            symbolic
+              ..durationMs = null
+              ..durationFollowsTempo = true
+              ..sourceTempoBpm = null
+              ..tempoFollowMode = mode
+              ..tempoPreservePitch = mode == 'preserve_pitch'
+              ..boundsRuntimeAuthoritative = true;
+            label = command.type == 'project.set_tempo_from_clip'
+                ? 'Set the project tempo from ${clipRef.commandId}.${clipRef.output} and follow in $mode mode'
+                : 'Align ${clipRef.commandId}.${clipRef.output} to the project tempo in $mode mode';
+            verifiedLabel = command.type == 'project.set_tempo_from_clip'
+                ? 'Set the project tempo from ${clipRef.commandId}.${clipRef.output} with $mode tempo following'
+                : 'Aligned ${clipRef.commandId}.${clipRef.output} to the project tempo in $mode mode';
+            break;
+          }
           final clipId = args['clip_id'] as String;
           final clip = clipById[clipId];
           final target = clipTarget(clipId, requireAudio: true);
@@ -1579,30 +2938,75 @@ class AiV3CommandPreparer {
                 'v3_clip_tempo_detection_unavailable',
               );
             }
-            commandActions.add(AssistantAction(
-              type: 'project_edit',
-              data: <String, dynamic>{
-                'operation': 'set_tempo',
-                'tempo_bpm': projectTempo,
-                'time_stretch_audio': false,
-                'preserve_pitch': mode == 'preserve_pitch',
-                'target': const <String, dynamic>{'scope': 'project'},
-              },
-            ));
+            commandActions.add(
+              AssistantAction(
+                type: 'project_edit',
+                data: <String, dynamic>{
+                  'operation': 'set_tempo',
+                  'tempo_bpm': projectTempo,
+                  'time_stretch_audio': false,
+                  'preserve_pitch': mode == 'preserve_pitch',
+                  'target': const <String, dynamic>{'scope': 'project'},
+                },
+              ),
+            );
           }
-          commandActions.add(AssistantAction(
-            type: 'clip_edit',
-            data: <String, dynamic>{
-              'operation': 'tempo_follow',
-              'mode': mode,
-              'target': target,
-            },
-          ));
+          commandActions.add(
+            AssistantAction(
+              type: 'clip_edit',
+              data: <String, dynamic>{
+                'operation': 'tempo_follow',
+                'mode': mode,
+                'target': target,
+              },
+            ),
+          );
           label = command.type == 'project.set_tempo_from_clip'
               ? 'Detect ${_clipLabel(clipById, clipId)} at ${_formatNumber(detectedTempo)} BPM, set the project to ${detectedTempo.round()} BPM, and follow in $mode mode'
               : 'Detect ${_clipLabel(clipById, clipId)} at ${_formatNumber(detectedTempo)} BPM and align it to the project in $mode mode';
+          verifiedLabel = command.type == 'project.set_tempo_from_clip'
+              ? 'Detected ${_clipLabel(clipById, clipId)} at ${_formatNumber(detectedTempo)} BPM, set the project to ${detectedTempo.round()} BPM, and enabled $mode tempo following'
+              : 'Detected ${_clipLabel(clipById, clipId)} at ${_formatNumber(detectedTempo)} BPM and aligned it to the project in $mode mode';
           break;
         case 'clip.trim_silence':
+          final rawRef = args['clip_ref'];
+          final AiV3ResourceRef? clipRef = rawRef is Map
+              ? AiV3ResourceRef.fromJson(rawRef)
+              : null;
+          if (clipRef != null) {
+            final symbolic =
+                symbolicResources['${clipRef.commandId}.${clipRef.output}'];
+            if (symbolic == null ||
+                !symbolic.available ||
+                symbolic.kind != AiV3ResourceKind.audioClip) {
+              throw const AiV3PreparationException(
+                'v3_resource_ref_unavailable',
+              );
+            }
+            commandActions.add(
+              AssistantAction(
+                type: 'v3_clip_audio_analysis',
+                data: <String, dynamic>{
+                  'resource_consumer_type': command.type,
+                  'operation': 'trim_silence',
+                  'edges': args['edges'],
+                  'padding_ms': args['padding_ms'],
+                  'target': <String, dynamic>{
+                    'scope': 'clip',
+                    'resource_ref': clipRef.toJson(),
+                  },
+                },
+              ),
+            );
+            symbolic
+              ..durationMs = null
+              ..boundsRuntimeAuthoritative = true;
+            label =
+                'Trim ${args['edges']} silence from ${clipRef.commandId}.${clipRef.output} with ${_formatNumber((args['padding_ms'] as num).toDouble())} ms padding';
+            verifiedLabel =
+                'Trimmed ${args['edges']} silence from ${clipRef.commandId}.${clipRef.output} with ${_formatNumber((args['padding_ms'] as num).toDouble())} ms padding';
+            break;
+          }
           final clipId = args['clip_id'] as String;
           final clip = clipById[clipId];
           final target = clipTarget(clipId, requireAudio: true);
@@ -1667,8 +3071,49 @@ class AiV3CommandPreparer {
           }
           label =
               'Trim $edges silence from ${_clipLabel(clipById, clipId)} with ${_formatNumber(paddingMs)} ms padding';
+          verifiedLabel =
+              'Trimmed $edges silence from ${_clipLabel(clipById, clipId)} with ${_formatNumber(paddingMs)} ms padding';
           break;
         case 'clip.align_first_sound':
+          final rawRef = args['clip_ref'];
+          final AiV3ResourceRef? clipRef = rawRef is Map
+              ? AiV3ResourceRef.fromJson(rawRef)
+              : null;
+          if (clipRef != null) {
+            final symbolic =
+                symbolicResources['${clipRef.commandId}.${clipRef.output}'];
+            if (symbolic == null ||
+                !symbolic.available ||
+                symbolic.kind != AiV3ResourceKind.audioClip) {
+              throw const AiV3PreparationException(
+                'v3_resource_ref_unavailable',
+              );
+            }
+            commandActions.add(
+              AssistantAction(
+                type: 'v3_clip_audio_analysis',
+                data: <String, dynamic>{
+                  'resource_consumer_type': command.type,
+                  'operation': 'align_first_sound',
+                  'destination': Map<String, dynamic>.from(
+                    args['destination'] as Map,
+                  ),
+                  'target': <String, dynamic>{
+                    'scope': 'clip',
+                    'resource_ref': clipRef.toJson(),
+                  },
+                },
+              ),
+            );
+            symbolic
+              ..durationMs = null
+              ..boundsRuntimeAuthoritative = true;
+            label =
+                'Align the first sound of ${clipRef.commandId}.${clipRef.output}';
+            verifiedLabel =
+                'Aligned the first sound of ${clipRef.commandId}.${clipRef.output}';
+            break;
+          }
           final clipId = args['clip_id'] as String;
           final clip = clipById[clipId];
           final target = clipTarget(clipId, requireAudio: true);
@@ -1728,33 +3173,80 @@ class AiV3CommandPreparer {
           }
           label =
               'Align the first sound of ${_clipLabel(clipById, clipId)} to ${destination['kind'] == 'project_beat' ? 'beat ${_formatNumber(destinationBeat)}' : destination['kind']}';
+          verifiedLabel =
+              'Aligned the first sound of ${_clipLabel(clipById, clipId)} to ${destination['kind'] == 'project_beat' ? 'beat ${_formatNumber(destinationBeat)}' : destination['kind']}';
           break;
         case 'midi.transpose':
-          final clipId = args['clip_id'] as String;
-          clipTarget(clipId, requireMidi: true);
-          final currentNotes = simulatedMidiNotesByClipId[clipId] ??
-              const <Map<String, dynamic>>[];
+          final rawRef = args['clip_ref'];
+          final AiV3ResourceRef? clipRef = rawRef is Map
+              ? AiV3ResourceRef.fromJson(rawRef)
+              : null;
+          final String? clipId = args['clip_id'] is String
+              ? args['clip_id'] as String
+              : null;
+          final symbolic = clipRef == null
+              ? null
+              : symbolicResources['${clipRef.commandId}.${clipRef.output}'];
+          if (clipRef != null &&
+              (symbolic == null ||
+                  !symbolic.available ||
+                  symbolic.kind != AiV3ResourceKind.midiClip)) {
+            throw const AiV3PreparationException('v3_resource_ref_unavailable');
+          }
+          final target = clipRef == null
+              ? clipTarget(clipId!, requireMidi: true)
+              : <String, dynamic>{
+                  'scope': 'clip',
+                  'resource_ref': clipRef.toJson(),
+                };
+          final currentNotes = clipRef == null
+              ? simulatedMidiNotesByClipId[clipId] ??
+                    const <Map<String, dynamic>>[]
+              : symbolic!.midiNotes ?? const <Map<String, dynamic>>[];
+          final runtimeAuthoritativeNotes =
+              symbolic?.midiNotesRuntimeAuthoritative == true;
           final semitones = args['semitones'] as int;
-          simulatedMidiNotesByClipId[clipId] = _sortedMidiNotes(
-            currentNotes
-                .map((note) => <String, dynamic>{
-                      ...note,
-                      'pitch': ((note['pitch'] as int) + semitones)
-                          .clamp(0, 127)
-                          .toInt(),
-                    })
-                .toList(growable: false),
+          final nextNotes = runtimeAuthoritativeNotes
+              ? null
+              : _sortedMidiNotes(
+                  currentNotes
+                      .map(
+                        (note) => <String, dynamic>{
+                          ...note,
+                          'pitch': ((note['pitch'] as int) + semitones)
+                              .clamp(0, 127)
+                              .toInt(),
+                        },
+                      )
+                      .toList(growable: false),
+                );
+          if (clipRef == null) {
+            simulatedMidiNotesByClipId[clipId!] = nextNotes!;
+          } else if (nextNotes != null) {
+            symbolic!.midiNotes = nextNotes;
+          }
+          commandActions.add(
+            AssistantAction(
+              type: 'midi_compose',
+              data: <String, dynamic>{
+                'command_id': command.commandId,
+                if (clipRef != null) 'resource_consumer_type': command.type,
+                'operation': 'transpose_notes',
+                'semitones': semitones,
+                if (clipRef != null && nextNotes != null)
+                  'expected_notes': nextNotes,
+                if (runtimeAuthoritativeNotes)
+                  'runtime_authoritative_midi': true,
+                'target': target,
+              },
+            ),
           );
-          commandActions.add(AssistantAction(
-            type: 'midi_compose',
-            data: <String, dynamic>{
-              'operation': 'transpose_notes',
-              'semitones': semitones,
-              'target': clipTarget(clipId, requireMidi: true),
-            },
-          ));
-          label =
-              'Transpose ${_clipLabel(clipById, clipId)} by $semitones semitones';
+          label = clipRef == null
+              ? 'Transpose ${_clipLabel(clipById, clipId!)} by $semitones semitones'
+              : 'Transpose generated MIDI clip by $semitones semitones';
+          verifiedLabel = clipRef == null
+              ? 'Transposed ${_clipLabel(clipById, clipId!)} by $semitones semitones'
+              : 'Transposed generated MIDI clip by $semitones semitones';
           break;
         case 'midi.create_clip':
           final arrangementLimit =
@@ -1763,55 +3255,124 @@ class AiV3CommandPreparer {
           final clipLength = (args['length_beats'] as num).toDouble();
           final notes = (args['notes'] as List).whereType<Map>();
           if (clipLength > arrangementLimit ||
-              notes.any((note) =>
-                  (note['start_beat'] as num).toDouble() +
-                      (note['length_beats'] as num).toDouble() >
-                  clipLength)) {
-            throw const AiV3PreparationException(
-              'v3_midi_arrangement_limit',
-            );
+              notes.any(
+                (note) =>
+                    (note['start_beat'] as num).toDouble() +
+                        (note['length_beats'] as num).toDouble() >
+                    clipLength,
+              )) {
+            throw const AiV3PreparationException('v3_midi_arrangement_limit');
+          }
+          if (simulatedClipCount + 1 > 128) {
+            throw const AiV3PreparationException('v3_clip_capacity_exceeded');
           }
           final resolved = destination(args['destination'], midi: true);
+          final usesRowRef = (args['destination'] as Map)['row_ref'] is Map;
           commandActions.addAll(resolved.setup);
-          final instrumentId = (resolved.target['instrument_id'] ??
-                  rowById[(args['destination'] as Map)['row_id']]
-                      ?['instrument_id'])
-              ?.toString();
-          commandActions.add(AssistantAction(
-            type: 'midi_compose',
-            data: <String, dynamic>{
-              'operation': 'create_clip',
-              'target': resolved.target,
-              'notes': args['notes'],
-              'start_ms': clipStart * 60000.0 / bpm,
-              'length_beats': args['length_beats'],
-              'exact_notes': true,
-              'create_new_clip': true,
-              if ((instrumentId ?? '').isNotEmpty)
-                'instrument_id': instrumentId,
-            },
-          ));
+          final instrumentId =
+              (resolved.target['instrument_id'] ??
+                      rowById[(args['destination']
+                          as Map)['row_id']]?['instrument_id'])
+                  ?.toString();
+          commandActions.add(
+            AssistantAction(
+              type: 'midi_compose',
+              data: <String, dynamic>{
+                if (referencedProducerCommandIds.contains(command.commandId))
+                  'command_id': command.commandId,
+                if (usesRowRef) 'resource_consumer_type': command.type,
+                'operation': 'create_clip',
+                'target': resolved.target,
+                'notes': args['notes'],
+                'start_ms': clipStart * 60000.0 / symbolicBpm,
+                'length_beats': args['length_beats'],
+                'exact_notes': true,
+                'create_new_clip': true,
+                if ((instrumentId ?? '').isNotEmpty)
+                  'instrument_id': instrumentId,
+              },
+            ),
+          );
+          simulatedClipCount += 1;
           label =
               'Create MIDI clip with ${(args['notes'] as List).length} notes';
+          verifiedLabel =
+              'Created MIDI clip with ${(args['notes'] as List).length} notes';
           break;
         case 'midi.replace_notes':
         case 'midi.append_notes':
         case 'midi.chop_notes':
-          final clipId = args['clip_id'] as String;
-          final target = clipTarget(clipId, requireMidi: true);
-          final clip = clipById[clipId]!;
-          final clipLength = simulatedMidiLengthByClipId[clipId] ??
-              (clip['length_beats'] as num?)?.toDouble();
-          if (clipLength == null || !clipLength.isFinite || clipLength <= 0) {
-            throw const AiV3PreparationException(
-              'v3_midi_clip_length_invalid',
-            );
+          final rawRef = args['clip_ref'];
+          final AiV3ResourceRef? clipRef = rawRef is Map
+              ? AiV3ResourceRef.fromJson(rawRef)
+              : null;
+          final String? clipId = args['clip_id'] is String
+              ? args['clip_id'] as String
+              : null;
+          final spec = aiV3ResourceConsumerSpecs[command.type]!;
+          final symbolic = clipRef == null
+              ? null
+              : symbolicResources['${clipRef.commandId}.${clipRef.output}'];
+          if (clipRef != null &&
+              (symbolic == null ||
+                  !symbolic.available ||
+                  !spec.acceptedKinds.contains(symbolic.kind))) {
+            throw const AiV3PreparationException('v3_resource_ref_unavailable');
           }
-          final currentNotes = simulatedMidiNotesByClipId[clipId] ??
-              const <Map<String, dynamic>>[];
+          final target = clipRef == null
+              ? clipTarget(clipId!, requireMidi: true)
+              : <String, dynamic>{
+                  'scope': 'clip',
+                  'resource_ref': clipRef.toJson(),
+                };
+          final clip = clipId == null ? null : clipById[clipId];
+          final runtimeAuthoritativeNotes =
+              symbolic?.midiNotesRuntimeAuthoritative == true;
+          final runtimeAuthoritativeBounds =
+              symbolic?.boundsRuntimeAuthoritative == true;
+          final clipLength = symbolic?.durationMs == null
+              ? simulatedMidiLengthByClipId[clipId] ??
+                    (clip?['length_beats'] as num?)?.toDouble()
+              : symbolic!.durationMs! * symbolicBpm / 60000.0;
+          if ((clipLength == null && !runtimeAuthoritativeBounds) ||
+              (clipLength != null &&
+                  (!clipLength.isFinite || clipLength <= 0))) {
+            throw const AiV3PreparationException('v3_midi_clip_length_invalid');
+          }
+          final currentNotes = clipRef == null
+              ? simulatedMidiNotesByClipId[clipId] ??
+                    const <Map<String, dynamic>>[]
+              : symbolic!.midiNotes ?? const <Map<String, dynamic>>[];
           late final List<Map<String, dynamic>> nextNotes;
+          var deferredRuntimeTransform = false;
           if (command.type == 'midi.replace_notes') {
             nextNotes = _normalizedMidiNotes(args['notes'] as List);
+            deferredRuntimeTransform =
+                runtimeAuthoritativeBounds && clipLength == null;
+            if (symbolic != null) {
+              symbolic
+                ..midiNotesRuntimeAuthoritative = false
+                ..midiNotes = nextNotes;
+            }
+          } else if (runtimeAuthoritativeNotes ||
+              (runtimeAuthoritativeBounds && clipLength == null)) {
+            deferredRuntimeTransform = true;
+            nextNotes = const <Map<String, dynamic>>[];
+            if (command.type == 'midi.chop_notes') {
+              final rawRange = args['range'];
+              final range = rawRange is Map
+                  ? Map<String, dynamic>.from(rawRange)
+                  : null;
+              final rangeStart =
+                  (range?['start_beat'] as num?)?.toDouble() ?? 0.0;
+              final rangeEnd = (range?['end_beat'] as num?)?.toDouble();
+              if (rangeStart < 0 ||
+                  (rangeEnd != null && rangeEnd <= rangeStart)) {
+                throw const AiV3PreparationException(
+                  'v3_midi_chop_range_invalid',
+                );
+              }
+            }
           } else if (command.type == 'midi.append_notes') {
             final relativeNotes = _normalizedMidiNotes(args['notes'] as List);
             final existingNoteEnd = currentNotes.fold<double>(
@@ -1822,7 +3383,7 @@ class AiV3CommandPreparer {
                     (note['length_beats'] as double),
               ),
             );
-            final appendAnchor = math.max(clipLength, existingNoteEnd);
+            final appendAnchor = math.max(clipLength!, existingNoteEnd);
             final appended = relativeNotes
                 .map((note) => <String, dynamic>{
                       ...note,
@@ -1839,7 +3400,12 @@ class AiV3CommandPreparer {
                     (note['start_beat'] as double) +
                     (note['length_beats'] as double))
                 .reduce(math.max);
-            simulatedMidiLengthByClipId[clipId] = appendAnchor + appendedSpan;
+            final appendedLength = appendAnchor + appendedSpan;
+            if (clipRef == null) {
+              simulatedMidiLengthByClipId[clipId!] = appendedLength;
+            } else {
+              symbolic!.durationMs = appendedLength * 60000.0 / symbolicBpm;
+            }
           } else {
             if (currentNotes.isEmpty) {
               throw const AiV3PreparationException(
@@ -1852,10 +3418,10 @@ class AiV3CommandPreparer {
             final rangeStart =
                 (range?['start_beat'] as num?)?.toDouble() ?? 0.0;
             final rangeEnd =
-                (range?['end_beat'] as num?)?.toDouble() ?? clipLength;
+                (range?['end_beat'] as num?)?.toDouble() ?? clipLength!;
             if (rangeStart < 0 ||
                 rangeEnd <= rangeStart ||
-                rangeEnd > clipLength + 0.000001) {
+                rangeEnd > clipLength! + 0.000001) {
               throw const AiV3PreparationException(
                 'v3_midi_chop_range_invalid',
               );
@@ -1869,50 +3435,100 @@ class AiV3CommandPreparer {
                   (args['velocity_decay_per_slice'] as num).toDouble(),
             );
           }
-          final finalClipLength =
-              simulatedMidiLengthByClipId[clipId] ?? clipLength;
-          if (nextNotes.any((note) =>
-              (note['start_beat'] as double) +
-                  (note['length_beats'] as double) >
-              finalClipLength + 0.000001)) {
-            throw const AiV3PreparationException(
-              'v3_midi_note_out_of_bounds',
-            );
+          final double? finalClipLength = deferredRuntimeTransform
+              ? null
+              : clipRef == null
+              ? simulatedMidiLengthByClipId[clipId] ?? clipLength
+              : symbolic!.durationMs! * symbolicBpm / 60000.0;
+          if (!deferredRuntimeTransform &&
+              nextNotes.any(
+                (note) =>
+                    (note['start_beat'] as double) +
+                        (note['length_beats'] as double) >
+                    finalClipLength! + 0.000001,
+              )) {
+            throw const AiV3PreparationException('v3_midi_note_out_of_bounds');
           }
-          if (nextNotes.length > 512) {
-            throw const AiV3PreparationException(
-              'v3_midi_result_limit',
-            );
+          if (!deferredRuntimeTransform && nextNotes.length > 512) {
+            throw const AiV3PreparationException('v3_midi_result_limit');
           }
-          simulatedMidiNotesByClipId[clipId] = nextNotes;
-          final alreadySatisfied = command.type != 'midi.append_notes' &&
+          if (deferredRuntimeTransform) {
+            // Exact converted notes are bound at runtime and transformed there.
+          } else if (clipRef == null) {
+            simulatedMidiNotesByClipId[clipId!] = nextNotes;
+          } else {
+            symbolic!.midiNotes = nextNotes;
+          }
+          final alreadySatisfied =
+              !deferredRuntimeTransform &&
+              command.type != 'midi.append_notes' &&
               _midiNotesEqual(currentNotes, nextNotes);
           if (alreadySatisfied) {
             receiptStatus = 'already_satisfied';
           } else {
-            commandActions.add(AssistantAction(
-              type: 'midi_compose',
-              data: <String, dynamic>{
-                'operation': 'replace_notes',
-                'target': target,
-                'notes': nextNotes,
-                'exact_notes': true,
-                'preserve_existing_notes': false,
-                'preserve_clip_state': true,
-                if (command.type == 'midi.append_notes')
-                  'final_length_beats': finalClipLength,
-              },
-            ));
+            commandActions.add(
+              AssistantAction(
+                type: 'midi_compose',
+                data: <String, dynamic>{
+                  if (clipRef != null) 'command_id': command.commandId,
+                  if (clipRef != null) 'resource_consumer_type': command.type,
+                  'operation': 'replace_notes',
+                  'target': target,
+                  if (!deferredRuntimeTransform) 'notes': nextNotes,
+                  if (clipRef != null && !deferredRuntimeTransform)
+                    'expected_notes': nextNotes,
+                  if (deferredRuntimeTransform) ...<String, dynamic>{
+                    'runtime_authoritative_midi': true,
+                    'deferred_midi_command': command.type,
+                    if (args['notes'] != null) 'requested_notes': args['notes'],
+                    if (args['subdivision'] != null)
+                      'subdivision': args['subdivision'],
+                    if (args['range'] != null) 'range': args['range'],
+                    if (args['velocity_decay_per_slice'] != null)
+                      'velocity_decay_per_slice':
+                          args['velocity_decay_per_slice'],
+                  },
+                  'exact_notes': true,
+                  'preserve_existing_notes': false,
+                  'preserve_clip_state': true,
+                  if (command.type == 'midi.append_notes' &&
+                      !deferredRuntimeTransform)
+                    'final_length_beats': finalClipLength!,
+                },
+              ),
+            );
           }
           label = switch (command.type) {
             'midi.replace_notes' =>
-              'Replace notes in ${_clipLabel(clipById, clipId)}',
+              clipRef == null
+                  ? 'Replace notes in ${_clipLabel(clipById, clipId!)}'
+                  : 'Replace notes in ${clipRef.commandId}.${clipRef.output}',
             'midi.append_notes' =>
-              'Append notes to ${_clipLabel(clipById, clipId)}',
-            _ => 'Chop notes in ${_clipLabel(clipById, clipId)}',
+              clipRef == null
+                  ? 'Append notes to ${_clipLabel(clipById, clipId!)}'
+                  : 'Append notes to ${clipRef.commandId}.${clipRef.output}',
+            _ =>
+              clipRef == null
+                  ? 'Chop notes in ${_clipLabel(clipById, clipId!)}'
+                  : 'Chop notes in ${clipRef.commandId}.${clipRef.output}',
+          };
+          verifiedLabel = switch (command.type) {
+            'midi.replace_notes' =>
+              clipRef == null
+                  ? 'Replaced notes in ${_clipLabel(clipById, clipId!)}'
+                  : 'Replaced notes in ${clipRef.commandId}.${clipRef.output}',
+            'midi.append_notes' =>
+              clipRef == null
+                  ? 'Appended notes to ${_clipLabel(clipById, clipId!)}'
+                  : 'Appended notes to ${clipRef.commandId}.${clipRef.output}',
+            _ =>
+              clipRef == null
+                  ? 'Chopped notes in ${_clipLabel(clipById, clipId!)}'
+                  : 'Chopped notes in ${clipRef.commandId}.${clipRef.output}',
           };
           break;
         case 'effect.ensure_configured':
+          final resolved = resolveRowCommandTarget();
           final effectId = args['effect_id'] as String;
           final effect = effectById[effectId];
           if (effect == null) {
@@ -1942,17 +3558,21 @@ class AiV3CommandPreparer {
             }
             parameters[canonicalParameterId] = entry['value'];
           }
-          commandActions.add(AssistantAction(
-            type: 'v3_effect_configure',
-            data: <String, dynamic>{
-              'operation': 'ensure_configured',
-              'effect_id': effectId,
-              'parameters': parameters,
-              'target': rowTarget(args['row_id'] as int),
-            },
-          ));
-          label =
-              'Add/configure $effectId on ${_rowLabel(rowById, args['row_id'] as int)}';
+          commandActions.add(
+            AssistantAction(
+              type: 'v3_effect_configure',
+              data: <String, dynamic>{
+                if (resolved.ref != null)
+                  'resource_consumer_type': command.type,
+                'operation': 'ensure_configured',
+                'effect_id': effectId,
+                'parameters': parameters,
+                'target': resolved.target,
+              },
+            ),
+          );
+          label = 'Add/configure $effectId on ${resolved.label}';
+          verifiedLabel = 'Added/configured $effectId on ${resolved.label}';
           break;
         case 'effect.remove':
         case 'effect.set_bypassed':
@@ -1989,6 +3609,8 @@ class AiV3CommandPreparer {
             chain.removeAt(effectIndex);
             label =
                 'Remove ${effect['display_name'] ?? effectId} from ${_rowLabel(rowById, rowId)}';
+            verifiedLabel =
+                'Removed ${effect['display_name'] ?? effectId} from ${_rowLabel(rowById, rowId)}';
           } else {
             final bypassed = args['bypassed'] as bool;
             if (effect['bypassed'] == bypassed) {
@@ -2009,12 +3631,16 @@ class AiV3CommandPreparer {
             }
             label =
                 '${bypassed ? 'Bypass' : 'Enable'} ${effect['display_name'] ?? effectId} on ${_rowLabel(rowById, rowId)}';
+            verifiedLabel =
+                '${bypassed ? 'Bypassed' : 'Enabled'} ${effect['display_name'] ?? effectId} on ${_rowLabel(rowById, rowId)}';
           }
           break;
         case 'automation.gain_fade':
+          final resolved = resolveRowCommandTarget();
           final startMs =
-              (args['start_beat'] as num).toDouble() * 60000.0 / bpm;
-          final endMs = (args['end_beat'] as num).toDouble() * 60000.0 / bpm;
+              (args['start_beat'] as num).toDouble() * 60000.0 / symbolicBpm;
+          final endMs =
+              (args['end_beat'] as num).toDouble() * 60000.0 / symbolicBpm;
           final toLevel = args['to_level'];
           // Volume automation is a normalized multiplier in the editor. A
           // value of 1 preserves the row's current fader level, while 0 is
@@ -2027,67 +3653,84 @@ class AiV3CommandPreparer {
             return math.pow(10.0, db / 20.0).toDouble().clamp(0.0, 1.0);
           }
 
-          commandActions.add(AssistantAction(
-            type: 'automation_edit',
-            data: <String, dynamic>{
-              'operation': 'set_points',
-              'target': <String, dynamic>{
-                ...rowTarget(args['row_id'] as int),
-                'automation_target_id': 'volume',
+          commandActions.add(
+            AssistantAction(
+              type: 'automation_edit',
+              data: <String, dynamic>{
+                if (resolved.ref != null)
+                  'resource_consumer_type': command.type,
+                'operation': 'set_points',
+                'target': <String, dynamic>{
+                  ...resolved.target,
+                  'automation_target_id': 'volume',
+                },
+                'value_mode': 'normalized',
+                'points': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'time_ms': startMs,
+                    'value': normalizedGain(args['from_gain_db']!),
+                  },
+                  <String, dynamic>{
+                    'time_ms': endMs,
+                    'value': normalizedGain(toLevel!),
+                  },
+                ],
               },
-              'value_mode': 'normalized',
-              'points': <Map<String, dynamic>>[
-                <String, dynamic>{
-                  'time_ms': startMs,
-                  'value': normalizedGain(args['from_gain_db']!),
-                },
-                <String, dynamic>{
-                  'time_ms': endMs,
-                  'value': normalizedGain(toLevel!),
-                },
-              ],
-            },
-          ));
-          label =
-              'Add gain fade on ${_rowLabel(rowById, args['row_id'] as int)}';
+            ),
+          );
+          label = 'Add gain fade on ${resolved.label}';
+          verifiedLabel = 'Added gain fade on ${resolved.label}';
           break;
         case 'automation.set_points':
-          final rowId = args['row_id'] as int;
+          final resolved = resolveRowCommandTarget();
           final targetId = args['automation_target_id'].toString();
-          final target = automationTarget(rowId, targetId);
+          final target = generatedRowAutomationTarget(resolved, targetId);
           final points = (args['points'] as List)
               .whereType<Map>()
-              .map((raw) => <String, dynamic>{
-                    'time_ms': (raw['beat'] as num).toDouble() * 60000.0 / bpm,
-                    'value': (raw['value_normalized'] as num).toDouble(),
-                  })
+              .map(
+                (raw) => <String, dynamic>{
+                  'time_ms':
+                      (raw['beat'] as num).toDouble() * 60000.0 / symbolicBpm,
+                  'value': (raw['value_normalized'] as num).toDouble(),
+                },
+              )
               .toList(growable: false);
-          commandActions.add(AssistantAction(
-            type: 'v3_automation_points',
-            data: <String, dynamic>{
-              'operation': 'set_points',
-              'target': target,
-              'points': points,
-            },
-          ));
-          label =
-              'Set ${points.length} automation points on ${_rowLabel(rowById, rowId)}';
+          commandActions.add(
+            AssistantAction(
+              type: 'v3_automation_points',
+              data: <String, dynamic>{
+                if (resolved.ref != null)
+                  'resource_consumer_type': command.type,
+                'operation': 'set_points',
+                'target': target,
+                'points': points,
+              },
+            ),
+          );
+          label = 'Set ${points.length} automation points on ${resolved.label}';
+          verifiedLabel = label;
           break;
         case 'automation.clear':
-          final rowId = args['row_id'] as int;
+          final resolved = resolveRowCommandTarget();
           final targetId = args['automation_target_id'].toString();
-          commandActions.add(AssistantAction(
-            type: 'v3_automation_points',
-            data: <String, dynamic>{
-              'operation': 'clear',
-              'target': automationTarget(rowId, targetId),
-              'points': const <Map<String, dynamic>>[],
-            },
-          ));
-          label = 'Clear automation on ${_rowLabel(rowById, rowId)}';
+          commandActions.add(
+            AssistantAction(
+              type: 'v3_automation_points',
+              data: <String, dynamic>{
+                if (resolved.ref != null)
+                  'resource_consumer_type': command.type,
+                'operation': 'clear',
+                'target': generatedRowAutomationTarget(resolved, targetId),
+                'points': const <Map<String, dynamic>>[],
+              },
+            ),
+          );
+          label = 'Clear automation on ${resolved.label}';
+          verifiedLabel = 'Cleared automation on ${resolved.label}';
           break;
         case 'sample.place':
           final resolved = destination(args['destination'], midi: false);
+          final usesRowRef = (args['destination'] as Map)['row_ref'] is Map;
           commandActions.addAll(resolved.setup);
           final items = <Map<String, dynamic>>[];
           for (final raw in (args['placements'] as List).whereType<Map>()) {
@@ -2100,24 +3743,57 @@ class AiV3CommandPreparer {
               'library_path': asset['path'],
               'row_index': resolved.target['row_index'],
               'start_ms':
-                  (placement['start_beat'] as num).toDouble() * 60000.0 / bpm,
+                  (placement['start_beat'] as num).toDouble() *
+                  60000.0 /
+                  symbolicBpm,
               'target': resolved.target,
             });
           }
-          commandActions.add(AssistantAction(
-            type: 'sample_insert',
-            data: <String, dynamic>{
-              'operation': 'insert_audio_clips',
-              'items': items,
-              'target': resolved.target,
-            },
-          ));
+          if (simulatedClipCount + items.length > 128) {
+            throw const AiV3PreparationException('v3_clip_capacity_exceeded');
+          }
+          commandActions.add(
+            AssistantAction(
+              type: 'sample_insert',
+              data: <String, dynamic>{
+                if (referencedProducerCommandIds.contains(command.commandId))
+                  'command_id': command.commandId,
+                if (usesRowRef) 'resource_consumer_type': command.type,
+                'operation': 'insert_audio_clips',
+                'items': items,
+                'target': resolved.target,
+              },
+            ),
+          );
+          simulatedClipCount += items.length;
           label =
               'Place ${items.length} library sample${items.length == 1 ? '' : 's'}';
+          verifiedLabel =
+              'Placed ${items.length} library sample${items.length == 1 ? '' : 's'}';
           break;
         case 'sample.replace':
-          final clipId = args['clip_id'] as String;
-          final target = clipTarget(clipId, requireAudio: true);
+          final rawRef = args['clip_ref'];
+          final AiV3ResourceRef? clipRef = rawRef is Map
+              ? AiV3ResourceRef.fromJson(rawRef)
+              : null;
+          final String? clipId = args['clip_id'] is String
+              ? args['clip_id'] as String
+              : null;
+          final symbolic = clipRef == null
+              ? null
+              : symbolicResources['${clipRef.commandId}.${clipRef.output}'];
+          if (clipRef != null &&
+              (symbolic == null ||
+                  !symbolic.available ||
+                  symbolic.kind != AiV3ResourceKind.audioClip)) {
+            throw const AiV3PreparationException('v3_resource_ref_unavailable');
+          }
+          final target = clipRef == null
+              ? clipTarget(clipId!, requireAudio: true)
+              : <String, dynamic>{
+                  'scope': 'clip',
+                  'resource_ref': clipRef.toJson(),
+                };
           final assetId = args['asset_id'] as String;
           final asset = assetById[assetId];
           if (asset == null) {
@@ -2127,24 +3803,40 @@ class AiV3CommandPreparer {
           if (sourcePath.isEmpty) {
             throw const AiV3PreparationException('v3_asset_id_unknown');
           }
-          final clip = clipById[clipId]!;
-          final currentSource = clip['source_file']?.toString().trim() ?? '';
-          if (currentSource.isNotEmpty && currentSource == sourcePath) {
+          final clip = clipId == null ? null : clipById[clipId];
+          final currentSource = clip?['source_file']?.toString().trim() ?? '';
+          if (clipRef == null &&
+              currentSource.isNotEmpty &&
+              currentSource == sourcePath) {
             receiptStatus = 'already_satisfied';
           } else {
-            commandActions.add(AssistantAction(
-              type: 'v3_sample_replace',
-              data: <String, dynamic>{
-                'operation': 'replace',
-                'asset_id': assetId,
-                'library_path': sourcePath,
-                'target': target,
-              },
-            ));
+            commandActions.add(
+              AssistantAction(
+                type: 'v3_sample_replace',
+                data: <String, dynamic>{
+                  if (clipRef != null) 'resource_consumer_type': command.type,
+                  'operation': 'replace',
+                  'asset_id': assetId,
+                  'library_path': sourcePath,
+                  'target': target,
+                },
+              ),
+            );
+            if (symbolic != null) {
+              symbolic
+                ..durationMs = null
+                ..durationFollowsTempo = false
+                ..sourceTempoBpm = 0.0
+                ..tempoFollowMode = 'off'
+                ..tempoPreservePitch = false
+                ..boundsRuntimeAuthoritative = true;
+            }
           }
           final assetName = asset['filename']?.toString().trim();
           label =
-              'Replace ${_clipLabel(clipById, clipId)} with ${assetName == null || assetName.isEmpty ? assetId : assetName}';
+              'Replace ${clipRef == null ? _clipLabel(clipById, clipId!) : '${clipRef.commandId}.${clipRef.output}'} with ${assetName == null || assetName.isEmpty ? assetId : assetName}';
+          verifiedLabel =
+              'Replaced ${clipRef == null ? _clipLabel(clipById, clipId!) : '${clipRef.commandId}.${clipRef.output}'} with ${assetName == null || assetName.isEmpty ? assetId : assetName}';
           break;
         case 'mix.apply_goal':
           if (hasPriorTopologyMutation) {
@@ -2237,15 +3929,16 @@ class AiV3CommandPreparer {
           ));
           final targetLabel = switch (scope) {
             'row' => _rowLabel(rowById, rawTarget['row_id'] as int),
-            'group' => simulatedGroupsById[rawTarget['group_id']]?['name']
-                        ?.toString()
+            'group' =>
+              simulatedGroupsById[rawTarget['group_id']]?['name']
+                          ?.toString()
+                          .trim()
+                          .isNotEmpty ==
+                      true
+                  ? simulatedGroupsById[rawTarget['group_id']]!['name']
+                        .toString()
                         .trim()
-                        .isNotEmpty ==
-                    true
-                ? simulatedGroupsById[rawTarget['group_id']]!['name']
-                    .toString()
-                    .trim()
-                : 'group ${rawTarget['group_id']}',
+                  : 'group ${rawTarget['group_id']}',
             'master' => 'Master Bus',
             _ => 'all project rows',
           };
@@ -2253,6 +3946,7 @@ class AiV3CommandPreparer {
               ? ''
               : ' using ${_rowLabel(rowById, preparedReference['row_id'] as int)} as reference';
           label = 'Mix $targetLabel$referenceLabel';
+          verifiedLabel = 'Mixed $targetLabel$referenceLabel';
           break;
         default:
           throw const AiV3PreparationException('v3_command_not_supported');
@@ -2265,7 +3959,235 @@ class AiV3CommandPreparer {
         'status': receiptStatus,
         'expanded_action_count': commandActions.length,
         'preview_label': label,
+        'verified_label': _aiV3VerifiedReceiptLabel(
+          verifiedLabel: verifiedLabel,
+          symbolicResources: symbolicResources,
+        ),
+        ..._aiV3ReceiptLocalization(
+          command: command,
+          rows: rowById,
+          clips: clipById,
+          symbolicResources: symbolicResources,
+        ),
       });
+      for (final output in aiV3ProducedResources(
+        commandType: command.type,
+        arguments: command.arguments,
+      ).entries) {
+        if (symbolicResources.containsKey(
+          '${command.commandId}.${output.key}',
+        )) {
+          continue;
+        }
+        final isRowOutput =
+            output.value == AiV3ResourceKind.audioRow ||
+            output.value == AiV3ResourceKind.midiRow;
+        String? outputInstrumentId;
+        if (output.value == AiV3ResourceKind.midiRow) {
+          outputInstrumentId = command.type == 'clip.convert_to_midi'
+              ? command.arguments['instrument_id']?.toString()
+              : (command.arguments['lane'] as Map?)?['instrument_id']
+                    ?.toString();
+        }
+        final producerTarget = commandActions
+            .map((action) => action.data['target'])
+            .whereType<Map>()
+            .map((target) => Map<String, dynamic>.from(target))
+            .where(
+              (target) => target['row_id'] is int || target['row_index'] is int,
+            )
+            .lastOrNull;
+        final producerInputRef = command.arguments['clip_ref'] is Map
+            ? AiV3ResourceRef.fromJson(command.arguments['clip_ref'])
+            : null;
+        final producerInputSymbolic = producerInputRef == null
+            ? null
+            : symbolicResources['${producerInputRef.commandId}.${producerInputRef.output}'];
+        final sourceRowId = command.arguments['clip_id'] is String
+            ? (clipById[command.arguments['clip_id']]?['row_id']) as int?
+            : producerInputSymbolic?.rowId;
+        final sourceRowIndex = sourceRowId == null
+            ? producerInputSymbolic?.rowIndex
+            : rowById[sourceRowId]?['display_index'];
+        final outputRowIndex = command.type == 'clip.separate_stems'
+            ? (sourceRowIndex is int
+                  ? sourceRowIndex +
+                        (output.key == 'instrumental_clip' ||
+                                output.key == 'instrumental_row'
+                            ? 2
+                            : 1)
+                  : null)
+            : command.type == 'clip.convert_to_midi'
+            ? (sourceRowIndex == null ? null : sourceRowIndex + 1)
+            : command.type == 'row.create'
+            ? commandActions
+                  .map((action) => action.data['predicted_row_index'])
+                  .whereType<int>()
+                  .firstOrNull
+            : producerTarget?['row_index'] as int?;
+        final outputRowId = command.type == 'clip.convert_to_midi'
+            ? null
+            : producerTarget?['row_id'] as int?;
+        final destination = command.arguments['destination'];
+        final rawParentRowRef = destination is Map
+            ? destination['row_ref']
+            : null;
+        final parentRowResourceKey = rawParentRowRef is Map
+            ? '${rawParentRowRef['command_id']}.${rawParentRowRef['output']}'
+            : command.type == 'clip.separate_stems'
+            ? '${command.commandId}.${output.key == 'vocals_clip' ? 'vocals_row' : 'instrumental_row'}'
+            : command.type == 'clip.convert_to_midi' &&
+                  output.key == 'midi_clip'
+            ? '${command.commandId}.midi_row'
+            : null;
+        final stableProducerInput = command.arguments['clip_id'] is String
+            ? clipById[command.arguments['clip_id']]
+            : null;
+        final stableProducerLengthBeats =
+            (stableProducerInput?['timeline_length_beats'] as num?)
+                ?.toDouble() ??
+            (stableProducerInput?['length_beats'] as num?)?.toDouble();
+        final startMs = switch (command.type) {
+          'clip.separate_stems' =>
+            producerInputSymbolic?.startMs ??
+                (((command.arguments['clip_id'] is String
+                                    ? clipById[command.arguments['clip_id']]
+                                    : null)?['start_beat']
+                                as num?)
+                            ?.toDouble() ??
+                        0.0) *
+                    60000.0 /
+                    symbolicBpm,
+          'midi.create_clip' =>
+            (command.arguments['start_beat'] as num).toDouble() *
+                60000.0 /
+                symbolicBpm,
+          'sample.place' =>
+            (((command.arguments['placements'] as List).single
+                            as Map)['start_beat']
+                        as num)
+                    .toDouble() *
+                60000.0 /
+                symbolicBpm,
+          'clip.convert_to_midi' =>
+            producerInputSymbolic?.startMs ??
+                (((command.arguments['clip_id'] is String
+                                    ? clipById[command.arguments['clip_id']]
+                                    : null)?['start_beat']
+                                as num?)
+                            ?.toDouble() ??
+                        0.0) *
+                    60000.0 /
+                    symbolicBpm,
+          _ => 0.0,
+        };
+        final durationMs = switch (command.type) {
+          'clip.separate_stems' =>
+            producerInputSymbolic != null
+                ? producerInputSymbolic.durationMs
+                : (((command.arguments['clip_id'] is String
+                                      ? clipById[command.arguments['clip_id']]
+                                      : null)?['timeline_length_beats']
+                                  as num?)
+                              ?.toDouble() ??
+                          0.0) *
+                      60000.0 /
+                      ((command.arguments['clip_id'] is String &&
+                              (clipById[command
+                                          .arguments['clip_id']]?['stretch_to_project_tempo'] ==
+                                      true ||
+                                  projectAudioForcedTempoFollow))
+                          ? symbolicBpm
+                          : bpm),
+          'midi.create_clip' =>
+            (command.arguments['length_beats'] as num).toDouble() *
+                60000.0 /
+                symbolicBpm,
+          'clip.convert_to_midi' =>
+            producerInputSymbolic?.durationMs ??
+                (stableProducerLengthBeats == null
+                    ? null
+                    : stableProducerLengthBeats *
+                          60000.0 /
+                          ((stableProducerInput?['stretch_to_project_tempo'] ==
+                                      true ||
+                                  projectAudioForcedTempoFollow)
+                              ? symbolicBpm
+                              : bpm)),
+          _ => null,
+        };
+        symbolicResources['${command.commandId}.${output.key}'] =
+            _AiV3SymbolicResource(
+              kind: output.value,
+              startMs: startMs,
+              durationMs: durationMs,
+              durationFollowsTempo: switch (command.type) {
+                'midi.create_clip' => true,
+                'clip.convert_to_midi' => true,
+                'clip.separate_stems' => false,
+                _ => null,
+              },
+              rowId: outputRowId,
+              rowIndex: outputRowIndex,
+              parentRowResourceKey:
+                  output.value == AiV3ResourceKind.audioClip ||
+                      output.value == AiV3ResourceKind.midiClip
+                  ? parentRowResourceKey
+                  : null,
+              pitchSemitones: output.value == AiV3ResourceKind.audioClip
+                  ? 0.0
+                  : null,
+              sourceTempoBpm: output.value == AiV3ResourceKind.audioClip
+                  ? 0.0
+                  : null,
+              tempoFollowMode: output.value == AiV3ResourceKind.audioClip
+                  ? 'off'
+                  : null,
+              tempoPreservePitch: output.value == AiV3ResourceKind.audioClip
+                  ? false
+                  : null,
+              midiNotes:
+                  output.value == AiV3ResourceKind.midiClip &&
+                      command.type != 'clip.convert_to_midi'
+                  ? _normalizedMidiNotes(
+                      command.arguments['notes'] as List? ?? const <Object>[],
+                    )
+                  : null,
+              midiNotesRuntimeAuthoritative:
+                  command.type == 'clip.convert_to_midi' &&
+                  output.value == AiV3ResourceKind.midiClip,
+              boundsRuntimeAuthoritative:
+                  (command.type == 'clip.convert_to_midi' &&
+                      output.value == AiV3ResourceKind.midiClip) ||
+                  ((output.value == AiV3ResourceKind.audioClip ||
+                          output.value == AiV3ResourceKind.midiClip) &&
+                      durationMs == null),
+              rowName: isRowOutput
+                  ? (command.type == 'row.create'
+                        ? command.arguments['name'] as String
+                        : command.type == 'clip.convert_to_midi'
+                        ? commandActions
+                              .map((action) => action.data['output_label'])
+                              .whereType<String>()
+                              .firstOrNull
+                        : null)
+                  : null,
+              instrumentId: outputInstrumentId,
+              gainDb: isRowOutput ? 0.0 : null,
+              panSigned: isRowOutput ? 0.0 : null,
+              muted: isRowOutput ? false : null,
+              soloed: isRowOutput ? false : null,
+            );
+        if (isRowOutput) {
+          final resourceKey = '${command.commandId}.${output.key}';
+          if (!symbolicRowOrder.contains(resourceKey) &&
+              outputRowIndex != null &&
+              outputRowIndex >= 0 &&
+              outputRowIndex <= symbolicRowOrder.length) {
+            symbolicRowOrder.insert(outputRowIndex, resourceKey);
+          }
+        }
+      }
       final directlyTargetedClipId = args['clip_id'];
       if (directlyTargetedClipId is String &&
           command.type != 'clip.delete' &&
@@ -2318,6 +4240,26 @@ AiV3Plan _canonicalizeEmbeddedDestinationRows(AiV3Plan plan) {
   final standaloneCounts = <_AiV3RowDestinationDescriptor, int>{};
   final standaloneDescriptorByCommandId =
       <String, _AiV3RowDestinationDescriptor>{};
+  final referencedCommandIds = <String>{};
+  for (final command in plan.commands) {
+    final directRef = command.arguments['row_ref'];
+    final destination = command.arguments['destination'];
+    final destinationRef = destination is Map ? destination['row_ref'] : null;
+    final groupMemberRefs =
+        command.type == 'group.create' && command.arguments['members'] is List
+        ? (command.arguments['members'] as List).whereType<Map>().map(
+            (member) => member['row_ref'],
+          )
+        : const Iterable<Object?>.empty();
+    for (final rawRef in <Object?>[
+      directRef,
+      destinationRef,
+      ...groupMemberRefs,
+    ].whereType<Map>()) {
+      final commandId = rawRef['command_id']?.toString().trim() ?? '';
+      if (commandId.isNotEmpty) referencedCommandIds.add(commandId);
+    }
+  }
 
   _AiV3RowDestinationDescriptor descriptor({
     required String laneKind,
@@ -2374,7 +4316,11 @@ AiV3Plan _canonicalizeEmbeddedDestinationRows(AiV3Plan plan) {
   }
 
   final redundantStandaloneIds = standaloneDescriptorByCommandId.entries
-      .where((entry) => embeddedCounts[entry.value] == 1)
+      .where(
+        (entry) =>
+            embeddedCounts[entry.value] == 1 &&
+            !referencedCommandIds.contains(entry.key),
+      )
       .map((entry) => entry.key)
       .toSet();
   if (redundantStandaloneIds.isEmpty) return plan;
@@ -2439,25 +4385,8 @@ List<Map<String, dynamic>> _normalizedMidiNotes(List<dynamic> rawNotes) {
   return _sortedMidiNotes(notes);
 }
 
-List<Map<String, dynamic>> _sortedMidiNotes(
-  List<Map<String, dynamic>> notes,
-) {
-  final sorted = notes
-      .map((note) => Map<String, dynamic>.from(note))
-      .toList(growable: true);
-  sorted.sort((a, b) {
-    var result =
-        (a['start_beat'] as double).compareTo(b['start_beat'] as double);
-    if (result != 0) return result;
-    result = (a['pitch'] as int).compareTo(b['pitch'] as int);
-    if (result != 0) return result;
-    result =
-        (a['length_beats'] as double).compareTo(b['length_beats'] as double);
-    if (result != 0) return result;
-    return (a['velocity'] as double).compareTo(b['velocity'] as double);
-  });
-  return List<Map<String, dynamic>>.unmodifiable(sorted);
-}
+List<Map<String, dynamic>> _sortedMidiNotes(List<Map<String, dynamic>> notes) =>
+    aiV3CanonicalMidiNotes(notes);
 
 bool _midiNotesEqual(
   List<Map<String, dynamic>> left,
@@ -2544,8 +4473,275 @@ String _rowLabel(Map<int, Map<String, dynamic>> rows, int id) =>
 
 String _clipLabel(Map<String, Map<String, dynamic>> clips, String id) =>
     clips[id]?['name']?.toString().trim().isNotEmpty == true
-        ? clips[id]!['name'].toString().trim()
-        : 'clip $id';
+    ? clips[id]!['name'].toString().trim()
+    : 'clip $id';
+
+String _aiV3VerifiedReceiptLabel({
+  required String verifiedLabel,
+  required Map<String, _AiV3SymbolicResource> symbolicResources,
+}) {
+  var label = verifiedLabel;
+  final resources = symbolicResources.entries.toList(growable: false)
+    ..sort((a, b) => b.key.length.compareTo(a.key.length));
+  for (final entry in resources) {
+    if (!label.contains(entry.key)) continue;
+    label = label.replaceAll(
+      entry.key,
+      _aiV3SymbolicResourceDisplayLabel(entry.key, entry.value),
+    );
+  }
+  return label;
+}
+
+Map<String, dynamic> _aiV3ReceiptLocalization({
+  required AiV3Command command,
+  required Map<int, Map<String, dynamic>> rows,
+  required Map<String, Map<String, dynamic>> clips,
+  required Map<String, _AiV3SymbolicResource> symbolicResources,
+}) {
+  final args = command.arguments;
+
+  String referencedLabel(Object? rawRef, String fallback) {
+    if (rawRef is! Map) return fallback;
+    final commandId = rawRef['command_id']?.toString().trim() ?? '';
+    final output = rawRef['output']?.toString().trim() ?? '';
+    final key = '$commandId.$output';
+    final resource = symbolicResources[key];
+    return resource == null
+        ? fallback
+        : _aiV3SymbolicResourceDisplayLabel(key, resource);
+  }
+
+  String rowLabel() {
+    final rowId = args['row_id'];
+    if (rowId is int) return _rowLabel(rows, rowId);
+    return referencedLabel(args['row_ref'], 'generated row');
+  }
+
+  String clipLabel() {
+    final clipId = args['clip_id'];
+    if (clipId is String) return _clipLabel(clips, clipId);
+    return referencedLabel(args['clip_ref'], 'generated clip');
+  }
+
+  Map<String, dynamic> message(
+    String key, [
+    Map<String, Object?> values = const <String, Object?>{},
+  ]) =>
+      <String, dynamic>{
+        'verified_l10n_key': key,
+        if (values.isNotEmpty)
+          'verified_l10n_args': values.map(
+            (name, value) => MapEntry(name, value?.toString() ?? ''),
+          ),
+      };
+
+  final target = rowLabel();
+  final clip = clipLabel();
+  return switch (command.type) {
+    'project.set_tempo' =>
+      message('Set project tempo to {value} BPM.', {'value': args['bpm']}),
+    'transport.set_playing' => message(
+        args['playing'] == true ? 'Started playback.' : 'Paused playback.',
+      ),
+    'transport.restart' => message('Restarted playback.'),
+    'transport.set_metronome_enabled' => message(
+        args['enabled'] == true ? 'Enabled the metronome.' : 'Disabled the metronome.',
+      ),
+    'transport.set_loop_enabled' => message(
+        args['enabled'] == true ? 'Enabled loop playback.' : 'Disabled loop playback.',
+      ),
+    'row.adjust_gain_db' => message(
+        'Adjusted {target} gain by {value} dB.',
+        {'target': target, 'value': args['delta_db']},
+      ),
+    'row.set_gain_db' => message(
+        'Set {target} gain to {value} dB.',
+        {'target': target, 'value': args['gain_db']},
+      ),
+    'row.adjust_pan' => message(
+        'Adjusted {target} pan by {value}.',
+        {'target': target, 'value': args['delta_signed']},
+      ),
+    'row.set_pan' => message(
+        'Set {target} pan to {value}.',
+        {'target': target, 'value': args['pan_signed']},
+      ),
+    'row.set_muted' => message(
+        args['muted'] == true ? 'Muted {target}.' : 'Unmuted {target}.',
+        {'target': target},
+      ),
+    'row.set_soloed' => message(
+        args['soloed'] == true ? 'Soloed {target}.' : 'Unsoloed {target}.',
+        {'target': target},
+      ),
+    'row.rename' => message(
+        'Renamed {target} to {name}.',
+        {'target': target, 'name': args['new_name']},
+      ),
+    'row.set_role_override' => message(
+        'Updated the role for {target}.',
+        {'target': target},
+      ),
+    'row.apply_phone_mic_cleanup' => message(
+        'Applied phone-mic cleanup to {target}.',
+        {'target': target},
+      ),
+    'row.select' => message('Selected {target}.', {'target': target}),
+    'row.set_color' =>
+      message('Updated the color of {target}.', {'target': target}),
+    'row.create' => message(
+        args['lane'] is Map && (args['lane'] as Map)['kind'] == 'midi'
+            ? 'Created MIDI row {name}.'
+            : 'Created audio row {name}.',
+        {'name': args['name']},
+      ),
+    'row.delete' => message('Deleted {target}.', {'target': target}),
+    'group.create' =>
+      message('Created group {name}.', {'name': args['name']}),
+    'group.remove_row' => message(
+        'Removed {target} from the group.',
+        {
+          'target': args['row_id'] is int
+              ? _rowLabel(rows, args['row_id'] as int)
+              : referencedLabel(args['row_ref'], 'generated row'),
+        },
+      ),
+    'group.set_collapsed' => message(
+        args['collapsed'] == true ? 'Collapsed the group.' : 'Expanded the group.',
+      ),
+    'clip.move_by_beats' => message(
+        'Moved {target} by {value} beats.',
+        {'target': clip, 'value': args['delta_beats']},
+      ),
+    'clip.trim_to_range' => message(
+        'Trimmed {target} to beats {start}–{end}.',
+        {
+          'target': clip,
+          'start': args['start_beat'],
+          'end': args['end_beat'],
+        },
+      ),
+    'clip.split_at' => message(
+        'Split {target} at beat {value}.',
+        {'target': clip, 'value': args['at_beat']},
+      ),
+    'clip.duplicate_to' => message(
+        'Duplicated {target} at beat {value}.',
+        {'target': clip, 'value': args['start_beat']},
+      ),
+    'clip.delete' => message('Deleted {target}.', {'target': clip}),
+    'clip.glue' => message('Glued the selected audio clips.'),
+    'clip.separate_stems' => message('Separated vocals and instrumental.'),
+    'clip.convert_to_midi' => message('Converted {target} to MIDI.', {'target': clip}),
+    'clip.set_pitch_semitones' => message(
+        'Set {target} pitch to {value} semitones.',
+        {'target': clip, 'value': args['pitch_semitones']},
+      ),
+    'clip.adjust_pitch_semitones' => message(
+        'Adjusted {target} pitch by {value} semitones.',
+        {'target': clip, 'value': args['delta_semitones']},
+      ),
+    'clip.set_timeline_length_beats' => message(
+        'Set {target} length to {value} beats.',
+        {'target': clip, 'value': args['length_beats']},
+      ),
+    'clip.scale_timeline_length' => message(
+        'Scaled {target} length by {value}.',
+        {'target': clip, 'value': args['factor']},
+      ),
+    'clip.set_source_tempo_bpm' => message(
+        'Set {target} source tempo to {value} BPM.',
+        {'target': clip, 'value': args['source_tempo_bpm']},
+      ),
+    'clip.set_tempo_follow_mode' =>
+      message('Updated tempo following for {target}.', {'target': clip}),
+    'clip.align_tempo_to_project' =>
+      message('Aligned {target} to the project tempo.', {'target': clip}),
+    'project.set_tempo_from_clip' =>
+      message('Set the project tempo from {target}.', {'target': clip}),
+    'clip.trim_silence' =>
+      message('Trimmed silence from {target}.', {'target': clip}),
+    'clip.align_first_sound' =>
+      message('Aligned the first sound in {target}.', {'target': clip}),
+    'midi.transpose' => message(
+        'Transposed {target} by {value} semitones.',
+        {'target': clip, 'value': args['semitones']},
+      ),
+    'midi.create_clip' => message(
+        'Created a MIDI clip with {count} notes.',
+        {'count': (args['notes'] as List?)?.length ?? 0},
+      ),
+    'midi.replace_notes' =>
+      message('Replaced notes in {target}.', {'target': clip}),
+    'midi.append_notes' =>
+      message('Appended notes to {target}.', {'target': clip}),
+    'midi.chop_notes' =>
+      message('Chopped notes in {target}.', {'target': clip}),
+    'effect.ensure_configured' => message(
+        'Added/configured {effect} on {target}.',
+        {'effect': args['effect_id'], 'target': target},
+      ),
+    'effect.remove' => message('Removed an effect from {target}.', {'target': target}),
+    'effect.set_bypassed' => message('Updated effect bypass on {target}.', {'target': target}),
+    'automation.gain_fade' =>
+      message('Added a gain fade on {target}.', {'target': target}),
+    'automation.set_points' => message(
+        'Set {count} automation points on {target}.',
+        {'count': (args['points'] as List?)?.length ?? 0, 'target': target},
+      ),
+    'automation.clear' =>
+      message('Cleared automation on {target}.', {'target': target}),
+    'sample.place' => message(
+        'Placed {count} library sample(s).',
+        {'count': (args['placements'] as List?)?.length ?? 0},
+      ),
+    'sample.replace' =>
+      message('Replaced the sample in {target}.', {'target': clip}),
+    'mix.apply_goal' => message('Applied the requested mix.'),
+    _ => const <String, dynamic>{},
+  };
+}
+
+String _aiV3SymbolicResourceDisplayLabel(
+  String resourceKey,
+  _AiV3SymbolicResource resource,
+) {
+  final separator = resourceKey.lastIndexOf('.');
+  final output = separator < 0
+      ? resourceKey
+      : resourceKey.substring(separator + 1);
+  return switch (output) {
+    'vocals_clip' => 'vocal stem',
+    'instrumental_clip' => 'instrumental stem',
+    'vocals_row' => 'vocal row',
+    'instrumental_row' => 'instrumental row',
+    'audio_clip' => 'generated audio clip',
+    'midi_clip' => 'generated MIDI clip',
+    'midi_row' =>
+      resource.rowName?.trim().isNotEmpty == true
+          ? resource.rowName!.trim()
+          : 'generated MIDI row',
+    'left_clip' => 'left split clip',
+    'right_clip' => 'right split clip',
+    'copy_clip' => 'copied clip',
+    'glued_clip' => 'glued clip',
+    'group' => 'generated group',
+    'row' =>
+      resource.rowName?.trim().isNotEmpty == true
+          ? resource.rowName!.trim()
+          : resource.kind == AiV3ResourceKind.midiRow
+          ? 'generated MIDI row'
+          : 'generated audio row',
+    _ => switch (resource.kind) {
+      AiV3ResourceKind.audioRow => 'generated audio row',
+      AiV3ResourceKind.midiRow => 'generated MIDI row',
+      AiV3ResourceKind.audioClip => 'generated audio clip',
+      AiV3ResourceKind.midiClip => 'generated MIDI clip',
+      AiV3ResourceKind.group => 'generated group',
+    },
+  };
+}
 
 String _formatNumber(double value) {
   final fixed = value.toStringAsFixed(2);

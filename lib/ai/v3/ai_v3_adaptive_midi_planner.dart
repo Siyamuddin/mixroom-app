@@ -9,6 +9,7 @@ import 'ai_v3_contract.dart';
 import 'ai_v3_planner_request.dart';
 import 'ai_v3_planning_snapshot.dart';
 import 'ai_v3_retrieval.dart';
+import 'ai_v3_resources.dart';
 import 'ai_v3_user_facing_text.dart';
 
 const String aiV3AdaptiveArchitecture = 'v3_adaptive_shadow';
@@ -25,6 +26,8 @@ sufficient. Otherwise request only the enabled domain facts needed to complete
 the entire request, including every required domain in the single batch. Use the
 capability directory to identify which domain owns missing functionality. Do not
 request context for an ordinary common edit.
+$aiV3RequestedResourceLifecycleInstructions
+$aiV3VisibleLanguageInstructions
 $aiV3MidiTimingInstructions
 Clarify only ambiguity that materially changes the result; never choose an
 ambiguous target arbitrarily. The application owns factual preparation and
@@ -41,6 +44,8 @@ context request is available. Treat supplied project state and stable IDs as
 factual authority, use only supplied commands, and preserve every explicit
 target and constraint. Use general musical knowledge for interpretation, but
 never invent project resources or state.
+$aiV3RequestedResourceLifecycleInstructions
+$aiV3VisibleLanguageInstructions
 $aiV3MidiTimingInstructions
 Clarify only ambiguity that materially changes the result; never choose an
 ambiguous target arbitrarily. Never claim unexecuted work was applied. Match the
@@ -120,6 +125,7 @@ class AiV3AdaptivePlannerService implements AiV3AdaptivePlanner {
     this.reasoningEffort = 'low',
     this.requestTimeout = const Duration(seconds: 40),
     this.retriever = const AiV3ContextRetriever(),
+    this.resourceRefsEnabled = false,
     http.Client? httpClient,
   }) : _httpClient = httpClient ?? http.Client();
 
@@ -132,6 +138,7 @@ class AiV3AdaptivePlannerService implements AiV3AdaptivePlanner {
   final String reasoningEffort;
   final Duration requestTimeout;
   final AiV3ContextRetriever retriever;
+  final bool resourceRefsEnabled;
   final http.Client _httpClient;
 
   @override
@@ -159,6 +166,7 @@ class AiV3AdaptivePlannerService implements AiV3AdaptivePlanner {
       model: model,
       reasoningEffort: reasoningEffort,
       promptTraceId: promptTraceId,
+      resourceRefsEnabled: resourceRefsEnabled,
     );
     final first = await _post(firstBody, stage: 'first');
     final firstCall = _singleFunctionCall(first.response);
@@ -166,6 +174,7 @@ class AiV3AdaptivePlannerService implements AiV3AdaptivePlanner {
       final plan = _parsePlan(
         firstCall.arguments,
         allowedCommands: aiV3CommandTypes,
+        resourceRefsEnabled: resourceRefsEnabled,
       );
       totalStopwatch.stop();
       return AiV3AdaptivePlannerResult(
@@ -229,6 +238,7 @@ class AiV3AdaptivePlannerService implements AiV3AdaptivePlanner {
       model: model,
       reasoningEffort: reasoningEffort,
       promptTraceId: promptTraceId,
+      resourceRefsEnabled: resourceRefsEnabled,
     );
     final second = await _post(secondBody, stage: 'continuation');
     final secondCall = _singleFunctionCall(second.response);
@@ -246,6 +256,7 @@ class AiV3AdaptivePlannerService implements AiV3AdaptivePlanner {
     final plan = _parsePlan(
       secondCall.arguments,
       allowedCommands: aiV3CommandTypes,
+      resourceRefsEnabled: resourceRefsEnabled,
     );
     final requestedDomains =
         retrievalRequest.requests.map((query) => query.domain).toSet();
@@ -369,7 +380,9 @@ class AiV3AdaptivePlannerService implements AiV3AdaptivePlanner {
         (second?.cost?['estimated_cost_usd'] as num?)?.toDouble();
     return <String, dynamic>{
       'architecture': aiV3AdaptiveArchitecture,
-      'surface_revision': aiV3AdaptiveSurfaceRevision,
+      'surface_revision': resourceRefsEnabled
+          ? '$aiV3AdaptiveSurfaceRevision+$aiV3ResourceRefSurfaceRevision'
+          : aiV3AdaptiveSurfaceRevision,
       'model': model,
       'reasoning_effort': reasoningEffort,
       'call_count': second == null ? 1 : 2,
@@ -444,6 +457,7 @@ void _requireRetrievedMidiIdentifiers(
       'midi.append_notes',
       'midi.chop_notes',
     }.contains(command.type)) {
+      if (command.arguments['clip_ref'] is Map) continue;
       final clipId = command.arguments['clip_id']?.toString() ?? '';
       if (!returnedClipIds.contains(clipId)) {
         throw AiV3AdaptivePlannerException(
@@ -587,8 +601,15 @@ void _requireRetrievedAdvancedClipTargets(
   };
   for (final command in plan.commands) {
     if (!aiV3ClipAdvancedCommandTypes.contains(command.type)) continue;
+    if (command.arguments['clip_ref'] is Map) continue;
     if (command.type == 'clip.glue') {
-      final clipIds = (command.arguments['clip_ids'] as List? ?? const [])
+      final clipIds = command.arguments['sources'] is List
+          ? (command.arguments['sources'] as List)
+              .whereType<Map>()
+              .map((source) => source['clip_id'])
+              .whereType<String>()
+              .toList(growable: false)
+          : (command.arguments['clip_ids'] as List? ?? const [])
           .map((value) => value.toString())
           .toList(growable: false);
       final missing =
@@ -739,9 +760,13 @@ Map<String, dynamic> buildAiV3AdaptiveFirstRequestBody({
   required String model,
   required String reasoningEffort,
   String? promptTraceId,
+  bool resourceRefsEnabled = false,
 }) =>
     _baseRequest(
-      instructions: aiV3AdaptiveFirstTurnInstructions,
+      instructions: <String>[
+        aiV3AdaptiveFirstTurnInstructions,
+        if (resourceRefsEnabled) aiV3ResourceReferenceInstructions,
+      ].join('\n'),
       content: <Map<String, dynamic>>[
         _inputText('ORIGINAL_REQUEST_VERBATIM', originalRequest),
         _inputJson('COMPACT_CORE_V3_JSON', compactCore),
@@ -750,6 +775,8 @@ Map<String, dynamic> buildAiV3AdaptiveFirstRequestBody({
         aiV3SubmitPlanTool(
           commandTypes: aiV3CommandTypes,
           includeCommandSemantics: true,
+          includeResourceRefs: resourceRefsEnabled,
+          resourceRefCommandTypes: aiV3RuntimeResourceRefConsumerTypes,
         ),
         aiV3GetContextDomainsTool(),
       ],
@@ -758,6 +785,9 @@ Map<String, dynamic> buildAiV3AdaptiveFirstRequestBody({
       reasoningEffort: reasoningEffort,
       promptTraceId: promptTraceId,
       stage: 'first',
+      surfaceRevision: resourceRefsEnabled
+          ? '$aiV3AdaptiveSurfaceRevision+$aiV3ResourceRefSurfaceRevision'
+          : aiV3AdaptiveSurfaceRevision,
     );
 
 Map<String, dynamic> buildAiV3AdaptiveContinuationRequestBody({
@@ -768,9 +798,13 @@ Map<String, dynamic> buildAiV3AdaptiveContinuationRequestBody({
   required String model,
   required String reasoningEffort,
   String? promptTraceId,
+  bool resourceRefsEnabled = false,
 }) =>
     _baseRequest(
-      instructions: aiV3AdaptiveContinuationInstructions,
+      instructions: <String>[
+        aiV3AdaptiveContinuationInstructions,
+        if (resourceRefsEnabled) aiV3ResourceReferenceInstructions,
+      ].join('\n'),
       content: <Map<String, dynamic>>[
         _inputText('ORIGINAL_REQUEST_VERBATIM', originalRequest),
         _inputJson('COMPACT_CORE_V3_JSON', compactCore),
@@ -781,6 +815,8 @@ Map<String, dynamic> buildAiV3AdaptiveContinuationRequestBody({
         aiV3SubmitPlanTool(
           commandTypes: aiV3CommandTypes,
           includeCommandSemantics: true,
+          includeResourceRefs: resourceRefsEnabled,
+          resourceRefCommandTypes: aiV3RuntimeResourceRefConsumerTypes,
         ),
       ],
       forcedSubmit: true,
@@ -788,6 +824,9 @@ Map<String, dynamic> buildAiV3AdaptiveContinuationRequestBody({
       reasoningEffort: reasoningEffort,
       promptTraceId: promptTraceId,
       stage: 'continuation',
+      surfaceRevision: resourceRefsEnabled
+          ? '$aiV3AdaptiveSurfaceRevision+$aiV3ResourceRefSurfaceRevision'
+          : aiV3AdaptiveSurfaceRevision,
     );
 
 Map<String, dynamic> _baseRequest({
@@ -799,6 +838,7 @@ Map<String, dynamic> _baseRequest({
   required String reasoningEffort,
   required String? promptTraceId,
   required String stage,
+  required String surfaceRevision,
 }) {
   final trace = (promptTraceId ?? '').trim();
   return <String, dynamic>{
@@ -820,7 +860,7 @@ Map<String, dynamic> _baseRequest({
         'prompt_trace_id':
             trace.substring(0, trace.length > 64 ? 64 : trace.length),
         'architecture': aiV3AdaptiveArchitecture,
-        'surface_revision': aiV3AdaptiveSurfaceRevision,
+        'surface_revision': surfaceRevision,
         'stage': stage,
       },
   };
@@ -835,9 +875,14 @@ Map<String, dynamic> _inputJson(String label, Map<String, dynamic> value) =>
 AiV3Plan _parsePlan(
   Map<String, dynamic> arguments, {
   required Set<String> allowedCommands,
+  bool resourceRefsEnabled = false,
 }) {
   try {
-    final plan = AiV3Plan.fromJson(arguments);
+    final plan = AiV3Plan.fromJson(
+      arguments,
+      allowResourceRefs: resourceRefsEnabled,
+      resourceRefCommandTypes: aiV3RuntimeResourceRefConsumerTypes,
+    );
     if (plan.commands
         .any((command) => !allowedCommands.contains(command.type))) {
       throw const AiV3ContractException(

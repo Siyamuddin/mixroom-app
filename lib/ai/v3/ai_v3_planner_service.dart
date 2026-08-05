@@ -7,6 +7,7 @@ import '../ai_model_cost.dart';
 import 'ai_v3_context.dart';
 import 'ai_v3_contract.dart';
 import 'ai_v3_planner_request.dart';
+import 'ai_v3_resources.dart';
 
 class AiV3PlannerException implements Exception {
   const AiV3PlannerException(
@@ -61,6 +62,7 @@ class AiV3PlannerService implements AiV3Planner {
     this.proxyPath = '/v1/llm/v3/responses',
     this.authTokenProvider,
     this.refreshAuthTokenProvider,
+    this.resourceRefsEnabled = false,
     http.Client? httpClient,
   })  : assert(commandTypes.isNotEmpty),
         commandTypes = Set<String>.unmodifiable(commandTypes),
@@ -80,6 +82,7 @@ class AiV3PlannerService implements AiV3Planner {
   final String proxyPath;
   final Future<String?> Function()? authTokenProvider;
   final Future<String?> Function()? refreshAuthTokenProvider;
+  final bool resourceRefsEnabled;
   final http.Client _httpClient;
 
   bool get _usesProxy => proxyApiBaseUrl.trim().isNotEmpty;
@@ -103,6 +106,7 @@ class AiV3PlannerService implements AiV3Planner {
       promptTraceId: promptTraceId,
       commandTypes: commandTypes,
       architecture: architecture,
+      resourceRefsEnabled: resourceRefsEnabled,
     );
     final stopwatch = Stopwatch()..start();
     late http.Response response;
@@ -156,7 +160,11 @@ class AiV3PlannerService implements AiV3Planner {
     late final AiV3Plan plan;
     try {
       arguments = _functionArguments(decoded);
-      plan = AiV3Plan.fromJson(arguments);
+      plan = AiV3Plan.fromJson(
+        arguments,
+        allowResourceRefs: resourceRefsEnabled,
+        resourceRefCommandTypes: aiV3RuntimeResourceRefConsumerTypes,
+      );
       if (plan.commands
           .any((command) => !commandTypes.contains(command.type))) {
         throw const AiV3ContractException(

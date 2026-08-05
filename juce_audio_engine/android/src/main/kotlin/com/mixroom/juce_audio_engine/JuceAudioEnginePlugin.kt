@@ -707,6 +707,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             JuceBridge.getTrackPluginParametersJNI(
               args.intValue("row"),
               args.intValue("effect"),
+              args.boolValue("forceIndividualRow"),
             ),
           )
         }
@@ -1123,6 +1124,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           val ok = JuceBridge.insertTrackEffectJNI(
             args.intValue("row"),
             args.stringValue("path"),
+            args.boolValue("forceIndividualRow"),
           )
           result.success(ok)
         }
@@ -1130,6 +1132,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           JuceBridge.removeTrackEffectJNI(
             args.intValue("row"),
             args.intValue("effect"),
+            args.boolValue("forceIndividualRow"),
           )
           result.success(null)
         }
@@ -1138,17 +1141,18 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             args.intValue("row"),
             args.intValue("from"),
             args.intValue("to"),
+            args.boolValue("forceIndividualRow"),
           )
           result.success(null)
         }
         "getTrackEffectsForRow" -> {
-          result.success(JuceBridge.getTrackEffectsForRowJNI(args.intValue("row")))
+          result.success(JuceBridge.getTrackEffectsForRowJNI(args.intValue("row"), args.boolValue("forceIndividualRow")))
         }
         "getTrackEffectIdsForRow" -> {
-          result.success(JuceBridge.getTrackEffectIdsForRowJNI(args.intValue("row")))
+          result.success(JuceBridge.getTrackEffectIdsForRowJNI(args.intValue("row"), args.boolValue("forceIndividualRow")))
         }
         "getTrackEffectInstanceIdsForRow" -> {
-          result.success(JuceBridge.getTrackEffectInstanceIdsForRowJNI(args.intValue("row")))
+          result.success(JuceBridge.getTrackEffectInstanceIdsForRowJNI(args.intValue("row"), args.boolValue("forceIndividualRow")))
         }
         "setTrackEffect" -> {
           val value = args["value"]
@@ -1158,6 +1162,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
               args.intValue("effect"),
               args.stringValue("paramId"),
               value,
+              args.boolValue("forceIndividualRow"),
             )
           }
           result.success(null)
@@ -1167,6 +1172,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             args.intValue("row"),
             args.intValue("effect"),
             args.boolValue("bypass"),
+            args.boolValue("forceIndividualRow"),
           )
           result.success(null)
         }
@@ -1175,6 +1181,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             JuceBridge.getRowEffectBypassStateJNI(
               args.intValue("row"),
               args.intValue("effect"),
+              args.boolValue("forceIndividualRow"),
             ),
           )
         }

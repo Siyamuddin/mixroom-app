@@ -658,7 +658,7 @@ void main() {
       expect(result.aiV3Handoff?['reason'], 'already_satisfied');
       expect(
         result.message,
-        'No changes were needed:\n- Unmute Audio 1 (already set)',
+        'No changes were needed:\n- Unmuted Audio 1 (already set)',
       );
       expect(result.message, isNot(contains('I will')));
       expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
@@ -956,6 +956,32 @@ void main() {
       );
     });
 
+    test('verified execution details allow receipt localization', () {
+      expect(
+        aiV3VerifiedExecutionDetails(
+          const <String, dynamic>{
+            'receipts': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'status': 'prepared',
+                'verified_label': 'Added/configured Chorus on Chords',
+                'verified_l10n_key':
+                    'Added/configured {effect} on {target}.',
+                'verified_l10n_args': <String, String>{
+                  'effect': 'Chorus',
+                  'target': 'Chords',
+                },
+              },
+            ],
+          },
+          receiptLabelLocalizer: (receipt, fallback) {
+            expect(receipt['verified_l10n_key'], isNotEmpty);
+            return 'Chords에 Chorus를 추가하고 설정했습니다.';
+          },
+        ),
+        <String>['Chords에 Chorus를 추가하고 설정했습니다.'],
+      );
+    });
+
     test('already-satisfied completion is factual rather than future tense',
         () {
       expect(
@@ -1031,7 +1057,7 @@ void main() {
       );
     });
 
-    test('verified action notices replace fallback summaries and receipts', () {
+    test('verified receipts take precedence over runtime action notices', () {
       expect(
         aiV3VerifiedExecutionDetails(
           const <String, dynamic>{
@@ -1051,7 +1077,7 @@ void main() {
           ],
         ),
         <String>[
-          'Adjusted Gain from -1.0 dB to -1.5 dB on Automation Lead',
+          'Adjust Automation Lead by -0.5 dB',
         ],
       );
     });

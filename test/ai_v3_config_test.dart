@@ -7,6 +7,10 @@ void main() {
       'AI_V3_PRIMARY_ENABLED',
       defaultValue: true,
     );
+    const expectedResourceRefs = bool.fromEnvironment(
+      'AI_V3_RESOURCE_REFS_ENABLED',
+      defaultValue: true,
+    );
     expect(LlmConfig.aiV3PrimaryEnabled, expectedPrimary);
     expect(LlmConfig.aiV3ProxyPath, '/v1/llm/v3/responses');
     expect(LlmConfig.effectiveAiV3ProxyEnabled, expectedPrimary);
@@ -16,6 +20,7 @@ void main() {
     expect(LlmConfig.aiV3Model, 'gpt-5.6-luna');
     expect(LlmConfig.aiV3ReasoningEffort, 'low');
     expect(LlmConfig.aiV3CaptureEnabled, isFalse);
+    expect(LlmConfig.aiV3ResourceRefsEnabled, expectedResourceRefs);
     expect(LlmConfig.aiV3DetachedComparisonsEnabled, isTrue);
     expect(LlmConfig.aiV3CompactShadowEvaluationEnabled, isFalse);
     expect(LlmConfig.aiV3AdaptiveShadowEnabled, isFalse);

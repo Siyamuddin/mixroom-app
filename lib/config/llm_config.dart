@@ -110,6 +110,11 @@ class LlmConfig {
     defaultValue: false,
   );
 
+  static const bool aiV3ResourceRefsEnabled = bool.fromEnvironment(
+    'AI_V3_RESOURCE_REFS_ENABLED',
+    defaultValue: true,
+  );
+
   static const bool aiV3DetachedComparisonsEnabled = bool.fromEnvironment(
     'AI_V3_DETACHED_COMPARISONS_ENABLED',
     defaultValue: true,

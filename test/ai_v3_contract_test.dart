@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mixroom/ai/v3/ai_v3_context.dart';
 import 'package:mixroom/ai/v3/ai_v3_contract.dart';
 import 'package:mixroom/ai/v3/ai_v3_preparer.dart';
+import 'package:mixroom/ai/v3/ai_v3_resources.dart';
 
 Map<String, dynamic> _plan(List<Map<String, dynamic>> commands) =>
     <String, dynamic>{
@@ -389,43 +390,2554 @@ AiV3CoreContext _contextWithMidiNotes(
 }
 
 void main() {
+  group('V3 typed resource references', () {
+    Map<String, dynamic> ref(String commandId, String output) =>
+        <String, dynamic>{'command_id': commandId, 'output': output};
+    AiV3Plan parse(
+      List<Map<String, dynamic>> commands, {
+      Set<String>? consumers,
+    }) => AiV3Plan.fromJson(
+          _plan(commands),
+          allowResourceRefs: true,
+          resourceRefCommandTypes: consumers,
+        );
+    Map<String, dynamic> row(String id, String kind) =>
+        _command(id, 'row.create', <String, dynamic>{
+          'name': kind == 'midi' ? 'Synth' : 'Audio',
+          'lane': kind == 'midi'
+              ? <String, dynamic>{
+                  'kind': 'midi',
+                  'instrument_id': 'mixroom.basic_synth',
+                }
+              : <String, dynamic>{'kind': 'audio'},
+          'position': <String, dynamic>{'kind': 'end'},
+    });
+
+    test('resource refs and producer ports are strict and typed', () {
+      final value = AiV3ResourceRef.fromJson(ref('producer', 'row'));
+      expect(value.toJson(), ref('producer', 'row'));
+      expect(
+        () => AiV3ResourceRef.fromJson(<String, dynamic>{
+          ...ref('producer', 'row'),
+          'extra': true,
+        }),
+        throwsFormatException,
+      );
+    expect(
+        aiV3ProducedResources(
+          commandType: 'row.create',
+          arguments: row('audio', 'audio')['arguments'] as Map<String, dynamic>,
+        )['row'],
+        AiV3ResourceKind.audioRow,
+    );
+    expect(
+        aiV3ProducedResources(
+          commandType: 'row.create',
+          arguments: row('midi', 'midi')['arguments'] as Map<String, dynamic>,
+        )['row'],
+        AiV3ResourceKind.midiRow,
+    );
+    expect(
+        aiV3ProducedResources(
+          commandType: 'clip.separate_stems',
+          arguments: const <String, dynamic>{'clip_id': 'source'},
+        )['instrumental_clip'],
+        AiV3ResourceKind.audioClip,
+    );
+    expect(
+        aiV3ProducedResources(
+          commandType: 'sample.place',
+          arguments: <String, dynamic>{
+            'placements': <Map<String, dynamic>>[
+              <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+            ],
+          },
+        )['audio_clip'],
+        AiV3ResourceKind.audioClip,
+    );
+    expect(
+        aiV3ProducedResources(
+          commandType: 'sample.place',
+          arguments: <String, dynamic>{
+            'placements': <Map<String, dynamic>>[
+              <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+              <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 1},
+            ],
+          },
+        ),
+        isEmpty,
+    );
+    expect(
+        aiV3ProducedResources(
+          commandType: 'clip.convert_to_midi',
+          arguments: const <String, dynamic>{
+            'clip_id': 'audio-clip',
+            'instrument_id': 'piano',
+          },
+        ),
+        const <String, AiV3ResourceKind>{
+          'midi_clip': AiV3ResourceKind.midiClip,
+          'midi_row': AiV3ResourceKind.midiRow,
+        },
+    );
+  });
+
+    test('types audio-to-MIDI input and both generated outputs', () {
+      final plan = parse(<Map<String, dynamic>>[
+        _command('separate', 'clip.separate_stems', <String, dynamic>{
+          'clip_id': 'audio-clip',
+        }),
+        _command('convert', 'clip.convert_to_midi', <String, dynamic>{
+          'clip_ref': ref('separate', 'instrumental_clip'),
+          'instrument_id': 'piano',
+        }),
+        _command('transpose', 'midi.transpose', <String, dynamic>{
+          'clip_ref': ref('convert', 'midi_clip'),
+          'semitones': 2,
+        }),
+        _command('rename', 'row.rename', <String, dynamic>{
+          'row_ref': ref('convert', 'midi_row'),
+          'new_name': 'Transcribed melody',
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      expect(plan.commands, hasLength(4));
+    expect(
+        plan.commands[1].arguments['clip_ref'],
+        ref('separate', 'instrumental_clip'),
+    );
+    expect(
+        plan.commands[2].arguments['clip_ref'],
+        ref('convert', 'midi_clip'),
+    );
+      expect(plan.commands[3].arguments['row_ref'], ref('convert', 'midi_row'));
+
+    expect(
+        () => parse(<Map<String, dynamic>>[
+          row('midi-row', 'midi'),
+          _command('bad', 'clip.convert_to_midi', <String, dynamic>{
+            'clip_ref': ref('midi-row', 'row'),
+            'instrument_id': 'piano',
+          }),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes),
+        throwsA(isA<AiV3ContractException>()),
+    );
+  });
+
+    test(
+      'producer output catalog is registry-derived and pairings stay strict',
+      () {
+        final catalog = aiV3ProducerOutputPortCatalog(
+          AiV3ResourceKind.values.toSet(),
+      );
+        for (final producer in aiV3PossibleProducerOutputKinds.entries) {
+          for (final output in producer.value.keys) {
+            expect(catalog, contains('${producer.key} ->'));
+            expect(catalog, contains(output));
+          }
+    }
+        expect(catalog, contains('row.create -> row'));
+    expect(
+          catalog,
+          contains('clip.convert_to_midi -> midi_clip, midi_row'),
+    );
+    expect(
+          () => parse(<Map<String, dynamic>>[
+            row('create-midi-row', 'midi'),
+            _command('mute', 'row.set_muted', <String, dynamic>{
+              'row_ref': ref('create-midi-row', 'midi_row'),
+              'muted': true,
+        }),
+          ], consumers: aiV3RuntimeResourceRefConsumerTypes),
+          throwsA(
+            isA<AiV3ContractException>().having(
+              (error) => error.code,
+              'code',
+              'v3_resource_ref_unavailable',
+      ),
+          ),
+      );
+      },
+    );
+
+    test('prepares typed audio glue as a consuming many-to-one producer', () {
+      final plan = parse(<Map<String, dynamic>>[
+        _command('place', 'sample.place', <String, dynamic>{
+          'destination': <String, dynamic>{'row_id': 100},
+          'placements': <Map<String, dynamic>>[
+            <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+          ],
+      }),
+        _command('copy', 'clip.duplicate_to', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+          'destination_row_id': null,
+          'start_beat': 4,
+        }),
+        _command('glue', 'clip.glue', <String, dynamic>{
+          'sources': <Map<String, dynamic>>[
+            <String, dynamic>{'clip_ref': ref('place', 'audio_clip')},
+            <String, dynamic>{'clip_ref': ref('copy', 'copy_clip')},
+          ],
+          'label': 'Combined loop',
+        }),
+        _command('pitch', 'clip.adjust_pitch_semitones', <String, dynamic>{
+          'clip_ref': ref('glue', 'glued_clip'),
+          'delta_semitones': 2,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+    );
+      expect(prepared.actions.map((action) => action.type), <String>[
+        'sample_insert',
+        'clip_edit',
+        'v3_clip_glue',
+        'clip_edit',
+      ]);
+      expect(prepared.actions[2].data['sources'], <Map<String, dynamic>>[
+        <String, dynamic>{'resource_ref': ref('place', 'audio_clip')},
+        <String, dynamic>{'resource_ref': ref('copy', 'copy_clip')},
+      ]);
+    expect(
+        (prepared.actions.last.data['target'] as Map)['resource_ref'],
+        ref('glue', 'glued_clip'),
+    );
+    });
+
+    test('typed glue canonicalizes aliases and retires every input', () {
+      final plan = parse(<Map<String, dynamic>>[
+        _command('place', 'sample.place', <String, dynamic>{
+          'destination': <String, dynamic>{'row_id': 100},
+          'placements': <Map<String, dynamic>>[
+            <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+          ],
+        }),
+        _command('move', 'clip.move_by_beats', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+          'delta_beats': 1,
+        }),
+        _command('copy', 'clip.duplicate_to', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+          'destination_row_id': null,
+          'start_beat': 4,
+        }),
+        _command('glue', 'clip.glue', <String, dynamic>{
+          'sources': <Map<String, dynamic>>[
+            <String, dynamic>{'clip_ref': ref('move', 'audio_clip')},
+            <String, dynamic>{'clip_ref': ref('copy', 'copy_clip')},
+          ],
+          'label': null,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+      final sources = plan.commands.last.arguments['sources'] as List;
+      expect((sources.first as Map)['clip_ref'], ref('place', 'audio_clip'));
+
+      for (final unavailable in <Map<String, dynamic>>[
+        _command('move-source', 'clip.move_by_beats', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+          'delta_beats': 1,
+        }),
+        _command('move-copy', 'clip.move_by_beats', <String, dynamic>{
+          'clip_ref': ref('copy', 'copy_clip'),
+          'delta_beats': 1,
+        }),
+      ]) {
+        expect(
+          () => parse(<Map<String, dynamic>>[
+            ...plan.commands.map((command) => command.toJson()),
+            unavailable,
+          ], consumers: aiV3RuntimeResourceRefConsumerTypes),
+          throwsA(isA<AiV3ContractException>()),
+        );
+      }
+    });
+
+    test('typed glue rejects malformed, duplicate, and wrong-kind sources', () {
+      final invalidSources = <List<Map<String, dynamic>>>[
+        <Map<String, dynamic>>[
+          <String, dynamic>{'clip_ref': ref('place', 'audio_clip')},
+        ],
+        <Map<String, dynamic>>[
+          <String, dynamic>{'clip_ref': ref('place', 'audio_clip')},
+          <String, dynamic>{'clip_ref': ref('place', 'audio_clip')},
+        ],
+        <Map<String, dynamic>>[
+          <String, dynamic>{'clip_ref': ref('midi', 'midi_clip')},
+          <String, dynamic>{'clip_id': 'audio-clip'},
+        ],
+      ];
+      for (final sources in invalidSources) {
+        expect(
+          () => parse(<Map<String, dynamic>>[
+            _command('place', 'sample.place', <String, dynamic>{
+              'destination': <String, dynamic>{'row_id': 100},
+              'placements': <Map<String, dynamic>>[
+                <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+              ],
+            }),
+            _command('midi', 'midi.create_clip', <String, dynamic>{
+              'destination': <String, dynamic>{'row_id': 200},
+              'instrument_id': 'piano',
+          'start_beat': 0,
+          'length_beats': 4,
+          'notes': <Map<String, dynamic>>[_note(60, 0, 1)],
+        }),
+            _command('glue', 'clip.glue', <String, dynamic>{
+              'sources': sources,
+              'label': null,
+            }),
+          ], consumers: aiV3RuntimeResourceRefConsumerTypes),
+          throwsA(isA<AiV3ContractException>()),
+        );
+      }
+    });
+
+    test('prepares generated audio conversion with deferred MIDI notes', () {
+      final contextData = Map<String, dynamic>.from(
+        jsonDecode(jsonEncode(_contextForStemSeparation().data)) as Map,
+      );
+      contextData['runtime_capabilities'] = <String>[
+        'daw.stem_separate',
+        'daw.midi_compose.audio_to_midi',
+      ];
+      final context = AiV3CoreContext(
+        profile: AiV3ContextProfile.essential,
+        stateDigest: 'state-1',
+        data: contextData,
+      );
+      final plan = parse(<Map<String, dynamic>>[
+        _command('separate', 'clip.separate_stems', <String, dynamic>{
+          'clip_id': 'audio-clip',
+        }),
+        _command('convert', 'clip.convert_to_midi', <String, dynamic>{
+          'clip_ref': ref('separate', 'instrumental_clip'),
+          'instrument_id': 'piano',
+        }),
+        _command('transpose', 'midi.transpose', <String, dynamic>{
+          'clip_ref': ref('convert', 'midi_clip'),
+          'semitones': 2,
+        }),
+        _command('append', 'midi.append_notes', <String, dynamic>{
+          'clip_ref': ref('convert', 'midi_clip'),
+          'notes': <Map<String, dynamic>>[_note(72, 0, 0.5)],
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: context,
+      );
+      expect(prepared.actions.map((action) => action.type), <String>[
+        'v3_clip_separate_stems',
+        'v3_clip_convert_to_midi',
+        'midi_compose',
+        'midi_compose',
+      ]);
+      expect(
+        (prepared.actions[1].data['target'] as Map)['resource_ref'],
+        ref('separate', 'instrumental_clip'),
+      );
+      expect(prepared.actions[2].data['runtime_authoritative_midi'], isTrue);
+      expect(prepared.actions[2].data.containsKey('expected_notes'), isFalse);
+      expect(prepared.actions[3].data['runtime_authoritative_midi'], isTrue);
+      expect(
+        prepared.actions[3].data['deferred_midi_command'],
+        'midi.append_notes',
+      );
+      expect(prepared.actions[3].data.containsKey('notes'), isFalse);
+    });
+
+    test('prepares generated audio follow-ups through the shared registry', () {
+      final contextData = Map<String, dynamic>.from(
+        jsonDecode(jsonEncode(_contextForStemSeparation().data)) as Map,
+      );
+      contextData['runtime_capabilities'] = <String>['daw.stem_separate'];
+      final context = AiV3CoreContext(
+        profile: AiV3ContextProfile.essential,
+        stateDigest: 'state-1',
+        data: contextData,
+      );
+      final plan = parse(<Map<String, dynamic>>[
+        _command('place', 'sample.place', <String, dynamic>{
+          'destination': <String, dynamic>{'row_id': 100},
+          'placements': <Map<String, dynamic>>[
+            <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+          ],
+        }),
+        _command('replace', 'sample.replace', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+          'asset_id': 'kick-1',
+        }),
+        _command('trim', 'clip.trim_silence', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+          'edges': 'both',
+          'padding_ms': 8,
+        }),
+        _command('align', 'clip.align_first_sound', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+          'destination': <String, dynamic>{'kind': 'nearest_beat'},
+        }),
+        _command('tempo', 'clip.align_tempo_to_project', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+          'mode': 'preserve_pitch',
+        }),
+        _command('separate', 'clip.separate_stems', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+        }),
+        _command('pitch', 'clip.adjust_pitch_semitones', <String, dynamic>{
+          'clip_ref': ref('separate', 'instrumental_clip'),
+          'delta_semitones': 1,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: context,
+      );
+      expect(prepared.actions.map((action) => action.type), <String>[
+        'sample_insert',
+        'v3_sample_replace',
+        'v3_clip_audio_analysis',
+        'v3_clip_audio_analysis',
+        'v3_clip_audio_analysis',
+        'v3_clip_separate_stems',
+        'clip_edit',
+      ]);
+      for (final index in <int>[1, 2, 3, 4, 5]) {
+        final action = prepared.actions[index];
+        expect(
+          (action.data['target'] as Map)['resource_ref'],
+          ref('place', 'audio_clip'),
+        );
+        expect(
+          action.data['resource_consumer_type'],
+          plan.commands[index].type,
+        );
+      }
+    });
+
+    test('referenced project-tempo detection is terminal and audio-only', () {
+      final terminalPlan = parse(<Map<String, dynamic>>[
+        _command('place', 'sample.place', <String, dynamic>{
+          'destination': <String, dynamic>{'row_id': 100},
+          'placements': <Map<String, dynamic>>[
+            <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+          ],
+        }),
+        _command('tempo', 'project.set_tempo_from_clip', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+          'mode': 'repitch',
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: terminalPlan,
+        context: _context(),
+      );
+      expect(prepared.actions.last.type, 'v3_clip_audio_analysis');
+      expect(prepared.actions.last.data['operation'], 'set_tempo_from_clip');
+
+      expect(
+        () => parse(<Map<String, dynamic>>[
+          ...terminalPlan.commands.map((command) => command.toJson()),
+          _command('late', 'project.set_tempo', <String, dynamic>{
+            'bpm': 128,
+            'time_stretch_audio': false,
+            'preserve_pitch': true,
+          }),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes),
+        throwsA(
+          isA<AiV3ContractException>().having(
+            (error) => error.code,
+            'code',
+            'v3_runtime_tempo_command_must_be_final',
+          ),
+        ),
+      );
+      expect(
+        () => parse(<Map<String, dynamic>>[
+          _command('midi', 'midi.create_clip', <String, dynamic>{
+            'destination': <String, dynamic>{'row_id': 200},
+            'instrument_id': 'piano',
+            'start_beat': 0,
+            'length_beats': 4,
+            'notes': <Map<String, dynamic>>[_note(60, 0, 1)],
+          }),
+          _command('bad', 'clip.trim_silence', <String, dynamic>{
+            'clip_ref': ref('midi', 'midi_clip'),
+            'edges': 'both',
+            'padding_ms': 0,
+          }),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes),
+        throwsA(isA<AiV3ContractException>()),
+      );
+    });
+
+    test('composes conversion through duplicate and split producers', () {
+      final contextData = Map<String, dynamic>.from(
+        jsonDecode(jsonEncode(_contextForStemSeparation().data)) as Map,
+      );
+      contextData['runtime_capabilities'] = <String>[
+        'daw.stem_separate',
+        'daw.midi_compose.audio_to_midi',
+      ];
+      final plan = parse(<Map<String, dynamic>>[
+        _command('separate', 'clip.separate_stems', <String, dynamic>{
+          'clip_id': 'audio-clip',
+        }),
+        _command('convert', 'clip.convert_to_midi', <String, dynamic>{
+          'clip_ref': ref('separate', 'instrumental_clip'),
+          'instrument_id': 'piano',
+        }),
+        _command('duplicate', 'clip.duplicate_to', <String, dynamic>{
+          'clip_ref': ref('convert', 'midi_clip'),
+          'destination_row_id': null,
+          'start_beat': 8,
+        }),
+        _command('split', 'clip.split_at', <String, dynamic>{
+          'clip_ref': ref('duplicate', 'copy_clip'),
+          'at_beat': 10,
+        }),
+        _command('transpose', 'midi.transpose', <String, dynamic>{
+          'clip_ref': ref('split', 'right_clip'),
+          'semitones': 12,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: AiV3CoreContext(
+          profile: AiV3ContextProfile.essential,
+          stateDigest: 'state-1',
+          data: contextData,
+        ),
+      );
+      expect(prepared.actions, hasLength(5));
+      expect(
+        (prepared.actions[4].data['target'] as Map)['resource_ref'],
+        ref('split', 'right_clip'),
+      );
+      expect(prepared.actions[4].data['runtime_authoritative_midi'], isTrue);
+      expect(prepared.actions[4].data.containsKey('expected_notes'), isFalse);
+    });
+
+    test('carries unknown sample and edited MIDI bounds to runtime', () {
+      final contextData = Map<String, dynamic>.from(
+        jsonDecode(jsonEncode(_context().data)) as Map,
+      );
+      contextData['runtime_capabilities'] = <String>[
+        'daw.midi_compose.audio_to_midi',
+      ];
+      final plan = parse(<Map<String, dynamic>>[
+        _command('place', 'sample.place', <String, dynamic>{
+          'destination': <String, dynamic>{'row_id': 100},
+          'placements': <Map<String, dynamic>>[
+            <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+          ],
+        }),
+        _command('convert', 'clip.convert_to_midi', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+          'instrument_id': 'piano',
+        }),
+        _command('append', 'midi.append_notes', <String, dynamic>{
+          'clip_ref': ref('convert', 'midi_clip'),
+          'notes': <Map<String, dynamic>>[_note(72, 0, 1)],
+        }),
+        _command('duplicate', 'clip.duplicate_to', <String, dynamic>{
+          'clip_ref': ref('convert', 'midi_clip'),
+          'destination_row_id': null,
+          'start_beat': 8,
+        }),
+        _command('split', 'clip.split_at', <String, dynamic>{
+          'clip_ref': ref('duplicate', 'copy_clip'),
+          'at_beat': 10,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: AiV3CoreContext(
+          profile: AiV3ContextProfile.essential,
+          stateDigest: 'state-1',
+          data: contextData,
+        ),
+      );
+
+      expect(prepared.actions, hasLength(5));
+      expect(prepared.actions[1].data.containsKey('duration_ms'), isFalse);
+      expect(prepared.actions[2].data['runtime_authoritative_midi'], isTrue);
+      expect(
+        prepared.actions[2].data['deferred_midi_command'],
+        'midi.append_notes',
+      );
+      expect(
+        prepared.actions[3].data.containsKey('predicted_input_end_ms'),
+        isFalse,
+      );
+      expect(
+        prepared.actions[4].data.containsKey('predicted_input_end_ms'),
+        isFalse,
+      );
+    });
+
+    test('deleting converted MIDI row retires its generated clip', () {
+      expect(
+        () => parse(<Map<String, dynamic>>[
+          _command('convert', 'clip.convert_to_midi', <String, dynamic>{
+            'clip_id': 'audio-clip',
+            'instrument_id': 'piano',
+          }),
+          _command('delete-row', 'row.delete', <String, dynamic>{
+            'row_ref': ref('convert', 'midi_row'),
+          }),
+          _command('transpose', 'midi.transpose', <String, dynamic>{
+            'clip_ref': ref('convert', 'midi_clip'),
+            'semitones': 2,
+          }),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes),
+        throwsA(isA<AiV3ContractException>()),
+      );
+    });
+
+    test('accepts audio, MIDI, row, and independent dependency chains', () {
+      final stems = parse(<Map<String, dynamic>>[
+        _command('tempo', 'project.set_tempo', <String, dynamic>{
+          'bpm': 110,
+          'time_stretch_audio': false,
+          'preserve_pitch': true,
+        }),
+        _command('separate', 'clip.separate_stems', <String, dynamic>{
+          'clip_id': 'source',
+        }),
+        _command('pitch', 'clip.adjust_pitch_semitones', <String, dynamic>{
+          'clip_ref': ref('separate', 'instrumental_clip'),
+          'delta_semitones': -1,
+        }),
+      ]);
+      final midi = parse(<Map<String, dynamic>>[
+        row('create-row', 'midi'),
+        _command('create-clip', 'midi.create_clip', <String, dynamic>{
+          'destination': <String, dynamic>{'row_ref': ref('create-row', 'row')},
+          'start_beat': 0,
+          'length_beats': 4,
+          'notes': <Map<String, dynamic>>[_note(60, 0, 1)],
+        }),
+        _command('transpose', 'midi.transpose', <String, dynamic>{
+          'clip_ref': ref('create-clip', 'midi_clip'),
+          'semitones': 1,
+        }),
+      ]);
+      final sample = parse(<Map<String, dynamic>>[
+        row('audio-row', 'audio'),
+        _command('place', 'sample.place', <String, dynamic>{
+          'destination': <String, dynamic>{'row_ref': ref('audio-row', 'row')},
+          'placements': <Map<String, dynamic>>[
+            <String, dynamic>{'asset_id': 'kick', 'start_beat': 0},
+          ],
+        }),
+      ]);
+      expect(stems.commands, hasLength(3));
+      expect(midi.commands, hasLength(3));
+      expect(sample.commands, hasLength(2));
+    });
+
+    test(
+      'canonicalizes safe aliases through identity-preserving consumers',
+      () {
+        final audio = parse(<Map<String, dynamic>>[
+          row('audio-row', 'audio'),
+          _command('place', 'sample.place', <String, dynamic>{
+            'destination': <String, dynamic>{
+              'row_ref': ref('audio-row', 'row'),
+            },
+            'placements': <Map<String, dynamic>>[
+              <String, dynamic>{'asset_id': 'loop', 'start_beat': 0},
+            ],
+          }),
+          _command('move', 'clip.move_by_beats', <String, dynamic>{
+            'clip_ref': ref('place', 'audio_clip'),
+            'delta_beats': 2,
+          }),
+          _command('trim', 'clip.trim_to_range', <String, dynamic>{
+            'clip_ref': ref('move', 'audio_clip'),
+            'start_beat': 2,
+            'end_beat': 6,
+          }),
+          _command('pitch', 'clip.adjust_pitch_semitones', <String, dynamic>{
+            'clip_ref': ref('trim', 'audio_clip'),
+            'delta_semitones': -1,
+          }),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+        expect(
+          audio.commands[3].arguments['clip_ref'],
+          ref('place', 'audio_clip'),
+        );
+        expect(
+          audio.commands[4].arguments['clip_ref'],
+          ref('place', 'audio_clip'),
+        );
+
+        final generatedRow = parse(<Map<String, dynamic>>[
+          row('create-row', 'audio'),
+          _command('rename', 'row.rename', <String, dynamic>{
+            'row_ref': ref('create-row', 'row'),
+            'new_name': 'Percussion',
+          }),
+          _command('mute', 'row.set_muted', <String, dynamic>{
+            'row_ref': ref('rename', 'row'),
+            'muted': true,
+          }),
+          _command('place', 'sample.place', <String, dynamic>{
+            'destination': const <String, dynamic>{
+              'row_ref': <String, dynamic>{
+                'command_id': 'rename',
+                'output': 'row',
+              },
+            },
+            'placements': <Map<String, dynamic>>[
+              <String, dynamic>{'asset_id': 'kick', 'start_beat': 0},
+            ],
+          }),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+        expect(
+          generatedRow.commands[2].arguments['row_ref'],
+          ref('create-row', 'row'),
+        );
+        expect(
+          (generatedRow.commands.last.arguments['destination']
+              as Map)['row_ref'],
+          ref('create-row', 'row'),
+        );
+
+        final midi = parse(<Map<String, dynamic>>[
+          row('midi-row', 'midi'),
+          _command('create-midi', 'midi.create_clip', <String, dynamic>{
+            'destination': <String, dynamic>{'row_ref': ref('midi-row', 'row')},
+            'start_beat': 0,
+            'length_beats': 4,
+            'notes': <Map<String, dynamic>>[_note(60, 0, 1)],
+          }),
+          _command('transpose', 'midi.transpose', <String, dynamic>{
+            'clip_ref': ref('create-midi', 'midi_clip'),
+            'semitones': 2,
+          }),
+          _command('append', 'midi.append_notes', <String, dynamic>{
+            'clip_ref': ref('transpose', 'midi_clip'),
+            'notes': <Map<String, dynamic>>[_note(64, 0, 1)],
+          }),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+        expect(
+          midi.commands.last.arguments['clip_ref'],
+          ref('create-midi', 'midi_clip'),
+        );
+      },
+    );
+
+    test('does not canonicalize unsafe or ambiguous resource aliases', () {
+      final invalidPlans = <List<Map<String, dynamic>>>[
+        <Map<String, dynamic>>[
+          _command('move-stable', 'clip.move_by_beats', <String, dynamic>{
+            'clip_id': 'audio-clip',
+            'delta_beats': 1,
+          }),
+          _command('pitch', 'clip.adjust_pitch_semitones', <String, dynamic>{
+            'clip_ref': ref('move-stable', 'audio_clip'),
+            'delta_semitones': 1,
+          }),
+        ],
+        <Map<String, dynamic>>[
+          _command('place', 'sample.place', <String, dynamic>{
+            'destination': <String, dynamic>{'row_id': 100},
+            'placements': <Map<String, dynamic>>[
+              <String, dynamic>{'asset_id': 'loop', 'start_beat': 0},
+            ],
+          }),
+          _command('move', 'clip.move_by_beats', <String, dynamic>{
+            'clip_ref': ref('place', 'audio_clip'),
+            'delta_beats': 1,
+          }),
+          _command('pitch', 'clip.adjust_pitch_semitones', <String, dynamic>{
+            'clip_ref': ref('move', 'wrong_output'),
+            'delta_semitones': 1,
+          }),
+        ],
+        <Map<String, dynamic>>[
+          _command('place', 'sample.place', <String, dynamic>{
+            'destination': <String, dynamic>{'row_id': 100},
+            'placements': <Map<String, dynamic>>[
+              <String, dynamic>{'asset_id': 'loop', 'start_beat': 0},
+            ],
+          }),
+          _command('delete', 'clip.delete', <String, dynamic>{
+            'clip_ref': ref('place', 'audio_clip'),
+          }),
+          _command('move', 'clip.move_by_beats', <String, dynamic>{
+            'clip_ref': ref('delete', 'audio_clip'),
+            'delta_beats': 1,
+          }),
+        ],
+      ];
+      for (final commands in invalidPlans) {
+        expect(
+          () => parse(commands, consumers: aiV3RuntimeResourceRefConsumerTypes),
+          throwsA(
+            isA<AiV3ContractException>().having(
+              (error) => error.code,
+              'code',
+              'v3_resource_ref_unavailable',
+            ),
+          ),
+        );
+      }
+    });
+
+    test('canonical MIDI ordering is semantic and preserves duplicates', () {
+      final ordered = aiV3CanonicalMidiNotes(<Map<String, dynamic>>[
+        _note(67, 2, 1),
+        _note(64, 0, 2),
+        _note(60, 0, 1),
+        _note(60, 0, 1),
+      ]);
+      expect(ordered.map((note) => note['pitch']), <int>[60, 60, 64, 67]);
+      expect(ordered, hasLength(4));
+    });
+
+    test(
+      'prepares a generated audio row through configuration and placement',
+      () {
+        final plan = parse(<Map<String, dynamic>>[
+          row('create-row', 'audio'),
+          _command('rename', 'row.rename', <String, dynamic>{
+            'row_ref': ref('create-row', 'row'),
+            'new_name': 'Percussion',
+          }),
+          _command('gain', 'row.adjust_gain_db', <String, dynamic>{
+            'row_ref': ref('create-row', 'row'),
+            'delta_db': -3,
+          }),
+          _command('pan', 'row.set_pan', <String, dynamic>{
+            'row_ref': ref('create-row', 'row'),
+            'pan_signed': 0.25,
+          }),
+          _command('mute', 'row.set_muted', <String, dynamic>{
+            'row_ref': ref('create-row', 'row'),
+            'muted': true,
+          }),
+          _command('solo', 'row.set_soloed', <String, dynamic>{
+            'row_ref': ref('create-row', 'row'),
+            'soloed': true,
+          }),
+          _command('place', 'sample.place', <String, dynamic>{
+            'destination': <String, dynamic>{
+              'row_ref': ref('create-row', 'row'),
+            },
+            'placements': <Map<String, dynamic>>[
+              <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 4},
+            ],
+          }),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+        final prepared = const AiV3CommandPreparer().prepare(
+          plan: plan,
+          context: _context(),
+        );
+        expect(prepared.actions.map((action) => action.type), <String>[
+          'row_create',
+          'row_rename',
+          'row_mix',
+          'row_mix',
+          'row_mute',
+          'row_solo',
+          'sample_insert',
+        ]);
+        expect(prepared.actions.first.data['command_id'], 'create-row');
+        expect(prepared.actions[2].data['expected_gain_db'], -3.0);
+        expect(prepared.actions[3].data['expected_pan_signed'], 0.25);
+        expect(
+          (prepared.actions.last.data['target'] as Map)['resource_ref'],
+          ref('create-row', 'row'),
+        );
+        expect(
+          jsonEncode(prepared.actions),
+          isNot(anyOf(contains('label_contains'), contains('row_index":null'))),
+        );
+      },
+    );
+
+    test('prepared references conform to the consumer registry', () {
+      final plan = parse(<Map<String, dynamic>>[
+        row('create-row', 'audio'),
+        _command('mute', 'row.set_muted', <String, dynamic>{
+          'row_ref': ref('create-row', 'row'),
+          'muted': true,
+        }),
+        _command('unmute', 'row.set_muted', <String, dynamic>{
+          'row_ref': ref('create-row', 'row'),
+          'muted': false,
+        }),
+        _command('solo', 'row.set_soloed', <String, dynamic>{
+          'row_ref': ref('create-row', 'row'),
+          'soloed': true,
+        }),
+        _command('unsolo', 'row.set_soloed', <String, dynamic>{
+          'row_ref': ref('create-row', 'row'),
+          'soloed': false,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+      final referencedActions = prepared.actions
+          .where((action) => action.data['resource_consumer_type'] is String)
+          .toList(growable: false);
+      expect(referencedActions, hasLength(4));
+      for (final action in referencedActions) {
+        final consumerType = action.data['resource_consumer_type'] as String;
+        final spec = aiV3ResourceConsumerSpecs[consumerType];
+        expect(spec, isNotNull);
+        expect(action.type, spec!.actionType);
+        expect(action.data['operation'], spec.operation);
+      }
+      expect(
+        referencedActions.map((action) => action.data['muted']),
+        containsAll(<bool>[true, false]),
+      );
+      expect(
+        referencedActions.map((action) => action.data['soloed']),
+        containsAll(<bool>[true, false]),
+      );
+    });
+
+    test('generated rows support effects and built-in automation targets', () {
+      final plan = parse(<Map<String, dynamic>>[
+        row('create-row', 'audio'),
+        _command('tempo', 'project.set_tempo', <String, dynamic>{
+          'bpm': 60,
+          'time_stretch_audio': false,
+          'preserve_pitch': true,
+        }),
+        _command('effect', 'effect.ensure_configured', <String, dynamic>{
+          'row_ref': ref('create-row', 'row'),
+          'effect_id': 'Reverb',
+          'parameters': const <Map<String, dynamic>>[],
+        }),
+        _command('fade', 'automation.gain_fade', <String, dynamic>{
+          'row_ref': ref('create-row', 'row'),
+          'start_beat': 0,
+          'end_beat': 4,
+          'from_gain_db': -12,
+          'to_level': 'current',
+        }),
+        _command('pan', 'automation.set_points', <String, dynamic>{
+          'row_ref': ref('create-row', 'row'),
+          'automation_target_id': 'mix:pan',
+          'points': <Map<String, dynamic>>[
+            <String, dynamic>{'beat': 0, 'value_normalized': 0.25},
+            <String, dynamic>{'beat': 2, 'value_normalized': 0.75},
+          ],
+        }),
+        _command('clear', 'automation.clear', <String, dynamic>{
+          'row_ref': ref('create-row', 'row'),
+          'automation_target_id': 'mix:gain',
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+      final referenced = prepared.actions
+          .where((action) => action.data['resource_consumer_type'] != null)
+          .toList(growable: false);
+      expect(
+        referenced.map((action) => action.data['resource_consumer_type']),
+        <String>[
+          'effect.ensure_configured',
+          'automation.gain_fade',
+          'automation.set_points',
+          'automation.clear',
+        ],
+      );
+      for (final action in referenced) {
+        final consumer = action.data['resource_consumer_type'] as String;
+        final spec = aiV3ResourceConsumerSpecs[consumer]!;
+        expect(action.type, spec.actionType);
+        expect(action.data['operation'], spec.operation);
+        expect(
+          (action.data['target'] as Map)['resource_ref'],
+          ref('create-row', 'row'),
+        );
+      }
+      expect(referenced[1].data['points'], <Map<String, dynamic>>[
+        <String, dynamic>{
+          'time_ms': 0.0,
+          'value': closeTo(0.251188643150958, 0.0000001),
+        },
+        <String, dynamic>{'time_ms': 4000.0, 'value': 1.0},
+      ]);
+      expect(referenced[2].data['points'], <Map<String, dynamic>>[
+        <String, dynamic>{'time_ms': 0.0, 'value': 0.25},
+        <String, dynamic>{'time_ms': 2000.0, 'value': 0.75},
+      ]);
+      expect(
+        prepared.receipts.map((receipt) => receipt['verified_label']),
+        <String>[
+          'Created audio row Audio',
+          'Set project tempo to 60 BPM',
+          'Added/configured Reverb on Audio',
+          'Added gain fade on Audio',
+          'Set 2 automation points on Audio',
+          'Cleared automation on Audio',
+        ],
+      );
+      expect(
+        prepared.receipts.map((receipt) => receipt['verified_l10n_key']),
+        <String>[
+          'Created audio row {name}.',
+          'Set project tempo to {value} BPM.',
+          'Added/configured {effect} on {target}.',
+          'Added a gain fade on {target}.',
+          'Set {count} automation points on {target}.',
+          'Cleared automation on {target}.',
+        ],
+      );
+      expect(
+        prepared.receipts[2]['verified_l10n_args'],
+        <String, String>{'effect': 'Reverb', 'target': 'Audio'},
+      );
+    });
+
+    test('generated rows form a typed group that can be collapsed', () {
+      final plan = parse(<Map<String, dynamic>>[
+        row('audio-row', 'audio'),
+        _command('midi-row', 'row.create', <String, dynamic>{
+          'name': 'Synth',
+          'lane': <String, dynamic>{'kind': 'midi', 'instrument_id': 'piano'},
+          'position': <String, dynamic>{'kind': 'end'},
+        }),
+        _command('group', 'group.create', <String, dynamic>{
+          'members': <Map<String, dynamic>>[
+            <String, dynamic>{'row_ref': ref('audio-row', 'row')},
+            <String, dynamic>{'row_ref': ref('midi-row', 'row')},
+          ],
+          'name': 'Band',
+        }),
+        _command('collapse', 'group.set_collapsed', <String, dynamic>{
+          'group_ref': ref('group', 'group'),
+          'collapsed': true,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+      expect(prepared.actions.map((action) => action.type), <String>[
+        'row_create',
+        'row_create',
+        'v3_group_edit',
+        'v3_group_edit',
+      ]);
+      expect(prepared.actions[0].data['command_id'], 'audio-row');
+      expect(prepared.actions[1].data['command_id'], 'midi-row');
+      final create = prepared.actions[2].data;
+      expect(create['command_id'], 'group');
+      expect(create['member_targets'], hasLength(2));
+      expect(create['row_ids'], isNull);
+      final collapse = prepared.actions[3].data;
+      expect(collapse['resource_consumer_type'], 'group.set_collapsed');
+      expect(
+        (collapse['target'] as Map)['resource_ref'],
+        ref('group', 'group'),
+      );
+    });
+
+    test('group-only row references retain every producer command id', () {
+      final plan = parse(<Map<String, dynamic>>[
+        row('first', 'audio'),
+        row('second', 'audio'),
+        row('third', 'audio'),
+        _command('group', 'group.create', <String, dynamic>{
+          'members': <Map<String, dynamic>>[
+            <String, dynamic>{'row_ref': ref('first', 'row')},
+            <String, dynamic>{'row_ref': ref('second', 'row')},
+            <String, dynamic>{'row_ref': ref('third', 'row')},
+          ],
+          'name': 'Layers',
+        }),
+        _command('remove', 'group.remove_row', <String, dynamic>{
+          'group_ref': ref('group', 'group'),
+          'row_ref': ref('second', 'row'),
+        }),
+        _command('collapse', 'group.set_collapsed', <String, dynamic>{
+          'group_ref': ref('group', 'group'),
+          'collapsed': true,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+      expect(
+        prepared.actions.take(3).map((action) => action.data['command_id']),
+        <String>['first', 'second', 'third'],
+      );
+    });
+
+    test('stable and generated rows can form one typed group', () {
+      final plan = parse(<Map<String, dynamic>>[
+        row('generated-row', 'audio'),
+        _command('group', 'group.create', <String, dynamic>{
+          'members': <Map<String, dynamic>>[
+            <String, dynamic>{'row_id': 100},
+            <String, dynamic>{'row_ref': ref('generated-row', 'row')},
+          ],
+          'name': 'Mixed',
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+      final create = prepared.actions.last.data;
+      final targets = (create['member_targets'] as List).cast<Map>();
+      expect(targets, hasLength(2));
+      expect(targets.first['row_id'], 100);
+      expect(targets.last['resource_ref'], ref('generated-row', 'row'));
+    });
+
+    test('dissolved generated groups become unavailable', () {
+      expect(
+        () => parse(<Map<String, dynamic>>[
+          row('first', 'audio'),
+          row('second', 'audio'),
+          _command('group', 'group.create', <String, dynamic>{
+            'members': <Map<String, dynamic>>[
+              <String, dynamic>{'row_ref': ref('first', 'row')},
+              <String, dynamic>{'row_ref': ref('second', 'row')},
+            ],
+            'name': 'Pair',
+          }),
+          _command('remove', 'group.remove_row', <String, dynamic>{
+            'group_ref': ref('group', 'group'),
+            'row_ref': ref('first', 'row'),
+          }),
+          _command('collapse', 'group.set_collapsed', <String, dynamic>{
+            'group_ref': ref('group', 'group'),
+            'collapsed': true,
+          }),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes),
+        throwsA(
+          isA<AiV3ContractException>().having(
+            (error) => error.code,
+            'code',
+            'v3_resource_ref_unavailable',
+          ),
+        ),
+      );
+    });
+
+    test('deleting a member retires a two-row generated group', () {
+      expect(
+        () => parse(<Map<String, dynamic>>[
+          row('first', 'audio'),
+          row('second', 'audio'),
+          _command('group', 'group.create', <String, dynamic>{
+            'members': <Map<String, dynamic>>[
+              <String, dynamic>{'row_ref': ref('first', 'row')},
+              <String, dynamic>{'row_ref': ref('second', 'row')},
+            ],
+            'name': 'Pair',
+          }),
+          _command('delete', 'row.delete', <String, dynamic>{
+            'row_ref': ref('first', 'row'),
+          }),
+          _command('collapse', 'group.set_collapsed', <String, dynamic>{
+            'group_ref': ref('group', 'group'),
+            'collapsed': true,
+          }),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes),
+        throwsA(
+          isA<AiV3ContractException>().having(
+            (error) => error.code,
+            'code',
+            'v3_resource_ref_unavailable',
+          ),
+        ),
+      );
+    });
+
+    test('generated rows reject non-built-in automation targets', () {
+      final plan = parse(<Map<String, dynamic>>[
+        row('create-row', 'audio'),
+        _command('effect-lane', 'automation.set_points', <String, dynamic>{
+          'row_ref': ref('create-row', 'row'),
+          'automation_target_id': 'fx:reverb:mix',
+          'points': <Map<String, dynamic>>[
+            <String, dynamic>{'beat': 0, 'value_normalized': 0.5},
+          ],
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      expect(
+        () => const AiV3CommandPreparer().prepare(
+          plan: plan,
+          context: _context(),
+        ),
+        throwsA(
+          isA<AiV3PreparationException>().having(
+            (error) => error.code,
+            'code',
+            'v3_automation_target_unknown',
+          ),
+        ),
+      );
+    });
+
+    test('generated stem rows use the same compatible row consumer path', () {
+      final plan = parse(<Map<String, dynamic>>[
+        _command('stems', 'clip.separate_stems', <String, dynamic>{
+          'clip_id': 'audio-clip',
+        }),
+        _command('rename', 'row.rename', <String, dynamic>{
+          'row_ref': ref('stems', 'vocals_row'),
+          'new_name': 'Lead Vocal',
+        }),
+        _command('gain', 'row.set_gain_db', <String, dynamic>{
+          'row_ref': ref('stems', 'instrumental_row'),
+          'gain_db': -2,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _contextForStemSeparation(),
+      );
+      expect(prepared.actions.map((action) => action.type), <String>[
+        'v3_clip_separate_stems',
+        'row_rename',
+        'row_mix',
+      ]);
+      expect(
+        (prepared.actions[1].data['target'] as Map)['resource_ref'],
+        ref('stems', 'vocals_row'),
+      );
+      expect(prepared.actions[2].data['expected_gain_db'], -2.0);
+    });
+
+    test('generated stem rows can form a typed group', () {
+      final plan = parse(<Map<String, dynamic>>[
+        _command('stems', 'clip.separate_stems', <String, dynamic>{
+          'clip_id': 'audio-clip',
+        }),
+        _command('group', 'group.create', <String, dynamic>{
+          'members': <Map<String, dynamic>>[
+            <String, dynamic>{'row_ref': ref('stems', 'vocals_row')},
+            <String, dynamic>{'row_ref': ref('stems', 'instrumental_row')},
+          ],
+          'name': 'Stems',
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _contextForStemSeparation(),
+      );
+      expect(prepared.actions.map((action) => action.type), <String>[
+        'v3_clip_separate_stems',
+        'v3_group_edit',
+      ]);
+      expect(prepared.actions.last.data['member_targets'], hasLength(2));
+    });
+
+    test('converted MIDI rows enter the generated row order for grouping', () {
+      final plan = parse(<Map<String, dynamic>>[
+        _command('convert', 'clip.convert_to_midi', <String, dynamic>{
+          'clip_id': 'audio-clip',
+          'instrument_id': 'piano',
+        }),
+        _command('group', 'group.create', <String, dynamic>{
+          'members': <Map<String, dynamic>>[
+            <String, dynamic>{'row_id': 100},
+            <String, dynamic>{'row_ref': ref('convert', 'midi_row')},
+          ],
+          'name': 'Audio and MIDI',
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _contextForAudioToMidi(),
+      );
+      expect(prepared.actions.map((action) => action.type), <String>[
+        'v3_clip_convert_to_midi',
+        'v3_group_edit',
+      ]);
+      expect(prepared.actions.last.data['member_targets'], hasLength(2));
+    });
+
+    test('generated stem row deletion bypasses only the typed target', () {
+      final typedPlan = parse(<Map<String, dynamic>>[
+        _command('stems', 'clip.separate_stems', <String, dynamic>{
+          'clip_id': 'audio-clip',
+        }),
+        _command('delete-vocals', 'row.delete', <String, dynamic>{
+          'row_ref': ref('stems', 'vocals_row'),
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: typedPlan,
+        context: _contextForStemSeparation(),
+      );
+      expect(prepared.actions.map((action) => action.type), <String>[
+        'v3_clip_separate_stems',
+        'row_delete',
+      ]);
+      expect(
+        (prepared.actions.last.data['target'] as Map)['resource_ref'],
+        ref('stems', 'vocals_row'),
+      );
+
+      final stablePlan = parse(<Map<String, dynamic>>[
+        _command('stems', 'clip.separate_stems', <String, dynamic>{
+          'clip_id': 'audio-clip',
+        }),
+        _command('delete-existing', 'row.delete', <String, dynamic>{
+          'row_id': 10,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+      expect(
+        () => const AiV3CommandPreparer().prepare(
+          plan: stablePlan,
+          context: _contextForStemSeparation(),
+        ),
+        throwsA(
+          isA<AiV3PreparationException>().having(
+            (error) => error.code,
+            'code',
+            'v3_row_id_unknown',
+          ),
+        ),
+      );
+    });
+
+    test('row deletion retires the row and every generated child resource', () {
+      final prefix = <Map<String, dynamic>>[
+        row('create-row', 'audio'),
+        _command('place', 'sample.place', <String, dynamic>{
+          'destination': <String, dynamic>{'row_ref': ref('create-row', 'row')},
+          'placements': <Map<String, dynamic>>[
+            <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+          ],
+        }),
+        _command('delete-row', 'row.delete', <String, dynamic>{
+          'row_ref': ref('create-row', 'row'),
+        }),
+      ];
+      for (final later in <Map<String, dynamic>>[
+        _command('rename-late', 'row.rename', <String, dynamic>{
+          'row_ref': ref('create-row', 'row'),
+          'new_name': 'Unavailable',
+        }),
+        _command('move-child', 'clip.move_by_beats', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+          'delta_beats': 1,
+        }),
+      ]) {
+        expect(
+          () => parse(<Map<String, dynamic>>[
+            ...prefix,
+            later,
+          ], consumers: aiV3RuntimeResourceRefConsumerTypes),
+          throwsA(isA<AiV3ContractException>()),
+        );
+      }
+    });
+
+    test('stable row deletion retires generated clips placed on that row', () {
+      expect(
+        () => parse(<Map<String, dynamic>>[
+          _command('place', 'sample.place', <String, dynamic>{
+            'destination': <String, dynamic>{'row_id': 100},
+            'placements': <Map<String, dynamic>>[
+              <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+            ],
+          }),
+          _command('delete-row', 'row.delete', <String, dynamic>{
+            'row_id': 100,
+          }),
+          _command('move-child', 'clip.move_by_beats', <String, dynamic>{
+            'clip_ref': ref('place', 'audio_clip'),
+            'delta_beats': 1,
+          }),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes),
+        throwsA(
+          isA<AiV3ContractException>().having(
+            (error) => error.code,
+            'code',
+            'v3_resource_ref_unavailable',
+          ),
+        ),
+      );
+    });
+
+    test(
+      'copy on another row survives deletion of its generated source row',
+      () {
+        final plan = parse(<Map<String, dynamic>>[
+          row('temporary-row', 'audio'),
+          _command('place', 'sample.place', <String, dynamic>{
+            'destination': <String, dynamic>{
+              'row_ref': ref('temporary-row', 'row'),
+            },
+            'placements': <Map<String, dynamic>>[
+              <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+            ],
+          }),
+          _command('copy-away', 'clip.duplicate_to', <String, dynamic>{
+            'clip_ref': ref('place', 'audio_clip'),
+            'destination_row_id': 100,
+            'start_beat': 4,
+          }),
+          _command('delete-source-row', 'row.delete', <String, dynamic>{
+            'row_ref': ref('temporary-row', 'row'),
+          }),
+          _command(
+            'pitch-copy',
+            'clip.adjust_pitch_semitones',
+            <String, dynamic>{
+              'clip_ref': ref('copy-away', 'copy_clip'),
+              'delta_semitones': 2,
+            },
+          ),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+        final prepared = const AiV3CommandPreparer().prepare(
+          plan: plan,
+          context: _context(),
+        );
+        expect(prepared.actions.map((action) => action.type), <String>[
+          'row_create',
+          'sample_insert',
+          'clip_edit',
+          'row_delete',
+          'clip_edit',
+        ]);
+      },
+    );
+
+    test(
+      'stable row deletion retires copies explicitly placed on that row',
+      () {
+        expect(
+          () => parse(<Map<String, dynamic>>[
+            _command('copy', 'clip.duplicate_to', <String, dynamic>{
+              'clip_id': 'audio-clip',
+              'destination_row_id': 100,
+              'start_beat': 10,
+            }),
+            _command('delete-row', 'row.delete', <String, dynamic>{
+              'row_id': 100,
+            }),
+            _command('move-copy', 'clip.move_by_beats', <String, dynamic>{
+              'clip_ref': ref('copy', 'copy_clip'),
+              'delta_beats': 1,
+            }),
+          ], consumers: aiV3RuntimeResourceRefConsumerTypes),
+          throwsA(
+            isA<AiV3ContractException>().having(
+              (error) => error.code,
+              'code',
+              'v3_resource_ref_unavailable',
+            ),
+          ),
+        );
+      },
+    );
+
+    test('rejects invalid ordering, ports, types, and dual targets', () {
+      final invalidPlans = <List<Map<String, dynamic>>>[
+        <Map<String, dynamic>>[
+          _command('pitch', 'clip.set_pitch_semitones', <String, dynamic>{
+            'clip_ref': ref('separate', 'instrumental_clip'),
+            'pitch_semitones': -1,
+          }),
+          _command('separate', 'clip.separate_stems', <String, dynamic>{
+            'clip_id': 'source',
+          }),
+        ],
+        <Map<String, dynamic>>[
+          _command('separate', 'clip.separate_stems', <String, dynamic>{
+            'clip_id': 'source',
+          }),
+          _command('pitch', 'clip.set_pitch_semitones', <String, dynamic>{
+            'clip_ref': ref('separate', 'unknown'),
+            'pitch_semitones': -1,
+          }),
+        ],
+        <Map<String, dynamic>>[
+          row('audio-row', 'audio'),
+          _command('clip', 'midi.create_clip', <String, dynamic>{
+            'destination': <String, dynamic>{
+              'row_ref': ref('audio-row', 'row'),
+            },
+            'start_beat': 0,
+            'length_beats': 4,
+            'notes': <Map<String, dynamic>>[_note(60, 0, 1)],
+          }),
+        ],
+        <Map<String, dynamic>>[
+          _command('separate', 'clip.separate_stems', <String, dynamic>{
+            'clip_id': 'source',
+          }),
+          _command('pitch', 'clip.set_pitch_semitones', <String, dynamic>{
+            'clip_id': 'existing',
+            'clip_ref': ref('separate', 'instrumental_clip'),
+            'pitch_semitones': -1,
+          }),
+        ],
+      ];
+      for (final commands in invalidPlans) {
+        expect(() => parse(commands), throwsA(isA<AiV3ContractException>()));
+      }
+      expect(
+        () => parse(<Map<String, dynamic>>[
+          row('same', 'audio'),
+          row('same', 'midi'),
+        ]),
+        throwsA(isA<AiV3ContractException>()),
+      );
+    });
+
+    test(
+      'references are opt-in and runtime schema exposes supported consumers',
+      () {
+        final raw = _plan(<Map<String, dynamic>>[
+          _command('separate', 'clip.separate_stems', <String, dynamic>{
+            'clip_id': 'source',
+          }),
+          _command('pitch', 'clip.set_pitch_semitones', <String, dynamic>{
+            'clip_ref': ref('separate', 'instrumental_clip'),
+            'pitch_semitones': -1,
+          }),
+        ]);
+        expect(
+          () => AiV3Plan.fromJson(raw),
+          throwsA(isA<AiV3ContractException>()),
+        );
+        expect(
+          aiV3SubmitPlanTool(),
+          aiV3SubmitPlanTool(includeResourceRefs: false),
+        );
+        expect(jsonEncode(aiV3SubmitPlanTool()), isNot(contains('"clip_ref"')));
+
+        final schema = jsonEncode(
+          aiV3SubmitPlanTool(
+            includeCommandSemantics: true,
+            includeResourceRefs: true,
+            resourceRefCommandTypes: aiV3RuntimeResourceRefConsumerTypes,
+          ),
+        );
+        expect(schema, contains('"clip_ref"'));
+        expect(schema, contains('midi_clip'));
+        final transposeStart = schema.indexOf('"enum":["midi.transpose"]');
+        final transposeEnd = schema.indexOf('"command_id"', transposeStart + 1);
+        expect(
+          schema.substring(transposeStart, transposeEnd),
+          contains('"clip_ref"'),
+        );
+        for (final supported in <String>[
+          'midi.replace_notes',
+          'midi.append_notes',
+          'midi.chop_notes',
+          'clip.move_by_beats',
+          'clip.delete',
+          'clip.split_at',
+          'clip.duplicate_to',
+          'clip.trim_to_range',
+          'clip.set_timeline_length_beats',
+          'clip.scale_timeline_length',
+          'clip.set_source_tempo_bpm',
+          'clip.set_tempo_follow_mode',
+        ]) {
+          final commandStart = schema.indexOf('"enum":["$supported"]');
+          final nextCommand = schema.indexOf('"command_id"', commandStart + 1);
+          final variant = schema.substring(commandStart, nextCommand);
+          expect(variant, contains('"clip_ref"'));
+        }
+        expect(
+          parse(<Map<String, dynamic>>[
+            _command('separate', 'clip.separate_stems', <String, dynamic>{
+              'clip_id': 'source',
+            }),
+            _command('delete', 'clip.delete', <String, dynamic>{
+              'clip_ref': ref('separate', 'vocals_clip'),
+            }),
+          ], consumers: aiV3RuntimeResourceRefConsumerTypes).commands,
+          hasLength(2),
+        );
+      },
+    );
+
+    test('supports generated clip move and terminal delete lifecycles', () {
+      final plan = parse(<Map<String, dynamic>>[
+        _command('place', 'sample.place', <String, dynamic>{
+          'destination': <String, dynamic>{'row_id': 100},
+          'placements': <Map<String, dynamic>>[
+            <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 1},
+          ],
+        }),
+        _command('pitch', 'clip.adjust_pitch_semitones', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+          'delta_semitones': 2,
+        }),
+        _command('move', 'clip.move_by_beats', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+          'delta_beats': 2,
+        }),
+        _command('delete', 'clip.delete', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+      expect(prepared.actions.map((action) => action.type), <String>[
+        'sample_insert',
+        'clip_edit',
+        'clip_edit',
+        'clip_edit',
+      ]);
+      expect(prepared.actions.first.data['command_id'], 'place');
+      expect(prepared.actions[2].data['predicted_start_ms'], 1500.0);
+      expect(
+        (prepared.actions[2].data['target'] as Map)['resource_ref'],
+        ref('place', 'audio_clip'),
+      );
+      expect(
+        jsonEncode(prepared.actions),
+        isNot(anyOf(contains('label_contains'), contains('clip_index'))),
+      );
+    });
+
+    test('composes generated audio timing before later producers', () {
+      final plan = parse(<Map<String, dynamic>>[
+        _command('place', 'sample.place', <String, dynamic>{
+          'destination': <String, dynamic>{'row_id': 100},
+          'placements': <Map<String, dynamic>>[
+            <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+          ],
+        }),
+        _command('source-tempo', 'clip.set_source_tempo_bpm', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+          'source_tempo_bpm': 100,
+        }),
+        _command('follow', 'clip.set_tempo_follow_mode', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+          'mode': 'preserve_pitch',
+        }),
+        _command(
+          'set-length',
+          'clip.set_timeline_length_beats',
+          <String, dynamic>{
+            'clip_ref': ref('place', 'audio_clip'),
+            'length_beats': 4,
+            'preserve_pitch': true,
+          },
+        ),
+        _command('scale', 'clip.scale_timeline_length', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+          'factor': 0.5,
+          'preserve_pitch': false,
+        }),
+        _command('copy', 'clip.duplicate_to', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+          'destination_row_id': null,
+          'start_beat': 8,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+      expect(prepared.actions, hasLength(6));
+      for (final action in prepared.actions.skip(1).take(4)) {
+        expect(action.data['runtime_authoritative_audio_timing'], isTrue);
+        expect(
+          (action.data['target'] as Map)['resource_ref'],
+          ref('place', 'audio_clip'),
+        );
+      }
+      expect(prepared.actions[3].data['requested_length_beats'], 4.0);
+      expect(prepared.actions[4].data['requested_length_factor'], 0.5);
+      expect(prepared.actions.last.data['command_id'], 'copy');
+      expect(
+        prepared.actions.last.data['resource_consumer_type'],
+        'clip.duplicate_to',
+      );
+    });
+
+    test(
+      'supports derived audio split outputs through independent lifecycles',
+      () {
+        final plan = parse(<Map<String, dynamic>>[
+          _command('place', 'sample.place', <String, dynamic>{
+            'destination': <String, dynamic>{'row_id': 100},
+            'placements': <Map<String, dynamic>>[
+              <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+            ],
+          }),
+          _command('split', 'clip.split_at', <String, dynamic>{
+            'clip_ref': ref('place', 'audio_clip'),
+            'at_beat': 2,
+          }),
+          _command(
+            'pitch-left',
+            'clip.adjust_pitch_semitones',
+            <String, dynamic>{
+              'clip_ref': ref('split', 'left_clip'),
+              'delta_semitones': 2,
+            },
+          ),
+          _command('move-right', 'clip.move_by_beats', <String, dynamic>{
+            'clip_ref': ref('split', 'right_clip'),
+            'delta_beats': 1,
+          }),
+          _command('delete-right', 'clip.delete', <String, dynamic>{
+            'clip_ref': ref('split', 'right_clip'),
+          }),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+        final prepared = const AiV3CommandPreparer().prepare(
+          plan: plan,
+          context: _context(),
+        );
+        expect(prepared.actions.map((action) => action.type), <String>[
+          'sample_insert',
+          'clip_edit',
+          'clip_edit',
+          'clip_edit',
+          'clip_edit',
+        ]);
+        expect(prepared.actions[1].data['command_id'], 'split');
+        expect(prepared.actions[1].data['cut_ms'], 1000.0);
+        expect(
+          (prepared.actions[1].data['target'] as Map)['resource_ref'],
+          ref('place', 'audio_clip'),
+        );
+        expect(prepared.actions[3].data['predicted_start_ms'], 1500.0);
+        expect(
+          jsonEncode(prepared.actions),
+          isNot(anyOf(contains('label_contains'), contains('clip_index'))),
+        );
+      },
+    );
+
+    test('predicts exact MIDI split outputs and dependent edits', () {
+      final plan = parse(<Map<String, dynamic>>[
+        _command('midi', 'midi.create_clip', <String, dynamic>{
+          'destination': <String, dynamic>{'row_id': 200},
+          'start_beat': 0,
+          'length_beats': 4,
+          'notes': <Map<String, dynamic>>[_note(60, 0, 1), _note(64, 2, 1)],
+        }),
+        _command('split', 'clip.split_at', <String, dynamic>{
+          'clip_ref': ref('midi', 'midi_clip'),
+          'at_beat': 2,
+        }),
+        _command('transpose-right', 'midi.transpose', <String, dynamic>{
+          'clip_ref': ref('split', 'right_clip'),
+          'semitones': 2,
+        }),
+        _command('move-left', 'clip.move_by_beats', <String, dynamic>{
+          'clip_ref': ref('split', 'left_clip'),
+          'delta_beats': 1,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+      expect(prepared.actions.map((action) => action.type), <String>[
+        'midi_compose',
+        'clip_edit',
+        'midi_compose',
+        'clip_edit',
+      ]);
+      expect(prepared.actions[1].data['predicted_input_start_ms'], 0.0);
+      expect(prepared.actions[1].data['predicted_input_end_ms'], 2000.0);
+      expect(prepared.actions[3].data['predicted_start_ms'], 500.0);
+      final notes = (prepared.actions[2].data['expected_notes'] as List)
+          .cast<Map>();
+      expect(notes.map((note) => note['pitch']), <int>[62, 66]);
+    });
+
+    test('composes tempo changes before and after a generated MIDI split', () {
+      Map<String, dynamic> createMidi() =>
+          _command('midi', 'midi.create_clip', <String, dynamic>{
+            'destination': <String, dynamic>{'row_id': 200},
+            'start_beat': 0,
+            'length_beats': 4,
+            'notes': <Map<String, dynamic>>[_note(60, 0, 1)],
+          });
+      Map<String, dynamic> splitMidi() => _command(
+        'split',
+        'clip.split_at',
+        <String, dynamic>{'clip_ref': ref('midi', 'midi_clip'), 'at_beat': 2},
+      );
+      final tempo = _command('tempo', 'project.set_tempo', <String, dynamic>{
+        'bpm': 100,
+        'time_stretch_audio': false,
+        'preserve_pitch': true,
+      });
+
+      final tempoFirst = const AiV3CommandPreparer().prepare(
+        plan: parse(<Map<String, dynamic>>[
+          tempo,
+          createMidi(),
+          splitMidi(),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes),
+        context: _context(),
+      );
+      expect(tempoFirst.actions[2].data['cut_ms'], 1200.0);
+      expect(tempoFirst.actions[2].data['predicted_input_end_ms'], 2400.0);
+
+      final tempoAfter = const AiV3CommandPreparer().prepare(
+        plan: parse(<Map<String, dynamic>>[
+          createMidi(),
+          splitMidi(),
+          tempo,
+          _command('move-right', 'clip.move_by_beats', <String, dynamic>{
+            'clip_ref': ref('split', 'right_clip'),
+            'delta_beats': 1,
+          }),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes),
+        context: _context(),
+      );
+      expect(tempoAfter.actions[1].data['cut_ms'], 1000.0);
+      expect(tempoAfter.actions[3].data['predicted_start_ms'], 1800.0);
+    });
+
+    test('prepares generated audio duplicate, trim, and independent edits', () {
+      final plan = parse(<Map<String, dynamic>>[
+        _command('place', 'sample.place', <String, dynamic>{
+          'destination': <String, dynamic>{'row_id': 100},
+          'placements': <Map<String, dynamic>>[
+            <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+          ],
+        }),
+        _command('copy', 'clip.duplicate_to', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+          'destination_row_id': null,
+          'start_beat': 4,
+        }),
+        _command('pitch-copy', 'clip.adjust_pitch_semitones', <String, dynamic>{
+          'clip_ref': ref('copy', 'copy_clip'),
+          'delta_semitones': -2,
+        }),
+        _command('trim-copy', 'clip.trim_to_range', <String, dynamic>{
+          'clip_ref': ref('copy', 'copy_clip'),
+          'start_beat': 4.5,
+          'end_beat': 6,
+        }),
+        _command('move-original', 'clip.move_by_beats', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+          'delta_beats': 1,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+      expect(prepared.actions.map((action) => action.type), <String>[
+        'sample_insert',
+        'clip_edit',
+        'clip_edit',
+        'clip_edit',
+        'clip_edit',
+      ]);
+      expect(prepared.actions[1].data['command_id'], 'copy');
+      expect(prepared.actions[1].data.containsKey('row_index'), isFalse);
+      expect(prepared.actions[3].data['requested_start_ms'], 2250.0);
+      expect(prepared.actions[3].data['requested_end_ms'], 3000.0);
+      expect(prepared.actions[4].data['predicted_start_ms'], 500.0);
+      expect(
+        jsonEncode(prepared.actions),
+        isNot(anyOf(contains('label_contains'), contains('clip_index'))),
+      );
+    });
+
+    test('prepares generated MIDI duplicate, split, and terminal edit', () {
+      final plan = parse(<Map<String, dynamic>>[
+        _command('midi', 'midi.create_clip', <String, dynamic>{
+          'destination': <String, dynamic>{
+            'new_row': <String, dynamic>{
+              'name': 'Synth',
+              'instrument_id': 'piano',
+            },
+          },
+          'start_beat': 0,
+          'length_beats': 4,
+          'notes': <Map<String, dynamic>>[_note(60, 0, 1)],
+        }),
+        _command('copy', 'clip.duplicate_to', <String, dynamic>{
+          'clip_ref': ref('midi', 'midi_clip'),
+          'destination_row_id': null,
+          'start_beat': 4,
+        }),
+        _command('transpose', 'midi.transpose', <String, dynamic>{
+          'clip_ref': ref('copy', 'copy_clip'),
+          'semitones': 2,
+        }),
+        _command('split', 'clip.split_at', <String, dynamic>{
+          'clip_ref': ref('copy', 'copy_clip'),
+          'at_beat': 6,
+        }),
+        _command('delete-right', 'clip.delete', <String, dynamic>{
+          'clip_ref': ref('split', 'right_clip'),
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+      expect(prepared.actions.map((action) => action.type), <String>[
+        'row_create',
+        'midi_compose',
+        'clip_edit',
+        'midi_compose',
+        'clip_edit',
+        'clip_edit',
+      ]);
+      expect(prepared.actions[2].data['paste_start_ms'], 2000.0);
+      expect(prepared.actions[4].data['predicted_input_start_ms'], 2000.0);
+      expect(prepared.actions[4].data['predicted_input_end_ms'], 4000.0);
+    });
+
+    test('edits generated MIDI copies and split outputs independently', () {
+      final plan = parse(<Map<String, dynamic>>[
+        _command('midi', 'midi.create_clip', <String, dynamic>{
+          'destination': <String, dynamic>{'row_id': 200},
+          'start_beat': 0,
+          'length_beats': 4,
+          'notes': <Map<String, dynamic>>[_note(60, 0, 1)],
+        }),
+        _command('copy', 'clip.duplicate_to', <String, dynamic>{
+          'clip_ref': ref('midi', 'midi_clip'),
+          'destination_row_id': null,
+          'start_beat': 4,
+        }),
+        _command('replace-copy', 'midi.replace_notes', <String, dynamic>{
+          'clip_ref': ref('copy', 'copy_clip'),
+          'notes': <Map<String, dynamic>>[_note(70, 0, 1)],
+        }),
+        _command('split-copy', 'clip.split_at', <String, dynamic>{
+          'clip_ref': ref('copy', 'copy_clip'),
+          'at_beat': 6,
+        }),
+        _command('append-right', 'midi.append_notes', <String, dynamic>{
+          'clip_ref': ref('split-copy', 'right_clip'),
+          'notes': <Map<String, dynamic>>[_note(72, 0, 0.5)],
+        }),
+        _command('chop-left', 'midi.chop_notes', <String, dynamic>{
+          'clip_ref': ref('split-copy', 'left_clip'),
+          'subdivision': 8,
+          'range': null,
+          'velocity_decay_per_slice': 0,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+
+      expect(prepared.actions, hasLength(6));
+      expect(
+        prepared.actions[4].data['resource_consumer_type'],
+        'midi.append_notes',
+      );
+      expect(prepared.actions[4].data['final_length_beats'], 2.5);
+      expect(
+        (prepared.actions[4].data['target'] as Map)['resource_ref'],
+        ref('split-copy', 'right_clip'),
+      );
+      expect(
+        (prepared.actions[5].data['notes'] as List).map(
+          (raw) => (raw as Map)['start_beat'],
+        ),
+        <double>[0.0, 0.5],
+      );
+      expect(
+        (prepared.actions[5].data['target'] as Map)['resource_ref'],
+        ref('split-copy', 'left_clip'),
+      );
+    });
+
+    test('duplicate preserves its input and supports repeated duplication', () {
+      final plan = parse(<Map<String, dynamic>>[
+        _command('place', 'sample.place', <String, dynamic>{
+          'destination': <String, dynamic>{'row_id': 100},
+          'placements': <Map<String, dynamic>>[
+            <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+          ],
+        }),
+        _command('copy-one', 'clip.duplicate_to', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+          'destination_row_id': null,
+          'start_beat': 2,
+        }),
+        _command('copy-two', 'clip.duplicate_to', <String, dynamic>{
+          'clip_ref': ref('copy-one', 'copy_clip'),
+          'destination_row_id': 100,
+          'start_beat': 4,
+        }),
+        _command('move-input', 'clip.move_by_beats', <String, dynamic>{
+          'clip_ref': ref('place', 'audio_clip'),
+          'delta_beats': 1,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      expect(plan.commands, hasLength(4));
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+      expect(prepared.actions[2].data['paste_start_ms'], 2000.0);
+      expect(prepared.actions.last.data['predicted_start_ms'], 500.0);
+    });
+
+    test(
+      'preserves deferred generated stem bounds through duplicate and split',
+      () {
+        final plan = parse(<Map<String, dynamic>>[
+          _command('place', 'sample.place', <String, dynamic>{
+            'destination': <String, dynamic>{'row_id': 100},
+            'placements': <Map<String, dynamic>>[
+              <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+            ],
+          }),
+          _command('stems', 'clip.separate_stems', <String, dynamic>{
+            'clip_ref': ref('place', 'audio_clip'),
+          }),
+          _command('copy', 'clip.duplicate_to', <String, dynamic>{
+            'clip_ref': ref('stems', 'instrumental_clip'),
+            'destination_row_id': null,
+            'start_beat': 8,
+          }),
+          _command('split', 'clip.split_at', <String, dynamic>{
+            'clip_ref': ref('copy', 'copy_clip'),
+            'at_beat': 10,
+          }),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+        final prepared = const AiV3CommandPreparer().prepare(
+          plan: plan,
+          context: _contextForStemSeparation(),
+        );
+
+        expect(prepared.actions, hasLength(4));
+        expect(prepared.actions[2].data['predicted_input_end_ms'], isNull);
+        expect(prepared.actions[3].data['predicted_input_end_ms'], isNull);
+        expect(
+          (prepared.actions[3].data['target'] as Map)['resource_ref'],
+          ref('copy', 'copy_clip'),
+        );
+      },
+    );
+
+    test('composes tempo before and after generated duplicate trim', () {
+      Map<String, dynamic> place() =>
+          _command('place', 'sample.place', <String, dynamic>{
+            'destination': <String, dynamic>{'row_id': 100},
+            'placements': <Map<String, dynamic>>[
+              <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+            ],
+          });
+      Map<String, dynamic> duplicate() =>
+          _command('copy', 'clip.duplicate_to', <String, dynamic>{
+            'clip_ref': ref('place', 'audio_clip'),
+            'destination_row_id': null,
+            'start_beat': 4,
+          });
+      Map<String, dynamic> trim() =>
+          _command('trim', 'clip.trim_to_range', <String, dynamic>{
+            'clip_ref': ref('copy', 'copy_clip'),
+            'start_beat': 4.5,
+            'end_beat': 6,
+          });
+      final tempo = _command('tempo', 'project.set_tempo', <String, dynamic>{
+        'bpm': 100,
+        'time_stretch_audio': false,
+        'preserve_pitch': true,
+      });
+      Map<String, dynamic> move() =>
+          _command('move', 'clip.move_by_beats', <String, dynamic>{
+            'clip_ref': ref('copy', 'copy_clip'),
+            'delta_beats': 1,
+          });
+
+      final tempoFirst = const AiV3CommandPreparer().prepare(
+        plan: parse(<Map<String, dynamic>>[
+          tempo,
+          place(),
+          duplicate(),
+          trim(),
+          move(),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes),
+        context: _context(),
+      );
+      expect(tempoFirst.actions[2].data['paste_start_ms'], 2400.0);
+      expect(tempoFirst.actions[3].data['requested_start_ms'], 2700.0);
+      expect(tempoFirst.actions[4].data['predicted_start_ms'], 3300.0);
+
+      final tempoAfter = const AiV3CommandPreparer().prepare(
+        plan: parse(<Map<String, dynamic>>[
+          place(),
+          duplicate(),
+          trim(),
+          tempo,
+          move(),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes),
+        context: _context(),
+      );
+      expect(tempoAfter.actions[1].data['paste_start_ms'], 2000.0);
+      expect(tempoAfter.actions[2].data['requested_start_ms'], 2250.0);
+      expect(tempoAfter.actions[4].data['predicted_start_ms'], 3300.0);
+    });
+
+    test('rejects invalid duplicate and generated trim targets', () {
+      expect(
+        () => parse(<Map<String, dynamic>>[
+          _command('midi', 'midi.create_clip', <String, dynamic>{
+            'destination': <String, dynamic>{'row_id': 200},
+            'start_beat': 0,
+            'length_beats': 4,
+            'notes': <Map<String, dynamic>>[_note(60, 0, 1)],
+          }),
+          _command('trim', 'clip.trim_to_range', <String, dynamic>{
+            'clip_ref': ref('midi', 'midi_clip'),
+            'start_beat': 0,
+            'end_beat': 2,
+          }),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes),
+        throwsA(isA<AiV3ContractException>()),
+      );
+      expect(
+        () => parse(<Map<String, dynamic>>[
+          _command('copy', 'clip.duplicate_to', <String, dynamic>{
+            'clip_id': 'audio-clip',
+            'destination_row_id': null,
+            'start_beat': 1,
+          }),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes),
+        throwsA(isA<AiV3ContractException>()),
+      );
+      final wrongLane = parse(<Map<String, dynamic>>[
+        _command('midi', 'midi.create_clip', <String, dynamic>{
+          'destination': <String, dynamic>{'row_id': 200},
+          'start_beat': 0,
+          'length_beats': 4,
+          'notes': <Map<String, dynamic>>[_note(60, 0, 1)],
+        }),
+        _command('copy', 'clip.duplicate_to', <String, dynamic>{
+          'clip_ref': ref('midi', 'midi_clip'),
+          'destination_row_id': 100,
+          'start_beat': 4,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+      expect(
+        () => const AiV3CommandPreparer().prepare(
+          plan: wrongLane,
+          context: _context(),
+        ),
+        throwsA(
+          isA<AiV3PreparationException>().having(
+            (error) => error.code,
+            'code',
+            'v3_clip_destination_lane_mismatch',
+          ),
+        ),
+      );
+    });
+
+    test(
+      'retires split inputs and enforces exact output kind in preparation',
+      () {
+        expect(
+          () => parse(<Map<String, dynamic>>[
+            _command('place', 'sample.place', <String, dynamic>{
+              'destination': <String, dynamic>{'row_id': 100},
+              'placements': <Map<String, dynamic>>[
+                <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+              ],
+            }),
+            _command('split', 'clip.split_at', <String, dynamic>{
+              'clip_ref': ref('place', 'audio_clip'),
+              'at_beat': 1,
+            }),
+            _command('reuse-old', 'clip.move_by_beats', <String, dynamic>{
+              'clip_ref': ref('place', 'audio_clip'),
+              'delta_beats': 1,
+            }),
+          ], consumers: aiV3RuntimeResourceRefConsumerTypes),
+          throwsA(isA<AiV3ContractException>()),
+        );
+
+        final stableAudioPlan = parse(<Map<String, dynamic>>[
+          _command('split', 'clip.split_at', <String, dynamic>{
+            'clip_id': 'audio-clip',
+            'at_beat': 4,
+          }),
+          _command('transpose', 'midi.transpose', <String, dynamic>{
+            'clip_ref': ref('split', 'right_clip'),
+            'semitones': 1,
+          }),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+        expect(
+          () => const AiV3CommandPreparer().prepare(
+            plan: stableAudioPlan,
+            context: _context(),
+          ),
+          throwsA(isA<AiV3PreparationException>()),
+        );
+
+        final stableAudioEdit = parse(<Map<String, dynamic>>[
+          _command('split', 'clip.split_at', <String, dynamic>{
+            'clip_id': 'audio-clip',
+            'at_beat': 4,
+          }),
+          _command('pitch-left', 'clip.set_pitch_semitones', <String, dynamic>{
+            'clip_ref': ref('split', 'left_clip'),
+            'pitch_semitones': -2,
+          }),
+          _command('move-right', 'clip.move_by_beats', <String, dynamic>{
+            'clip_ref': ref('split', 'right_clip'),
+            'delta_beats': 1,
+          }),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+        final prepared = const AiV3CommandPreparer().prepare(
+          plan: stableAudioEdit,
+          context: _context(),
+        );
+        expect(prepared.actions, hasLength(3));
+        expect(prepared.actions.first.data['predicted_input_end_ms'], 4000.0);
+        expect(prepared.actions.last.data['predicted_start_ms'], 2500.0);
+      },
+    );
+
+    test('rejects ambiguous sample output and use after delete', () {
+      final invalidPlans = <List<Map<String, dynamic>>>[
+        <Map<String, dynamic>>[
+          _command('place', 'sample.place', <String, dynamic>{
+            'destination': <String, dynamic>{'row_id': 100},
+            'placements': <Map<String, dynamic>>[
+              <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+              <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 1},
+        ],
+          }),
+          _command('move', 'clip.move_by_beats', <String, dynamic>{
+            'clip_ref': ref('place', 'audio_clip'),
+            'delta_beats': 1,
+          }),
+        ],
+        <Map<String, dynamic>>[
+          _command('midi', 'midi.create_clip', <String, dynamic>{
+            'destination': <String, dynamic>{'row_id': 200},
+            'start_beat': 0,
+            'length_beats': 4,
+            'notes': <Map<String, dynamic>>[_note(60, 0, 1)],
+          }),
+          _command('delete', 'clip.delete', <String, dynamic>{
+            'clip_ref': ref('midi', 'midi_clip'),
+          }),
+          _command('move', 'clip.move_by_beats', <String, dynamic>{
+            'clip_ref': ref('midi', 'midi_clip'),
+            'delta_beats': 1,
+          }),
+        ],
+      ];
+      for (final commands in invalidPlans) {
+        expect(
+          () => parse(commands, consumers: aiV3RuntimeResourceRefConsumerTypes),
+          throwsA(isA<AiV3ContractException>()),
+        );
+        }
+    });
+
+    test('prepares generated MIDI clip transpose from symbolic notes', () {
+      final plan = parse(<Map<String, dynamic>>[
+        _command('create-midi', 'midi.create_clip', <String, dynamic>{
+          'destination': <String, dynamic>{'row_id': 200},
+          'start_beat': 0,
+          'length_beats': 4,
+          'notes': <Map<String, dynamic>>[
+            _note(0, 0, 1),
+            _note(60, 1, 1),
+            _note(127, 2, 1),
+          ],
+        }),
+        _command('transpose', 'midi.transpose', <String, dynamic>{
+          'clip_ref': ref('create-midi', 'midi_clip'),
+          'semitones': 2,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+
+      expect(prepared.actions.map((action) => action.type), <String>[
+        'midi_compose',
+        'midi_compose',
+      ]);
+      expect(prepared.actions.first.data['command_id'], 'create-midi');
+      expect(
+        (prepared.actions.last.data['target'] as Map)['resource_ref'],
+        ref('create-midi', 'midi_clip'),
+      );
+      expect(
+        (prepared.actions.last.data['expected_notes'] as List).map(
+          (note) => (note as Map)['pitch'],
+        ),
+        <int>[2, 62, 127],
+      );
+      expect(
+        jsonEncode(prepared.actions.last.data),
+        isNot(anyOf(contains('label_contains'), contains('clip_index'))),
+      );
+    });
+
+    test('prepares complete generated MIDI note editing in order', () {
+      final plan = parse(<Map<String, dynamic>>[
+        _command('create-midi', 'midi.create_clip', <String, dynamic>{
+          'destination': <String, dynamic>{'row_id': 200},
+          'start_beat': 0,
+          'length_beats': 4,
+          'notes': <Map<String, dynamic>>[_note(60, 0, 1)],
+        }),
+        _command('replace', 'midi.replace_notes', <String, dynamic>{
+          'clip_ref': ref('create-midi', 'midi_clip'),
+          'notes': <Map<String, dynamic>>[_note(65, 0, 1), _note(67, 2, 1)],
+        }),
+        _command('append', 'midi.append_notes', <String, dynamic>{
+          'clip_ref': ref('create-midi', 'midi_clip'),
+          'notes': <Map<String, dynamic>>[_note(72, 0, 0.5)],
+        }),
+        _command('chop', 'midi.chop_notes', <String, dynamic>{
+          'clip_ref': ref('create-midi', 'midi_clip'),
+          'subdivision': 8,
+          'range': null,
+          'velocity_decay_per_slice': 0,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+
+      expect(prepared.actions, hasLength(4));
+      expect(
+        prepared.actions.map((action) => action.data['operation']),
+        <String>[
+          'create_clip',
+          'replace_notes',
+          'replace_notes',
+          'replace_notes',
+        ],
+      );
+      expect(
+        prepared.actions
+            .skip(1)
+            .map((action) => action.data['resource_consumer_type']),
+        <String>['midi.replace_notes', 'midi.append_notes', 'midi.chop_notes'],
+      );
+      expect(prepared.actions[2].data['final_length_beats'], 4.5);
+      expect(
+        (prepared.actions.last.data['notes'] as List).map((raw) {
+          final note = raw as Map;
+          return <Object?>[
+            note['pitch'],
+            note['start_beat'],
+            note['length_beats'],
+          ];
+        }),
+        <List<Object?>>[
+          <Object?>[65, 0.0, 0.5],
+          <Object?>[65, 0.5, 0.5],
+          <Object?>[67, 2.0, 0.5],
+          <Object?>[67, 2.5, 0.5],
+          <Object?>[72, 4.0, 0.5],
+        ],
+      );
+      for (final action in prepared.actions.skip(1)) {
+        expect(
+          (action.data['target'] as Map)['resource_ref'],
+          ref('create-midi', 'midi_clip'),
+        );
+      }
+    });
+
+    test(
+      'non-producing MIDI edit aliases resolve to the original reference',
+      () {
+        final plan = parse(<Map<String, dynamic>>[
+          _command('create-midi', 'midi.create_clip', <String, dynamic>{
+            'destination': <String, dynamic>{'row_id': 200},
+            'start_beat': 0,
+            'length_beats': 4,
+            'notes': <Map<String, dynamic>>[_note(60, 0, 1)],
+          }),
+          _command('replace', 'midi.replace_notes', <String, dynamic>{
+            'clip_ref': ref('create-midi', 'midi_clip'),
+            'notes': <Map<String, dynamic>>[_note(65, 0, 1)],
+          }),
+          _command('append', 'midi.append_notes', <String, dynamic>{
+            'clip_ref': ref('replace', 'midi_clip'),
+            'notes': <Map<String, dynamic>>[_note(67, 0, 0.5)],
+          }),
+        ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+        expect(
+          plan.commands.last.arguments['clip_ref'],
+          ref('create-midi', 'midi_clip'),
+        );
+      },
+    );
+
+    test('prepares a symbolic stem pitch chain from predicted pitch zero', () {
+      final plan = parse(<Map<String, dynamic>>[
+        _command('tempo', 'project.set_tempo', <String, dynamic>{
+          'bpm': 110,
+          'time_stretch_audio': false,
+          'preserve_pitch': true,
+        }),
+        _command('separate', 'clip.separate_stems', <String, dynamic>{
+          'clip_id': 'audio-clip',
+        }),
+        _command('lower', 'clip.adjust_pitch_semitones', <String, dynamic>{
+          'clip_ref': ref('separate', 'instrumental_clip'),
+          'delta_semitones': -1,
+        }),
+        _command('raise', 'clip.adjust_pitch_semitones', <String, dynamic>{
+          'clip_ref': ref('separate', 'instrumental_clip'),
+          'delta_semitones': 2,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _contextForStemSeparation(),
+      );
+      expect(prepared.actions.map((action) => action.type), <String>[
+        'project_edit',
+        'v3_clip_separate_stems',
+        'clip_edit',
+        'clip_edit',
+      ]);
+      expect(prepared.actions[1].data['command_id'], 'separate');
+      expect(prepared.actions[2].data['new_pitch_semitones'], -1.0);
+      expect(prepared.actions[3].data['new_pitch_semitones'], 1.0);
+      expect(
+        (prepared.actions[2].data['target'] as Map)['resource_ref'],
+        ref('separate', 'instrumental_clip'),
+      );
+      expect(
+        jsonEncode(prepared.actions[2].data),
+        isNot(anyOf(contains('label_contains'), contains('clip_index'))),
+      );
+      expect(
+        prepared.receipts.map((receipt) => receipt['verified_label']),
+        <String>[
+          'Set project tempo to 110 BPM',
+          'Separated vocals and instrumental',
+          'Set instrumental stem pitch to -1.0 semitones',
+          'Set instrumental stem pitch to 1.0 semitones',
+        ],
+      );
+      expect(
+        jsonEncode(
+          prepared.receipts
+              .map((receipt) => receipt['verified_label'])
+              .toList(growable: false),
+        ),
+        isNot(contains('separate.instrumental_clip')),
+      );
+    });
+
+    test('rejects generated pitch outside editor limits', () {
+      final plan = parse(<Map<String, dynamic>>[
+        _command('separate', 'clip.separate_stems', <String, dynamic>{
+          'clip_id': 'audio-clip',
+        }),
+        _command('pitch', 'clip.adjust_pitch_semitones', <String, dynamic>{
+          'clip_ref': ref('separate', 'instrumental_clip'),
+          'delta_semitones': 13,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+      expect(
+        () => const AiV3CommandPreparer().prepare(
+          plan: plan,
+          context: _contextForStemSeparation(),
+        ),
+        throwsA(
+          isA<AiV3PreparationException>().having(
+            (error) => error.code,
+            'code',
+            'v3_clip_pitch_out_of_range',
+          ),
+        ),
+      );
+    });
+  });
+
   group('V3 execution policy', () {
     test('explicitly covers every current command as auto apply', () {
-      expect(
-        aiV3ExecutionPolicyByCommandType.keys.toSet(),
-        aiV3CommandTypes,
-      );
+      expect(aiV3ExecutionPolicyByCommandType.keys.toSet(), aiV3CommandTypes);
       expect(
         aiV3ExecutionPolicyByCommandType.values,
         everyElement(AiV3ExecutionPolicy.autoApply),
       );
     });
 
-    test('fails closed for missing policy and uses strictest compound policy',
-        () {
-      expect(
-        () => aiV3ExecutionPolicyForCommandTypes(
-          const <String>['future.command'],
-        ),
-        throwsA(
-          isA<AiV3ContractException>().having(
-            (error) => error.code,
-            'code',
-            'v3_execution_policy_missing',
+    test(
+      'fails closed for missing policy and uses strictest compound policy',
+      () {
+        expect(
+          () => aiV3ExecutionPolicyForCommandTypes(const <String>[
+            'future.command',
+          ]),
+          throwsA(
+            isA<AiV3ContractException>().having(
+              (error) => error.code,
+              'code',
+              'v3_execution_policy_missing',
+            ),
           ),
-        ),
-      );
-      expect(
-        aiV3ExecutionPolicyForCommandTypes(
-          const <String>['safe', 'future_external'],
-          policies: const <String, AiV3ExecutionPolicy>{
-            'safe': AiV3ExecutionPolicy.autoApply,
-            'future_external': AiV3ExecutionPolicy.confirm,
-          },
-        ),
-        AiV3ExecutionPolicy.confirm,
-      );
-    });
+        );
+        expect(
+          aiV3ExecutionPolicyForCommandTypes(
+            const <String>['safe', 'future_external'],
+            policies: const <String, AiV3ExecutionPolicy>{
+              'safe': AiV3ExecutionPolicy.autoApply,
+              'future_external': AiV3ExecutionPolicy.confirm,
+            },
+          ),
+          AiV3ExecutionPolicy.confirm,
+        );
+      },
+    );
   });
 
   test('strict tool describes relative and absolute row mixing distinctly', () {
@@ -461,40 +2973,61 @@ void main() {
     );
   });
 
-  test('strict tool exposes exact row automation point and clear contracts',
-      () {
-    final tool = aiV3SubmitPlanTool();
-    final properties = (tool['parameters'] as Map)['properties'] as Map;
-    final variants =
-        (((properties['commands'] as Map)['items'] as Map)['anyOf'] as List)
-            .cast<Map>();
+  test(
+    'strict tool exposes exact row automation point and clear contracts',
+    () {
+      final tool = aiV3SubmitPlanTool();
+      final properties = (tool['parameters'] as Map)['properties'] as Map;
+      final variants =
+          (((properties['commands'] as Map)['items'] as Map)['anyOf'] as List)
+              .cast<Map>();
 
-    Map variantFor(String type) => variants.singleWhere((candidate) {
-          final typeSchema = ((candidate['properties'] as Map)['type'] as Map);
-          return (typeSchema['enum'] as List).contains(type);
-        });
+      Map variantFor(String type) => variants.singleWhere((candidate) {
+        final typeSchema = ((candidate['properties'] as Map)['type'] as Map);
+            return (typeSchema['enum'] as List).contains(type);
+          });
 
-    final setArguments = ((variantFor('automation.set_points')['properties']
-        as Map)['arguments'] as Map);
-    expect(
-      setArguments['required'],
-      <String>['row_id', 'automation_target_id', 'points'],
-    );
-    final pointItems = ((((setArguments['properties'] as Map)['points']
-        as Map)['items']) as Map);
-    expect(pointItems['required'], <String>['beat', 'value_normalized']);
-    expect(
-      ((setArguments['properties'] as Map)['points'] as Map)['maxItems'],
-      aiV3MaxAutomationPoints,
-    );
+      final setArguments =
+          ((variantFor('automation.set_points')['properties']
+                  as Map)['arguments']
+              as Map);
+      final setStableArguments = (setArguments['anyOf'] as List)
+          .cast<Map>()
+          .singleWhere(
+            (candidate) =>
+                (candidate['properties'] as Map).containsKey('row_id'),
+          );
+      expect(setStableArguments['required'], <String>[
+        'row_id',
+        'automation_target_id',
+        'points',
+      ]);
+      final pointItems =
+          ((((setStableArguments['properties'] as Map)['points']
+                  as Map)['items'])
+              as Map);
+      expect(pointItems['required'], <String>['beat', 'value_normalized']);
+      expect(
+        ((setStableArguments['properties'] as Map)['points']
+            as Map)['maxItems'],
+        aiV3MaxAutomationPoints,
+      );
 
-    final clearArguments = ((variantFor('automation.clear')['properties']
-        as Map)['arguments'] as Map);
-    expect(clearArguments['required'], <String>[
-      'row_id',
-      'automation_target_id',
-    ]);
-  });
+      final clearArguments =
+          ((variantFor('automation.clear')['properties'] as Map)['arguments']
+              as Map);
+      final clearStableArguments = (clearArguments['anyOf'] as List)
+          .cast<Map>()
+          .singleWhere(
+            (candidate) =>
+                (candidate['properties'] as Map).containsKey('row_id'),
+          );
+      expect(clearStableArguments['required'], <String>[
+        'row_id',
+        'automation_target_id',
+      ]);
+    },
+  );
 
   test('strict tool exposes row metadata and final-state mute semantics', () {
     final tool = aiV3SubmitPlanTool();
@@ -534,10 +3067,14 @@ void main() {
     expect(aiV3CommonCommandTypes, isNot(contains('row.select')));
     expect(aiV3CommonCommandTypes, isNot(contains('row.set_color')));
     final roleSchema = argumentsFor('row.set_role_override')['role'] as Map;
-    expect(
-      ((roleSchema['anyOf'] as List).first as Map)['enum'],
-      <String>['vocals', 'drums', 'bass', 'guitar', 'synth', 'other'],
-    );
+    expect(((roleSchema['anyOf'] as List).first as Map)['enum'], <String>[
+      'vocals',
+      'drums',
+      'bass',
+      'guitar',
+      'synth',
+      'other',
+    ]);
     expect(roleSchema['description'], contains('Use null to clear'));
     expect(aiV3CommonCommandTypes, isNot(contains('row.set_role_override')));
     final cleanupRowSchema =
@@ -552,52 +3089,64 @@ void main() {
     );
   });
 
-  test('strict role override contract accepts canonical roles and null only',
-      () {
-    for (final role in <Object?>[
-      'vocals',
-      'drums',
-      'bass',
-      'guitar',
-      'synth',
-      'other',
-      null,
-    ]) {
+  test(
+    'strict role override contract accepts canonical roles and null only',
+    () {
+      for (final role in <Object?>[
+        'vocals',
+        'drums',
+        'bass',
+        'guitar',
+        'synth',
+        'other',
+        null,
+      ]) {
+        expect(
+          AiV3Plan.fromJson(
+            _plan(<Map<String, dynamic>>[
+              _command('role-$role', 'row.set_role_override', <String, dynamic>{
+                'row_id': 100,
+                'role': role,
+              }),
+            ]),
+          ).commands.single.arguments['role'],
+          role,
+        );
+      }
       expect(
-        AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
-          _command('role-$role', 'row.set_role_override',
-              <String, dynamic>{'row_id': 100, 'role': role}),
-        ])).commands.single.arguments['role'],
-        role,
+        () => AiV3Plan.fromJson(
+          _plan(<Map<String, dynamic>>[
+            _command('alias', 'row.set_role_override', <String, dynamic>{
+              'row_id': 100,
+              'role': 'vocal',
+            }),
+          ]),
+        ),
+        throwsA(isA<AiV3ContractException>()),
       );
-    }
-    expect(
-      () => AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
-        _command('alias', 'row.set_role_override',
-            <String, dynamic>{'row_id': 100, 'role': 'vocal'}),
-      ])),
-      throwsA(isA<AiV3ContractException>()),
-    );
-    expect(
-      () => AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
-        _command('extra', 'row.set_role_override', <String, dynamic>{
-          'row_id': 100,
-          'role': 'vocals',
-          'infer': true,
-        }),
-      ])),
-      throwsA(isA<AiV3ContractException>()),
-    );
-  });
+      expect(
+        () => AiV3Plan.fromJson(
+          _plan(<Map<String, dynamic>>[
+            _command('extra', 'row.set_role_override', <String, dynamic>{
+              'row_id': 100,
+              'role': 'vocals',
+              'infer': true,
+            }),
+          ]),
+        ),
+        throwsA(isA<AiV3ContractException>()),
+      );
+    },
+  );
 
   test('strict phone cleanup contract accepts only one stable row ID', () {
-    final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
-      _command(
-        'cleanup',
-        'row.apply_phone_mic_cleanup',
-        <String, dynamic>{'row_id': 100},
-      ),
-    ]));
+    final plan = AiV3Plan.fromJson(
+      _plan(<Map<String, dynamic>>[
+        _command('cleanup', 'row.apply_phone_mic_cleanup', <String, dynamic>{
+          'row_id': 100,
+        }),
+      ]),
+    );
     expect(plan.commands.single.arguments, <String, dynamic>{'row_id': 100});
     for (final arguments in <Map<String, dynamic>>[
       <String, dynamic>{'row_id': '100'},
@@ -693,6 +3242,96 @@ void main() {
     expect(aiV3CommonCommandTypes, isNot(contains('row.delete')));
   });
 
+  test('flagged schema documents the exact row.create output port', () {
+    final tool = aiV3SubmitPlanTool(
+      includeCommandSemantics: true,
+      includeResourceRefs: true,
+    );
+    final properties = (tool['parameters'] as Map)['properties'] as Map;
+    final variants =
+        (((properties['commands'] as Map)['items'] as Map)['anyOf'] as List)
+            .cast<Map>();
+    final rowCreateVariant = variants.singleWhere((candidate) {
+      final type = ((candidate['properties'] as Map)['type'] as Map);
+      return (type['enum'] as List).contains('row.create');
+    });
+    expect(
+      rowCreateVariant['description'],
+      contains('typed row output port row'),
+    );
+    final midiCreateVariant = variants.singleWhere((candidate) {
+      final type = ((candidate['properties'] as Map)['type'] as Map);
+      return (type['enum'] as List).contains('midi.create_clip');
+    });
+    final midiArguments =
+        ((midiCreateVariant['properties'] as Map)['arguments'] as Map);
+    final destination =
+        ((midiArguments['properties'] as Map)['destination'] as Map);
+    final rowRefVariant = (destination['anyOf'] as List)
+        .cast<Map>()
+        .singleWhere(
+          (candidate) =>
+              ((candidate['properties'] as Map).containsKey('row_ref')),
+        );
+    final rowRef = ((rowRefVariant['properties'] as Map)['row_ref'] as Map);
+    final outputDescription =
+        (((rowRef['properties'] as Map)['output'] as Map)['description'])
+            .toString();
+    expect(
+      outputDescription,
+      allOf(
+        contains('row.create -> row'),
+        contains('clip.convert_to_midi -> midi_row'),
+      ),
+    );
+    final newRowVariant = (destination['anyOf'] as List)
+        .cast<Map>()
+        .singleWhere(
+          (candidate) =>
+              ((candidate['properties'] as Map).containsKey('new_row')),
+        );
+    final newRow = ((newRowVariant['properties'] as Map)['new_row'] as Map);
+    expect(
+      newRow['description'],
+      allOf(
+        contains('does not produce a row output'),
+        contains('issue row.create first'),
+      ),
+    );
+  });
+
+  test('generated-row automation schema exposes only built-in targets', () {
+    final tool = aiV3SubmitPlanTool(
+      includeCommandSemantics: true,
+      includeResourceRefs: true,
+      resourceRefCommandTypes: aiV3RuntimeResourceRefConsumerTypes,
+    );
+    final properties = (tool['parameters'] as Map)['properties'] as Map;
+    final variants =
+        (((properties['commands'] as Map)['items'] as Map)['anyOf'] as List)
+            .cast<Map>();
+
+    for (final commandType in <String>[
+      'automation.set_points',
+      'automation.clear',
+    ]) {
+      final variant = variants.singleWhere((candidate) {
+        final type = ((candidate['properties'] as Map)['type'] as Map);
+        return (type['enum'] as List).contains(commandType);
+      });
+      final arguments =
+          ((variant['properties'] as Map)['arguments'] as Map)['anyOf'] as List;
+      final rowRefArguments = arguments.cast<Map>().singleWhere(
+        (candidate) =>
+            ((candidate['properties'] as Map).containsKey('row_ref')),
+      );
+      final target =
+          ((rowRefArguments['properties'] as Map)['automation_target_id']
+              as Map);
+      expect(target['enum'], <String>['volume', 'mix:gain', 'mix:pan']);
+    }
+  });
+
   test('strict tool exposes stable-id final-state grouping commands', () {
     final tool = aiV3SubmitPlanTool();
     final properties = (tool['parameters'] as Map)['properties'] as Map;
@@ -723,7 +3362,42 @@ void main() {
     expect(aiV3CommonCommandTypes, isNot(contains('group.set_collapsed')));
   });
 
-  test('grouping contract rejects duplicate, fuzzy, and toggle-shaped input',
+  test('flagged grouping schema exposes typed members and group targets', () {
+    final tool = aiV3SubmitPlanTool(
+      includeCommandSemantics: true,
+      includeResourceRefs: true,
+      resourceRefCommandTypes: aiV3RuntimeResourceRefConsumerTypes,
+    );
+    final variants =
+        (((((tool['parameters'] as Map)['properties'] as Map)['commands']
+                        as Map)['items']
+                    as Map)['anyOf']
+                as List)
+            .cast<Map>();
+
+    Map argumentsFor(String type) {
+      final variant = variants.singleWhere(
+        (candidate) =>
+            ((((candidate['properties'] as Map)['type'] as Map)['enum'] as List)
+                .contains(type)),
+      );
+      return (variant['properties'] as Map)['arguments'] as Map;
+    }
+
+    final create = argumentsFor('group.create');
+    expect((create['properties'] as Map).keys, <String>{'members', 'name'});
+    final collapse = argumentsFor('group.set_collapsed');
+    expect(jsonEncode(collapse), contains('group_ref'));
+    final remove = argumentsFor('group.remove_row');
+    expect(
+      jsonEncode(remove),
+      allOf(contains('group_ref'), contains('row_ref')),
+    );
+    expect(jsonEncode(collapse), contains('group.create -> group'));
+  });
+
+  test(
+    'grouping contract rejects duplicate, fuzzy, and toggle-shaped input',
       () {
     for (final command in <Map<String, dynamic>>[
       _command('group', 'group.create', <String, dynamic>{
@@ -1145,7 +3819,8 @@ void main() {
       expect(prepared.actions[1].data['delta_db'], -2);
       expect(prepared.actions[2].data['gain_db'], -6);
       expect(prepared.actions[3].data['delta'], 0.25);
-      expect(prepared.actions[4].data['operation'], 'solo');
+      expect(prepared.actions[4].data['operation'], 'set_soloed');
+      expect(prepared.actions[4].data['soloed'], isTrue);
       expect(prepared.actions[5].data['pan_signed'], 0.2);
       expect(prepared.actions[8].data['delta_ms'], 2000.0);
       expect(prepared.actions[9].data['semitones'], -2);
@@ -1564,9 +4239,11 @@ void main() {
           (error) => error.code,
           'code',
           'v3_clip_id_unknown',
-        )),
+            ),
+          ),
+        );
+      },
       );
-    });
 
     test('keeps absolute and relative audio pitch commands distinct', () {
       final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
@@ -2616,7 +5293,8 @@ void main() {
       expect(prepared.actions[1].data['gain_db'], -6);
       expect(prepared.actions[2].data['operation'], 'adjust_pan');
       expect(prepared.actions[2].data['delta'], -2);
-      expect(prepared.actions[3].data['operation'], 'solo');
+      expect(prepared.actions[3].data['operation'], 'set_soloed');
+      expect(prepared.actions[3].data['soloed'], isTrue);
       for (final action in prepared.actions) {
         expect((action.data['target'] as Map)['row_id'], 100);
         expect((action.data['target'] as Map)['row_index'], 0);
@@ -2651,7 +5329,8 @@ void main() {
         expect(target['row_index'], isIn(<int>[0, 1]));
       }
       expect(prepared.actions[1].data['color'], 'magenta');
-      expect(prepared.actions[2].data['operation'], 'unmute');
+      expect(prepared.actions[2].data['operation'], 'set_muted');
+      expect(prepared.actions[2].data['muted'], isFalse);
     });
 
     test('row metadata commands detect already-satisfied state', () {
@@ -3278,10 +5957,14 @@ void main() {
       expect(created.actions.single.type, 'v3_group_edit');
       expect(created.actions.single.data['operation'], 'create');
       expect(created.actions.single.data['row_ids'], <int>[100, 200]);
+      expect(created.actions.single.data['expected_row_order'], <int>[
+        100,
+        200,
+      ]);
       expect(
-          created.actions.single.data['expected_row_order'], <int>[100, 200]);
-      expect(created.actions.single.data['group_id'].toString(),
-          startsWith('v3_group_'));
+        created.actions.single.data['group_id'].toString(),
+        startsWith('v3_group_'),
+      );
 
       final groupedData =
           jsonDecode(jsonEncode(_context().data)) as Map<String, dynamic>;
@@ -4336,18 +7019,12 @@ void main() {
         (index) => _note(60, index * 0.05, 0.01),
       );
       expect(
-        () => AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
-          editCommand(
-            'replace-129',
-            'midi.replace_notes',
-            notes: tooMany,
+          () => AiV3Plan.fromJson(
+            _plan(<Map<String, dynamic>>[
+              editCommand('replace-129', 'midi.replace_notes', notes: tooMany),
+              editCommand('append-129', 'midi.append_notes', notes: tooMany),
+            ]),
           ),
-          editCommand(
-            'append-129',
-            'midi.append_notes',
-            notes: tooMany,
-          ),
-        ])),
         throwsA(
           isA<AiV3ContractException>().having(
             (error) => error.code,

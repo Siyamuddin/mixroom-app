@@ -146,6 +146,128 @@ void main() {
     );
   });
 
+  test('opt-in service accepts an ordered stem-to-pitch output reference',
+      () async {
+    final rawPlan = <String, dynamic>{
+      'schema_version': aiV3PlanVersion,
+      'outcome': 'plan',
+      'user_message': 'Separated the stems and adjusted the generated clip.',
+      'commands': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'command_id': 'separate',
+          'type': 'clip.separate_stems',
+          'arguments': <String, dynamic>{'clip_id': 'source'},
+        },
+        <String, dynamic>{
+          'command_id': 'pitch',
+          'type': 'clip.adjust_pitch_semitones',
+          'arguments': <String, dynamic>{
+            'clip_ref': <String, dynamic>{
+              'command_id': 'separate',
+              'output': 'instrumental_clip',
+            },
+            'delta_semitones': -1,
+          },
+        },
+      ],
+      'question_options': const <Object>[],
+    };
+    final service = AiV3PlannerService(
+      apiKey: 'test-key',
+      model: 'test-model',
+      resourceRefsEnabled: true,
+      httpClient: MockClient((_) async => http.Response(
+            jsonEncode(_responseWithArguments(jsonEncode(rawPlan))),
+            200,
+          )),
+    );
+
+    final result = await service.plan(
+      context: _context(),
+      originalRequest: 'Perform the ordered edit.',
+    );
+
+    expect(result.plan.commands, hasLength(2));
+    expect(
+      result.plan.commands.last.arguments['clip_ref'],
+      <String, dynamic>{
+        'command_id': 'separate',
+        'output': 'instrumental_clip',
+      },
+    );
+  });
+
+  test('opt-in service accepts generated MIDI clip transpose reference',
+      () async {
+    final rawPlan = <String, dynamic>{
+      'schema_version': aiV3PlanVersion,
+      'outcome': 'plan',
+      'user_message': 'Created and transposed the generated MIDI clip.',
+      'commands': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'command_id': 'create-midi',
+          'type': 'midi.create_clip',
+          'arguments': <String, dynamic>{
+            'destination': <String, dynamic>{
+              'new_row': <String, dynamic>{
+                'name': 'Synth',
+                'instrument_id': 'mixroom.basic_synth',
+              },
+            },
+            'start_beat': 0,
+            'length_beats': 4,
+            'notes': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'pitch': 60,
+                'start_beat': 0,
+                'length_beats': 1,
+                'velocity': 0.8,
+              },
+            ],
+          },
+        },
+        <String, dynamic>{
+          'command_id': 'transpose',
+          'type': 'midi.transpose',
+          'arguments': <String, dynamic>{
+            'clip_ref': <String, dynamic>{
+              'command_id': 'create-midi',
+              'output': 'midi_clip',
+            },
+            'semitones': 2,
+          },
+        },
+      ],
+      'question_options': const <Object>[],
+    };
+    final service = AiV3PlannerService(
+      apiKey: 'test-key',
+      model: 'test-model',
+      resourceRefsEnabled: true,
+      httpClient: MockClient((_) async => http.Response(
+            jsonEncode(_responseWithArguments(jsonEncode(rawPlan))),
+            200,
+          )),
+    );
+
+    final result = await service.plan(
+      context: _context(),
+      originalRequest: 'Create a MIDI clip and transpose that generated clip.',
+    );
+
+    expect(result.plan.commands.map((command) => command.type), <String>[
+      'midi.create_clip',
+      'midi.transpose',
+    ]);
+    expect(
+      result.plan.commands.last.arguments['clip_ref'],
+      <String, dynamic>{
+        'command_id': 'create-midi',
+        'output': 'midi_clip',
+      },
+    );
+  });
+
   test('authenticated proxy preserves the V3 request and hides API keys',
       () async {
     late http.Request sentRequest;

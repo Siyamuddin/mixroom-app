@@ -4768,19 +4768,20 @@ public:
     void setClipStretchOptions(int clipIndex, double tempoRatio, bool preservePitch);
 
     // ROW (track bus) FX
-    bool insertTrackEffect(int trackRow, const juce::String &pluginPath);
-    void removeTrackEffect(int trackRow, int effectIndex);
-    void reorderTrackEffects(int trackRow, int fromIndex, int toIndex);
+    bool insertTrackEffect(int trackRow, const juce::String &pluginPath, bool forceIndividualRow = false);
+    void removeTrackEffect(int trackRow, int effectIndex, bool forceIndividualRow = false);
+    void reorderTrackEffects(int trackRow, int fromIndex, int toIndex, bool forceIndividualRow = false);
     void setTrackEffectParameter(int trackRow,
                                  int effectIndex,
                                  const juce::String &paramName,
-                                 const juce::var &newValue);
-    juce::StringArray getTrackEffectsForRow(int trackRow);
-    juce::StringArray getTrackEffectIdsForRow(int trackRow);
-    juce::StringArray getTrackEffectInstanceIdsForRow(int trackRow);
-    juce::Array<juce::NamedValueSet> getTrackPluginParameterInfo(int row, int effectIndex);
-    void bypassRowEffect(int rowIndex, int effectIndex, bool shouldBypass);
-    bool getRowEffectBypassState(int rowIndex, int effectIndex);
+                                 const juce::var &newValue,
+                                 bool forceIndividualRow = false);
+    juce::StringArray getTrackEffectsForRow(int trackRow, bool forceIndividualRow = false);
+    juce::StringArray getTrackEffectIdsForRow(int trackRow, bool forceIndividualRow = false);
+    juce::StringArray getTrackEffectInstanceIdsForRow(int trackRow, bool forceIndividualRow = false);
+    juce::Array<juce::NamedValueSet> getTrackPluginParameterInfo(int row, int effectIndex, bool forceIndividualRow = false);
+    void bypassRowEffect(int rowIndex, int effectIndex, bool shouldBypass, bool forceIndividualRow = false);
+    bool getRowEffectBypassState(int rowIndex, int effectIndex, bool forceIndividualRow = false);
     void setTrackAutomationPoints(int trackRow,
                                   const std::vector<AutomationPoint> &points);
     void setTrackEffectAutomationPoints(int trackRow,
@@ -5578,8 +5579,8 @@ private:
         TrackGroupState &group,
         juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync);
     void compactTrackGroupFxChain(TrackGroupState &group);
-    juce::Array<juce::AudioProcessorGraph::NodeID> *effectChainForRowApi(int rowIndex);
-    juce::StringArray *effectIdsForRowApi(int rowIndex);
+    juce::Array<juce::AudioProcessorGraph::NodeID> *effectChainForRowApi(int rowIndex, bool forceIndividualRow = false);
+    juce::StringArray *effectIdsForRowApi(int rowIndex, bool forceIndividualRow = false);
     juce::AudioProcessorGraph::Node::Ptr getRowInputNodeById(int rowId);
     int getRowIndexById(int rowId) const;
     void applyTrackEffectAutomationAtTimeSeconds(double timeSeconds);
