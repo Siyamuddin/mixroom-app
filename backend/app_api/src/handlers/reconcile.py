@@ -21,6 +21,7 @@ from common.models import (
 )
 from common.collaboration_repository import CollaborationRepository
 from common.billing_catalog_repository import BillingCatalogRepository
+from common.google_play import verify_google_purchase
 from common.monitoring import capture_exception, init_sentry
 from common.providers import charge_toss_billing_key
 from common.repository import BillingRepository
@@ -46,6 +47,14 @@ _TOSS_RENEWAL_GRACE = timedelta(days=3)
 _DASHBOARD_URL = "https://www.mixroom.ai/dashboard"
 _NOTICE_FROM_STATUSES = {"active", "trialing", "grace_period", "past_due"}
 _PAYMENT_PROBLEM_STATUSES = {"grace_period", "past_due"}
+_GOOGLE_RECONCILE_STATUSES = {
+    "active",
+    "trialing",
+    "grace_period",
+    "past_due",
+    "paused",
+    "expired",
+}
 
 
 def _is_team_plan(raw: Dict[str, Any]) -> bool:
@@ -535,13 +544,141 @@ def _renew_due_toss_subscription(sub: Dict[str, Any], now: datetime) -> str:
     return "renewed"
 
 
-def _subscription_iterable(now: datetime) -> list[Dict[str, Any]]:
+def _google_subscription_token(
+    sub: Dict[str, Any],
+) -> tuple[str, Dict[str, Any]]:
+    user_id = str(sub.get("user_id") or "").strip()
+    subscription_id = str(sub.get("subscription_id") or "").strip()
+    if not user_id:
+        return "", {}
+
+    candidates = [
+        item
+        for item in repo.list_purchase_tokens_for_user(user_id)
+        if str(item.get("provider") or "").strip().lower() == "google"
+        and str(item.get("purchase_token") or "").strip()
+    ]
+    exact = [
+        item
+        for item in candidates
+        if str(item.get("subscription_id") or "").strip() == subscription_id
+    ]
+    if exact:
+        selected = exact[0]
+        return str(selected.get("purchase_token") or "").strip(), selected
+
+    product_id = str(sub.get("product_id") or "").strip()
+    matching_product = [
+        item
+        for item in candidates
+        if not product_id or str(item.get("product_id") or "").strip() == product_id
+    ]
+    if len(matching_product) == 1:
+        selected = matching_product[0]
+        return str(selected.get("purchase_token") or "").strip(), selected
+    return "", {}
+
+
+def _reconcile_google_subscription(
+    sub: Dict[str, Any],
+    now: datetime,
+) -> str:
+    token, token_record = _google_subscription_token(sub)
+    if not token:
+        return "missing_token"
+
+    user_id = str(sub.get("user_id") or "").strip()
+    package_name = str(
+        token_record.get("package_name")
+        or sub.get("package_name")
+        or ""
+    ).strip()
+    try:
+        verified = verify_google_purchase(
+            repo,
+            purchase_token=token,
+            package_name=package_name,
+            expected_user_id=user_id,
+            client_product_id=str(sub.get("product_id") or ""),
+        )
+    except Exception as exc:
+        # A failed provider read must not revoke access. The next run or RTDN
+        # can correct a transient Google API or network failure.
+        capture_exception(
+            exc,
+            tags={
+                "service": "subscriptions_reconcile",
+                "operation": "google_subscription_reconcile",
+            },
+            context={
+                "subscription_id": sub.get("subscription_id"),
+                "user_id": user_id,
+            },
+        )
+        return "error"
+
+    normalized = verified.get("normalized")
+    if not isinstance(normalized, dict):
+        return "error"
+
+    updated = dict(sub)
+    for key in (
+        "status",
+        "expires_at",
+        "effective_at",
+        "product_id",
+        "product_code",
+        "plan_code",
+        "package_name",
+        "base_plan_id",
+        "offer_id",
+        "cancel_at_period_end",
+    ):
+        if key in normalized:
+            updated[key] = normalized.get(key)
+    updated["google_latest_order_id"] = str(
+        normalized.get("subscription_id") or ""
+    ).strip()
+    updated["google_last_reconciled_at"] = now.isoformat()
+    updated["source_occurred_at"] = now.isoformat()
+    repo.upsert_subscription(updated)
+    _refresh_current_entitlement_from_subscription(updated)
+    return "updated"
+
+
+def _google_subscriptions_for_reconcile() -> list[Dict[str, Any]]:
+    selected: list[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for sub in repo.scan_subscriptions():
+        if str(sub.get("provider") or "").strip().lower() != "google":
+            continue
+        if str(sub.get("status") or "").strip().lower() not in _GOOGLE_RECONCILE_STATUSES:
+            continue
+        subscription_id = str(sub.get("subscription_id") or "").strip()
+        if not subscription_id or subscription_id in seen:
+            continue
+        seen.add(subscription_id)
+        selected.append(sub)
+    return selected
+
+
+def _subscription_iterable(
+    now: datetime,
+    *,
+    skip_mobile_reconciliation_ids: Optional[set[str]] = None,
+) -> list[Dict[str, Any]]:
     seen: set[str] = set()
     selected: list[Dict[str, Any]] = []
 
     def add(item: Dict[str, Any]) -> None:
         subscription_id = str(item.get("subscription_id") or "").strip()
         if not subscription_id or subscription_id in seen:
+            return
+        if (
+            skip_mobile_reconciliation_ids
+            and str(item.get("provider") or "").strip().lower() == "google"
+            and subscription_id in skip_mobile_reconciliation_ids
+        ):
             return
         seen.add(subscription_id)
         selected.append(item)
@@ -582,8 +719,26 @@ def handler(_event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     downgraded = 0
     renewed = 0
     notifications_sent = 0
+    google_checked = 0
+    google_updated = 0
+    google_errors = 0
+    google_reconcile_failed_ids: set[str] = set()
 
-    for sub in _subscription_iterable(now):
+    for google_sub in _google_subscriptions_for_reconcile():
+        google_checked += 1
+        result = _reconcile_google_subscription(google_sub, now)
+        if result == "updated":
+            google_updated += 1
+        elif result == "error":
+            google_errors += 1
+            subscription_id = str(google_sub.get("subscription_id") or "").strip()
+            if subscription_id:
+                google_reconcile_failed_ids.add(subscription_id)
+
+    for sub in _subscription_iterable(
+        now,
+        skip_mobile_reconciliation_ids=google_reconcile_failed_ids,
+    ):
         scanned += 1
         user_id = str(sub.get("user_id") or "").strip()
         sub_id = str(sub.get("subscription_id") or "").strip()
@@ -698,6 +853,9 @@ def handler(_event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             "scanned": scanned,
             "downgraded": downgraded,
             "renewed": renewed,
+            "google_checked": google_checked,
+            "google_updated": google_updated,
+            "google_errors": google_errors,
             "notifications_sent": notifications_sent,
             "finished_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -707,6 +865,7 @@ def handler(_event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         "statusCode": 200,
         "body": (
             f"scanned={scanned}, renewed={renewed}, downgraded={downgraded}, "
-            f"notifications_sent={notifications_sent}"
+            f"google_checked={google_checked}, google_updated={google_updated}, "
+            f"google_errors={google_errors}, notifications_sent={notifications_sent}"
         ),
     }

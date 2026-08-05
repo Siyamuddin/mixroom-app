@@ -17,21 +17,21 @@ class AppApiConfig {
 
   static const bool enforceSubscriptions = bool.fromEnvironment(
     'SUBSCRIPTION_ENFORCE',
-    defaultValue: false,
+    defaultValue: true,
   );
   static const bool hasEnforceSubscriptionsOverride =
       bool.hasEnvironment('SUBSCRIPTION_ENFORCE');
 
   static const bool accountPlanBillingEnabled = bool.fromEnvironment(
     'ACCOUNT_PLAN_BILLING_ENABLED',
-    defaultValue: false,
+    defaultValue: true,
   );
   static const bool hasAccountPlanBillingOverride =
       bool.hasEnvironment('ACCOUNT_PLAN_BILLING_ENABLED');
 
   static const bool cloudProjectsEnabled = bool.fromEnvironment(
     'CLOUD_PROJECTS_ENABLED',
-    defaultValue: false,
+    defaultValue: true,
   );
   static const bool hasCloudProjectsOverride =
       bool.hasEnvironment('CLOUD_PROJECTS_ENABLED');

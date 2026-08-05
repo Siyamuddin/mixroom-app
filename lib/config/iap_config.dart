@@ -5,7 +5,7 @@ class IapConfig {
 
   static const bool purchasesEnabled = bool.fromEnvironment(
     'IAP_ENABLE_PURCHASES',
-    defaultValue: false,
+    defaultValue: true,
   );
   static const bool hasPurchasesEnabledOverride =
       bool.hasEnvironment('IAP_ENABLE_PURCHASES');
