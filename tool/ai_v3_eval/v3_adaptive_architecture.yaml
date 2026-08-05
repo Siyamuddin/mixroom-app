@@ -80,7 +80,7 @@ common_commands:
 adaptive_command_surface:
   revision: full_commands_fact_retrieval_v1
   source_of_truth: aiV3CommandTypes
-  command_count: 53
+  command_count: 54
   first_call_exposes_all: true
   continuation_exposes_all: true
   retrieval_unlocks_commands: false
@@ -160,7 +160,7 @@ v1_capability_placement:
 domains:
   project_structure: {purpose: transport_row_lifecycle_metadata_and_grouping, current_commands: [row.select, row.set_color, row.set_role_override, row.create, row.delete, group.create, group.remove_row, group.set_collapsed]}
   clip_advanced: {purpose: rendered_analysis_tempo_dialogue_and_multi_clip_editing, current_commands: [clip.set_pitch_semitones, clip.adjust_pitch_semitones, clip.set_timeline_length_beats, clip.scale_timeline_length, clip.set_source_tempo_bpm, clip.set_tempo_follow_mode, clip.align_tempo_to_project, project.set_tempo_from_clip, clip.trim_silence, clip.align_first_sound, clip.glue, clip.separate_stems, clip.convert_to_midi]}
-  midi: {purpose: midi_content_and_editing, current_commands: [midi.transpose, midi.create_clip, midi.replace_notes, midi.append_notes, midi.chop_notes]}
+  midi: {purpose: midi_content_and_editing, current_commands: [midi.transpose, midi.create_clip, midi.replace_notes, midi.append_notes, midi.chop_notes, row.set_instrument]}
   samples: {purpose: asset_search_insertion_and_replacement, current_commands: [sample.place, sample.replace]}
   effects: {purpose: effect_instances_parameters_presets_and_configuration, current_commands: [effect.ensure_configured, effect.remove, effect.set_bypassed]}
   automation: {purpose: targets_points_ramps_clips_templates_and_state, current_commands: [automation.gain_fade, automation.set_points, automation.clear]}
@@ -180,9 +180,9 @@ adaptive_domain_registry:
     continuation_commands: [clip.set_pitch_semitones, clip.adjust_pitch_semitones, clip.set_timeline_length_beats, clip.scale_timeline_length, clip.set_source_tempo_bpm, clip.set_tempo_follow_mode, clip.align_tempo_to_project, project.set_tempo_from_clip, clip.trim_silence, clip.align_first_sound, clip.glue, clip.separate_stems, clip.convert_to_midi]
   midi:
     retrieval_enabled: true
-    capabilities: [transpose_notes, create_midi_clip, replace_notes, append_notes, chop_notes]
+    capabilities: [transpose_notes, create_midi_clip, replace_notes, append_notes, chop_notes, set_row_instrument]
     requested_fields: [clip_notes, clip_instruments, edit_capabilities]
-    continuation_commands: [midi.transpose, midi.create_clip, midi.replace_notes, midi.append_notes, midi.chop_notes]
+    continuation_commands: [midi.transpose, midi.create_clip, midi.replace_notes, midi.append_notes, midi.chop_notes, row.set_instrument]
   effects:
     retrieval_enabled: true
     capabilities: [ensure_configured_effect, remove_effect, set_effect_bypass]

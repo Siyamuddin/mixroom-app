@@ -137,6 +137,60 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('instrument change notice uses every supported locale', (
+    tester,
+  ) async {
+    const messageKey = 'Changed {row} instrument to {instrument}';
+    final localeProvider = LocaleProvider();
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<LocaleProvider>.value(
+        value: localeProvider,
+        child: Consumer<LocaleProvider>(
+          builder: (context, provider, _) {
+            return MaterialApp(
+              locale: L10n.resolveSupportedLocale(provider.locale),
+              supportedLocales: L10n.supportedLocales,
+              localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
+                GlobalMaterialLocalizations.delegate,
+                GlobalWidgetsLocalizations.delegate,
+                GlobalCupertinoLocalizations.delegate,
+              ],
+              home: Scaffold(
+                body: Builder(
+                  builder: (context) => Text(
+                    L10n.translate(context, messageKey)
+                        .replaceAll('{row}', 'Custom Keys')
+                        .replaceAll('{instrument}', 'Dream Pad'),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+
+    expect(
+      find.text('Changed Custom Keys instrument to Dream Pad'),
+      findsOneWidget,
+    );
+
+    await localeProvider.setLocale(const Locale('ko'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Custom Keys: 악기를 Dream Pad로 변경했습니다'),
+      findsOneWidget,
+    );
+
+    await localeProvider.setLocale(const Locale('ja'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Custom KeysのインストゥルメントをDream Padに変更しました'),
+      findsOneWidget,
+    );
+  });
 }
 
 class _LocaleDependencyProbe extends StatefulWidget {

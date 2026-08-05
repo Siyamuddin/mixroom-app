@@ -29,7 +29,7 @@ user request
 → tests and workflow captures
 ```
 
-The canonical action contract contains 22 families and 87 operations, but it is
+The canonical action contract contains 22 families and 88 operations, but it is
 not the whole AI product. The audit separately includes top-level response
 surfaces, the mix-goal contract, heuristic and learned mixing engines, concrete
 mix executor actions, reference-track mixing, audio models, catalogs, context
@@ -103,7 +103,7 @@ gaps, V3 disposition, phase, and dependency.
 | `row_group_edit` | `create`, `remove_row`, `toggle_collapsed` | Implemented but not separately advertised in the legacy capability field | V3 uses stable group/row IDs, exact membership and final collapsed state |
 | `clip_edit` | `trim`, `auto_trim`, `cut`, `stretch`, `pitch_shift`, `glue`, `move`, `tempo_follow`, `auto_bpm_align`, `align_first_sound`, `tempo_detect_set_project`, `duplicate`, `delete`, four dialogue operations | Local and rendering paths exist; rendering is not uniformly atomic | V3 supports exact move, explicit and automatic silence trim, first-sound alignment, split, single-copy duplication, delete, same-row transactional audio glue, absolute/relative pitch and stretch, explicit tempo-follow, local BPM alignment, and project tempo derivation; dialogue work remains staged |
 | `sample_insert` | `insert_audio_clips`, `replace_audio_clips` | Implemented; large-catalog matching can be descriptive | `sample.place` and stable-ID `sample.replace` with adaptive shadow catalog lookup |
-| `midi_compose` | `create_clip`, `compose_bassline`, `compose_pattern`, `replace_notes`, `append_notes`, `transpose_notes`, `convert_audio_to_midi`, `chop_notes` | Editing exists; raw composition quality unproven; transcription is model-dependent | V3 supports exact create, replace, bounded append, transpose, deterministic chop, and staged local Basic Pitch transcription |
+| `midi_compose` | `create_clip`, `compose_bassline`, `compose_pattern`, `replace_notes`, `append_notes`, `transpose_notes`, `convert_audio_to_midi`, `chop_notes`, `set_row_instrument` | Editing exists; raw composition quality unproven; transcription is model-dependent | V3 supports exact create, replace, bounded append, transpose, deterministic chop, exact row instrument swaps, and staged local Basic Pitch transcription |
 | `effect_edit` | `add`, `remove`, `bypass`, `unbypass`, `toggle_bypass` | Implemented; hosted-plugin parameters lack one portable contract | Built-in ensure/configure plus exact row-instance remove and bypass; master/group instances remain deferred |
 | `automation_edit` | points, ramps, clear, create/duplicate/move/delete/clear clips, clip mute state, unique clips, clip points, templates | Implemented with target-specific units | Existing gain fade with adaptive shadow point lookup, then target/clip IDs and typed parameter values |
 | `stem_separate` | `vocal_instrumental` | Partial asynchronous ONNX/file workflow | `clip.separate_stems` with local staged Spleeter execution and atomic rollback |
@@ -287,7 +287,7 @@ adaptive retrieval supplies their detailed domain facts only when needed:
 | --- | --- |
 | Transport | `transport.set_playing`, `transport.restart`, `transport.set_metronome_enabled`, `transport.set_loop_enabled` |
 | Project structure | `row.select`, `row.set_color`, `row.set_role_override`, `row.create`, `row.delete`, `group.create`, `group.remove_row`, `group.set_collapsed` |
-| MIDI | `midi.transpose`, `midi.create_clip`, `midi.replace_notes`, `midi.append_notes`, `midi.chop_notes` |
+| MIDI | `midi.transpose`, `midi.create_clip`, `midi.replace_notes`, `midi.append_notes`, `midi.chop_notes`, `row.set_instrument` |
 | Samples | `sample.place`, `sample.replace` |
 | Effects | `effect.ensure_configured`, `effect.remove`, `effect.set_bypassed` |
 | Automation | `automation.gain_fade`, `automation.set_points`, `automation.clear` |
@@ -295,7 +295,7 @@ adaptive retrieval supplies their detailed domain facts only when needed:
 | Advanced clips | `clip.set_pitch_semitones`, `clip.adjust_pitch_semitones`, `clip.set_timeline_length_beats`, `clip.scale_timeline_length`, `clip.set_source_tempo_bpm`, `clip.set_tempo_follow_mode`, `clip.align_tempo_to_project`, `project.set_tempo_from_clip`, `clip.trim_silence`, `clip.align_first_sound`, `clip.glue`, `clip.separate_stems`, `clip.convert_to_midi` |
 | External audio | `row.apply_phone_mic_cleanup` |
 
-The adaptive shadow exposes all fifty-three prototype commands from its first
+The adaptive shadow exposes all fifty-four prototype commands from its first
 call, including `mix.apply_goal`. Mixing retrieval supplies only bounded factual
 row/group/master/reference information; the existing Mixroom heuristic and
 learned refinement stack remains the sole producer of concrete MixActions.
@@ -323,7 +323,7 @@ does not execute or reinterpret the request.
 
 ## Gap report
 
-- The canonical 87-operation contract does not describe the full mixing or
+- The canonical 88-operation contract does not describe the full mixing or
   audio-model architecture.
 - V1 lacks universal atomicity and readback across heterogeneous and
   asynchronous compound work.
