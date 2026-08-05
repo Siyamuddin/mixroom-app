@@ -9,6 +9,8 @@ class AppDelegate: FlutterAppDelegate, ASWebAuthenticationPresentationContextPro
   private let nativeSocialChannelName = "mixroom/native_social"
   private var channel: FlutterMethodChannel?
   private var nativeSocialChannel: FlutterMethodChannel?
+  private var sampleBrowserAccessChannel: FlutterMethodChannel?
+  private var activeSampleBookmarks: [String: URL] = [:]
   private var initialMixroomPath: String?
   private var channelsInitialized = false
   private var kakaoAuthSession: ASWebAuthenticationSession?
@@ -84,6 +86,61 @@ class AppDelegate: FlutterAppDelegate, ASWebAuthenticationPresentationContextPro
       name: nativeSocialChannelName,
       binaryMessenger: flutterViewController.engine.binaryMessenger
     )
+    sampleBrowserAccessChannel = FlutterMethodChannel(
+      name: "mixroom/sample_browser_access",
+      binaryMessenger: flutterViewController.engine.binaryMessenger
+    )
+    sampleBrowserAccessChannel?.setMethodCallHandler { [weak self] call, result in
+      guard let self = self else { return }
+      let args = call.arguments as? [String: Any]
+      switch call.method {
+      case "createBookmark":
+        guard let path = args?["path"] as? String else {
+          result(FlutterError(code: "bad_args", message: "Missing path", details: nil))
+          return
+        }
+        do {
+          let url = URL(fileURLWithPath: path)
+          let bookmark = try url.bookmarkData(
+            options: [.withSecurityScope],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+          )
+          result(["path": url.path, "persistentToken": bookmark.base64EncodedString()])
+        } catch {
+          result(FlutterError(code: "bookmark_failed", message: error.localizedDescription, details: nil))
+        }
+      case "restoreAccess":
+        guard let token = args?["token"] as? String,
+              let data = Data(base64Encoded: token) else {
+          result(FlutterError(code: "bad_token", message: "Invalid bookmark", details: nil))
+          return
+        }
+        do {
+          var stale = false
+          let url = try URL(
+            resolvingBookmarkData: data,
+            options: [.withSecurityScope],
+            relativeTo: nil,
+            bookmarkDataIsStale: &stale
+          )
+          guard url.startAccessingSecurityScopedResource() else {
+            result(FlutterError(code: "access_denied", message: "Folder access is no longer available", details: nil))
+            return
+          }
+          self.activeSampleBookmarks[token] = url
+          result(["path": url.path, "persistentToken": token])
+        } catch {
+          result(FlutterError(code: "restore_failed", message: error.localizedDescription, details: nil))
+        }
+      case "releaseAccess":
+        guard let token = args?["token"] as? String else { result(nil); return }
+        self.activeSampleBookmarks.removeValue(forKey: token)?.stopAccessingSecurityScopedResource()
+        result(nil)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
     nativeSocialChannel?.setMethodCallHandler { [weak self] call, result in
       guard let self = self else { return }
       if call.method == "signInWithKakao" {

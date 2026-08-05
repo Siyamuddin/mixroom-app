@@ -31,6 +31,7 @@ class MainActivity : FlutterFragmentActivity() {
     private const val MAX_INCOMING_MIXROOM_BYTES = 512L * 1024L * 1024L
     private const val MAX_INCOMING_AUDIO_BYTES = 512L * 1024L * 1024L
     private const val REQUEST_CODE_SAVE_EXPORTED_FILE = 40171
+    private const val REQUEST_CODE_PICK_SAMPLE_DIRECTORY = 40172
   }
 
   private val openFileChannelName = "mixroom/open_file"
@@ -46,6 +47,7 @@ class MainActivity : FlutterFragmentActivity() {
   private var pendingSavedExportResult: MethodChannel.Result? = null
   private var pendingSavedExportSourcePath: String? = null
   private var pendingSavedExportSuggestedFileName: String? = null
+  private var pendingSampleDirectoryResult: MethodChannel.Result? = null
 
   override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
     super.configureFlutterEngine(flutterEngine)
@@ -176,6 +178,47 @@ class MainActivity : FlutterFragmentActivity() {
         else -> result.notImplemented()
       }
     }
+
+    val sampleBrowserAccessChannel = MethodChannel(
+      flutterEngine.dartExecutor.binaryMessenger,
+      "mixroom/sample_browser_access",
+    )
+    sampleBrowserAccessChannel.setMethodCallHandler { call, result ->
+      when (call.method) {
+        "pickDirectory" -> pickSampleDirectory(result)
+        "restoreAccess" -> {
+          val args = call.arguments as? Map<*, *>
+          val token = args?.get("token") as? String
+          val path = args?.get("path") as? String
+          if (token.isNullOrBlank()) {
+            result.success(mapOf("path" to path.orEmpty()))
+          } else {
+            try {
+              val uri = Uri.parse(token)
+              val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+              contentResolver.takePersistableUriPermission(uri, flags)
+              result.success(mapOf("path" to (pathFromTreeUri(uri) ?: path.orEmpty()), "persistentToken" to token))
+            } catch (e: Exception) {
+              result.error("restore_failed", e.message, null)
+            }
+          }
+        }
+        "releaseAccess" -> {
+          val token = (call.arguments as? Map<*, *>)?.get("token") as? String
+          if (!token.isNullOrBlank()) {
+            try {
+              val uri = Uri.parse(token)
+              contentResolver.releasePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+              )
+            } catch (_: Exception) {}
+          }
+          result.success(null)
+        }
+        else -> result.notImplemented()
+      }
+    }
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -192,11 +235,72 @@ class MainActivity : FlutterFragmentActivity() {
   }
 
   override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+    if (requestCode == REQUEST_CODE_PICK_SAMPLE_DIRECTORY) {
+      handleSampleDirectoryResult(resultCode, data)
+      return
+    }
     if (requestCode == REQUEST_CODE_SAVE_EXPORTED_FILE) {
       handleSavedExportDocumentResult(resultCode, data)
       return
     }
     super.onActivityResult(requestCode, resultCode, data)
+  }
+
+  private fun pickSampleDirectory(result: MethodChannel.Result) {
+    if (pendingSampleDirectoryResult != null) {
+      result.error("pick_in_progress", "A folder picker is already open", null)
+      return
+    }
+    pendingSampleDirectoryResult = result
+    try {
+      val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+      }
+      startActivityForResult(intent, REQUEST_CODE_PICK_SAMPLE_DIRECTORY)
+    } catch (e: Exception) {
+      pendingSampleDirectoryResult = null
+      result.error("pick_launch_failed", e.message, null)
+    }
+  }
+
+  private fun handleSampleDirectoryResult(resultCode: Int, data: Intent?) {
+    val result = pendingSampleDirectoryResult ?: return
+    pendingSampleDirectoryResult = null
+    if (resultCode != RESULT_OK || data?.data == null) {
+      result.success(null)
+      return
+    }
+    val uri = data.data!!
+    try {
+      val flags = data.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+      contentResolver.takePersistableUriPermission(uri, if (flags != 0) flags else Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      result.success(
+        mapOf(
+          "path" to (pathFromTreeUri(uri) ?: uri.path.orEmpty()),
+          "persistentToken" to uri.toString(),
+        ),
+      )
+    } catch (e: Exception) {
+      result.error("persist_failed", e.message, null)
+    }
+  }
+
+  private fun pathFromTreeUri(uri: Uri): String? {
+    if (!DocumentsContract.isTreeUri(uri)) return null
+    val docId = DocumentsContract.getTreeDocumentId(uri) ?: return null
+    val split = docId.split(":", limit = 2)
+    if (split.size != 2) return null
+    val volume = split[0]
+    val relative = split[1].trim('/').replace('/', File.separatorChar)
+    val base = if (volume.equals("primary", ignoreCase = true)) {
+      Environment.getExternalStorageDirectory()
+    } else {
+      File("/storage/$volume")
+    }
+    return if (relative.isEmpty()) base.absolutePath else File(base, relative).absolutePath
   }
 
   private fun handleIntent(intent: Intent?, isInitial: Boolean) {

@@ -1,5 +1,104 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/services.dart';
+
+class SampleBrowserRootAccess {
+  final String path;
+  final String? persistentToken;
+
+  const SampleBrowserRootAccess({required this.path, this.persistentToken});
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'path': path,
+    if (persistentToken?.trim().isNotEmpty == true)
+      'persistentToken': persistentToken,
+  };
+
+  static SampleBrowserRootAccess? fromJson(dynamic value) {
+    if (value is! Map) return null;
+    final path = SampleBrowserRootDefaults.normalizeRoot(
+      value['path']?.toString(),
+    );
+    if (path.isEmpty) return null;
+    final token = value['persistentToken']?.toString().trim();
+    return SampleBrowserRootAccess(
+      path: path,
+      persistentToken: token == null || token.isEmpty ? null : token,
+    );
+  }
+}
+
+class SampleBrowserAccess {
+  SampleBrowserAccess._();
+
+  static const MethodChannel _channel = MethodChannel(
+    'mixroom/sample_browser_access',
+  );
+
+  static Future<SampleBrowserRootAccess?> pickDirectory() async {
+    if (!Platform.isAndroid) return null;
+    final raw = await _channel.invokeMethod<dynamic>('pickDirectory');
+    return SampleBrowserRootAccess.fromJson(raw);
+  }
+
+  static Future<SampleBrowserRootAccess?> createPersistentAccess(
+    String path,
+  ) async {
+    if (!(Platform.isIOS || Platform.isMacOS)) {
+      return SampleBrowserRootAccess(
+        path: SampleBrowserRootDefaults.normalizeRoot(path),
+      );
+    }
+    try {
+      final raw = await _channel.invokeMethod<dynamic>(
+        'createBookmark',
+        <String, dynamic>{'path': path},
+      );
+      return SampleBrowserRootAccess.fromJson(raw) ??
+          SampleBrowserRootAccess(
+            path: SampleBrowserRootDefaults.normalizeRoot(path),
+          );
+    } on MissingPluginException {
+      return SampleBrowserRootAccess(
+        path: SampleBrowserRootDefaults.normalizeRoot(path),
+      );
+    } on PlatformException {
+      return SampleBrowserRootAccess(
+        path: SampleBrowserRootDefaults.normalizeRoot(path),
+      );
+    }
+  }
+
+  static Future<SampleBrowserRootAccess?> restore(
+    SampleBrowserRootAccess access,
+  ) async {
+    final token = access.persistentToken?.trim();
+    if (token == null || token.isEmpty) return access;
+    try {
+      final raw = await _channel.invokeMethod<dynamic>(
+        'restoreAccess',
+        <String, dynamic>{'token': token, 'path': access.path},
+      );
+      return SampleBrowserRootAccess.fromJson(raw) ?? access;
+    } on MissingPluginException {
+      return access;
+    } on PlatformException {
+      return access;
+    }
+  }
+
+  static Future<void> release(String token) async {
+    if (token.trim().isEmpty) return;
+    try {
+      await _channel.invokeMethod<void>('releaseAccess', <String, dynamic>{
+        'token': token,
+      });
+    } catch (_) {}
+  }
+}
 
 class SampleBrowserRootDefaults {
   SampleBrowserRootDefaults._();
@@ -104,6 +203,8 @@ class MobileSampleBrowserPrefs {
         : '$_rootsPrefix:$trimmed';
   }
 
+  static String _accessKey(String? userId) => '${_rootsKey(userId)}:access';
+
   static Future<List<String>> loadSampleBrowserRoots(String? userId) async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getStringList(_rootsKey(userId)) ?? const <String>[];
@@ -125,5 +226,53 @@ class MobileSampleBrowserPrefs {
         nonPersistedRoots: const <String>[],
       ),
     );
+  }
+
+  static Future<List<SampleBrowserRootAccess>> loadSampleBrowserAccess(
+    String? userId,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_accessKey(userId));
+    if (raw == null || raw.trim().isEmpty) {
+      return (prefs.getStringList(_rootsKey(userId)) ?? const <String>[])
+          .map(
+            (path) => SampleBrowserRootAccess(
+              path: SampleBrowserRootDefaults.normalizeRoot(path),
+            ),
+          )
+          .where((access) => access.path.isNotEmpty)
+          .toList(growable: false);
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const <SampleBrowserRootAccess>[];
+      return decoded
+          .map(SampleBrowserRootAccess.fromJson)
+          .whereType<SampleBrowserRootAccess>()
+          .toList(growable: false);
+    } catch (_) {
+      return const <SampleBrowserRootAccess>[];
+    }
+  }
+
+  static Future<void> saveSampleBrowserAccess(
+    String? userId,
+    Iterable<SampleBrowserRootAccess> access,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final normalized = <String, SampleBrowserRootAccess>{};
+    for (final entry in access) {
+      final path = SampleBrowserRootDefaults.normalizeRoot(entry.path);
+      if (path.isEmpty) continue;
+      normalized[path] = SampleBrowserRootAccess(
+        path: path,
+        persistentToken: entry.persistentToken,
+      );
+    }
+    await prefs.setString(
+      _accessKey(userId),
+      jsonEncode(normalized.values.map((entry) => entry.toJson()).toList()),
+    );
+    await prefs.setStringList(_rootsKey(userId), normalized.keys.toList());
   }
 }

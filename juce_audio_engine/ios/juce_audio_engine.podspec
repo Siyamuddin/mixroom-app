@@ -32,7 +32,7 @@ Pod::Spec.new do |s|
   # The selected archive is linked by sdk/config-specific OTHER_LDFLAGS below.
   s.preserve_paths = 'JuceModules.xcframework/**/*'
 
-  s.platform         = :ios, '13.0'
+  s.platform         = :ios, '15.0'
   s.requires_arc     = false
   s.swift_version    = '5.0'
   s.dependency       'Flutter'

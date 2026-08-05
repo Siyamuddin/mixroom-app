@@ -20,16 +20,13 @@ void main() {
         ],
       );
 
-      expect(
-        roots,
-        const <String>[
-          '/packs/drums',
-          '/packs/keys',
-          '/projects/song/audio',
-          '/documents/Mixroom Samples',
-          '/samples/user',
-        ],
-      );
+      expect(roots, const <String>[
+        '/packs/drums',
+        '/packs/keys',
+        '/projects/song/audio',
+        '/documents/Mixroom Samples',
+        '/samples/user',
+      ]);
     });
 
     test('marks project audio and app sample folder as fixed roots', () {
@@ -64,13 +61,7 @@ void main() {
         ],
       );
 
-      expect(
-        persistable,
-        const <String>[
-          '/samples/user',
-          '/samples/second',
-        ],
-      );
+      expect(persistable, const <String>['/samples/user', '/samples/second']);
     });
 
     test('detects Android shared storage roots', () {
@@ -109,11 +100,7 @@ void main() {
     test('round-trips roots per user', () async {
       await MobileSampleBrowserPrefs.saveSampleBrowserRoots(
         'user-a',
-        const <String>[
-          '/samples/user',
-          '/samples/user',
-          '  /samples/second  ',
-        ],
+        const <String>['/samples/user', '/samples/user', '  /samples/second  '],
       );
       await MobileSampleBrowserPrefs.saveSampleBrowserRoots(
         'user-b',
@@ -122,10 +109,7 @@ void main() {
 
       expect(
         await MobileSampleBrowserPrefs.loadSampleBrowserRoots('user-a'),
-        const <String>[
-          '/samples/user',
-          '/samples/second',
-        ],
+        const <String>['/samples/user', '/samples/second'],
       );
       expect(
         await MobileSampleBrowserPrefs.loadSampleBrowserRoots('user-b'),

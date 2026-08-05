@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:mixroom/helpers/desktop_slider_wheel_sensitivity.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:mixroom/helpers/sample_browser_roots.dart';
 
 class DesktopEditorWindowLayout {
   const DesktopEditorWindowLayout({
@@ -18,11 +19,11 @@ class DesktopEditorWindowLayout {
   final double heightFraction;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-        'leftFraction': leftFraction,
-        'topFraction': topFraction,
-        'widthFraction': widthFraction,
-        'heightFraction': heightFraction,
-      };
+    'leftFraction': leftFraction,
+    'topFraction': topFraction,
+    'widthFraction': widthFraction,
+    'heightFraction': heightFraction,
+  };
 
   static DesktopEditorWindowLayout? fromJson(Map<String, dynamic> json) {
     final left = (json['leftFraction'] as num?)?.toDouble();
@@ -60,12 +61,12 @@ class DesktopShortcutBinding {
       LogicalKeyboardKey.findKeyByKeyId(keyId);
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-        'keyId': keyId,
-        'meta': meta,
-        'control': control,
-        'shift': shift,
-        'alt': alt,
-      };
+    'keyId': keyId,
+    'meta': meta,
+    'control': control,
+    'shift': shift,
+    'alt': alt,
+  };
 
   static DesktopShortcutBinding? fromJson(Map<String, dynamic> json) {
     final keyId = (json['keyId'] as num?)?.toInt();
@@ -98,16 +99,16 @@ class DesktopPluginPrefs {
   final int? lastRescanAtMs;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-        'favoritePluginIds': favoritePluginIds.toList()..sort(),
-        'hiddenPluginIds': hiddenPluginIds.toList()..sort(),
-        'scanPaths': scanPaths,
-        'cachedPlugins': cachedPlugins
-            .map(_sanitizePluginJson)
-            .where(_hasPluginIdentity)
-            .toList(),
-        'hostedWindowsDetached': hostedWindowsDetached,
-        if (lastRescanAtMs != null) 'lastRescanAtMs': lastRescanAtMs,
-      };
+    'favoritePluginIds': favoritePluginIds.toList()..sort(),
+    'hiddenPluginIds': hiddenPluginIds.toList()..sort(),
+    'scanPaths': scanPaths,
+    'cachedPlugins': cachedPlugins
+        .map(_sanitizePluginJson)
+        .where(_hasPluginIdentity)
+        .toList(),
+    'hostedWindowsDetached': hostedWindowsDetached,
+    if (lastRescanAtMs != null) 'lastRescanAtMs': lastRescanAtMs,
+  };
 
   static DesktopPluginPrefs fromJson(Map<String, dynamic> json) {
     Set<String> readStringSet(String key) {
@@ -125,9 +126,9 @@ class DesktopPluginPrefs {
       if (raw is! List) return const <Map<String, dynamic>>[];
       return raw
           .whereType<Map>()
-          .map((plugin) => _sanitizePluginJson(
-                Map<String, dynamic>.from(plugin),
-              ))
+          .map(
+            (plugin) => _sanitizePluginJson(Map<String, dynamic>.from(plugin)),
+          )
           .where(_hasPluginIdentity)
           .toList(growable: false);
     }
@@ -198,6 +199,8 @@ class DesktopEditorPrefs {
       '$_sliderWheelSensitivityKeyPrefix.${_scope(userId)}';
   static String _sampleRootsKey(String? userId) =>
       '$_sampleRootsKeyPrefix.${_scope(userId)}';
+  static String _sampleAccessKey(String? userId) =>
+      '${_sampleRootsKey(userId)}.access';
   static String _pluginPrefsKey(String? userId) =>
       '$_pluginPrefsKeyPrefix.${_scope(userId)}';
 
@@ -345,6 +348,49 @@ class DesktopEditorPrefs {
         .where((value) => value.isNotEmpty)
         .toList(growable: false);
     await prefs.setStringList(_sampleRootsKey(userId), normalized);
+  }
+
+  static Future<List<SampleBrowserRootAccess>> loadSampleBrowserAccess(
+    String? userId,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_sampleAccessKey(userId));
+    if (raw == null || raw.trim().isEmpty) {
+      return (prefs.getStringList(_sampleRootsKey(userId)) ?? const <String>[])
+          .map((path) => SampleBrowserRootAccess(path: path))
+          .toList(growable: false);
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const <SampleBrowserRootAccess>[];
+      return decoded
+          .map(SampleBrowserRootAccess.fromJson)
+          .whereType<SampleBrowserRootAccess>()
+          .toList(growable: false);
+    } catch (_) {
+      return const <SampleBrowserRootAccess>[];
+    }
+  }
+
+  static Future<void> saveSampleBrowserAccess(
+    String? userId,
+    Iterable<SampleBrowserRootAccess> access,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final normalized = <String, SampleBrowserRootAccess>{};
+    for (final entry in access) {
+      final path = entry.path.trim();
+      if (path.isEmpty) continue;
+      normalized[path] = entry;
+    }
+    await prefs.setString(
+      _sampleAccessKey(userId),
+      jsonEncode(normalized.values.map((entry) => entry.toJson()).toList()),
+    );
+    await prefs.setStringList(
+      _sampleRootsKey(userId),
+      normalized.keys.toList(growable: false),
+    );
   }
 
   static Future<DesktopPluginPrefs> loadPluginPrefs(String? userId) async {

@@ -44,9 +44,9 @@ compile_module() {
 
   local min_flag
   if [[ "$sdk" == "iphoneos" ]]; then
-    min_flag="-miphoneos-version-min=13.0"
+    min_flag="-miphoneos-version-min=15.0"
   else
-    min_flag="-mios-simulator-version-min=13.0"
+    min_flag="-mios-simulator-version-min=15.0"
   fi
 
   xcrun --sdk "$sdk" clang++ \
