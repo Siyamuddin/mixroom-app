@@ -70,6 +70,7 @@ const List<AiV3DomainDefinition> aiV3DomainDefinitions = <AiV3DomainDefinition>[
       'replace_notes',
       'append_notes',
       'chop_notes',
+      'set_row_instrument',
     ],
     requestedFields: <String>[
       'clip_notes',
@@ -82,6 +83,7 @@ const List<AiV3DomainDefinition> aiV3DomainDefinitions = <AiV3DomainDefinition>[
       'midi.replace_notes',
       'midi.append_notes',
       'midi.chop_notes',
+      'row.set_instrument',
     ],
   ),
   AiV3DomainDefinition(

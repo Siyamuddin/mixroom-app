@@ -198,7 +198,7 @@ AiV3CoreContext _context() => AiV3CoreContext(
             'length_beats': 8.0,
           },
         ],
-        'instruments': <String>['piano'],
+        'instruments': <String>['piano', 'bass'],
         'effects': <Map<String, dynamic>>[
           <String, dynamic>{
             'effect_id': 'Reverb',
@@ -3559,6 +3559,7 @@ void main() {
         'row.set_gain_db',
         'row.adjust_pan',
         'row.set_soloed',
+        'row.set_instrument',
         'clip.trim_to_range',
         'clip.split_at',
         'clip.duplicate_to',
@@ -3599,6 +3600,34 @@ void main() {
         }),
       ]));
       expect(plan.commands.single.type, 'mix.apply_goal');
+    });
+
+    test('accepts only strict row instrument commands', () {
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
+        _command('instrument', 'row.set_instrument', <String, dynamic>{
+          'row_id': 200,
+          'instrument_id': 'bass',
+        }),
+      ]));
+      expect(plan.commands.single.type, 'row.set_instrument');
+
+      for (final arguments in <Map<String, dynamic>>[
+        <String, dynamic>{'row_id': 200},
+        <String, dynamic>{'row_id': -1, 'instrument_id': 'bass'},
+        <String, dynamic>{'row_id': 200, 'instrument_id': ''},
+        <String, dynamic>{
+          'row_id': 200,
+          'instrument_id': 'bass',
+          'extra': true,
+        },
+      ]) {
+        expect(
+          () => AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
+            _command('invalid', 'row.set_instrument', arguments),
+          ])),
+          throwsA(isA<AiV3ContractException>()),
+        );
+      }
     });
 
     test('prepares exact effect-instance removal and final bypass state', () {
@@ -4581,6 +4610,73 @@ void main() {
   });
 
   group('V3 factual preparation', () {
+    test('prepares exact row instrument swaps and simulates later commands',
+        () {
+      final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
+        _command('instrument', 'row.set_instrument', <String, dynamic>{
+          'row_id': 200,
+          'instrument_id': 'bass',
+        }),
+        _command('create', 'midi.create_clip', <String, dynamic>{
+          'destination': <String, dynamic>{'row_id': 200},
+          'start_beat': 0.0,
+          'length_beats': 1.0,
+          'notes': <Map<String, dynamic>>[
+            _note(48, 0.0, 1.0),
+          ],
+        }),
+      ]));
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+
+      expect(prepared.actions, hasLength(2));
+      expect(prepared.actions.first.type, 'v3_row_set_instrument');
+      expect(prepared.actions.first.data['instrument_id'], 'bass');
+      expect((prepared.actions.first.data['target'] as Map)['row_id'], 200);
+      expect(prepared.actions.last.type, 'midi_compose');
+      expect(prepared.actions.last.data['instrument_id'], 'bass');
+    });
+
+    test('row instrument preparation is idempotent and rejects bad targets',
+        () {
+      final already = const AiV3CommandPreparer().prepare(
+        plan: AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
+          _command('same', 'row.set_instrument', <String, dynamic>{
+            'row_id': 200,
+            'instrument_id': 'piano',
+          }),
+        ])),
+        context: _context(),
+      );
+      expect(already.actions, isEmpty);
+      expect(already.receipts.single['status'], 'already_satisfied');
+
+      for (final value in <({int rowId, String instrumentId, String code})>[
+        (rowId: 999, instrumentId: 'bass', code: 'v3_row_id_unknown'),
+        (rowId: 100, instrumentId: 'bass', code: 'v3_instrument_row_required'),
+        (rowId: 200, instrumentId: 'missing', code: 'v3_instrument_id_unknown'),
+      ]) {
+        expect(
+          () => const AiV3CommandPreparer().prepare(
+            plan: AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
+              _command('bad', 'row.set_instrument', <String, dynamic>{
+                'row_id': value.rowId,
+                'instrument_id': value.instrumentId,
+              }),
+            ])),
+            context: _context(),
+          ),
+          throwsA(isA<AiV3PreparationException>().having(
+            (error) => error.code,
+            'code',
+            value.code,
+          )),
+        );
+      }
+    });
+
     test('allows all-row mixing for playable MIDI without analyzed audio', () {
       final data =
           jsonDecode(jsonEncode(_context().data)) as Map<String, dynamic>;
@@ -6852,7 +6948,7 @@ void main() {
         'midi.chop_notes',
         'midi.chop_notes',
       ]);
-      expect(aiV3CommandTypes, hasLength(53));
+      expect(aiV3CommandTypes, hasLength(54));
     });
 
     test('rejects malformed MIDI edit fields and numeric bounds', () {

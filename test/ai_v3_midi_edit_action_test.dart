@@ -29,6 +29,54 @@ Future<AudioTrack> _midiClip() => AudioTrack.create(
     );
 
 void main() {
+  group('instrument-derived MIDI clip labels', () {
+    test('empty and default instrument labels follow an instrument swap', () {
+      expect(
+        shouldMidiClipLabelFollowInstrument(
+          label: '',
+          instrumentName: 'Upright Piano',
+        ),
+        isTrue,
+      );
+      expect(
+        shouldMidiClipLabelFollowInstrument(
+          label: ' Upright Piano ',
+          instrumentName: 'Upright Piano',
+        ),
+        isTrue,
+      );
+    });
+
+    test('custom clip labels remain independent from the instrument', () {
+      expect(
+        shouldMidiClipLabelFollowInstrument(
+          label: 'Verse Chords',
+          instrumentName: 'Upright Piano',
+        ),
+        isFalse,
+      );
+    });
+
+    test('label rename action survives undo and redo', () async {
+      final clip = await _midiClip()
+        ..label = 'Upright Piano';
+      final action = SetClipLabelAction(
+        tracks: <AudioTrack>[clip],
+        originalIndex: 0,
+        oldLabel: 'Upright Piano',
+        newLabel: 'Dream Pad',
+        applyToState: (target, label) => target.label = label,
+      );
+
+      await action.redo();
+      expect(clip.label, 'Dream Pad');
+      await action.undo();
+      expect(clip.label, 'Upright Piano');
+      await action.redo();
+      expect(clip.label, 'Dream Pad');
+    });
+  });
+
   test('MIDI edit persists and restores exact notes and clip bounds', () async {
     final clip = await _midiClip();
     final tracks = <AudioTrack>[clip];
@@ -137,6 +185,71 @@ void main() {
     expect(clip.midiNotes.map((note) => note.pitch), <int>[60]);
     expect(clip.trimEnd, const Duration(seconds: 4));
     expect(clip.audioDuration, const Duration(seconds: 4));
+  });
+
+  test('instrument edit preserves notes, bounds, and tempo state', () async {
+    final clip = await _midiClip()
+      ..sourceTempoBpm = 117.5
+      ..stretchToProjectTempo = false
+      ..tempoStretchPreservePitch = false
+      ..tempoWarpMode = 'repitch';
+    final notes = clip.midiNotes.map((note) => note.copy()).toList();
+    final action = EditMidiClipAction(
+      tracks: <AudioTrack>[clip],
+      originalIndex: 0,
+      oldNotes: notes,
+      newNotes: notes.map((note) => note.copy()).toList(),
+      oldInstrumentId: clip.instrumentId,
+      oldInstrumentName: clip.instrumentName,
+      oldInstrumentParams: const <String, double>{},
+      oldHostedInstrumentStateBase64: 'old-state',
+      newInstrumentId: 'mixroom.bass',
+      newInstrumentName: 'Bass',
+      newInstrumentParams: const <String, double>{'tone': 0.4},
+      newHostedInstrumentStateBase64: '',
+      applyToClip:
+          (
+            target,
+            notes,
+            instrumentId,
+            instrumentName,
+            instrumentParams,
+            hostedInstrumentStateBase64,
+          ) async {
+            target
+              ..midiNotes = notes.map((note) => note.copy()).toList()
+              ..instrumentId = instrumentId
+              ..instrumentName = instrumentName
+              ..instrumentParams = Map<String, double>.from(instrumentParams)
+              ..hostedInstrumentStateBase64 = hostedInstrumentStateBase64;
+          },
+    );
+
+    await action.redo();
+    expect(clip.instrumentId, 'mixroom.bass');
+    expect(clip.instrumentName, 'Bass');
+    expect(clip.instrumentParams, <String, double>{'tone': 0.4});
+    expect(clip.midiNotes.single.id, 'old');
+    expect(clip.trimStart, Duration.zero);
+    expect(clip.trimEnd, const Duration(seconds: 4));
+    expect(clip.audioDuration, const Duration(seconds: 4));
+    expect(clip.sourceTempoBpm, 117.5);
+    expect(clip.stretchToProjectTempo, isFalse);
+    expect(clip.tempoStretchPreservePitch, isFalse);
+    expect(clip.tempoWarpMode, 'repitch');
+
+    await action.undo();
+    expect(clip.instrumentId, 'mixroom.basic_synth');
+    expect(clip.instrumentName, 'Basic Synth');
+    expect(clip.midiNotes.single.id, 'old');
+    expect(clip.trimEnd, const Duration(seconds: 4));
+    expect(clip.sourceTempoBpm, 117.5);
+    expect(clip.stretchToProjectTempo, isFalse);
+    expect(clip.tempoStretchPreservePitch, isFalse);
+    expect(clip.tempoWarpMode, 'repitch');
+
+    await action.redo();
+    expect(clip.instrumentId, 'mixroom.bass');
   });
 
   test('MIDI edit restores all command-owned tempo state exactly', () async {

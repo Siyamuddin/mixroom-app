@@ -525,6 +525,10 @@ class AiV3PlanningSnapshotBuilder {
       duplicateCode: 'planning_snapshot_asset_id_duplicate',
     );
     final instruments = _stringList(clientContext['allowed_instrument_ids']);
+    final instrumentCatalog = _instrumentCatalogFacts(
+      clientContext['ai_v3_instrument_catalog'],
+      instruments.toSet(),
+    );
     final effectNames = _stringList(clientContext['allowed_builtin_effects']);
     final effectCatalog = effectNames
         .map((name) => <String, dynamic>{
@@ -640,6 +644,7 @@ class AiV3PlanningSnapshotBuilder {
           _copyJson(validationState['automation_clips'] ?? const <Object>[]),
       'catalogs': <String, dynamic>{
         'instrument_ids': instruments,
+        'instrument_catalog': instrumentCatalog,
         'effects': effectCatalog,
         'library_assets': libraryAssets,
         'plugin_access': clientContext['plugin_access']?.toString() ?? '',
@@ -753,6 +758,36 @@ List<String> _stringList(Object? raw) {
       .toList(growable: false)
     ..sort();
   return values;
+}
+
+List<Map<String, dynamic>> _instrumentCatalogFacts(
+  Object? raw,
+  Set<String> allowedIds,
+) {
+  if (raw == null) return <Map<String, dynamic>>[];
+  final values = _maps(raw);
+  final byId = <String, Map<String, dynamic>>{};
+  for (final value in values) {
+    final instrumentId = value['instrument_id']?.toString().trim() ?? '';
+    final name = value['name']?.toString().trim() ?? '';
+    if (instrumentId.isEmpty ||
+        name.isEmpty ||
+        !allowedIds.contains(instrumentId) ||
+        byId.containsKey(instrumentId)) {
+      throw const AiV3PlanningSnapshotException(
+        'planning_snapshot_instrument_catalog_invalid',
+      );
+    }
+    byId[instrumentId] = <String, dynamic>{
+      'instrument_id': instrumentId,
+      'name': name,
+    };
+  }
+  final result = byId.values.toList(growable: false)
+    ..sort((left, right) => left['instrument_id']
+        .toString()
+        .compareTo(right['instrument_id'].toString()));
+  return result;
 }
 
 Map<K, Map<String, dynamic>> _mutableIndexBy<K>(

@@ -19,6 +19,7 @@ import 'package:mixroom/core/analytics/analytics_events.dart';
 import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/core/crash_reporting/crash_reporting_service.dart';
 import 'package:mixroom/helpers/midi_clip_arming.dart';
+import 'package:mixroom/helpers/midi_preview_readiness.dart';
 import 'package:mixroom/helpers/automation_clip_overlap.dart';
 import 'package:mixroom/helpers/automation_point_sanitizer.dart';
 import 'package:mixroom/helpers/automation_target_labels.dart';
@@ -139,6 +140,15 @@ import 'package:record/record.dart';
 import 'package:mixroom/widgets/sample_browser_panel.dart';
 import 'package:mixroom/widgets/export_success_preview_player.dart';
 import 'package:crypto/crypto.dart' as crypto;
+
+@visibleForTesting
+bool shouldMidiClipLabelFollowInstrument({
+  required String label,
+  required String instrumentName,
+}) {
+  final normalizedLabel = label.trim();
+  return normalizedLabel.isEmpty || normalizedLabel == instrumentName.trim();
+}
 
 Completer<void> _cancelSignal = Completer();
 
@@ -5590,7 +5600,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   final Set<int> _deferredHostedInstrumentEngineClipIds = <int>{};
   final Map<int, String> _restoredHostedInstrumentStateByClipId =
       <int, String>{};
-  Future<void>? _liveMidiPreviewRoutePrepareFuture;
+  Future<bool>? _liveMidiPreviewRoutePrepareFuture;
   bool _timelineMagnetEnabled = false;
   int _timelineQuantizeDivisionsPerBar = 4;
 
@@ -19351,31 +19361,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!_isMidiClipRecording) {
       if (!PlatformCapabilities.current.isDesktop) {
         if (clip.engineClipId >= 0) {
-          await _ensureLiveMidiClipReadyForPreview(clip);
-          await JuceAudioEngine.playPreviewMidiNote(
-            clip.engineClipId,
-            pitch: pitch.clamp(0, 127),
-            velocity: velocity.clamp(0.0, 1.0),
-            durationMs: 220,
-          );
+          await _playPianoRollPreviewForClip(clip, pitch, velocity);
         }
         return;
       }
       if (_liveMidiEventPlaybackSupported && clip.engineClipId >= 0) {
-        await _ensureLiveMidiClipReadyForPreview(clip);
-        final targetReady = await _setLiveMidiInputTargetClipIfNeeded(
-          clip.engineClipId,
-          clearPendingEvents: false,
+        final liveReady = await _ensureLiveMidiClipReadyForPreview(clip);
+        if (!liveReady) return;
+        final sent = await JuceAudioEngine.sendLiveMidiInputEvent(
+          noteOn: true,
+          channel: 1,
+          pitch: pitch,
+          velocity: velocity,
         );
-        if (targetReady) {
-          final sent = await JuceAudioEngine.sendLiveMidiInputEvent(
-            noteOn: true,
-            channel: 1,
-            pitch: pitch,
-            velocity: velocity,
-          );
-          if (sent) return;
-        }
+        if (sent) return;
       }
       await _previewPianoRollNote(pitch, velocity);
       return;
@@ -23740,6 +23739,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required String instrumentId,
     required String instrumentName,
     required Map<String, double> instrumentParams,
+    bool syncLaneMetadata = true,
   }) {
     final previousLiveInstrumentId =
         _liveMidiEngineInstrumentId(clip.instrumentId);
@@ -23755,7 +23755,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!preserveHostedState) {
       clip.hostedInstrumentStateBase64 = '';
     }
-    _syncInstrumentLaneMetadataFromMidiClip(clip);
+    if (syncLaneMetadata) {
+      _syncInstrumentLaneMetadataFromMidiClip(clip);
+    }
   }
 
   void _syncInstrumentLaneMetadataFromMidiClip(AudioTrack clip) {
@@ -28377,9 +28379,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final allowedEffects = _isFreePlan
         ? SubscriptionLimits.freeBuiltInEffects.toList(growable: false)
         : kMixroomBuiltInEffects;
-    final allowedInstruments = _instrumentCatalogForCurrentPlan(
+    final allowedInstrumentCatalog = _instrumentCatalogForCurrentPlan(
       _uiInstrumentCatalog(),
-    )
+    );
+    final allowedInstruments = allowedInstrumentCatalog
         .map((spec) => (spec['id'] as String? ?? '').trim())
         .where((id) => id.isNotEmpty)
         .toList(growable: false);
@@ -28433,6 +28436,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       'allowed_builtin_effects': allowedEffects,
       'allowed_instrument_ids': allowedInstruments,
       if (LlmConfig.effectiveAiV3Enabled) ...<String, dynamic>{
+        'ai_v3_instrument_catalog': allowedInstrumentCatalog
+            .map(
+              (spec) => <String, dynamic>{
+                'instrument_id': (spec['id'] as String? ?? '').trim(),
+                'name': (spec['name'] as String? ?? '').trim(),
+              },
+            )
+            .where(
+              (entry) =>
+                  entry['instrument_id']!.isNotEmpty &&
+                  entry['name']!.isNotEmpty,
+            )
+            .toList(growable: false),
         'ai_v3_playhead_ms': _globalAudioClock.inMilliseconds,
         'ai_v3_transport': <String, dynamic>{
           'playing': _isPlaying,
@@ -29707,6 +29723,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _addInstrumentClipFromPicker() async {
+    if (_rowCount >= _effectiveMaxRows) {
+      _showRowLimitReachedNotice();
+      return;
+    }
     var selected = await _showInstrumentPickerDialog();
     if (selected == null) return;
     if (_isPitchLabToolSpec(selected)) {
@@ -29731,6 +29751,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     int row, {
     required bool above,
   }) async {
+    if (_rowCount >= _effectiveMaxRows) {
+      _showRowLimitReachedNotice();
+      return;
+    }
     var selected = await _showInstrumentPickerDialog();
     if (selected == null) return;
     if (_isPitchLabToolSpec(selected)) {
@@ -29755,8 +29779,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _changeInstrumentLaneFromPicker(int row) async {
     if (row < 0 || row >= _rows.length) return;
-    final currentLane = _rows[row];
-    if (!currentLane.isInstrumentLane) return;
+    if (!_rows[row].isInstrumentLane) return;
 
     var selected = await _showInstrumentPickerDialog();
     if (selected == null) return;
@@ -29771,6 +29794,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       selected = await _pickGranularizerInstrumentSpec();
       if (selected == null) return;
     }
+    await _changeInstrumentLaneToSpec(
+      row,
+      selected,
+      preserveRowName: false,
+      recordManualEdit: true,
+    );
+  }
+
+  Future<void> _changeInstrumentLaneToSpec(
+    int row,
+    Map<String, dynamic> selected, {
+    required bool preserveRowName,
+    required bool recordManualEdit,
+  }) async {
+    if (row < 0 || row >= _rows.length) {
+      throw StateError('instrument_lane_target_missing');
+    }
+    final currentLane = _rows[row];
+    if (!currentLane.isInstrumentLane) {
+      throw StateError('instrument_lane_target_invalid');
+    }
     final nextLane = _instrumentLaneRowFromSpec(selected).copyWith(
       rowId: currentLane.rowId,
     );
@@ -29779,23 +29823,35 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         : nextLane.instrumentName.trim();
     final nextInstrumentParams =
         Map<String, double>.from(nextLane.instrumentParams);
+    final nextRowName = preserveRowName
+        ? currentLane.name
+        : (nextInstrumentName.isEmpty ? nextLane.name : nextInstrumentName);
+    final preserveLaneHostedState =
+        _instrumentIdUsesExternalPlugin(currentLane.instrumentId) &&
+            _instrumentIdUsesExternalPlugin(nextLane.instrumentId) &&
+            _liveMidiEngineInstrumentId(currentLane.instrumentId) ==
+                _liveMidiEngineInstrumentId(nextLane.instrumentId);
+    final nextLaneHostedState = preserveLaneHostedState
+        ? currentLane.hostedInstrumentStateBase64
+        : '';
 
     final laneChanged = currentLane.instrumentId != nextLane.instrumentId ||
         currentLane.instrumentName != nextInstrumentName ||
-        currentLane.name != nextInstrumentName ||
-        !_doubleMapsEqual(currentLane.instrumentParams, nextInstrumentParams);
+        currentLane.name != nextRowName ||
+        !_doubleMapsEqual(currentLane.instrumentParams, nextInstrumentParams) ||
+        currentLane.hostedInstrumentStateBase64 != nextLaneHostedState;
 
     final beforeLayout = await _captureRowLayoutSnapshot();
     final afterRows = beforeLayout.rows.map(_cloneTimelineRow).toList();
     if (row >= afterRows.length) return;
     afterRows[row] = afterRows[row].copyWith(
-      name: nextInstrumentName.isEmpty ? nextLane.name : nextInstrumentName,
+      name: nextRowName,
       iconId: 1,
       kind: TimelineRowKind.instrument,
       instrumentId: nextLane.instrumentId,
       instrumentName: nextInstrumentName,
       instrumentParams: nextInstrumentParams,
-      hostedInstrumentStateBase64: '',
+      hostedInstrumentStateBase64: nextLaneHostedState,
     );
 
     final actions = <EditorUndoAction>[
@@ -29818,6 +29874,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final oldParams = Map<String, double>.from(clip.instrumentParams);
       final oldInstrumentId = clip.instrumentId;
       final oldInstrumentName = clip.instrumentName;
+      final oldLabel = clip.label;
+      final shouldRenameLabel = shouldMidiClipLabelFollowInstrument(
+        label: oldLabel,
+        instrumentName: oldInstrumentName,
+      );
       final oldHostedInstrumentStateBase64 =
           await _captureHostedInstrumentStateForClip(clip);
       final newHostedInstrumentStateBase64 = _nextHostedInstrumentStateForEdit(
@@ -29846,40 +29907,89 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           newInstrumentParams: nextInstrumentParams,
           newHostedInstrumentStateBase64: newHostedInstrumentStateBase64,
           applyToClip: (target, notesToApply, nextInstrumentId,
-              nextInstrumentName, nextParams, hostedInstrumentStateBase64) {
-            _applyMidiClipStateLocally(
+              nextInstrumentName, nextParams, hostedInstrumentStateBase64) async {
+            target.midiNotes =
+                notesToApply.map((note) => note.copy()).toList(growable: false);
+            _assignMidiClipInstrument(
               target,
-              notes: notesToApply,
               instrumentId: nextInstrumentId,
               instrumentName: nextInstrumentName,
               instrumentParams: nextParams,
+              syncLaneMetadata: false,
             );
             target.hostedInstrumentStateBase64 =
                 hostedInstrumentStateBase64.trim();
-            final refresh = _refreshMidiClipEngineNow(
+            final refreshed = await _refreshMidiClipEngineNow(
               target,
               failureNotice: 'Could not switch instrument for this MIDI clip.',
             );
+            if (!refreshed) {
+              throw StateError('instrument_lane_engine_refresh_failed');
+            }
             if (mounted) setState(() {});
-            return refresh;
           },
         ),
       );
+      if (shouldRenameLabel && oldLabel != nextInstrumentName) {
+        actions.add(
+          SetClipLabelAction(
+            tracks: _audioTracks,
+            originalIndex: i,
+            oldLabel: oldLabel,
+            newLabel: nextInstrumentName,
+            applyToState: (target, label) {
+              target.label = label;
+              if (mounted) setState(() {});
+            },
+          ),
+        );
+      }
     }
 
     if (actions.isEmpty) return;
-    await _undoManager.execute(
-      actions.length == 1
-          ? actions.single
-          : CompoundUndoAction('Change instrument lane', actions),
-    );
-    _recordProducerManualEdit('change_instrument_lane', {
-      'row': row,
-      'instrument_id': nextLane.instrumentId,
-      'instrument_name': nextInstrumentName,
-      'clip_count': actions.whereType<EditMidiClipAction>().length,
-    });
+    await _executeInstrumentLaneChangeActions(actions);
+    if (recordManualEdit) {
+      _recordProducerManualEdit('change_instrument_lane', {
+        'row': row,
+        'instrument_id': nextLane.instrumentId,
+        'instrument_name': nextInstrumentName,
+        'clip_count': actions.whereType<EditMidiClipAction>().length,
+      });
+    }
     _scheduleProjectAutosave();
+  }
+
+  Future<void> _executeInstrumentLaneChangeActions(
+    List<EditorUndoAction> actions,
+  ) async {
+    final completed = <EditorUndoAction>[];
+    try {
+      for (final action in actions) {
+        await action.redo();
+        completed.add(action);
+      }
+      await _undoManager.addWithoutExecute(
+        actions.length == 1
+            ? actions.single
+            : CompoundUndoAction('Change instrument lane', actions),
+      );
+    } catch (error, stackTrace) {
+      var rollbackIncomplete = false;
+      for (final action in completed.reversed) {
+        try {
+          await action.undo();
+        } catch (_) {
+          rollbackIncomplete = true;
+        }
+      }
+      if (rollbackIncomplete) {
+        Error.throwWithStackTrace(
+          _EditorUndoCaptureRollbackException(error),
+          stackTrace,
+        );
+      }
+      Error.throwWithStackTrace(error, stackTrace);
+    }
   }
 
   Future<void> _createMidiClipInInstrumentLane(int row, double timeMs) async {
@@ -44462,6 +44572,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 _throwIfChatFlowStopped(chatFlowId);
               }
               break;
+            case 'v3_row_set_instrument':
+              final instrumentExpectation =
+                  await _applyAiV3RowSetInstrumentAction(data);
+              if (v3RuntimeExpectations != null) {
+                _addAiV3Expectation(
+                  v3RuntimeExpectations,
+                  instrumentExpectation,
+                );
+              }
+              if (chatFlowId != null) {
+                _throwIfChatFlowStopped(chatFlowId);
+              }
+              break;
             case 'row_delete':
               final deleteTarget = _actionTarget(data);
               final deletedRowId = _toActionInt(deleteTarget['row_id']);
@@ -46004,6 +46127,82 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _rows[row] = _rows[row].copyWith(roleOverride: role);
     });
     _scheduleProjectAutosave();
+  }
+
+  Future<Map<String, dynamic>> _applyAiV3RowSetInstrumentAction(
+    Map<String, dynamic> data,
+  ) async {
+    final target = _actionTarget(data);
+    final rowId = _toActionInt(target['row_id']);
+    final row = rowId == null ? -1 : _rowIndexForId(rowId);
+    if (rowId == null || !_isValidRowIndex(row)) {
+      throw StateError('v3_row_instrument_target_missing');
+    }
+    if (!_rows[row].isInstrumentLane) {
+      throw StateError('v3_row_instrument_target_invalid');
+    }
+    final originalRowName = _rows[row].name;
+    final instrumentId = data['instrument_id']?.toString().trim() ?? '';
+    if (instrumentId.isEmpty) {
+      throw StateError('v3_row_instrument_id_invalid');
+    }
+    final matches = _uiInstrumentCatalog()
+        .where((spec) => (spec['id']?.toString().trim() ?? '') == instrumentId)
+        .toList(growable: false);
+    if (matches.length != 1) {
+      throw StateError('v3_row_instrument_unavailable');
+    }
+    final destinationLane = _instrumentLaneRowFromSpec(matches.single);
+    final destinationInstrumentName =
+        destinationLane.instrumentName.trim().isEmpty
+            ? _instrumentNameFromId(destinationLane.instrumentId)
+            : destinationLane.instrumentName.trim();
+    final clipsBefore = _audioTracks
+        .where((clip) => clip.isMidi && clip.rowId == rowId)
+        .toList(growable: false);
+    final clipIds = clipsBefore.map((clip) => clip.clipId).toList(growable: false)
+      ..sort();
+    final expectedClipLabels = <String, String>{
+      for (final clip in clipsBefore)
+        clip.clipId: shouldMidiClipLabelFollowInstrument(
+          label: clip.label,
+          instrumentName: clip.instrumentName,
+        )
+            ? destinationInstrumentName
+            : clip.label,
+    };
+    final localizedNoticeTemplate = L10n.translate(
+      context,
+      'Changed {row} instrument to {instrument}',
+    );
+    await _changeInstrumentLaneToSpec(
+      row,
+      matches.single,
+      preserveRowName: true,
+      recordManualEdit: false,
+    );
+    final resolvedRow = _rowIndexForId(rowId);
+    if (!_isValidRowIndex(resolvedRow)) {
+      throw StateError('v3_row_instrument_target_stale');
+    }
+    final lane = _rows[resolvedRow];
+    final instrumentName = lane.instrumentName.trim().isEmpty
+        ? _instrumentNameFromId(lane.instrumentId)
+        : lane.instrumentName.trim();
+    final localizedNotice = localizedNoticeTemplate
+        .replaceAll('{row}', _rowDisplayName(resolvedRow))
+        .replaceAll('{instrument}', instrumentName);
+    _insertSystemChatText('• $localizedNotice •');
+    return <String, dynamic>{
+      'kind': 'row_instrument',
+      'row_id': rowId,
+      'row_name': originalRowName,
+      'instrument_id': lane.instrumentId,
+      'instrument_name': lane.instrumentName,
+      'instrument_params': Map<String, double>.from(lane.instrumentParams),
+      'clip_ids': clipIds,
+      'clip_labels': expectedClipLabels,
+    };
   }
 
   Future<void> _applyRowDeleteAction(Map<String, dynamic> data) async {
@@ -58969,8 +59168,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final newInstrumentName = '$sourceLabel Sampler';
     final newInstrumentId = 'sfz_asset:${sfzFile.path}';
     final oldLabel = clip.label;
-    final shouldRenameLabel =
-        oldLabel.trim().isEmpty || oldLabel.trim() == oldInstrumentName.trim();
+    final shouldRenameLabel = shouldMidiClipLabelFollowInstrument(
+      label: oldLabel,
+      instrumentName: oldInstrumentName,
+    );
 
     final editAction = EditMidiClipAction(
       tracks: _audioTracks,
@@ -63856,6 +64057,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       case 'row_solo':
       case 'row_name':
       case 'row_role_override':
+      case 'row_instrument':
       case 'row_pan':
       case 'row_gain':
       case 'phone_mic_cleanup':
@@ -66135,6 +66337,49 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             return false;
           }
           break;
+        case 'row_instrument':
+          final rowId = expectation['row_id'] as int;
+          final row = _rowIndexForId(rowId);
+          if (!_isValidRowIndex(row)) return false;
+          final lane = _rows[row];
+          if (!lane.isInstrumentLane ||
+              lane.name != expectation['row_name'] ||
+              lane.instrumentId != expectation['instrument_id'] ||
+              lane.instrumentName != expectation['instrument_name'] ||
+              !_doubleMapsEqual(
+                lane.instrumentParams,
+                Map<String, double>.from(
+                  expectation['instrument_params'] as Map,
+                ),
+              )) {
+            return false;
+          }
+          final expectedClipIds = List<String>.from(
+            expectation['clip_ids'] as List,
+          )..sort();
+          final expectedClipLabels = Map<String, String>.from(
+            expectation['clip_labels'] as Map,
+          );
+          final clips = _audioTracks
+              .where((clip) => clip.isMidi && clip.rowId == rowId)
+              .toList(growable: false);
+          final actualClipIds = clips.map((clip) => clip.clipId).toList()
+            ..sort();
+          if (!listEquals(actualClipIds, expectedClipIds)) return false;
+          for (final clip in clips) {
+            if (clip.instrumentId != expectation['instrument_id'] ||
+                clip.instrumentName != expectation['instrument_name'] ||
+                clip.label != expectedClipLabels[clip.clipId] ||
+                !_doubleMapsEqual(
+                  clip.instrumentParams,
+                  Map<String, double>.from(
+                    expectation['instrument_params'] as Map,
+                  ),
+                )) {
+              return false;
+            }
+          }
+          break;
         case 'row_pan':
           final row = expectation['row_id'] is int
               ? _rowIndexForId(expectation['row_id'] as int)
@@ -67115,6 +67360,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           final row = _rowIndexForId(expectation['row_id'] as int);
           item['value'] =
               _isValidRowIndex(row) ? _rows[row].roleOverride.trim() : null;
+          break;
+        case 'row_instrument':
+          final rowId = expectation['row_id'] as int;
+          final row = _rowIndexForId(rowId);
+          item['value'] = !_isValidRowIndex(row)
+              ? null
+              : <String, dynamic>{
+                  'row_name': _rows[row].name,
+                  'instrument_id': _rows[row].instrumentId,
+                  'instrument_name': _rows[row].instrumentName,
+                  'instrument_params': _rows[row].instrumentParams,
+                  'clips': <Map<String, dynamic>>[
+                    for (final clip in _audioTracks)
+                      if (clip.isMidi && clip.rowId == rowId)
+                        <String, dynamic>{
+                          'clip_id': clip.clipId,
+                          'instrument_id': clip.instrumentId,
+                          'instrument_name': clip.instrumentName,
+                          'instrument_params': clip.instrumentParams,
+                          'label': clip.label,
+                        },
+                  ],
+                };
           break;
         case 'row_pan':
           final row = expectation['row_id'] is int
@@ -75338,17 +75606,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
-  Future<void> _prepareLiveMidiPreviewRoute() {
-    if (!_liveMidiEventPlaybackSupported) return Future<void>.value();
-    if (kIsWeb || (!Platform.isAndroid && !Platform.isIOS)) {
-      return Future<void>.value();
+  Future<bool> _prepareLiveMidiPreviewRoute() {
+    if (!_liveMidiEventPlaybackSupported) return Future<bool>.value(false);
+    if (kIsWeb || !midiPreviewNeedsMobileRoute(defaultTargetPlatform)) {
+      return Future<bool>.value(true);
     }
     final pending = _liveMidiPreviewRoutePrepareFuture;
     if (pending != null) return pending;
 
-    final next = JuceAudioEngine.preparePlaybackRoute(
-      reason: 'midiPreview',
-    ).catchError((_) => false).then<void>((_) {});
+    final next = _ensurePlaybackRouteReady(reason: 'midiPreview');
     _liveMidiPreviewRoutePrepareFuture = next.whenComplete(() {
       if (identical(_liveMidiPreviewRoutePrepareFuture, next)) {
         _liveMidiPreviewRoutePrepareFuture = null;
@@ -75370,10 +75636,52 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!mounted || !_audioTracks.contains(clip)) return false;
     if (!clip.isMidi || clip.engineClipId < 0) return false;
 
-    await _prepareLiveMidiPreviewRoute();
-    final updated = await _updateMidiClipEventsLive(clip);
-    if (updated) return true;
-    return _reloadMidiTrackLive(clip);
+    return ensureMidiPreviewReady(
+      prepareRoute: _prepareLiveMidiPreviewRoute,
+      updateProcessor: () => _updateMidiClipEventsLive(clip),
+      reloadProcessor: () => _reloadMidiTrackLive(clip),
+      assignLiveTarget: () => _setLiveMidiInputTargetClipIfNeeded(
+        clip.engineClipId,
+        clearPendingEvents: false,
+        force: true,
+      ),
+      isStillValid: () => mounted && _audioTracks.contains(clip),
+    );
+  }
+
+  Future<bool> _playPianoRollPreviewForClip(
+    AudioTrack clip,
+    int pitch,
+    double velocity,
+  ) async {
+    if (!await _ensureLiveMidiClipReadyForPreview(clip)) return false;
+    final safePitch = pitch.clamp(0, 127);
+    final safeVelocity = velocity.clamp(0.0, 1.0);
+    final played = await JuceAudioEngine.playPreviewMidiNote(
+      clip.engineClipId,
+      pitch: safePitch,
+      velocity: safeVelocity,
+      durationMs: 220,
+    );
+    if (played) return true;
+
+    if (!await _reloadMidiTrackLive(clip) ||
+        !mounted ||
+        !_audioTracks.contains(clip)) {
+      return false;
+    }
+    final targetReady = await _setLiveMidiInputTargetClipIfNeeded(
+      clip.engineClipId,
+      clearPendingEvents: false,
+      force: true,
+    );
+    if (!targetReady) return false;
+    return JuceAudioEngine.playPreviewMidiNote(
+      clip.engineClipId,
+      pitch: safePitch,
+      velocity: safeVelocity,
+      durationMs: 220,
+    );
   }
 
   Future<void> _previewPianoRollNote(int pitch, double velocity) async {
@@ -75387,22 +75695,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (_liveMidiEventPlaybackSupported && clip.engineClipId >= 0) {
-      await _ensureLiveMidiClipReadyForPreview(clip);
-      final played = await JuceAudioEngine.playPreviewMidiNote(
-        clip.engineClipId,
-        pitch: pitch.clamp(0, 127),
-        velocity: velocity.clamp(0.0, 1.0),
-        durationMs: 220,
-      );
-      if (played) return;
-      final reloaded = await _reloadMidiTrackLive(clip);
-      if (!reloaded) return;
-      await JuceAudioEngine.playPreviewMidiNote(
-        clip.engineClipId,
-        pitch: pitch.clamp(0, 127),
-        velocity: velocity.clamp(0.0, 1.0),
-        durationMs: 220,
-      );
+      await _playPianoRollPreviewForClip(clip, pitch, velocity);
     }
   }
 
@@ -75695,7 +75988,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     TimelineRow instrumentRow, {
     int? preferredRowId,
   }) async {
-    if (_rowCount >= _effectiveMaxRows) return false;
+    if (_rowCount >= _effectiveMaxRows) {
+      _showRowLimitReachedNotice();
+      return false;
+    }
     final rowId = await JuceAudioEngine.addRow(
       instrumentRow.name,
       iconId: instrumentRow.iconId,
@@ -75719,7 +76015,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required bool above,
     int? preferredRowId,
   }) async {
-    if (_rowCount >= _effectiveMaxRows) return false;
+    if (_rowCount >= _effectiveMaxRows) {
+      _showRowLimitReachedNotice();
+      return false;
+    }
     if (row < 0 || row >= _rowCount) return false;
     final refRowId = _rowIdAt(row);
     final rowId = above

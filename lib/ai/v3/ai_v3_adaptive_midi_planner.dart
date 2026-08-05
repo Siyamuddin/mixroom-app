@@ -424,6 +424,23 @@ void _requireRetrievedMidiIdentifiers(
     }
   }
   for (final command in plan.commands) {
+    if (command.type == 'row.set_instrument') {
+      final rowId = command.arguments['row_id'];
+      if (rowId is! int || !returnedRowIds.contains(rowId)) {
+        throw AiV3AdaptivePlannerException(
+          'v3_adaptive_midi_row_not_retrieved',
+          rowId.toString(),
+        );
+      }
+      final instrumentId = command.arguments['instrument_id']?.toString() ?? '';
+      if (!returnedInstrumentIds.contains(instrumentId)) {
+        throw AiV3AdaptivePlannerException(
+          'v3_adaptive_midi_instrument_not_retrieved',
+          instrumentId,
+        );
+      }
+      continue;
+    }
     if (command.type == 'clip.convert_to_midi') {
       final instrumentId = command.arguments['instrument_id']?.toString() ?? '';
       if (!returnedInstrumentIds.contains(instrumentId)) {

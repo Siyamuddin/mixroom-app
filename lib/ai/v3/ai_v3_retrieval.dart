@@ -938,6 +938,7 @@ class AiV3MidiRetrievalResult implements AiV3DomainRetrievalResult {
     required this.matchedRowIds,
     required this.midiClips,
     required this.instrumentIds,
+    required this.instrumentCatalog,
     required this.editCapabilities,
     required this.totalNotes,
     required this.returnedNotes,
@@ -952,6 +953,7 @@ class AiV3MidiRetrievalResult implements AiV3DomainRetrievalResult {
   final List<int> matchedRowIds;
   final List<Map<String, dynamic>> midiClips;
   final List<String> instrumentIds;
+  final List<Map<String, dynamic>> instrumentCatalog;
   final Map<String, dynamic>? editCapabilities;
   final int totalNotes;
   final int returnedNotes;
@@ -965,6 +967,7 @@ class AiV3MidiRetrievalResult implements AiV3DomainRetrievalResult {
         'matched_row_ids': matchedRowIds,
         'midi_clips': midiClips,
         'instrument_ids': instrumentIds,
+        'instrument_catalog': instrumentCatalog,
         'edit_capabilities': editCapabilities,
         'counts': <String, dynamic>{
           'clips': midiClips.length,
@@ -1250,15 +1253,24 @@ class AiV3MidiContextRetriever {
             returnedByClip[clip['clip_id']] ?? const <Map<String, dynamic>>[];
       }
     }
-    final instruments = query.requestedFields.contains('edit_capabilities')
+    final instrumentCatalog =
+        query.requestedFields.contains('edit_capabilities')
         ? _instrumentCatalog(snapshot)
-        : const <String>[];
+        : const <Map<String, dynamic>>[];
+    final instruments = instrumentCatalog
+        .map((entry) => entry['instrument_id'].toString())
+        .toList(growable: false);
+    final canSetInstrument = instruments.isNotEmpty &&
+        matchedRows.any(
+          (rowId) => snapshot.rowById[rowId]?['lane_kind'] == 'instrument',
+        );
     return AiV3MidiRetrievalResult(
       requestId: query.requestId,
       requestedFields: query.requestedFields.toList()..sort(),
       matchedRowIds: matchedRows.toList()..sort(),
       midiClips: clipResults,
       instrumentIds: instruments,
+      instrumentCatalog: instrumentCatalog,
       editCapabilities: query.requestedFields.contains('edit_capabilities')
           ? <String, dynamic>{
               'can_transpose': clips.isNotEmpty,
@@ -1266,6 +1278,7 @@ class AiV3MidiContextRetriever {
               'can_append': clips.isNotEmpty,
               'can_chop': clips.isNotEmpty,
               'can_create': instruments.isNotEmpty,
+              'can_set_instrument': canSetInstrument,
               'max_generated_notes': aiV3MaxGeneratedMidiNotes,
             }
           : null,
@@ -1369,15 +1382,42 @@ class AiV3MidiContextRetriever {
     return notes;
   }
 
-  List<String> _instrumentCatalog(PlanningSnapshotV3 snapshot) {
+  List<Map<String, dynamic>> _instrumentCatalog(PlanningSnapshotV3 snapshot) {
     final catalogs = snapshot.data['catalogs'] as Map;
-    final values = (catalogs['instrument_ids'] as List? ?? const <Object>[])
+    final allowedIds = (catalogs['instrument_ids'] as List? ?? const <Object>[])
         .map((value) => value.toString().trim())
         .where((value) => value.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort();
-    return List<String>.unmodifiable(
+        .toSet();
+    final byId = <String, Map<String, dynamic>>{};
+    for (final raw in (catalogs['instrument_catalog'] as List? ??
+            const <Object>[])
+        .whereType<Map>()) {
+      final instrumentId = raw['instrument_id']?.toString().trim() ?? '';
+      final name = raw['name']?.toString().trim() ?? '';
+      if (instrumentId.isEmpty ||
+          name.isEmpty ||
+          !allowedIds.contains(instrumentId)) {
+        continue;
+      }
+      byId[instrumentId] = <String, dynamic>{
+        'instrument_id': instrumentId,
+        'name': name,
+      };
+    }
+    for (final instrumentId in allowedIds) {
+      byId.putIfAbsent(
+        instrumentId,
+        () => <String, dynamic>{
+          'instrument_id': instrumentId,
+          'name': instrumentId,
+        },
+      );
+    }
+    final values = byId.values.toList(growable: false)
+      ..sort((left, right) => left['instrument_id']
+          .toString()
+          .compareTo(right['instrument_id'].toString()));
+    return List<Map<String, dynamic>>.unmodifiable(
       values.take(aiV3MaxRetrievedInstrumentIds),
     );
   }

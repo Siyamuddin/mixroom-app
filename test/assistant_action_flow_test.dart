@@ -1082,53 +1082,32 @@ void main() {
       );
     });
 
-    test('verified details use compact receipt labels when provided', () {
+    test('verified action notices retain every committed command detail', () {
       expect(
         aiV3VerifiedExecutionDetails(
           const <String, dynamic>{
             'receipts': <Map<String, dynamic>>[
               <String, dynamic>{
-                'command_id': 'separate',
+                'command_id': 'rename',
                 'status': 'prepared',
-                'preview_label':
-                    'Separate a long source into two generated rows',
-                'verified_label': 'Separated vocals and instrumental',
+                'preview_label': 'Rename Keys to Custom Keys',
               },
               <String, dynamic>{
-                'command_id': 'pitch',
+                'command_id': 'instrument',
                 'status': 'prepared',
-                'preview_label':
-                    'Set separate.instrumental_clip pitch to -1 semitones',
-                'verified_label':
-                    'Set instrumental stem pitch to -1 semitones',
+                'preview_label': 'Set Custom Keys instrument to Dream Pad',
               },
             ],
           },
           actionNotices: const <String>[
-            'Preparing stem separation.',
-            'Loading stem separation models.',
-            'Separating stems (17/17).',
-            'Pitch shifted 1 clip.',
+            '• Renamed row to Custom Keys •',
+            '• Changed Custom Keys instrument to Dream Pad •',
           ],
         ),
         <String>[
-          'Separated vocals and instrumental',
-          'Set instrumental stem pitch to -1 semitones',
+          'Renamed row to Custom Keys',
+          'Changed Custom Keys instrument to Dream Pad',
         ],
-      );
-    });
-
-    test('runtime action notices remain a receipt-free fallback', () {
-      expect(
-        aiV3VerifiedExecutionDetails(
-          const <String, dynamic>{'receipts': <Object>[]},
-          actionNotices: const <String>[
-            '• Added Reverb •',
-            '• Added Reverb •',
-            '• Added volume automation •',
-          ],
-        ),
-        <String>['Added Reverb', 'Added volume automation'],
       );
     });
 

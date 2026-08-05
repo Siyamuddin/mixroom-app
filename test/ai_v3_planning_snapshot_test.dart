@@ -328,6 +328,10 @@ Future<_Fixture> _fixture({
     'current_rows': 2,
     'row_creation_policy': 'Rows may be created up to the app row limit.',
     'allowed_instrument_ids': <String>['piano', 'bass'],
+    'ai_v3_instrument_catalog': <Map<String, dynamic>>[
+      <String, dynamic>{'instrument_id': 'piano', 'name': 'Piano'},
+      <String, dynamic>{'instrument_id': 'bass', 'name': 'Bass'},
+    ],
     'allowed_builtin_effects': <String>['Reverb', 'Limiter'],
     'ai_v3_library_assets': List<Map<String, dynamic>>.generate(
       libraryAssetCount,
@@ -470,6 +474,10 @@ void main() {
     expect(
       oneShot.data['instruments'],
       (snapshot.data['catalogs'] as Map)['instrument_ids'],
+    );
+    expect(
+      oneShot.data['instrument_catalog'],
+      (snapshot.data['catalogs'] as Map)['instrument_catalog'],
     );
 
     final oneShotRows = <int, Map>{

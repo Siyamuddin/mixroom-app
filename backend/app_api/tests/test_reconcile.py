@@ -17,6 +17,7 @@ class ReconcileTests(unittest.TestCase):
         self.original_load_provider_api_key = module.load_provider_api_key
         self.original_charge_toss_billing_key = module.charge_toss_billing_key
         self.original_send_auth_email = module.send_auth_email
+        self.original_verify_google_purchase = module.verify_google_purchase
         module.repo = self.repo
         module.collaboration_repo = self.collaboration_repo
         module.send_auth_email = mock.Mock()
@@ -27,6 +28,107 @@ class ReconcileTests(unittest.TestCase):
         module.load_provider_api_key = self.original_load_provider_api_key
         module.charge_toss_billing_key = self.original_charge_toss_billing_key
         module.send_auth_email = self.original_send_auth_email
+        module.verify_google_purchase = self.original_verify_google_purchase
+
+    def test_google_reconciliation_refreshes_expiry_and_entitlement(self):
+        now = datetime.now(timezone.utc)
+        old_expiry = (now - timedelta(minutes=30)).isoformat()
+        new_expiry = (now + timedelta(days=30)).isoformat()
+        self.repo.upsert_subscription(
+            {
+                "subscription_id": "google-order-1",
+                "user_id": "user-1",
+                "provider": "google",
+                "plan_code": "producer",
+                "product_code": "producer_monthly",
+                "product_id": "mixroom_producer_monthly",
+                "package_name": "ai.mixroom.test",
+                "status": "active",
+                "expires_at": old_expiry,
+            }
+        )
+        self.repo.put_purchase_token(
+            "google",
+            "token-1",
+            {
+                "user_id": "user-1",
+                "subscription_id": "google-order-1",
+                "product_id": "mixroom_producer_monthly",
+                "package_name": "ai.mixroom.test",
+                "purchase_token": "token-1",
+            },
+        )
+        self.repo.put_entitlement(
+            {
+                "user_id": "user-1",
+                "plan_code": "producer",
+                "status": "active",
+                "expires_at": old_expiry,
+                "source_provider": "google",
+                "source_subscription_id": "google-order-1",
+                "capabilities": {"all_plugins": True},
+                "management_channel": "google",
+                "revision": 1,
+            }
+        )
+        module.verify_google_purchase = mock.Mock(
+            return_value={
+                "normalized": {
+                    "status": "active",
+                    "effective_at": now.isoformat(),
+                    "expires_at": new_expiry,
+                    "product_id": "mixroom_producer_monthly",
+                    "product_code": "producer_monthly",
+                    "plan_code": "producer",
+                    "package_name": "ai.mixroom.test",
+                    "base_plan_id": "monthly",
+                    "offer_id": "",
+                    "cancel_at_period_end": False,
+                    "subscription_id": "google-order-2",
+                }
+            }
+        )
+
+        response = module.handler({}, object())
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(self.repo.subscriptions["google-order-1"]["status"], "active")
+        self.assertEqual(self.repo.subscriptions["google-order-1"]["expires_at"], new_expiry)
+        self.assertEqual(self.repo.entitlements["user-1"]["expires_at"], new_expiry)
+        self.assertEqual(self.repo.reconciliation_jobs[0]["google_checked"], 1)
+        self.assertEqual(self.repo.reconciliation_jobs[0]["google_updated"], 1)
+
+    def test_google_reconciliation_does_not_revoke_on_provider_failure(self):
+        now = datetime.now(timezone.utc)
+        expired_at = (now - timedelta(minutes=30)).isoformat()
+        self.repo.upsert_subscription(
+            {
+                "subscription_id": "google-order-1",
+                "user_id": "user-1",
+                "provider": "google",
+                "plan_code": "producer",
+                "status": "active",
+                "expires_at": expired_at,
+                "product_id": "mixroom_producer_monthly",
+            }
+        )
+        self.repo.put_purchase_token(
+            "google",
+            "token-1",
+            {
+                "user_id": "user-1",
+                "subscription_id": "google-order-1",
+                "product_id": "mixroom_producer_monthly",
+                "purchase_token": "token-1",
+            },
+        )
+        module.verify_google_purchase = mock.Mock(side_effect=RuntimeError("temporary Google outage"))
+
+        response = module.handler({}, object())
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(self.repo.subscriptions["google-order-1"]["status"], "active")
+        self.assertEqual(self.repo.reconciliation_jobs[0]["google_errors"], 1)
 
     def test_expired_current_subscription_downgrades_entitlement(self):
         self.repo.upsert_subscription(

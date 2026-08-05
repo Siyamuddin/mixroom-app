@@ -138,7 +138,10 @@ void main() {
     );
   });
 
-  testWidgets('V3 receipt templates localize parameters', (tester) async {
+  testWidgets('instrument change notice uses every supported locale', (
+    tester,
+  ) async {
+    const messageKey = 'Changed {row} instrument to {instrument}';
     final localeProvider = LocaleProvider();
 
     await tester.pumpWidget(
@@ -157,14 +160,9 @@ void main() {
               home: Scaffold(
                 body: Builder(
                   builder: (context) => Text(
-                    L10n.translateWithParams(
-                      context,
-                      'Added/configured {effect} on {target}.',
-                      const <String, String>{
-                        'effect': 'Chorus',
-                        'target': 'Chords',
-                      },
-                    ),
+                    L10n.translate(context, messageKey)
+                        .replaceAll('{row}', 'Custom Keys')
+                        .replaceAll('{instrument}', 'Dream Pad'),
                   ),
                 ),
               ),
@@ -174,15 +172,24 @@ void main() {
       ),
     );
 
-    expect(find.text('Added/configured Chorus on Chords.'), findsOneWidget);
+    expect(
+      find.text('Changed Custom Keys instrument to Dream Pad'),
+      findsOneWidget,
+    );
 
     await localeProvider.setLocale(const Locale('ko'));
     await tester.pumpAndSettle();
-    expect(find.text('Chords에 Chorus를 추가하고 설정했습니다.'), findsOneWidget);
+    expect(
+      find.text('Custom Keys: 악기를 Dream Pad로 변경했습니다'),
+      findsOneWidget,
+    );
 
     await localeProvider.setLocale(const Locale('ja'));
     await tester.pumpAndSettle();
-    expect(find.text('ChordsにChorusを追加して設定しました。'), findsOneWidget);
+    expect(
+      find.text('Custom KeysのインストゥルメントをDream Padに変更しました'),
+      findsOneWidget,
+    );
   });
 }
 

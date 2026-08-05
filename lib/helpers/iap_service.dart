@@ -66,6 +66,14 @@ class IapService extends ChangeNotifier {
   bool get lastCompletedPurchaseMayBeDeferred =>
       _lastCompletedPurchaseMayBeDeferred;
 
+  /// Clears the one-time completion signal after the UI has presented it.
+  /// Purchase state and the synced entitlement remain unchanged.
+  void consumeCompletedPurchaseNotice() {
+    _lastCompletedPurchaseAtUtc = null;
+    _lastCompletedPurchaseProductId = null;
+    _lastCompletedPurchaseMayBeDeferred = false;
+  }
+
   bool get isMobilePlatformSupported => IapConfig.isMobileTarget;
   bool get purchasesEnabled =>
       _entitlementService?.areIapPurchasesEnabled ?? IapConfig.purchasesEnabled;

@@ -2659,6 +2659,50 @@ private:
 class TimelineMidiClipProcessor : public juce::AudioProcessor, public TimelineClipProcessorBase
 {
 public:
+    struct DecodedSamplePcm
+    {
+        int sampleRate = 48000;
+        std::vector<float> left;
+        std::vector<float> right;
+        float peak = 1.0f;
+
+        int frameCount() const
+        {
+            return (int)juce::jmin(left.size(), right.size());
+        }
+    };
+
+    struct PreparedLiveSample
+    {
+        PreparedLiveSample()
+            : sampled(false),
+              sampledMidiPitch(60),
+              keyCenter(60),
+              gainLinear(1.0),
+              attackSec(0.005),
+              releaseSec(0.35),
+              pitchKeytrack(100.0),
+              pitchOffsetSemitones(0.0),
+              startFrame(0),
+              endFrameExclusive(0),
+              oneShot(false)
+        {
+        }
+
+        bool sampled;
+        int sampledMidiPitch;
+        std::shared_ptr<const DecodedSamplePcm> source;
+        int keyCenter;
+        double gainLinear;
+        double attackSec;
+        double releaseSec;
+        double pitchKeytrack;
+        double pitchOffsetSemitones;
+        int startFrame;
+        int endFrameExclusive;
+        bool oneShot;
+    };
+
     static void setFlutterAssetRootPath(const juce::String &rootPath)
     {
         const juce::ScopedLock lock(flutterAssetRootLock());
@@ -2831,23 +2875,32 @@ public:
         return true;
     }
 
-    void enqueueLiveMidiEvent(bool noteOn, int channel, int pitch, float velocity)
+    bool enqueueLiveMidiEvent(bool noteOn,
+                              int channel,
+                              int pitch,
+                              float velocity,
+                              const PreparedLiveSample &preparedSample = {})
     {
         LiveMidiEvent event;
         event.noteOn = noteOn;
         event.channel = juce::jlimit(1, 16, channel);
         event.pitch = juce::jlimit(0, 127, pitch);
         event.velocity = juce::jlimit(0.0f, 1.0f, velocity);
-        enqueueLiveMidiEventLockFree(event);
+        event.preparedSample = preparedSample;
+        return enqueueLiveMidiEventLockFree(event);
     }
 
-    bool preloadLiveMidiPitch(int pitch, float velocity)
+    bool prepareLiveMidiSample(int pitch,
+                               float velocity,
+                               PreparedLiveSample &preparedSample)
     {
+        preparedSample = {};
         auto state = std::atomic_load_explicit(
             &publishedState,
             std::memory_order_acquire);
-        if (state == nullptr ||
-            state->sampledDefinition == nullptr ||
+        if (state == nullptr)
+            return false;
+        if (state->sampledDefinition == nullptr ||
             state->sampledDefinition->regions.empty())
             return true;
 
@@ -2860,18 +2913,46 @@ public:
         const int highKey =
             juce::jlimit(lowKey, 127, (int)std::round(state->preset.sampleHighKey));
         if (sampledPitch < lowKey || sampledPitch > highKey)
-            return true;
+            return false;
 
         const int midiVelocity = juce::jlimit(
             0,
             127,
             (int)std::lround(juce::jlimit(0.0f, 1.0f, velocity) * 127.0f));
+        const int sequenceStep =
+            liveSamplePrepareSequenceCounter.fetch_add(1, std::memory_order_relaxed);
         const SampledRegion *region = pickSampledRegion(
             *state->sampledDefinition,
             sampledPitch,
             midiVelocity,
-            sampledPitch);
-        return region != nullptr && isSampledRegionReady(*region);
+            sequenceStep);
+        if (region == nullptr || region->sampleAssetPath.trim().isEmpty())
+            return false;
+
+        auto sample = decodedSampleForAsset(region->sampleAssetPath);
+        if (sample == nullptr || sample->frameCount() < 2)
+            return false;
+
+        SampledRegion loadedRegion = *region;
+        loadedRegion.sample = std::move(sample);
+        const SampledRegion effectiveRegion =
+            samplerRegionForPreset(loadedRegion, state->preset, sampledPitch);
+        if (effectiveRegion.sample == nullptr || effectiveRegion.sample->frameCount() < 2)
+            return false;
+
+        preparedSample.sampled = true;
+        preparedSample.sampledMidiPitch = sampledPitch;
+        preparedSample.source = effectiveRegion.sample;
+        preparedSample.keyCenter = effectiveRegion.keyCenter;
+        preparedSample.gainLinear = effectiveRegion.gainLinear;
+        preparedSample.attackSec = effectiveRegion.attackSec;
+        preparedSample.releaseSec = effectiveRegion.releaseSec;
+        preparedSample.pitchKeytrack = effectiveRegion.pitchKeytrack;
+        preparedSample.pitchOffsetSemitones = effectiveRegion.pitchOffsetSemitones;
+        preparedSample.startFrame = effectiveRegion.sampleStartFrame;
+        preparedSample.endFrameExclusive = effectiveRegion.sampleEndFrameExclusive;
+        preparedSample.oneShot = effectiveRegion.oneShot;
+        return true;
     }
 
     void prepareToPlay(double deviceSampleRate, int samplesPerBlock) override
@@ -2900,7 +2981,7 @@ public:
         cachedSampledAttackOverride = false;
         cachedSampledReleaseOverride = false;
         cachedSourceTempoBpm = 120.0;
-        liveSampleSequenceCounter = 0;
+        liveSamplePrepareSequenceCounter.store(0, std::memory_order_relaxed);
         steadyBlockStartSec.store(std::numeric_limits<double>::quiet_NaN(),
                                   std::memory_order_relaxed);
         steadyWasPlaying.store(false, std::memory_order_relaxed);
@@ -3555,19 +3636,6 @@ private:
         double grainKeyMode = 0.0;
     };
 
-    struct DecodedSamplePcm
-    {
-        int sampleRate = 48000;
-        std::vector<float> left;
-        std::vector<float> right;
-        float peak = 1.0f;
-
-        int frameCount() const
-        {
-            return (int)juce::jmin(left.size(), right.size());
-        }
-    };
-
     struct SampledRegion
     {
         mutable std::shared_ptr<const DecodedSamplePcm> sample;
@@ -3619,6 +3687,7 @@ private:
         int channel = 1;
         int pitch = 60;
         float velocity = 1.0f;
+        PreparedLiveSample preparedSample;
     };
 
     struct ActiveLiveNote
@@ -5496,41 +5565,23 @@ private:
 
                 if (sampledMode)
                 {
-                    const int sampledPitch =
-                        sampledMidiPitchForDrumMap(
-                            cachedUsesDrumKitSamplePitchMap,
-                            voice.pitch);
-                    const int lowKey = juce::jlimit(0, 127, (int)std::round(cachedPreset.sampleLowKey));
-                    const int highKey = juce::jlimit(lowKey, 127, (int)std::round(cachedPreset.sampleHighKey));
-                    if (sampledPitch < lowKey || sampledPitch > highKey)
+                    const auto &prepared = event.preparedSample;
+                    if (!prepared.sampled ||
+                        prepared.source == nullptr ||
+                        prepared.source->frameCount() < 2)
                         continue;
-                    const int midiVelocity = juce::jlimit(
-                        0,
-                        127,
-                        (int)std::lround(voice.velocity * 127.0));
-                    const SampledRegion *region = pickSampledRegion(
-                        *cachedSampledDefinition,
-                        sampledPitch,
-                        midiVelocity,
-                        liveSampleSequenceCounter++);
-                    if (region == nullptr || !isSampledRegionReady(*region))
-                        continue;
-                    const SampledRegion effectiveRegion =
-                        samplerRegionForPreset(*region, cachedPreset, sampledPitch);
 
-                    voice.sampledMidiPitch = sampledPitch;
-                    voice.sampledSource = effectiveRegion.sample;
-                    voice.sampledKeyCenter = effectiveRegion.keyCenter;
-                    voice.sampledGainLinear = effectiveRegion.gainLinear;
-                    voice.sampledAttackSec = effectiveRegion.attackSec;
-                    voice.sampledReleaseSec = effectiveRegion.releaseSec;
-                    voice.sampledPitchKeytrack = effectiveRegion.pitchKeytrack;
-                    voice.sampledPitchOffsetSemitones =
-                        effectiveRegion.pitchOffsetSemitones;
-                    voice.sampledStartFrame = effectiveRegion.sampleStartFrame;
-                    voice.sampledEndFrameExclusive =
-                        effectiveRegion.sampleEndFrameExclusive;
-                    voice.sampledOneShot = effectiveRegion.oneShot;
+                    voice.sampledMidiPitch = prepared.sampledMidiPitch;
+                    voice.sampledSource = prepared.source;
+                    voice.sampledKeyCenter = prepared.keyCenter;
+                    voice.sampledGainLinear = prepared.gainLinear;
+                    voice.sampledAttackSec = prepared.attackSec;
+                    voice.sampledReleaseSec = prepared.releaseSec;
+                    voice.sampledPitchKeytrack = prepared.pitchKeytrack;
+                    voice.sampledPitchOffsetSemitones = prepared.pitchOffsetSemitones;
+                    voice.sampledStartFrame = prepared.startFrame;
+                    voice.sampledEndFrameExclusive = prepared.endFrameExclusive;
+                    voice.sampledOneShot = prepared.oneShot;
                 }
 
                 if (activeLiveNotes.size() >= kMaxActiveLiveNotes)
@@ -5655,7 +5706,6 @@ private:
         cachedSampledAttackOverride = state->sampledAttackOverride;
         cachedSampledReleaseOverride = state->sampledReleaseOverride;
         cachedSourceTempoBpm = state->sourceTempoBpm;
-        liveSampleSequenceCounter = 0;
         activeTimelineNotes.reset();
     }
 
@@ -5734,7 +5784,7 @@ private:
     std::atomic<std::size_t> liveMidiEnqueuePosition{0};
     std::atomic<std::size_t> liveMidiDequeuePosition{0};
     std::vector<ActiveLiveNote> activeLiveNotes;
-    int liveSampleSequenceCounter = 0;
+    std::atomic<int> liveSamplePrepareSequenceCounter{0};
     std::bitset<kMaxTimelineMidiNotes> activeTimelineNotes;
     std::vector<size_t> blockNoteIndices;
     std::vector<int> blockNotePitches;
@@ -5888,6 +5938,8 @@ public:
         int pitch = 60;
         float velocity = 0.0f;
         double transportSec = 0.0;
+        juce::AudioProcessor *routedProcessorIdentity = nullptr;
+        TimelineMidiClipProcessor::PreparedLiveSample preparedSample;
     };
     bool setLiveMidiInputTargetClip(int clipId);
     std::vector<LiveMidiInputEvent> consumeLiveMidiInputEvents();
@@ -6183,6 +6235,7 @@ private:
     int getTrackIndexForClip(int clipIdx) const; // clip → row mapping
     bool enqueueLiveMidiInputAudioEvent(const LiveMidiInputEvent &event) noexcept;
     bool dequeueLiveMidiInputAudioEvent(LiveMidiInputEvent &event) noexcept;
+    bool prepareLiveMidiInputEventForAudioQueue(LiveMidiInputEvent &event);
     void clearLiveMidiInputAudioQueue() noexcept;
     float panUIToNormalized(float uiPan)         // OLD: uiPan ∈ [-1, 1] NEW: uiPan ∈ [0, 1]
     {

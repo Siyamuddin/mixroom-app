@@ -104,8 +104,15 @@ object JuceBridge {
         velocity: Float,
         durationMs: Int,
     ): Boolean
+    @JvmStatic external fun sendLiveMidiInputEventJNI(
+        noteOn: Boolean,
+        channel: Int,
+        pitch: Int,
+        velocity: Float,
+    ): Boolean
     @JvmStatic external fun consumeLiveMidiInputEventsJNI(): ArrayList<HashMap<String, Any>>
     @JvmStatic external fun getConnectedMidiInputDevicesJNI(): ArrayList<HashMap<String, String>>
+    @JvmStatic external fun preparePlaybackGraphJNI(reason: String): Boolean
 
     // Transport
     @JvmStatic external fun setTransportSecondsJNI(timeSeconds: Double)

@@ -1805,6 +1805,25 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_playPreviewMidiNoteJNI(JNIEnv *,
     return ok.load() ? JNI_TRUE : JNI_FALSE;
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_sendLiveMidiInputEventJNI(JNIEnv *,
+                                                                          jclass,
+                                                                          jboolean noteOn,
+                                                                          jint channel,
+                                                                          jint pitch,
+                                                                          jfloat velocity)
+{
+    std::atomic<bool> ok{false};
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  {
+        ok = JuceEngine::get().sendLiveMidiInputEvent(
+            noteOn == JNI_TRUE,
+            (int)channel,
+            (int)pitch,
+            (float)velocity); });
+    return ok.load() ? JNI_TRUE : JNI_FALSE;
+}
+
 extern "C" JNIEXPORT jobject JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_consumeLiveMidiInputEventsJNI(JNIEnv *env, jclass)
 {
@@ -3106,6 +3125,20 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_hardResetPlaybackOnlyRouteJNI(JN
     std::atomic<bool> ok{false};
     juce::MessageManager::getInstance()->callSync([&]
                                                   { ok = JuceEngine::get().hardResetPlaybackOnlyRoute(juceReason); });
+    return ok.load() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_preparePlaybackGraphJNI(JNIEnv *env,
+                                                                         jclass,
+                                                                         jstring reason)
+{
+    const juce::String juceReason = reason == nullptr
+                                        ? juce::String("dart")
+                                        : juceStringFromJString(env, reason);
+    std::atomic<bool> ok{false};
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  { ok = JuceEngine::get().preparePlaybackGraph(juceReason); });
     return ok.load() ? JNI_TRUE : JNI_FALSE;
 }
 

@@ -13,11 +13,11 @@ scope:
 
 # An operation inherits the implementation, execution, dependencies, evidence,
 # and default status fields of its family. Operation fields override family
-# fields. This keeps the 87-operation ledger readable without hiding omissions.
+# fields. This keeps the 88-operation ledger readable without hiding omissions.
 inventory_rules:
   family_count: 22
-  canonical_operation_count: 87
-  v3_prototype_command_count: 53
+  canonical_operation_count: 88
+  v3_prototype_command_count: 54
   completion_rule: every accepted, emitted, routed, or executed capability has an explicit disposition
   verified_rule: verified requires real editor execution plus undo_or_rollback and readback evidence
   allowed_v1_statuses: [verified, implemented_unverified, partial, broken, non_mutating, context_only, unreachable, test_only]
@@ -417,6 +417,7 @@ direct_action_families:
       - {id: direct.midi_compose.transpose_notes, operation: transpose_notes, purpose: Transpose existing MIDI notes, inputs: [clip target, semitones], aliases: [transpose, transpose_note, shift_pitch, pitch_shift, octave_up, octave_down], capture_observed: true, v3: {disposition: prototype_supported, command: midi.transpose, phase: prototype, dependency: none}}
       - {id: direct.midi_compose.convert_audio_to_midi, operation: convert_audio_to_midi, purpose: Transcribe audio into a new MIDI clip, inputs: [audio clip target, instrument destination], aliases: [audio_to_midi, convert_to_midi, transcribe_audio, extract_midi], status: partial, v3: {disposition: prototype_supported, command: clip.convert_to_midi, adaptive_retrieval: shadow_supported, phase: local_audio_models, dependency: exact audio clip and instrument IDs, bundled Basic Pitch model, staged local result}}
       - {id: direct.midi_compose.chop_notes, operation: chop_notes, purpose: Split notes into rhythmic subdivisions or ratchets, inputs: [clip target, grid/division, selection], aliases: [chop, chop_note, note_chop, note_chopper, splice_notes, slice_notes, split_notes, grid_chop, ratchet, stutter], v3: {disposition: prototype_supported, command: midi.chop_notes, phase: midi_editing, dependency: deterministic subdivision contract}}
+      - {id: direct.midi_compose.set_row_instrument, operation: set_row_instrument, purpose: Set the exact instrument for an existing MIDI row while preserving its name and MIDI content, inputs: [row target, instrument ID], aliases: [change_instrument, swap_instrument, replace_instrument], v3: {disposition: prototype_supported, command: row.set_instrument, adaptive_retrieval: shadow_supported, phase: midi_editing, dependency: exact MIDI row and available instrument IDs}}
 
   - family: effect_edit
     category: effects
@@ -887,6 +888,7 @@ v3_prototype_commands:
   - {command: row.set_soloed, maps_to: [direct.row_solo.solo, direct.row_solo.unsolo, direct.row_solo.toggle]}
   - {command: row.rename, maps_to: direct.row_rename.rename}
   - {command: row.set_role_override, maps_to: [direct.role_override.set, direct.role_override.clear]}
+  - {command: row.set_instrument, maps_to: direct.midi_compose.set_row_instrument}
   - {command: row.select, maps_to: direct.row_select.select}
   - {command: row.set_color, maps_to: [direct.row_color_edit.set, direct.row_color_edit.clear]}
   - {command: row.create, maps_to: direct.row_create.create}
@@ -955,7 +957,7 @@ known_discrepancies:
     finding: mixing_result.dart documentation omits hard_reset_row_fx although LocalMixingModel and AudioEditor support it.
   - id: discrepancy.contract_scope
     severity: architectural
-    finding: the 87-operation action contract records mix_goal.mix_request but not GoalVector fields, mixing engines, or concrete MixActions.
+    finding: the 88-operation action contract records mix_goal.mix_request but not GoalVector fields, mixing engines, or concrete MixActions.
   - id: discrepancy.atomicity
     severity: medium
     finding: V1 ordered and asynchronous actions do not share a universal atomic rollback/readback contract.

@@ -80,7 +80,7 @@ void main() {
     inventory = _loadInventory();
   });
 
-  test('inventory exactly covers the canonical 22 families and 87 operations',
+  test('inventory exactly covers the canonical 22 families and 88 operations',
       () {
     final auditedFamilies = <String, Map<String, dynamic>>{
       for (final family in _families(inventory))
@@ -91,7 +91,7 @@ void main() {
     final operationCount = auditedFamilies.values
         .map((family) => _list(family['operations']).length)
         .fold<int>(0, (total, count) => total + count);
-    expect(operationCount, 87);
+    expect(operationCount, 88);
   });
 
   test('adaptive architecture accounts for every V1 family and V3 command', () {

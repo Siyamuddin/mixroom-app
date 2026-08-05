@@ -2501,6 +2501,9 @@ Resources:
           TOSS_SECRET_KEY_PARAMETER_NAME: !Ref TossSecretKeyParameterName
           TOSS_SECRET_KEY_SECRET_ARN: !If [HasTossSecretKeySecretArn, !Ref TossSecretKeySecretArn, !Ref AWS::NoValue]
           TOSS_API_BASE_URL: !Ref TossApiBaseUrl
+          GOOGLE_PLAY_PACKAGE_NAME: !Ref GooglePlayPackageName
+          GOOGLE_SERVICE_ACCOUNT_PARAMETER_NAME: !Ref GoogleServiceAccountParameterName
+          GOOGLE_SERVICE_ACCOUNT_SECRET_ARN: !Ref GoogleServiceAccountSecretArn
       Policies:
         - Statement:
             - Effect: Allow
@@ -2510,6 +2513,7 @@ Resources:
                 - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/toss/secret-key
                 - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/payment-credentials/${StageName}/toss/*
                 - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/postmark/server-token
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/google-play/service-account
             - Effect: Allow
               Action:
                 - kms:Decrypt
@@ -2522,6 +2526,10 @@ Resources:
             TableName: !Ref SubscriptionsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref EntitlementsCurrentTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PurchaseTokensTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CustomerLinksTable
         - DynamoDBReadPolicy:
             TableName: !Ref CatalogMappingsTable
         - DynamoDBCrudPolicy:
@@ -2549,6 +2557,14 @@ Resources:
                 Action:
                   - secretsmanager:GetSecretValue
                 Resource: !Ref PostmarkServerTokenSecretArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasGoogleServiceAccountSecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref GoogleServiceAccountSecretArn
           - !Ref AWS::NoValue
       Events:
         HourlyReconcile:

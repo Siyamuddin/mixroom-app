@@ -926,6 +926,35 @@ class AiV3CommandPreparer {
           label = 'Rename ${resolved.label} to $newName';
           verifiedLabel = 'Renamed ${resolved.label} to $newName';
           break;
+        case 'row.set_instrument':
+          final rowId = args['row_id'] as int;
+          final instrumentId = args['instrument_id'].toString().trim();
+          final target = rowTarget(rowId);
+          final row = rowById[rowId]!;
+          if (row['lane_kind'] != 'instrument') {
+            throw const AiV3PreparationException('v3_instrument_row_required');
+          }
+          if (!instruments.contains(instrumentId)) {
+            throw const AiV3PreparationException('v3_instrument_id_unknown');
+          }
+          if (row['instrument_id']?.toString().trim() == instrumentId) {
+            receiptStatus = 'already_satisfied';
+          } else {
+            commandActions.add(
+              AssistantAction(
+                type: 'v3_row_set_instrument',
+                data: <String, dynamic>{
+                  'operation': 'set',
+                  'instrument_id': instrumentId,
+                  'target': target,
+                },
+              ),
+            );
+          }
+          row['instrument_id'] = instrumentId;
+          label =
+              'Set ${_rowLabel(rowById, rowId)} instrument to $instrumentId';
+          break;
         case 'row.set_role_override':
           final rowId = args['row_id'] as int;
           final target = rowTarget(rowId);
