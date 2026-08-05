@@ -1393,6 +1393,21 @@ void main() {
           'Cleared automation on Audio',
         ],
       );
+      expect(
+        prepared.receipts.map((receipt) => receipt['verified_l10n_key']),
+        <String>[
+          'Created audio row {name}.',
+          'Set project tempo to {value} BPM.',
+          'Added/configured {effect} on {target}.',
+          'Added a gain fade on {target}.',
+          'Set {count} automation points on {target}.',
+          'Cleared automation on {target}.',
+        ],
+      );
+      expect(
+        prepared.receipts[2]['verified_l10n_args'],
+        <String, String>{'effect': 'Reverb', 'target': 'Audio'},
+      );
     });
 
     test('generated rows form a typed group that can be collapsed', () {

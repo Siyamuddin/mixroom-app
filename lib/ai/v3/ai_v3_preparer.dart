@@ -3934,6 +3934,12 @@ class AiV3CommandPreparer {
           verifiedLabel: verifiedLabel,
           symbolicResources: symbolicResources,
         ),
+        ..._aiV3ReceiptLocalization(
+          command: command,
+          rows: rowById,
+          clips: clipById,
+          symbolicResources: symbolicResources,
+        ),
       });
       for (final output in aiV3ProducedResources(
         commandType: command.type,
@@ -4456,6 +4462,216 @@ String _aiV3VerifiedReceiptLabel({
     );
   }
   return label;
+}
+
+Map<String, dynamic> _aiV3ReceiptLocalization({
+  required AiV3Command command,
+  required Map<int, Map<String, dynamic>> rows,
+  required Map<String, Map<String, dynamic>> clips,
+  required Map<String, _AiV3SymbolicResource> symbolicResources,
+}) {
+  final args = command.arguments;
+
+  String referencedLabel(Object? rawRef, String fallback) {
+    if (rawRef is! Map) return fallback;
+    final commandId = rawRef['command_id']?.toString().trim() ?? '';
+    final output = rawRef['output']?.toString().trim() ?? '';
+    final key = '$commandId.$output';
+    final resource = symbolicResources[key];
+    return resource == null
+        ? fallback
+        : _aiV3SymbolicResourceDisplayLabel(key, resource);
+  }
+
+  String rowLabel() {
+    final rowId = args['row_id'];
+    if (rowId is int) return _rowLabel(rows, rowId);
+    return referencedLabel(args['row_ref'], 'generated row');
+  }
+
+  String clipLabel() {
+    final clipId = args['clip_id'];
+    if (clipId is String) return _clipLabel(clips, clipId);
+    return referencedLabel(args['clip_ref'], 'generated clip');
+  }
+
+  Map<String, dynamic> message(
+    String key, [
+    Map<String, Object?> values = const <String, Object?>{},
+  ]) =>
+      <String, dynamic>{
+        'verified_l10n_key': key,
+        if (values.isNotEmpty)
+          'verified_l10n_args': values.map(
+            (name, value) => MapEntry(name, value?.toString() ?? ''),
+          ),
+      };
+
+  final target = rowLabel();
+  final clip = clipLabel();
+  return switch (command.type) {
+    'project.set_tempo' =>
+      message('Set project tempo to {value} BPM.', {'value': args['bpm']}),
+    'transport.set_playing' => message(
+        args['playing'] == true ? 'Started playback.' : 'Paused playback.',
+      ),
+    'transport.restart' => message('Restarted playback.'),
+    'transport.set_metronome_enabled' => message(
+        args['enabled'] == true ? 'Enabled the metronome.' : 'Disabled the metronome.',
+      ),
+    'transport.set_loop_enabled' => message(
+        args['enabled'] == true ? 'Enabled loop playback.' : 'Disabled loop playback.',
+      ),
+    'row.adjust_gain_db' => message(
+        'Adjusted {target} gain by {value} dB.',
+        {'target': target, 'value': args['delta_db']},
+      ),
+    'row.set_gain_db' => message(
+        'Set {target} gain to {value} dB.',
+        {'target': target, 'value': args['gain_db']},
+      ),
+    'row.adjust_pan' => message(
+        'Adjusted {target} pan by {value}.',
+        {'target': target, 'value': args['delta_signed']},
+      ),
+    'row.set_pan' => message(
+        'Set {target} pan to {value}.',
+        {'target': target, 'value': args['pan_signed']},
+      ),
+    'row.set_muted' => message(
+        args['muted'] == true ? 'Muted {target}.' : 'Unmuted {target}.',
+        {'target': target},
+      ),
+    'row.set_soloed' => message(
+        args['soloed'] == true ? 'Soloed {target}.' : 'Unsoloed {target}.',
+        {'target': target},
+      ),
+    'row.rename' => message(
+        'Renamed {target} to {name}.',
+        {'target': target, 'name': args['new_name']},
+      ),
+    'row.set_role_override' => message(
+        'Updated the role for {target}.',
+        {'target': target},
+      ),
+    'row.apply_phone_mic_cleanup' => message(
+        'Applied phone-mic cleanup to {target}.',
+        {'target': target},
+      ),
+    'row.select' => message('Selected {target}.', {'target': target}),
+    'row.set_color' =>
+      message('Updated the color of {target}.', {'target': target}),
+    'row.create' => message(
+        args['lane'] is Map && (args['lane'] as Map)['kind'] == 'midi'
+            ? 'Created MIDI row {name}.'
+            : 'Created audio row {name}.',
+        {'name': args['name']},
+      ),
+    'row.delete' => message('Deleted {target}.', {'target': target}),
+    'group.create' =>
+      message('Created group {name}.', {'name': args['name']}),
+    'group.remove_row' => message(
+        'Removed {target} from the group.',
+        {
+          'target': args['row_id'] is int
+              ? _rowLabel(rows, args['row_id'] as int)
+              : referencedLabel(args['row_ref'], 'generated row'),
+        },
+      ),
+    'group.set_collapsed' => message(
+        args['collapsed'] == true ? 'Collapsed the group.' : 'Expanded the group.',
+      ),
+    'clip.move_by_beats' => message(
+        'Moved {target} by {value} beats.',
+        {'target': clip, 'value': args['delta_beats']},
+      ),
+    'clip.trim_to_range' => message(
+        'Trimmed {target} to beats {start}–{end}.',
+        {
+          'target': clip,
+          'start': args['start_beat'],
+          'end': args['end_beat'],
+        },
+      ),
+    'clip.split_at' => message(
+        'Split {target} at beat {value}.',
+        {'target': clip, 'value': args['at_beat']},
+      ),
+    'clip.duplicate_to' => message(
+        'Duplicated {target} at beat {value}.',
+        {'target': clip, 'value': args['start_beat']},
+      ),
+    'clip.delete' => message('Deleted {target}.', {'target': clip}),
+    'clip.glue' => message('Glued the selected audio clips.'),
+    'clip.separate_stems' => message('Separated vocals and instrumental.'),
+    'clip.convert_to_midi' => message('Converted {target} to MIDI.', {'target': clip}),
+    'clip.set_pitch_semitones' => message(
+        'Set {target} pitch to {value} semitones.',
+        {'target': clip, 'value': args['pitch_semitones']},
+      ),
+    'clip.adjust_pitch_semitones' => message(
+        'Adjusted {target} pitch by {value} semitones.',
+        {'target': clip, 'value': args['delta_semitones']},
+      ),
+    'clip.set_timeline_length_beats' => message(
+        'Set {target} length to {value} beats.',
+        {'target': clip, 'value': args['length_beats']},
+      ),
+    'clip.scale_timeline_length' => message(
+        'Scaled {target} length by {value}.',
+        {'target': clip, 'value': args['factor']},
+      ),
+    'clip.set_source_tempo_bpm' => message(
+        'Set {target} source tempo to {value} BPM.',
+        {'target': clip, 'value': args['source_tempo_bpm']},
+      ),
+    'clip.set_tempo_follow_mode' =>
+      message('Updated tempo following for {target}.', {'target': clip}),
+    'clip.align_tempo_to_project' =>
+      message('Aligned {target} to the project tempo.', {'target': clip}),
+    'project.set_tempo_from_clip' =>
+      message('Set the project tempo from {target}.', {'target': clip}),
+    'clip.trim_silence' =>
+      message('Trimmed silence from {target}.', {'target': clip}),
+    'clip.align_first_sound' =>
+      message('Aligned the first sound in {target}.', {'target': clip}),
+    'midi.transpose' => message(
+        'Transposed {target} by {value} semitones.',
+        {'target': clip, 'value': args['semitones']},
+      ),
+    'midi.create_clip' => message(
+        'Created a MIDI clip with {count} notes.',
+        {'count': (args['notes'] as List?)?.length ?? 0},
+      ),
+    'midi.replace_notes' =>
+      message('Replaced notes in {target}.', {'target': clip}),
+    'midi.append_notes' =>
+      message('Appended notes to {target}.', {'target': clip}),
+    'midi.chop_notes' =>
+      message('Chopped notes in {target}.', {'target': clip}),
+    'effect.ensure_configured' => message(
+        'Added/configured {effect} on {target}.',
+        {'effect': args['effect_id'], 'target': target},
+      ),
+    'effect.remove' => message('Removed an effect from {target}.', {'target': target}),
+    'effect.set_bypassed' => message('Updated effect bypass on {target}.', {'target': target}),
+    'automation.gain_fade' =>
+      message('Added a gain fade on {target}.', {'target': target}),
+    'automation.set_points' => message(
+        'Set {count} automation points on {target}.',
+        {'count': (args['points'] as List?)?.length ?? 0, 'target': target},
+      ),
+    'automation.clear' =>
+      message('Cleared automation on {target}.', {'target': target}),
+    'sample.place' => message(
+        'Placed {count} library sample(s).',
+        {'count': (args['placements'] as List?)?.length ?? 0},
+      ),
+    'sample.replace' =>
+      message('Replaced the sample in {target}.', {'target': clip}),
+    'mix.apply_goal' => message('Applied the requested mix.'),
+    _ => const <String, dynamic>{},
+  };
 }
 
 String _aiV3SymbolicResourceDisplayLabel(

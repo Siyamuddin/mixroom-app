@@ -45722,12 +45722,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         operation != 'unmute' &&
         operation != 'toggle' &&
         operation != 'set_muted') {
-      _insertAssistantChatText("I couldn't apply that row mute edit.");
+      _insertAssistantChatText(
+        L10n.translate(context, "I couldn't apply that row mute edit."),
+      );
       return;
     }
     final requestedMuted = data['muted'];
     if (operation == 'set_muted' && requestedMuted is! bool) {
-      _insertAssistantChatText("I couldn't apply that row mute edit.");
+      _insertAssistantChatText(
+        L10n.translate(context, "I couldn't apply that row mute edit."),
+      );
       return;
     }
 
@@ -45793,12 +45797,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         operation != 'unsolo' &&
         operation != 'toggle' &&
         operation != 'set_soloed') {
-      _insertAssistantChatText("I couldn't apply that row solo edit.");
+      _insertAssistantChatText(
+        L10n.translate(context, "I couldn't apply that row solo edit."),
+      );
       return;
     }
     final requestedSoloed = data['soloed'];
     if (operation == 'set_soloed' && requestedSoloed is! bool) {
-      _insertAssistantChatText("I couldn't apply that row solo edit.");
+      _insertAssistantChatText(
+        L10n.translate(context, "I couldn't apply that row solo edit."),
+      );
       return;
     }
 
@@ -62518,6 +62526,54 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         'master_effects': _aiV3MasterEffectsJson(),
       };
 
+  String _localizedAiV3ReceiptLabel(
+    Map<dynamic, dynamic> receipt,
+    String fallback,
+  ) {
+    final key = receipt['verified_l10n_key']?.toString().trim() ?? '';
+    if (key.isEmpty) return fallback;
+    final rawArgs = receipt['verified_l10n_args'];
+    const localizableResourceLabels = <String>{
+      'vocal stem',
+      'instrumental stem',
+      'vocal row',
+      'instrumental row',
+      'generated row',
+      'generated audio row',
+      'generated MIDI row',
+      'generated clip',
+      'generated audio clip',
+      'generated MIDI clip',
+      'left split clip',
+      'right split clip',
+      'copied clip',
+      'glued clip',
+      'generated group',
+    };
+    final args = rawArgs is Map
+        ? rawArgs.map(
+            (name, value) {
+              final text = value.toString();
+              return MapEntry(
+                name.toString(),
+                localizableResourceLabels.contains(text)
+                    ? L10n.translate(context, text)
+                    : text,
+              );
+            },
+          )
+        : const <String, String>{};
+    return L10n.translateWithParams(context, key, args);
+  }
+
+  String _localizedAiV3AlreadySatisfiedLabel(String label) {
+    return L10n.translateWithParams(
+      context,
+      '{label} (already set)',
+      <String, String>{'label': label},
+    );
+  }
+
   Future<void> _presentAiV3Handoff(
     Map<String, dynamic> handoff, {
     int? chatFlowId,
@@ -62758,15 +62814,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final verifiedActionNotices = deferredActionNotices.isNotEmpty
           ? deferredActionNotices
           : deferredExecutionNotices;
+      final localizedExecutionSummaries =
+          Localizations.localeOf(context).languageCode == 'en'
+              ? executionSummariesByCommandId
+              : const <String, List<String>>{};
       final executionDetails = aiV3VerifiedExecutionDetails(
         bundle,
-        executionSummariesByCommandId: executionSummariesByCommandId,
+        executionSummariesByCommandId: localizedExecutionSummaries,
         actionNotices: verifiedActionNotices,
+        receiptLabelLocalizer: _localizedAiV3ReceiptLabel,
+        alreadySatisfiedLocalizer: _localizedAiV3AlreadySatisfiedLabel,
       );
       final conversationMessage = aiV3VerifiedConversationMessage(
         bundle,
-        executionSummariesByCommandId: executionSummariesByCommandId,
+        executionSummariesByCommandId: localizedExecutionSummaries,
         actionNotices: verifiedActionNotices,
+        receiptLabelLocalizer: _localizedAiV3ReceiptLabel,
+        alreadySatisfiedLocalizer: _localizedAiV3AlreadySatisfiedLabel,
       );
       final completionMessage = aiV3VerifiedCompletionMessage(bundle);
       _chatPipeline.recordAiV3Execution(
@@ -62785,11 +62849,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         conversationMessage: conversationMessage,
       );
       final count = (bundle['receipts'] as List?)?.length ?? actions.length;
-      final applied =
-          count == 1 ? 'Applied 1 change.' : 'Applied $count changes.';
+      final applied = L10n.translateWithParams(
+        context,
+        count == 1 ? 'Applied 1 change.' : 'Applied {count} changes.',
+        <String, String>{'count': '$count'},
+      );
       _insertExecutionDetailSystemText(
         source: 'ai_v3_verified_execution',
-        collapsedTitle: 'Applied ${executionDetails.length} verified changes',
+        collapsedTitle: L10n.translateWithParams(
+          context,
+          executionDetails.length == 1
+              ? 'Applied 1 verified change'
+              : 'Applied {count} verified changes',
+          <String, String>{'count': '${executionDetails.length}'},
+        ),
         detailLines: executionDetails,
       );
       _insertAssistantChatText(

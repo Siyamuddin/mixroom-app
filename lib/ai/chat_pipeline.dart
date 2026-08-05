@@ -29,6 +29,10 @@ typedef AiV3ClipTempoDetector = Future<double?> Function(AudioTrack clip);
 typedef AiV3ClipBoundaryAnalyzer = Future<AiV3ClipBoundaryAnalysis?> Function(
   AudioTrack clip,
 );
+typedef AiV3ReceiptLabelLocalizer = String Function(
+  Map<dynamic, dynamic> receipt,
+  String fallback,
+);
 
 class _AiV3PreparationFailureResponse {
   const _AiV3PreparationFailureResponse({
@@ -45,6 +49,8 @@ List<String> aiV3VerifiedExecutionDetails(
   Map<String, List<String>> executionSummariesByCommandId =
       const <String, List<String>>{},
   List<String> actionNotices = const <String>[],
+  AiV3ReceiptLabelLocalizer? receiptLabelLocalizer,
+  String Function(String label)? alreadySatisfiedLocalizer,
 }) {
   final executionDetails = <String>[];
   void addDetail(String rawDetail) {
@@ -67,13 +73,17 @@ List<String> aiV3VerifiedExecutionDetails(
       }
       final verifiedLabel =
           rawReceipt['verified_label']?.toString().trim() ?? '';
-      final label = verifiedLabel.isNotEmpty
+      final fallbackLabel = verifiedLabel.isNotEmpty
           ? verifiedLabel
           : rawReceipt['preview_label']?.toString().trim() ?? '';
+      final label = receiptLabelLocalizer?.call(rawReceipt, fallbackLabel) ??
+          fallbackLabel;
       if (label.isEmpty) continue;
       final status = rawReceipt['status']?.toString().trim() ?? '';
       addDetail(
-        status == 'already_satisfied' ? '$label (already set)' : label,
+        status == 'already_satisfied'
+            ? alreadySatisfiedLocalizer?.call(label) ?? '$label (already set)'
+            : label,
       );
     }
   }
@@ -96,11 +106,15 @@ String aiV3VerifiedConversationMessage(
   Map<String, List<String>> executionSummariesByCommandId =
       const <String, List<String>>{},
   List<String> actionNotices = const <String>[],
+  AiV3ReceiptLabelLocalizer? receiptLabelLocalizer,
+  String Function(String label)? alreadySatisfiedLocalizer,
 }) {
   final executionDetails = aiV3VerifiedExecutionDetails(
     bundle,
     executionSummariesByCommandId: executionSummariesByCommandId,
     actionNotices: actionNotices,
+    receiptLabelLocalizer: receiptLabelLocalizer,
+    alreadySatisfiedLocalizer: alreadySatisfiedLocalizer,
   );
   if (executionDetails.isEmpty) return 'Done.';
   return <String>[

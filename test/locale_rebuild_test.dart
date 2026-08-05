@@ -137,6 +137,53 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('V3 receipt templates localize parameters', (tester) async {
+    final localeProvider = LocaleProvider();
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<LocaleProvider>.value(
+        value: localeProvider,
+        child: Consumer<LocaleProvider>(
+          builder: (context, provider, _) {
+            return MaterialApp(
+              locale: L10n.resolveSupportedLocale(provider.locale),
+              supportedLocales: L10n.supportedLocales,
+              localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
+                GlobalMaterialLocalizations.delegate,
+                GlobalWidgetsLocalizations.delegate,
+                GlobalCupertinoLocalizations.delegate,
+              ],
+              home: Scaffold(
+                body: Builder(
+                  builder: (context) => Text(
+                    L10n.translateWithParams(
+                      context,
+                      'Added/configured {effect} on {target}.',
+                      const <String, String>{
+                        'effect': 'Chorus',
+                        'target': 'Chords',
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+
+    expect(find.text('Added/configured Chorus on Chords.'), findsOneWidget);
+
+    await localeProvider.setLocale(const Locale('ko'));
+    await tester.pumpAndSettle();
+    expect(find.text('Chords에 Chorus를 추가하고 설정했습니다.'), findsOneWidget);
+
+    await localeProvider.setLocale(const Locale('ja'));
+    await tester.pumpAndSettle();
+    expect(find.text('ChordsにChorusを追加して設定しました。'), findsOneWidget);
+  });
 }
 
 class _LocaleDependencyProbe extends StatefulWidget {

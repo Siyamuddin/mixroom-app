@@ -956,6 +956,32 @@ void main() {
       );
     });
 
+    test('verified execution details allow receipt localization', () {
+      expect(
+        aiV3VerifiedExecutionDetails(
+          const <String, dynamic>{
+            'receipts': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'status': 'prepared',
+                'verified_label': 'Added/configured Chorus on Chords',
+                'verified_l10n_key':
+                    'Added/configured {effect} on {target}.',
+                'verified_l10n_args': <String, String>{
+                  'effect': 'Chorus',
+                  'target': 'Chords',
+                },
+              },
+            ],
+          },
+          receiptLabelLocalizer: (receipt, fallback) {
+            expect(receipt['verified_l10n_key'], isNotEmpty);
+            return 'Chords에 Chorus를 추가하고 설정했습니다.';
+          },
+        ),
+        <String>['Chords에 Chorus를 추가하고 설정했습니다.'],
+      );
+    });
+
     test('already-satisfied completion is factual rather than future tense',
         () {
       expect(
