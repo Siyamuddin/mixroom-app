@@ -44757,6 +44757,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             ? destinationInstrumentName
             : clip.label,
     };
+    final localizedNoticeTemplate = L10n.translate(
+      context,
+      'Changed {row} instrument to {instrument}',
+    );
     await _changeInstrumentLaneToSpec(
       row,
       matches.single,
@@ -44771,9 +44775,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final instrumentName = lane.instrumentName.trim().isEmpty
         ? _instrumentNameFromId(lane.instrumentId)
         : lane.instrumentName.trim();
-    _insertSystemChatText(
-      '• Changed ${_rowDisplayName(resolvedRow)} instrument to $instrumentName •',
-    );
+    final localizedNotice = localizedNoticeTemplate
+        .replaceAll('{row}', _rowDisplayName(resolvedRow))
+        .replaceAll('{instrument}', instrumentName);
+    _insertSystemChatText('• $localizedNotice •');
     return <String, dynamic>{
       'kind': 'row_instrument',
       'row_id': rowId,

@@ -1208,6 +1208,8 @@ class L10n {
           'Insert instrument lane above': 'Insert instrument lane above',
           'Insert instrument lane below': 'Insert instrument lane below',
           'Change instrument lane': 'Change instrument lane',
+          'Changed {row} instrument to {instrument}':
+              'Changed {row} instrument to {instrument}',
           'Insert output row': 'Insert output row',
           'Remove row from group': 'Remove row from group',
           'Add audio clip': 'Add audio clip',
@@ -3123,6 +3125,8 @@ class L10n {
           'Insert instrument lane above': '위에 악기 레인 삽입',
           'Insert instrument lane below': '아래에 악기 레인 삽입',
           'Change instrument lane': '악기 레인 변경',
+          'Changed {row} instrument to {instrument}':
+              '{row}: 악기를 {instrument}로 변경했습니다',
           'Insert output row': '출력 트랙 삽입',
           'Remove row from group': '그룹에서 트랙 제거',
           'Add audio clip': '오디오 클립 추가',
@@ -4121,6 +4125,8 @@ class L10n {
           'Insert instrument lane above': '在上方插入乐器轨道',
           'Insert instrument lane below': '在下方插入乐器轨道',
           'Change instrument lane': '更改乐器轨道',
+          'Changed {row} instrument to {instrument}':
+              '已将{row}的乐器更改为{instrument}',
           'Insert output row': '插入输出轨道',
           'Remove row from group': '从分组中移除轨道',
           'Add audio clip': '添加音频片段',
@@ -5747,6 +5753,8 @@ class L10n {
           'Insert instrument lane above': '上にインストゥルメントレーンを挿入',
           'Insert instrument lane below': '下にインストゥルメントレーンを挿入',
           'Change instrument lane': 'インストゥルメントレーンを変更',
+          'Changed {row} instrument to {instrument}':
+              '{row}のインストゥルメントを{instrument}に変更しました',
           'Insert output row': '出力トラックを挿入',
           'Remove row from group': 'グループからトラックを削除',
           'Add audio clip': 'オーディオクリップを追加',
