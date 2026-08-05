@@ -4637,6 +4637,18 @@ void main() {
       expect((prepared.actions.first.data['target'] as Map)['row_id'], 200);
       expect(prepared.actions.last.type, 'midi_compose');
       expect(prepared.actions.last.data['instrument_id'], 'bass');
+      expect(
+        prepared.receipts.first['verified_label'],
+        'Changed Keys instrument to bass',
+      );
+      expect(
+        prepared.receipts.first['verified_l10n_key'],
+        'Changed {row} instrument to {instrument}',
+      );
+      expect(
+        prepared.receipts.first['verified_l10n_args'],
+        <String, String>{'row': 'Keys', 'instrument': 'bass'},
+      );
     });
 
     test('row instrument preparation is idempotent and rejects bad targets',

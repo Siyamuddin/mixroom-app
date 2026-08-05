@@ -954,6 +954,8 @@ class AiV3CommandPreparer {
           row['instrument_id'] = instrumentId;
           label =
               'Set ${_rowLabel(rowById, rowId)} instrument to $instrumentId';
+          verifiedLabel =
+              'Changed ${_rowLabel(rowById, rowId)} instrument to $instrumentId';
           break;
         case 'row.set_role_override':
           final rowId = args['row_id'] as int;
@@ -4578,6 +4580,13 @@ Map<String, dynamic> _aiV3ReceiptLocalization({
     'row.rename' => message(
         'Renamed {target} to {name}.',
         {'target': target, 'name': args['new_name']},
+      ),
+    'row.set_instrument' => message(
+        'Changed {row} instrument to {instrument}',
+        {
+          'row': target,
+          'instrument': args['instrument_id'],
+        },
       ),
     'row.set_role_override' => message(
         'Updated the role for {target}.',

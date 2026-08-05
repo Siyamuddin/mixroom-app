@@ -1091,11 +1091,14 @@ void main() {
                 'command_id': 'rename',
                 'status': 'prepared',
                 'preview_label': 'Rename Keys to Custom Keys',
+                'verified_label': 'Renamed row to Custom Keys',
               },
               <String, dynamic>{
                 'command_id': 'instrument',
                 'status': 'prepared',
                 'preview_label': 'Set Custom Keys instrument to Dream Pad',
+                'verified_label':
+                    'Changed Custom Keys instrument to Dream Pad',
               },
             ],
           },
