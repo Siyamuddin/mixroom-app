@@ -425,14 +425,14 @@ static NSArray<NSDictionary<NSString *, id> *> *MixroomCoreAudioDeviceInventory(
         return @[];
     }
 
-    const UInt32 count = size / sizeof(AudioDeviceID);
-    AudioDeviceID *devices = calloc(count, sizeof(AudioDeviceID));
+    const UInt32 capacity = size / sizeof(AudioDeviceID);
+    AudioDeviceID *devices = calloc(capacity, sizeof(AudioDeviceID));
     if (devices == NULL) {
         return nil;
     }
 
     NSMutableArray<NSDictionary<NSString *, id> *> *inventory =
-        [NSMutableArray arrayWithCapacity:count];
+        [NSMutableArray arrayWithCapacity:capacity];
     const OSStatus status = AudioObjectGetPropertyData(kAudioObjectSystemObject,
                                                        &address,
                                                        0,
@@ -440,7 +440,11 @@ static NSArray<NSDictionary<NSString *, id> *> *MixroomCoreAudioDeviceInventory(
                                                        &size,
                                                        devices);
     if (status == noErr) {
-        for (UInt32 index = 0; index < count; index++) {
+        const UInt32 returnedCount = MIN(
+            capacity,
+            size / (UInt32)sizeof(AudioDeviceID)
+        );
+        for (UInt32 index = 0; index < returnedCount; index++) {
             const AudioDeviceID deviceID = devices[index];
             NSString *name = MixroomStringFromCoreAudioObject(
                 deviceID,
@@ -501,6 +505,31 @@ static NSString *MixroomCoreAudioInventoryFingerprint(
     return [parts componentsJoinedByString:@";"];
 }
 
+static NSString *MixroomJuceRouteFingerprint(
+    NSDictionary<NSString *, id> *diagnostics
+) {
+    if (diagnostics == nil) {
+        return nil;
+    }
+    NSArray<NSString *> *keys = @[
+        @"deviceOpen",
+        @"inputDeviceName",
+        @"outputDeviceName",
+        @"inputChannelCount",
+        @"outputChannelCount",
+        @"sampleRate",
+        @"bufferSize",
+    ];
+    NSMutableArray<NSString *> *parts = [NSMutableArray arrayWithCapacity:keys.count];
+    for (NSString *key in keys) {
+        id value = diagnostics[key];
+        [parts addObject:[NSString stringWithFormat:@"%@=%@",
+                          key,
+                          value == nil || value == [NSNull null] ? @"<unavailable>" : value]];
+    }
+    return [parts componentsJoinedByString:@";"];
+}
+
 static NSArray<NSDictionary<NSString *, id> *> *MixroomExactDeviceMatches(
     NSArray<NSDictionary<NSString *, id> *> *inventory,
     NSString *name,
@@ -529,7 +558,7 @@ static NSString *MixroomNormalizedMacRouteKind(UInt32 transport,
         return @"bluetoothLe";
     }
     if (transport == kAudioDeviceTransportTypeBluetooth) {
-        return input || bluetoothInputActive ? @"bluetoothDuplex" : @"bluetoothMedia";
+        return input || bluetoothInputActive ? @"bluetoothDuplex" : @"bluetooth";
     }
     if (transport == kAudioDeviceTransportTypeBuiltIn) {
         return @"builtIn";
@@ -670,27 +699,40 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     const double startedAtMs = MixroomMonotonicMilliseconds();
     NSArray<NSDictionary<NSString *, id> *> *firstInventory =
         MixroomCoreAudioDeviceInventory();
-    NSDictionary<NSString *, id> *diagnostics =
-        [JuceBridge getEngineDiagnosticsObjC] ?: @{};
+    NSDictionary<NSString *, id> *firstDiagnostics =
+        [JuceBridge getEngineDiagnosticsObjC];
     NSArray<NSDictionary<NSString *, id> *> *secondInventory =
         MixroomCoreAudioDeviceInventory();
+    NSDictionary<NSString *, id> *secondDiagnostics =
+        [JuceBridge getEngineDiagnosticsObjC];
 
     NSMutableDictionary<NSString *, NSString *> *unavailable =
         [NSMutableDictionary dictionary];
     NSString *captureConsistency = @"unavailable";
     if (firstInventory == nil || secondInventory == nil) {
         unavailable[@"coreAudio.inventory"] = @"coreAudioReadFailed";
+    } else if (firstDiagnostics == nil || secondDiagnostics == nil) {
+        unavailable[@"juce.route"] = @"juceDiagnosticsReadFailed";
     } else {
         NSString *firstFingerprint =
             MixroomCoreAudioInventoryFingerprint(firstInventory);
         NSString *secondFingerprint =
             MixroomCoreAudioInventoryFingerprint(secondInventory);
-        captureConsistency = [firstFingerprint isEqualToString:secondFingerprint]
+        NSString *firstJuceFingerprint =
+            MixroomJuceRouteFingerprint(firstDiagnostics);
+        NSString *secondJuceFingerprint =
+            MixroomJuceRouteFingerprint(secondDiagnostics);
+        const BOOL coreAudioStable =
+            [firstFingerprint isEqualToString:secondFingerprint];
+        const BOOL juceStable =
+            [firstJuceFingerprint isEqualToString:secondJuceFingerprint];
+        captureConsistency = coreAudioStable && juceStable
             ? @"stable"
             : @"routeChangedDuringCapture";
     }
 
     NSArray<NSDictionary<NSString *, id> *> *inventory = secondInventory ?: @[];
+    NSDictionary<NSString *, id> *diagnostics = secondDiagnostics ?: @{};
     NSString *inputDeviceName = [diagnostics[@"inputDeviceName"] isKindOfClass:[NSString class]]
         ? diagnostics[@"inputDeviceName"]
         : @"";
@@ -726,6 +768,14 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     const BOOL bluetoothInputActive = selectedInputIsBluetooth &&
         activeInputChannels != nil &&
         activeInputChannels.integerValue > 0;
+    const BOOL selectedOutputIsUnspecifiedBluetooth = selectedOutput != nil &&
+        [selectedOutput[@"transport"] unsignedIntValue] ==
+            kAudioDeviceTransportTypeBluetooth &&
+        !bluetoothInputActive;
+    if (selectedOutputIsUnspecifiedBluetooth) {
+        unavailable[@"route.outputBluetoothProfile"] =
+            @"notObservableFromCoreAudioTransport";
+    }
 
     NSArray<NSDictionary<NSString *, id> *> *inputs = selectedInput == nil
         ? @[]

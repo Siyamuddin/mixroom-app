@@ -154,7 +154,7 @@ void main() {
           AudioRouteEndpointV2(
             direction: AudioRouteDirectionV2.output,
             nativePortType: 'BluetoothA2DPOutput',
-            normalizedKind: AudioRouteKindV2.bluetoothMedia,
+            normalizedKind: AudioRouteKindV2.bluetooth,
             uid: 'output-a',
             name: 'Headphones',
             channelCount: 2,

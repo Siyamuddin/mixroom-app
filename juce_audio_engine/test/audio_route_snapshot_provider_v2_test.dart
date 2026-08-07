@@ -158,4 +158,24 @@ void main() {
       'nativeMethodUnavailable',
     );
   });
+
+  test('malformed native response returns controlled unavailable', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (_) async => 'not-a-snapshot');
+    final provider = MethodChannelAudioRouteSnapshotProviderV2(
+      channel: channel,
+      platformOverride: TargetPlatform.macOS,
+    );
+
+    final snapshot = await provider.readSnapshot();
+
+    expect(
+      snapshot.captureConsistency,
+      AudioRouteCaptureConsistencyV2.unavailable,
+    );
+    expect(
+      snapshot.unavailableReasons['nativeSnapshot'],
+      'invalidNativeResponse',
+    );
+  });
 }

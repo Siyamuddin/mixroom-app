@@ -4,6 +4,7 @@ enum AudioRouteKindV2 {
   builtIn,
   wired,
   external,
+  bluetooth,
   bluetoothMedia,
   bluetoothDuplex,
   bluetoothLe,
@@ -254,6 +255,7 @@ class AudioRouteSnapshotV2 {
 
   bool get hasBluetoothOutput => outputs.any(
         (endpoint) => <AudioRouteKindV2>{
+          AudioRouteKindV2.bluetooth,
           AudioRouteKindV2.bluetoothMedia,
           AudioRouteKindV2.bluetoothDuplex,
           AudioRouteKindV2.bluetoothLe,

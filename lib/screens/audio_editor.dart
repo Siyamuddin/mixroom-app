@@ -5770,7 +5770,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   List<String> _macOutputDevices = const <String>[];
   String? _macOutputDeviceName;
   AudioRouteInfo _audioRouteInfo = AudioRouteInfo.unknown;
-  final BluetoothRouteReportSerializerV2 _bluetoothReportSerializerV2 =
+  static final BluetoothRouteReportSerializerV2 _bluetoothReportSerializerV2 =
       BluetoothRouteReportSerializerV2();
 
   List<String> _inputDevices = [];

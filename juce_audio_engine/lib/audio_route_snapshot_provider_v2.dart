@@ -39,6 +39,8 @@ class MethodChannelAudioRouteSnapshotProviderV2
         'nativeSnapshot',
         error.code.isEmpty ? 'platformError' : error.code,
       );
+    } on Object {
+      return _unavailable('nativeSnapshot', 'invalidNativeResponse');
     }
   }
 

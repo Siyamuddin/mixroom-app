@@ -268,6 +268,7 @@ Route kinds:
 - built-in;
 - wired;
 - USB/external;
+- Bluetooth with profile unavailable;
 - Bluetooth media;
 - Bluetooth headset/duplex;
 - Bluetooth LE; and
@@ -322,7 +323,7 @@ One native `apply` is atomic from Flutter's perspective:
 | Intent and route | Input | Hardware-rate policy | Buffer policy | Monitoring |
 | --- | --- | --- | --- | --- |
 | Playback, built-in/wired/USB | Closed | Use actual native-supported rate | Route-native/supported | Off |
-| Playback, Bluetooth media/LE | Closed | Prefer 48 kHz, accept/read actual | Conservative, bounded, route-supported | Off |
+| Playback, Bluetooth (profile known or unavailable)/LE | Closed | Prefer 48 kHz, accept/read actual | Conservative, bounded, route-supported | Off |
 | Preparing/recording with Bluetooth output | Mandatory safe non-Bluetooth input | Verify actual after reopen | Stability-oriented and bounded | Off |
 | Preparing/recording without Bluetooth | Selected safe input | Verify actual | Route-supported | Off unless explicitly supported |
 | Monitoring without Bluetooth | Selected safe input | Verify actual | Route-supported | Explicit intent only |
