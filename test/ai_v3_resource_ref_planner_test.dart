@@ -52,7 +52,19 @@ void main() {
         enabled['instructions'],
         contains('reuse that earlier reference for later edits'),
       );
+      expect(
+        enabled['instructions'],
+        contains('Use deterministic V3 commands for explicitly named effects'),
+      );
       expect(jsonEncode(enabled), contains('"row_ref"'));
+      expect(
+        jsonEncode(enabled),
+        contains('Use when the user explicitly names an effect'),
+      );
+      expect(
+        jsonEncode(enabled),
+        contains('warmer, wider, punchier, or polished'),
+      );
       expect(
         (enabled['metadata'] as Map)['surface_revision'],
         aiV3ResourceRefSurfaceRevision,
@@ -103,6 +115,10 @@ void main() {
         expect(
           request['instructions'],
           contains('reuse that earlier reference for later edits'),
+        );
+        expect(
+          request['instructions'],
+          contains('Use deterministic V3 commands for explicitly named effects'),
         );
         expect(jsonEncode(request), contains('"clip_ref"'));
         expect(jsonEncode(request), contains('"row_ref"'));

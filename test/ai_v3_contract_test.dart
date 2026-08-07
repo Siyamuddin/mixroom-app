@@ -412,6 +412,26 @@ void main() {
               : <String, dynamic>{'kind': 'audio'},
           'position': <String, dynamic>{'kind': 'end'},
     });
+    Map<String, dynamic> mixRow(
+      String id,
+      Map<String, dynamic> target,
+    ) =>
+        _command(id, 'mix.apply_goal', <String, dynamic>{
+          'target': target,
+          'intents': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'kind': 'eq',
+              'direction': null,
+              'descriptor': 'warmth_boost',
+            },
+          ],
+          'intensity': 0.5,
+          'execution_profile': 'producer_safe',
+          'audibility': 'noticeable',
+          'style_tags': <String>['warm'],
+          'reset_fx': false,
+          'reference': null,
+        });
 
     test('resource refs and producer ports are strict and typed', () {
       final value = AiV3ResourceRef.fromJson(ref('producer', 'row'));
@@ -604,6 +624,229 @@ void main() {
         (prepared.actions.last.data['target'] as Map)['resource_ref'],
         ref('glue', 'glued_clip'),
     );
+    });
+
+    test('generated rows support deferred mix goals and later row actions', () {
+      final plan = parse(<Map<String, dynamic>>[
+        row('created', 'audio'),
+        mixRow('mix', <String, dynamic>{
+          'scope': 'row',
+          'row_ref': ref('created', 'row'),
+        }),
+        _command('pan', 'row.set_pan', <String, dynamic>{
+          'row_ref': ref('created', 'row'),
+          'pan_signed': 0.25,
+        }),
+      ]);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+      expect(
+        prepared.actions.map((action) => action.type),
+        <String>['row_create', 'v3_deferred_mix_goal', 'row_mix'],
+      );
+      final deferred = prepared.actions[1].data;
+      expect(deferred['resource_consumer_type'], 'mix.apply_goal');
+      expect(deferred['operation'], 'apply_goal');
+      expect(
+        ((deferred['target'] as Map)['resource_ref'] as Map)['command_id'],
+        'created',
+      );
+    });
+
+    test('generated groups support deferred mix goals and later group actions',
+        () {
+      final plan = parse(<Map<String, dynamic>>[
+        row('drums', 'audio'),
+        row('bass', 'audio'),
+        _command('group', 'group.create', <String, dynamic>{
+          'members': <Map<String, dynamic>>[
+            <String, dynamic>{'row_ref': ref('drums', 'row')},
+            <String, dynamic>{'row_ref': ref('bass', 'row')},
+          ],
+          'name': 'Rhythm',
+        }),
+        mixRow('mix', <String, dynamic>{
+          'scope': 'group',
+          'group_ref': ref('group', 'group'),
+        }),
+        _command('collapse', 'group.set_collapsed', <String, dynamic>{
+          'group_ref': ref('group', 'group'),
+          'collapsed': true,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+      expect(
+        prepared.actions.map((action) => action.type),
+        <String>[
+          'row_create',
+          'row_create',
+          'v3_group_edit',
+          'v3_deferred_mix_goal',
+          'v3_group_edit',
+        ],
+      );
+      expect(
+        (prepared.actions[3].data['target'] as Map)['group_resource_ref'],
+        ref('group', 'group'),
+      );
+    });
+
+    test('generated rows defer all-rows mixing after topology changes', () {
+      final plan = parse(<Map<String, dynamic>>[
+        row('audio', 'audio'),
+        row('second-audio', 'audio'),
+        mixRow('mix', const <String, dynamic>{'scope': 'all_rows'}),
+      ]);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+      expect(
+        prepared.actions.map((action) => action.type),
+        <String>['row_create', 'row_create', 'v3_deferred_mix_goal'],
+      );
+      expect(
+        prepared.actions.last.data['target'],
+        const <String, dynamic>{'scope': 'all_rows'},
+      );
+    });
+
+    test('master mixing defers after prior changes and remains chainable', () {
+      final plan = parse(<Map<String, dynamic>>[
+        row('audio', 'audio'),
+        mixRow('master', const <String, dynamic>{'scope': 'master'}),
+        _command('mute', 'row.set_muted', <String, dynamic>{
+          'row_ref': ref('audio', 'row'),
+          'muted': true,
+        }),
+      ]);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+      expect(
+        prepared.actions.map((action) => action.type),
+        <String>['row_create', 'v3_deferred_mix_goal', 'row_mute'],
+      );
+      expect(
+        prepared.actions[1].data['target'],
+        const <String, dynamic>{'scope': 'master'},
+      );
+    });
+
+    test('stem row mixing can continue through master mixing and row edits', () {
+      final plan = parse(<Map<String, dynamic>>[
+        _command('stems', 'clip.separate_stems', <String, dynamic>{
+          'clip_id': 'audio-clip',
+        }),
+        mixRow('widen', <String, dynamic>{
+          'scope': 'row',
+          'row_ref': ref('stems', 'instrumental_row'),
+        }),
+        mixRow('master', const <String, dynamic>{'scope': 'master'}),
+        _command('mute', 'row.set_muted', <String, dynamic>{
+          'row_ref': ref('stems', 'vocals_row'),
+          'muted': true,
+        }),
+      ], consumers: aiV3RuntimeResourceRefConsumerTypes);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _contextForStemSeparation(),
+      );
+      expect(
+        prepared.actions.map((action) => action.type),
+        <String>[
+          'v3_clip_separate_stems',
+          'v3_deferred_mix_goal',
+          'v3_deferred_mix_goal',
+          'row_mute',
+        ],
+      );
+    });
+
+    test('only later sequential master goals are deferred', () {
+      final plan = parse(<Map<String, dynamic>>[
+        mixRow('first', const <String, dynamic>{'scope': 'master'}),
+        mixRow('second', const <String, dynamic>{'scope': 'master'}),
+      ]);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+      expect(
+        prepared.actions.map((action) => action.type),
+        <String>['v3_mix_goal', 'v3_deferred_mix_goal'],
+      );
+    });
+
+    test('any earlier executable mutation defers later mix goals', () {
+      final plan = parse(<Map<String, dynamic>>[
+        _command('gain', 'row.adjust_gain_db', <String, dynamic>{
+          'row_id': 100,
+          'delta_db': -2,
+        }),
+        mixRow('row-mix', const <String, dynamic>{
+          'scope': 'row',
+          'row_id': 100,
+        }),
+        mixRow('all-mix', const <String, dynamic>{'scope': 'all_rows'}),
+      ]);
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: _context(),
+      );
+      expect(
+        prepared.actions.map((action) => action.type),
+        <String>[
+          'row_mix',
+          'v3_deferred_mix_goal',
+          'v3_deferred_mix_goal',
+        ],
+      );
+    });
+
+    test('deferred mix goals reject wrong-kind and flag-off references', () {
+      final commands = <Map<String, dynamic>>[
+        row('first', 'audio'),
+        row('second', 'audio'),
+        _command('group', 'group.create', <String, dynamic>{
+          'name': 'Pair',
+          'members': <Map<String, dynamic>>[
+            <String, dynamic>{'row_ref': ref('first', 'row')},
+            <String, dynamic>{'row_ref': ref('second', 'row')},
+          ],
+        }),
+        mixRow('mix', <String, dynamic>{
+          'scope': 'row',
+          'row_ref': ref('group', 'group'),
+        }),
+      ];
+      expect(
+        () => parse(commands),
+        throwsA(isA<AiV3ContractException>()),
+      );
+      expect(
+        () => AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
+          row('created', 'audio'),
+          mixRow('mix', <String, dynamic>{
+            'scope': 'row',
+            'row_ref': ref('created', 'row'),
+          }),
+        ])),
+        throwsA(isA<AiV3ContractException>()),
+      );
     });
 
     test('typed glue canonicalizes aliases and retires every input', () {
@@ -3396,6 +3639,34 @@ void main() {
     expect(jsonEncode(collapse), contains('group.create -> group'));
   });
 
+  test('flagged mix schema exposes typed group targets only when enabled', () {
+    Map mixArguments(Map<String, dynamic> tool) {
+      final variants =
+          (((((tool['parameters'] as Map)['properties'] as Map)['commands']
+                          as Map)['items']
+                      as Map)['anyOf']
+                  as List)
+              .cast<Map>();
+      final variant = variants.singleWhere(
+        (candidate) =>
+            ((((candidate['properties'] as Map)['type'] as Map)['enum'] as List)
+                .contains('mix.apply_goal')),
+      );
+      return (variant['properties'] as Map)['arguments'] as Map;
+    }
+
+    final flagged = mixArguments(aiV3SubmitPlanTool(
+      includeCommandSemantics: true,
+      includeResourceRefs: true,
+      resourceRefCommandTypes: aiV3RuntimeResourceRefConsumerTypes,
+    ));
+    final ordinary = mixArguments(aiV3SubmitPlanTool(
+      includeCommandSemantics: true,
+    ));
+    expect(jsonEncode(flagged), contains('group_ref'));
+    expect(jsonEncode(ordinary), isNot(contains('group_ref')));
+  });
+
   test(
     'grouping contract rejects duplicate, fuzzy, and toggle-shaped input',
       () {
@@ -5780,7 +6051,8 @@ void main() {
       );
     });
 
-    test('topology changes block later index-dependent operations', () {
+    test('topology changes defer mixing but block stale topology operations',
+        () {
       Map<String, dynamic> createRow() =>
           _command('create', 'row.create', <String, dynamic>{
             'name': 'Extra',
@@ -5807,18 +6079,17 @@ void main() {
           'reference': null,
         }),
       ]));
+      final preparedMix = const AiV3CommandPreparer().prepare(
+        plan: laterMix,
+        context: _context(),
+      );
       expect(
-        () => const AiV3CommandPreparer().prepare(
-          plan: laterMix,
-          context: _context(),
-        ),
-        throwsA(
-          isA<AiV3PreparationException>().having(
-            (error) => error.code,
-            'code',
-            'v3_mix_action_target_invalid',
-          ),
-        ),
+        preparedMix.actions.map((action) => action.type),
+        <String>['row_create', 'v3_deferred_mix_goal'],
+      );
+      expect(
+        preparedMix.actions.last.data['target'],
+        <String, dynamic>{'scope': 'row', 'row_id': 100},
       );
 
       final laterDuplicate = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
@@ -5875,7 +6146,7 @@ void main() {
 
       expect(
         prepared.actions.map((action) => action.type),
-        <String>['clip_edit', 'v3_mix_goal', 'row_delete'],
+        <String>['clip_edit', 'v3_deferred_mix_goal', 'row_delete'],
       );
     });
 
@@ -5949,7 +6220,7 @@ void main() {
           isA<AiV3PreparationException>().having(
             (error) => error.code,
             'code',
-            'v3_mix_action_target_invalid',
+            'v3_group_id_unknown',
           ),
         ),
       );

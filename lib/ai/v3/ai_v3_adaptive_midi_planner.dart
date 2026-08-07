@@ -28,6 +28,7 @@ capability directory to identify which domain owns missing functionality. Do not
 request context for an ordinary common edit.
 $aiV3RequestedResourceLifecycleInstructions
 $aiV3VisibleLanguageInstructions
+$aiV3MixRoutingInstructions
 $aiV3MidiTimingInstructions
 Clarify only ambiguity that materially changes the result; never choose an
 ambiguous target arbitrarily. The application owns factual preparation and
@@ -46,6 +47,7 @@ target and constraint. Use general musical knowledge for interpretation, but
 never invent project resources or state.
 $aiV3RequestedResourceLifecycleInstructions
 $aiV3VisibleLanguageInstructions
+$aiV3MixRoutingInstructions
 $aiV3MidiTimingInstructions
 Clarify only ambiguity that materially changes the result; never choose an
 ambiguous target arbitrarily. Never claim unexecuted work was applied. Match the

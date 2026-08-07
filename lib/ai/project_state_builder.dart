@@ -232,20 +232,32 @@ class ProjectStateBuilder {
     for (var row = 0; row < effectiveMaxRows; row++) {
       final effects = <EffectState>[];
 
-      final names = await JuceAudioEngine.getTrackEffectsForRow(row);
-      var instanceIds =
-          await JuceAudioEngine.getTrackEffectInstanceIdsForRow(row);
+      final names = await JuceAudioEngine.getTrackEffectsForRow(
+        row,
+        forceIndividualRow: true,
+      );
+      var instanceIds = await JuceAudioEngine.getTrackEffectInstanceIdsForRow(
+        row,
+        forceIndividualRow: true,
+      );
       if (instanceIds.length != names.length) {
         instanceIds = List<String>.filled(names.length, '');
       }
-      var effectIds = await JuceAudioEngine.getTrackEffectIdsForRow(row);
+      var effectIds = await JuceAudioEngine.getTrackEffectIdsForRow(
+        row,
+        forceIndividualRow: true,
+      );
       if (effectIds.length != names.length) {
         effectIds = List<String>.from(names);
       }
       for (int i = 0; i < names.length; i++) {
         final params = exposedEffectParameters(
           names[i],
-          await JuceAudioEngine.getTrackPluginParameters(row, i),
+          await JuceAudioEngine.getTrackPluginParameters(
+            row,
+            i,
+            forceIndividualRow: true,
+          ),
         );
 
         effects.add(
@@ -254,7 +266,11 @@ class ProjectStateBuilder {
             instanceId: instanceIds[i],
             effectId: effectIds[i],
             name: names[i],
-            isBypassed: await JuceAudioEngine.getRowEffectBypassState(row, i),
+            isBypassed: await JuceAudioEngine.getRowEffectBypassState(
+              row,
+              i,
+              forceIndividualRow: true,
+            ),
             parameters: params
                 .map((p) =>
                     EffectParameterState.fromMap(Map<String, dynamic>.from(p)))

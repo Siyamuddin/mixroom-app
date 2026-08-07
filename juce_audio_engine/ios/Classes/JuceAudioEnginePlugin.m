@@ -1195,10 +1195,22 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSInteger row = [args[@"row"] integerValue];
         NSInteger effect = [args[@"effect"] integerValue];
         BOOL forceIndividualRow = [args[@"forceIndividualRow"] boolValue];
+#if TARGET_OS_OSX
+        FlutterResult removeResult = [result copy];
+        dispatch_async(MixroomMidiClipLoadQueue(), ^{
+            [JuceBridge removeTrackEffectObjC:row
+                                  effectIndex:effect
+                           forceIndividualRow:forceIndividualRow];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                removeResult(nil);
+            });
+        });
+#else
         [JuceBridge removeTrackEffectObjC:row
                               effectIndex:effect
                        forceIndividualRow:forceIndividualRow];
         result(nil);
+#endif
     } else if ([call.method isEqualToString:@"reorderTrackEffects"]) {
         NSInteger row  = [args[@"row"] integerValue];
         NSInteger from = [args[@"from"] integerValue];

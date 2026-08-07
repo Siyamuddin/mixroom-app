@@ -956,6 +956,45 @@ void main() {
       );
     });
 
+    test('runtime no-op receipts are updated without mutating preparation', () {
+      final bundle = <String, dynamic>{
+        'receipts': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'command_id': 'mix-row',
+            'status': 'prepared',
+            'expanded_action_count': 2,
+            'preview_label': 'Mix Drums',
+          },
+          <String, dynamic>{
+            'command_id': 'mute-row',
+            'status': 'prepared',
+            'expanded_action_count': 1,
+            'preview_label': 'Mute Synth',
+          },
+        ],
+      };
+
+      final verified = aiV3BundleWithRuntimeAlreadySatisfiedReceipts(
+        bundle,
+        const <String>{'mix-row'},
+      );
+      final verifiedReceipts =
+          (verified['receipts'] as List).cast<Map<String, dynamic>>();
+      final originalReceipts =
+          (bundle['receipts'] as List).cast<Map<String, dynamic>>();
+
+      expect(verifiedReceipts.first['status'], 'already_satisfied');
+      expect(verifiedReceipts.first['expanded_action_count'], 0);
+      expect(verifiedReceipts.last['status'], 'prepared');
+      expect(verifiedReceipts.last['expanded_action_count'], 1);
+      expect(originalReceipts.first['status'], 'prepared');
+      expect(originalReceipts.first['expanded_action_count'], 2);
+      expect(
+        aiV3VerifiedExecutionDetails(verified),
+        <String>['Mix Drums (already set)', 'Mute Synth'],
+      );
+    });
+
     test('verified execution details allow receipt localization', () {
       expect(
         aiV3VerifiedExecutionDetails(

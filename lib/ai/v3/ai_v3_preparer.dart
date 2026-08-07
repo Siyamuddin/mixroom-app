@@ -611,7 +611,10 @@ class AiV3CommandPreparer {
                 (member) => member is Map && member['row_ref'] is Map,
               )) ||
           (command.type == 'group.remove_row' &&
-              (args['group_ref'] is Map || args['row_ref'] is Map));
+              (args['group_ref'] is Map || args['row_ref'] is Map)) ||
+          (command.type == 'mix.apply_goal' &&
+              args['target'] is Map &&
+              (args['target'] as Map)['group_ref'] is Map);
       if ((hasPreparedStemSeparation || hasPreparedAudioToMidi) &&
           !hasTypedTopologyTarget &&
           const <String>{
@@ -622,7 +625,6 @@ class AiV3CommandPreparer {
             'clip.glue',
             'clip.separate_stems',
             'clip.convert_to_midi',
-            'mix.apply_goal',
           }.contains(command.type)) {
         throw const AiV3PreparationException('v3_row_id_unknown');
       }
@@ -3841,47 +3843,92 @@ class AiV3CommandPreparer {
               'Replaced ${clipRef == null ? _clipLabel(clipById, clipId!) : '${clipRef.commandId}.${clipRef.output}'} with ${assetName == null || assetName.isEmpty ? assetId : assetName}';
           break;
         case 'mix.apply_goal':
-          if (hasPriorTopologyMutation) {
-            throw const AiV3PreparationException(
-              'v3_mix_action_target_invalid',
-            );
-          }
           final rawTarget = Map<String, dynamic>.from(args['target'] as Map);
           final scope = rawTarget['scope'] as String;
+          final rawRowRef = rawTarget['row_ref'];
+          final rawGroupRef = rawTarget['group_ref'];
           final preparedTarget = <String, dynamic>{'scope': scope};
+          String targetLabel;
           switch (scope) {
             case 'row':
-              final rowId = rawTarget['row_id'] as int;
-              rowTarget(rowId);
-              final row = rowById[rowId];
-              if (row == null) {
-                throw const AiV3PreparationException('v3_row_id_unknown');
+              if (rawRowRef is Map) {
+                final resolved = symbolicRowTarget(
+                  rawRowRef,
+                  acceptedKinds: const <AiV3ResourceKind>{
+                    AiV3ResourceKind.audioRow,
+                    AiV3ResourceKind.midiRow,
+                  },
+                );
+                preparedTarget.addAll(
+                  generatedRowActionTarget(resolved.ref, resolved.resource),
+                );
+                targetLabel =
+                    '${resolved.ref.commandId}.${resolved.ref.output}';
+              } else {
+                final rowId = rawTarget['row_id'] as int;
+                final target = rowTarget(rowId);
+                preparedTarget.addAll(target);
+                targetLabel = _rowLabel(rowById, rowId);
               }
-              preparedTarget.addAll(<String, dynamic>{
-                'row_id': rowId,
-                'row_index': row['display_index'],
-              });
               break;
             case 'group':
-              final groupId = rawTarget['group_id'] as String;
+              AiV3ResourceRef? groupRef;
+              _AiV3SymbolicResource? groupSymbolic;
+              if (rawGroupRef is Map) {
+                groupRef = AiV3ResourceRef.fromJson(rawGroupRef);
+                groupSymbolic =
+                    symbolicResources['${groupRef.commandId}.${groupRef.output}'];
+                if (groupSymbolic == null ||
+                    !groupSymbolic.available ||
+                    groupSymbolic.kind != AiV3ResourceKind.group) {
+                  throw const AiV3PreparationException(
+                    'v3_resource_ref_unavailable',
+                  );
+                }
+              }
+              final groupId = groupRef == null
+                  ? rawTarget['group_id'] as String
+                  : groupSymbolic!.groupId ?? '';
               final group = simulatedGroupsById[groupId];
               if (group == null ||
                   (group['member_row_ids'] as List? ?? const <Object>[])
-                      .isEmpty) {
+                          .length <
+                      2) {
                 throw const AiV3PreparationException('v3_group_id_unknown');
               }
-              preparedTarget['group_id'] = groupId;
+              if (groupRef == null) {
+                preparedTarget['group_id'] = groupId;
+              } else {
+                preparedTarget['group_resource_ref'] = groupRef.toJson();
+              }
+              final groupName = group['name']?.toString().trim() ?? '';
+              targetLabel = groupName.isEmpty ? 'group $groupId' : groupName;
               break;
             case 'all_rows':
-              if (!rows.any((row) =>
-                  row['row_id'] is int &&
-                  !deletedRowIds.contains(row['row_id']) &&
-                  row['mix_processing_supported'] == true)) {
+              final hasStableMixableRow = rows.any(
+                (row) =>
+                    row['row_id'] is int &&
+                    !deletedRowIds.contains(row['row_id']) &&
+                    row['mix_processing_supported'] == true,
+              );
+              final hasGeneratedMixableRow = symbolicResources.values.any(
+                (resource) =>
+                    resource.available &&
+                    (resource.kind == AiV3ResourceKind.audioRow ||
+                        resource.kind == AiV3ResourceKind.midiRow),
+              );
+              if (!hasStableMixableRow && !hasGeneratedMixableRow) {
                 throw const AiV3PreparationException('v3_mix_audio_missing');
               }
+              targetLabel = 'all project rows';
               break;
             case 'master':
+              targetLabel = 'Master Bus';
               break;
+            default:
+              throw const AiV3PreparationException(
+                'v3_mix_action_target_invalid',
+              );
           }
           Map<String, dynamic>? preparedReference;
           final rawReference = args['reference'];
@@ -3910,40 +3957,41 @@ class AiV3CommandPreparer {
                 'v3_mix_reference_equals_target',
               );
             }
-            preparedReference = <String, dynamic>{
-              ...reference,
-              'row_index': referenceRow['display_index'],
-            };
+            preparedReference = Map<String, dynamic>.from(reference);
           }
-          commandActions.add(AssistantAction(
-            type: 'v3_mix_goal',
-            data: <String, dynamic>{
-              'command_id': command.commandId,
-              'target': preparedTarget,
-              'intents': args['intents'],
-              'intensity': args['intensity'],
-              'execution_profile': args['execution_profile'],
-              'audibility': args['audibility'],
-              'style_tags': args['style_tags'],
-              'reset_fx': args['reset_fx'],
-              'reference': preparedReference,
-            },
-          ));
-          final targetLabel = switch (scope) {
-            'row' => _rowLabel(rowById, rawTarget['row_id'] as int),
-            'group' =>
-              simulatedGroupsById[rawTarget['group_id']]?['name']
-                          ?.toString()
-                          .trim()
-                          .isNotEmpty ==
-                      true
-                  ? simulatedGroupsById[rawTarget['group_id']]!['name']
-                        .toString()
-                        .trim()
-                  : 'group ${rawTarget['group_id']}',
-            'master' => 'Master Bus',
-            _ => 'all project rows',
-          };
+          final shouldDefer =
+              actions.isNotEmpty || rawRowRef is Map || rawGroupRef is Map;
+          if (shouldDefer &&
+              scope == 'row' &&
+              preparedTarget['row_id'] is int) {
+            preparedTarget.remove('row_index');
+          }
+          if (!shouldDefer &&
+              preparedReference != null &&
+              preparedReference['row_id'] is int) {
+            final referenceRowId = preparedReference['row_id'] as int;
+            preparedReference['row_index'] =
+                rowById[referenceRowId]!['display_index'];
+          }
+          commandActions.add(
+            AssistantAction(
+              type: shouldDefer ? 'v3_deferred_mix_goal' : 'v3_mix_goal',
+              data: <String, dynamic>{
+                'command_id': command.commandId,
+                if (shouldDefer) 'operation': 'apply_goal',
+                if (shouldDefer && rawRowRef is Map)
+                  'resource_consumer_type': 'mix.apply_goal',
+                'target': preparedTarget,
+                'intents': args['intents'],
+                'intensity': args['intensity'],
+                'execution_profile': args['execution_profile'],
+                'audibility': args['audibility'],
+                'style_tags': args['style_tags'],
+                'reset_fx': args['reset_fx'],
+                'reference': preparedReference,
+              },
+            ),
+          );
           final referenceLabel = preparedReference == null
               ? ''
               : ' using ${_rowLabel(rowById, preparedReference['row_id'] as int)} as reference';
