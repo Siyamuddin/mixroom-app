@@ -127,6 +127,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:juce_audio_engine/audio_route_v2.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
 import 'package:mixroom/helpers/bluetooth_route_report_v2.dart';
+import 'package:mixroom/helpers/bluetooth_implementation_session_v2.dart';
 import 'package:mixroom/models/entitlement_models.dart';
 import 'package:mixroom/models/feedback_models.dart';
 import 'package:mixroom/widgets/effects_panel.dart';
@@ -5772,6 +5773,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   AudioRouteInfo _audioRouteInfo = AudioRouteInfo.unknown;
   static final BluetoothRouteReportSerializerV2 _bluetoothReportSerializerV2 =
       BluetoothRouteReportSerializerV2();
+  static const BluetoothImplementationPreferencesV2
+      _bluetoothImplementationPreferencesV2 =
+      BluetoothImplementationPreferencesV2();
+  BluetoothImplementationSessionV2? _bluetoothImplementationSessionV2;
+
+  bool get _isBluetoothV2Session =>
+      _bluetoothImplementationSessionV2?.active ==
+      BluetoothImplementationV2.v2;
 
   List<String> _inputDevices = [];
   List<AudioInputDeviceInfo> _inputDeviceInfos = const <AudioInputDeviceInfo>[];
@@ -9198,16 +9207,32 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // _startMeterPolling();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await JuceAudioEngine.initialise();
+      final bluetoothSession =
+          await _bluetoothImplementationPreferencesV2.loadSession();
+      if (!mounted) return;
+      setState(() {
+        _bluetoothImplementationSessionV2 = bluetoothSession;
+      });
+      final engineInitialised = await JuceAudioEngine.initialiseForImplementation(
+        bluetoothSession.active,
+      );
+      if (!mounted) return;
+      if (!engineInitialised) {
+        _showSmallNotice('Bluetooth 2.0 playback is not available yet.');
+        setState(() => _isLoadingNextScreen = false);
+        return;
+      }
       JuceAudioEngine.initialiseEventListeners();
       _juceEngineEventSubscription ??= JuceAudioEngine.eventsStream.listen(
         _handleJuceEngineEvent,
       );
       await _refreshPlatformCapabilities();
-      await _refreshMicrophonePermissionState();
-      await _maybePromptMicrophonePermissionOnDawEntry();
-      await _loadInputDevicesFromJuce(scheduleRecordingPrewarm: true);
-      await _refreshAudioRouteInfo();
+      if (!_isBluetoothV2Session) {
+        await _refreshMicrophonePermissionState();
+        await _maybePromptMicrophonePermissionOnDawEntry();
+        await _loadInputDevicesFromJuce(scheduleRecordingPrewarm: true);
+        await _refreshAudioRouteInfo();
+      }
       await _loadBundledInstrumentCatalog();
       final engineSupportsLiveMidi =
           await JuceAudioEngine.supportsLiveMidiClipPlayback();
@@ -9225,7 +9250,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _refreshProducerCaptureUiAllowlistAccess();
       await _sampleBrowserPreferencesFuture;
       await _loadProjectIfAny();
-      _scheduleRecordingInputPrewarm(reason: 'projectLoaded');
+      if (!_isBluetoothV2Session) {
+        _scheduleRecordingInputPrewarm(reason: 'projectLoaded');
+      }
       await _flushPendingDesktopFinderDrops();
       setState(() => _isLoadingNextScreen = false);
       unawaited(_flushDeferredAndroidRouteRefreshIfNeeded());
@@ -12482,6 +12509,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<bool> _ensurePlaybackRouteReady({required String reason}) async {
+    if (_isBluetoothV2Session) return false;
     var ok = false;
     try {
       ok = await JuceAudioEngine.preparePlaybackRoute(
@@ -40207,6 +40235,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  String _bluetoothImplementationLabel(BluetoothImplementationV2 value) {
+    return value == BluetoothImplementationV2.v2
+        ? 'Bluetooth 2.0'
+        : 'Legacy';
+  }
+
+  Future<bool> _setBluetoothImplementationForNextSession(
+    BluetoothImplementationV2 implementation,
+  ) async {
+    final session = _bluetoothImplementationSessionV2;
+    if (session == null || !session.selectionEnabled) return false;
+    final saved = await _bluetoothImplementationPreferencesV2.saveNextSession(
+      implementation,
+    );
+    if (!mounted || !saved) return false;
+    setState(() {
+      _bluetoothImplementationSessionV2 =
+          session.withNextSession(implementation);
+    });
+    _showSmallNotice('Reopen the audio editor to apply.');
+    return true;
+  }
+
   Future<void> _showDesktopDiagnosticsDialog() async {
     if (!mounted || !PlatformCapabilities.current.isDesktop) return;
     JuceEngineDiagnostics diagnostics =
@@ -40227,6 +40278,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             Future<void> resetRealtimeStats() async {
               await JuceAudioEngine.resetRealtimePerformanceStats();
               await refreshDiagnostics();
+            }
+
+            Future<void> selectBluetoothImplementation(
+              BluetoothImplementationV2 implementation,
+            ) async {
+              final saved = await _setBluetoothImplementationForNextSession(
+                implementation,
+              );
+              if (saved && context.mounted) setModalState(() {});
             }
 
             final overBudget = diagnostics.realtimeCallbackOverBudgetCount;
@@ -40290,6 +40350,54 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     ],
                   ),
                   const SizedBox(height: 10),
+                  if (kDebugMode &&
+                      Platform.isMacOS &&
+                      _bluetoothImplementationSessionV2 != null) ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Active: ${_bluetoothImplementationLabel(_bluetoothImplementationSessionV2!.active)}',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.78),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        const Text(
+                          'Next session',
+                          style: TextStyle(
+                            color: Color(0xFFBDBDBD),
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        DropdownButton<BluetoothImplementationV2>(
+                          value: _bluetoothImplementationSessionV2!.nextSession,
+                          dropdownColor: const Color(0xFF242424),
+                          style: const TextStyle(color: Colors.white),
+                          underline: const SizedBox.shrink(),
+                          items: BluetoothImplementationV2.values
+                              .map(
+                                (value) => DropdownMenuItem(
+                                  value: value,
+                                  child: Text(
+                                    _bluetoothImplementationLabel(value),
+                                  ),
+                                ),
+                              )
+                              .toList(growable: false),
+                          onChanged: (value) {
+                            if (value != null) {
+                              unawaited(selectBluetoothImplementation(value));
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                  ],
                   Wrap(
                     spacing: 10,
                     runSpacing: 10,
@@ -40849,6 +40957,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _selectMacOutputDevice(String name) async {
+    if (_isBluetoothV2Session) {
+      _showSmallNotice(
+        'Output changes are not available in this Bluetooth 2.0 checkpoint.',
+      );
+      return;
+    }
     final trimmed = name.trim();
     if (trimmed.isEmpty) return;
 
@@ -41178,6 +41292,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     AudioRouteInfo? info,
     bool force = false,
   }) async {
+    if (_isBluetoothV2Session) return;
     if (!_supportsNativeBluetoothMonitorPolicy()) return;
     final routeInfo = info ?? _audioRouteInfo;
     final shouldEnable = _shouldEnableLiveInputMonitoring(routeInfo);
@@ -41188,7 +41303,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await JuceAudioEngine.setLiveInputMonitoringEnabled(shouldEnable);
   }
 
-  Future<void> _refreshAudioRouteInfo({bool refreshNativeRoute = false}) async {
+  Future<void> _refreshAudioRouteInfo({
+    bool refreshNativeRoute = false,
+  }) async {
+    if (_isBluetoothV2Session) return;
     if (!_supportsNativeBluetoothMonitorPolicy()) return;
     if (refreshNativeRoute) {
       await _requestAndroidRouteRefresh(reason: 'editorRouteInfo');
@@ -41403,12 +41521,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   bool get _supportsDawAudioEngineDeviceSettings =>
-      Platform.isMacOS || Platform.isIOS;
+      !_isBluetoothV2Session && (Platform.isMacOS || Platform.isIOS);
 
   Future<bool> _applyAudioEngineSettingsToNative({
     required String reason,
     bool notifyOnFailure = true,
   }) async {
+    if (_isBluetoothV2Session) {
+      if (notifyOnFailure && mounted) {
+        _showSmallNotice(
+          'Hardware settings are managed by Bluetooth 2.0 in this checkpoint.',
+        );
+      }
+      return false;
+    }
     if (_audioEngineSettingsApplying) return false;
 
     _setStateAndRefreshProjectSettings(() {
@@ -41484,6 +41610,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required String reason,
     bool rescheduleOnConfigChange = false,
   }) {
+    if (_isBluetoothV2Session) return Future<bool>.value(false);
     _recordingInputPrewarmInFlight = true;
 
     late final Future<bool> future;
@@ -41537,6 +41664,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _scheduleRecordingInputPrewarm({required String reason}) {
+    if (_isBluetoothV2Session) return;
     if (!mounted || _isRecording) return;
     final desiredInputChannels = _desiredRecordingInputOpenChannels();
     final selectedDevice = (_selectedDevice ?? '').trim();
@@ -41605,6 +41733,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _loadInputDevicesFromJuce({
     bool scheduleRecordingPrewarm = false,
   }) async {
+    if (_isBluetoothV2Session) return;
     if (_loadingDevices) return;
     _setStateAndRefreshProjectSettings(() => _loadingDevices = true);
 
@@ -43621,6 +43750,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _handleRecordPressed({required bool keepPlayingOnStop}) async {
+    if (_isBluetoothV2Session) {
+      _showSmallNotice(
+        'Recording is not available in this Bluetooth 2.0 checkpoint.',
+      );
+      return;
+    }
     if (_recordStartVisualPending && !_isRecording) {
       _recordStartCancelRequested = true;
       if (mounted) {

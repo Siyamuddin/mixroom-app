@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:juce_audio_engine/audio_route_v2.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
 
 void main() {
@@ -77,6 +78,22 @@ void main() {
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
+  });
+
+  test('implementation-aware initialization keeps V2 off Legacy channel',
+      () async {
+    final v2 = await JuceAudioEngine.initialiseForImplementation(
+      BluetoothImplementationV2.v2,
+    );
+    expect(v2, isFalse);
+    expect(calls, isEmpty);
+
+    final legacy = await JuceAudioEngine.initialiseForImplementation(
+      BluetoothImplementationV2.legacy,
+    );
+    expect(legacy, isTrue);
+    expect(calls, hasLength(1));
+    expect(calls.single.method, 'initialise');
   });
 
   test('loadClip sends rowId + timeline payload', () async {

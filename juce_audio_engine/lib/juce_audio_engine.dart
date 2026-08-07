@@ -311,6 +311,16 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<bool> initialiseForImplementation(
+    BluetoothImplementationV2 implementation,
+  ) async {
+    if (implementation != BluetoothImplementationV2.legacy) {
+      return false;
+    }
+    await initialise();
+    return true;
+  }
+
   static Future<void> shutdown() async {
     try {
       await _ch.invokeMethod('shutdown');
