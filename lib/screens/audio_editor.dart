@@ -124,7 +124,9 @@ import 'package:fftea/fftea.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:juce_audio_engine/audio_route_v2.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
+import 'package:mixroom/helpers/bluetooth_route_report_v2.dart';
 import 'package:mixroom/models/entitlement_models.dart';
 import 'package:mixroom/models/feedback_models.dart';
 import 'package:mixroom/widgets/effects_panel.dart';
@@ -5768,6 +5770,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   List<String> _macOutputDevices = const <String>[];
   String? _macOutputDeviceName;
   AudioRouteInfo _audioRouteInfo = AudioRouteInfo.unknown;
+  final BluetoothRouteReportSerializerV2 _bluetoothReportSerializerV2 =
+      BluetoothRouteReportSerializerV2();
 
   List<String> _inputDevices = [];
   List<AudioInputDeviceInfo> _inputDeviceInfos = const <AudioInputDeviceInfo>[];
@@ -40175,6 +40179,34 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  Future<void> _copyBluetoothReportV2() async {
+    if (!kDebugMode || !Platform.isMacOS) return;
+
+    final snapshot = await JuceAudioEngine.getAudioRouteSnapshotV2();
+    if (!mounted) return;
+    if (snapshot.captureConsistency ==
+        AudioRouteCaptureConsistencyV2.unavailable) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Bluetooth report unavailable')),
+      );
+      return;
+    }
+
+    try {
+      final report = _bluetoothReportSerializerV2.encode(snapshot);
+      await Clipboard.setData(ClipboardData(text: report));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Bluetooth report copied')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Bluetooth report unavailable')),
+      );
+    }
+  }
+
   Future<void> _showDesktopDiagnosticsDialog() async {
     if (!mounted || !PlatformCapabilities.current.isDesktop) return;
     JuceEngineDiagnostics diagnostics =
@@ -40240,6 +40272,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         onPressed: resetRealtimeStats,
                         child: const Text('Reset RT'),
                       ),
+                      if (kDebugMode && Platform.isMacOS) ...[
+                        const SizedBox(width: 6),
+                        TextButton(
+                          onPressed: () => unawaited(_copyBluetoothReportV2()),
+                          child: const Text('Copy Bluetooth Report'),
+                        ),
+                      ],
                       const SizedBox(width: 2),
                       IconButton(
                         onPressed: () => Navigator.of(dialogContext).pop(),

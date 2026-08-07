@@ -2,8 +2,9 @@
 
 ## Document status
 
-- Status: evidence-first foundation approved; later behavioral phases remain
-  unapproved.
+- Status: dormant shared contracts completed in `c780dfe7`; the macOS
+  read-only evidence adapter is implemented in the following independent
+  checkpoint. Later behavioral phases remain unapproved.
 - Applies to: Android, iOS, and macOS.
 - Excludes: Windows and every other unsupported platform.
 - Current production implementation: Legacy Bluetooth only.
@@ -424,7 +425,7 @@ Initial user message for a rejected combination:
 - Reopen only when effective route/configuration changes.
 - Provide one supported fallback if the preferred AAudio configuration fails.
 
-Questions that Phase 1 diagnostics must answer before tuning:
+Questions that Android diagnostics must answer before tuning:
 
 - Is output actually A2DP/LE media or SCO/duplex during the bad sound?
 - What rate and buffer did Oboe actually accept?
@@ -523,48 +524,54 @@ Deliverables:
 Exit gate: written approval to begin read-only diagnostics. No production code
 changes before this gate.
 
-### Phase 1 — Legacy baseline and read-only diagnostics
-
-Scope: observation only; no route behavior changes.
-
-Deliverables:
-
-- capture the iOS disconnect crash report and reproduction steps;
-- expose actual rate, buffer, input-open state, stable route identity,
-  transport/profile evidence, callback timing, stream state, and xruns where
-  available;
-- tag reports as Legacy;
-- run the four original diagnostics:
-  1. 48 kHz with buffer at least 1024;
-  2. launch-connected versus connect-after-launch;
-  3. REC/input-monitoring comparison; and
-  4. effective low-latency/performance-mode check;
-- record audible results and timestamps on representative hardware.
-
-Automated checks: diagnostics parsing and compatibility with unavailable
-fields.
-
-Exit gate: enough evidence to distinguish profile degradation, underrun,
-resampling, and missing route reconfiguration. No V2 behavior yet.
-
-### Phase 2 — Dormant shared V2 foundation
+### Phase 1 — Dormant shared V2 foundation
 
 Scope: shared types and pure logic only; no editor or native behavior change.
 
 Deliverables:
 
-- define route types, snapshots, desired configuration, transition result, and
-  diagnostics contracts;
+- define route types, snapshots, desired configuration, and diagnostics
+  contracts;
 - implement pure `AudioRoutePolicyV2`;
-- implement a coordinator against a fake backend;
-- prove serialization, generation cancellation, duplicate suppression, bounded
-  fallback, shutdown safety, and recovery after failure;
-- add a build guard, but do not expose a usable V2 selector yet.
+- define a read-only snapshot-provider boundary and privacy-safe report
+  serializer;
+- prove parsing, unavailable-value handling, policy invariants, and report
+  redaction;
+- do not implement a coordinator, apply interface, transition engine, build
+  guard, or usable V2 selector yet.
 
-Automated checks: exhaustive policy matrix and coordinator race tests.
+Automated checks: policy, parsing, nullability, and redaction tests.
 
 Exit gate: shared design is understandable in isolation and Legacy runtime is
-unchanged.
+unchanged. Completed by commit `c780dfe7`.
+
+### Phase 2 — macOS read-only evidence adapter
+
+Scope: observation only; no route behavior changes.
+
+The first implementation platform is macOS because real Mac hardware is
+available. The manual Legacy baseline is intentionally waived rather than
+spending testing effort on behavior already known to be unreliable. Commit
+`c780dfe7` remains the immutable, buildable Legacy reference if a baseline is
+needed later. The iOS disconnect-crash reproduction is deferred until affected
+iPhone or iPad hardware is available.
+
+Deliverables:
+
+- add one macOS-only, read-only route snapshot from Core Audio and JUCE;
+- expose a debug-only redacted report-copy action;
+- report actual rate, buffer, input-open state, stable route identity,
+  transport evidence, callback timing, and explicit unavailable reasons;
+- tag reports as Legacy; and
+- make unsupported platforms return an unavailable snapshot without native
+  route calls.
+
+Automated checks: contract parsing, platform isolation, redaction, macOS build,
+and repeated real native capture without JUCE configuration changes.
+
+Exit gate: the evidence path is read-only, privacy-safe, and useful enough to
+design the first macOS V2 playback slice. Bluetooth-specific audible testing is
+deferred until that playback candidate exists.
 
 ### Phase 3 — Dual-path scaffolding without Bluetooth behavior
 
@@ -583,20 +590,19 @@ V2 must remain marked unavailable on platforms without a completed adapter.
 Exit gate: switching sessions is safe, deterministic, and cannot affect
 production/default Legacy behavior.
 
-### Phase 4 — iOS V2 playback-only and disconnect safety
+### Phase 4 — macOS V2 playback consistency
 
-Scope: iOS playback and route lifecycle only; no recording.
+Scope: macOS playback and route changes only; no recording.
 
 Deliverables:
 
-- direct route observer and generation invalidation;
-- output-only session configuration;
-- atomic JUCE reopen and actual-state verification;
-- safe speaker/system fallback on disconnect; and
-- Legacy/V2 A/B diagnostics for connect/disconnect/background/interruption.
+- Core Audio output transport classification;
+- default/selected output observer through the coordinator;
+- playback-only startup and verified settings; and
+- confirmation that no unsafe aggregate/combiner is created.
 
-Exit gate: zero crashes in the initial iOS disconnect stress run and no input
-open during playback. Review results before adding recording or Android work.
+Exit gate: stable repeated Bluetooth → local → Bluetooth transitions on the
+available Mac, followed by broader Intel and Apple Silicon validation later.
 
 ### Phase 5 — Android V2 playback stability
 
@@ -615,19 +621,20 @@ Deliverables:
 Exit gate: no sustained audible crackling or recurring xrun growth after route
 stabilization on the agreed representative devices.
 
-### Phase 6 — macOS V2 playback consistency
+### Phase 6 — iOS V2 playback-only and disconnect safety
 
-Scope: macOS playback and route changes only; no recording.
+Scope: iOS playback and route lifecycle only; no recording.
 
 Deliverables:
 
-- Core Audio output transport classification;
-- default/selected output observer through the coordinator;
-- playback-only startup and verified settings; and
-- confirmation that no unsafe aggregate/combiner is created.
+- direct route observer and generation invalidation;
+- output-only session configuration;
+- atomic JUCE reopen and actual-state verification;
+- safe speaker/system fallback on disconnect; and
+- Legacy/V2 A/B diagnostics for connect/disconnect/background/interruption.
 
-Exit gate: stable repeated Bluetooth → local → Bluetooth transitions on Intel
-and Apple Silicon test groups.
+Exit gate: zero crashes in the initial iOS disconnect stress run and no input
+open during playback.
 
 ### Phase 7 — Intent-driven recording across all platforms
 
@@ -768,7 +775,10 @@ Each run records:
 
 1. Which exact Android devices, iOS devices, Macs, and headsets form the minimum
    supported hardware matrix?
-2. Where will diagnostic exports and iOS crash reports be stored?
+2. Which secure location will hold unsanitized iOS crash reports when iOS
+   hardware becomes available? Redacted Bluetooth reports are clipboard-only
+   by default and may be committed under
+   `docs/audio/evidence/bluetooth-v2/reports/`.
 3. Is muted playback during unsupported Bluetooth-output recording acceptable,
    or should V2 always fail before recording on that combination?
 4. What exact buffer upper bounds are supported and useful on each platform?
@@ -791,7 +801,7 @@ Each run records:
 
 ## Immediate next step
 
-Review Phase 0 only. Resolve the open product questions, name the initial
-hardware matrix, and approve or revise the invariants. After that—and only
-after explicit approval—the first code change should be Phase 1 read-only
-Legacy diagnostics. It must not alter Bluetooth routing behavior.
+Review the macOS read-only evidence checkpoint and its first redacted reports.
+After explicit approval, design the first isolated macOS V2 playback-only path
+using the captured Core Audio and JUCE facts. Do not add coordinator, route
+observer, selector, recording, or tuning behavior before that review.

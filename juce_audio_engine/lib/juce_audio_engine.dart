@@ -1,6 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'audio_route_snapshot_provider_v2.dart';
+import 'audio_route_v2.dart';
+
 class JuceEngineCapabilities {
   final bool externalPluginHosting;
   final List<String> supportedPluginFormats;
@@ -242,6 +245,8 @@ class AudioInputDeviceInfo {
 class JuceAudioEngine {
   static const _ch = MethodChannel('juce_audio_engine');
   static const _eventCh = EventChannel('juce_audio_engine/events');
+  static const AudioRouteSnapshotProviderV2 _audioRouteSnapshotProviderV2 =
+      MethodChannelAudioRouteSnapshotProviderV2();
 
   static Stream<Map<String, dynamic>> get _events => _eventCh
       .receiveBroadcastStream()
@@ -2755,6 +2760,10 @@ class JuceAudioEngine {
       _logError('getAudioRouteInfo', e);
       return AudioRouteInfo.unknown;
     }
+  }
+
+  static Future<AudioRouteSnapshotV2> getAudioRouteSnapshotV2() {
+    return _audioRouteSnapshotProviderV2.readSnapshot();
   }
 
   static Future<void> setLiveInputMonitoringEnabled(bool enabled) async {

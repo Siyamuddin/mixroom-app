@@ -7253,6 +7253,7 @@ juce::NamedValueSet JuceEngine::getEngineDiagnostics()
         getKnownDeviceSampleRate(deviceManager, hostSampleRateAtomic.load(std::memory_order_relaxed));
     const auto bufferSize = getKnownDeviceBufferSize(deviceManager, 512);
 
+    out.set("deviceOpen", device != nullptr);
     out.set("sampleRate", sampleRate);
     out.set("bufferSize", bufferSize);
     out.set("cpuUsage", deviceManager.getCpuUsage());
@@ -7266,10 +7267,8 @@ juce::NamedValueSet JuceEngine::getEngineDiagnostics()
     out.set("pluginScanFailures", juce::var(pluginFailureValues));
     out.set("rowCount", (int)rows.size());
     out.set("clipCount", (int)clips.size());
-    out.set("inputDeviceName",
-            device != nullptr ? device->getName() : juce::String());
-    out.set("outputDeviceName",
-            device != nullptr ? device->getName() : juce::String());
+    out.set("inputDeviceName", getCurrentInputDeviceName());
+    out.set("outputDeviceName", getCurrentOutputDeviceName());
     out.set("inputChannelCount",
             device != nullptr ? device->getActiveInputChannels().countNumberOfSetBits() : 0);
     out.set("outputChannelCount",
