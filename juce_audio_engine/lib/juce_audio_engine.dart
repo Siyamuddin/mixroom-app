@@ -247,6 +247,7 @@ class JuceAudioEngine {
   static const _eventCh = EventChannel('juce_audio_engine/events');
   static const AudioRouteSnapshotProviderV2 _audioRouteSnapshotProviderV2 =
       MethodChannelAudioRouteSnapshotProviderV2();
+  static AudioRouteSnapshotV2? _v2StartupSnapshot;
 
   static Stream<Map<String, dynamic>> get _events => _eventCh
       .receiveBroadcastStream()
@@ -314,11 +315,76 @@ class JuceAudioEngine {
   static Future<bool> initialiseForImplementation(
     BluetoothImplementationV2 implementation,
   ) async {
-    if (implementation != BluetoothImplementationV2.legacy) {
-      return false;
+    if (implementation == BluetoothImplementationV2.v2) {
+      final result = await initialisePlaybackV2();
+      _v2StartupSnapshot = result.success ? result.snapshot : null;
+      return result.success;
     }
     await initialise();
     return true;
+  }
+
+  static Future<AudioPlaybackStartupResultV2> initialisePlaybackV2({
+    TargetPlatform? platformOverride,
+  }) async {
+    if (kIsWeb ||
+        (platformOverride ?? defaultTargetPlatform) != TargetPlatform.macOS) {
+      return _unavailablePlaybackStartupV2();
+    }
+    try {
+      final raw = await _ch.invokeMethod<Map<dynamic, dynamic>>(
+        'initialisePlaybackV2',
+      );
+      if (raw == null) return _unavailablePlaybackStartupV2();
+      return AudioPlaybackStartupResultV2.fromMap(
+        Map<String, dynamic>.from(raw),
+      );
+    } on MissingPluginException {
+      return _unavailablePlaybackStartupV2();
+    } on PlatformException catch (error) {
+      return _unavailablePlaybackStartupV2(
+        error.code.isEmpty ? 'actual_state_unavailable' : error.code,
+      );
+    } on Object {
+      return _unavailablePlaybackStartupV2();
+    }
+  }
+
+  static AudioPlaybackStartupResultV2 _unavailablePlaybackStartupV2([
+    String diagnosticCode = 'actual_state_unavailable',
+  ]) {
+    return AudioPlaybackStartupResultV2(
+      success: false,
+      diagnosticCode: diagnosticCode,
+      snapshot: AudioRouteSnapshotV2.fromMap(<String, dynamic>{
+        'captureConsistency': 'unavailable',
+        'unavailableReasons': const <String, String>{
+          'startup': 'nativeV2PlaybackUnavailable',
+        },
+      }),
+    );
+  }
+
+  static Future<bool> validatePlaybackV2() async {
+    final startup = _v2StartupSnapshot;
+    if (startup == null || startup.outputs.length != 1) return false;
+    final current = await getAudioRouteSnapshotV2();
+    if (current.implementation != BluetoothImplementationV2.v2 ||
+        current.captureConsistency != AudioRouteCaptureConsistencyV2.stable ||
+        current.juce.deviceOpen != true ||
+        current.juce.activeInputChannels != 0 ||
+        (current.juce.activeOutputChannels ?? 0) <= 0 ||
+        (current.juce.sampleRateHz ?? 0) <= 0 ||
+        (current.juce.bufferFrames ?? 0) <= 0 ||
+        current.outputs.length != 1) {
+      return false;
+    }
+    final expected = startup.outputs.single;
+    final actual = current.outputs.single;
+    if (expected.uid.isNotEmpty && actual.uid.isNotEmpty) {
+      return expected.uid == actual.uid;
+    }
+    return expected.name.isNotEmpty && expected.name == actual.name;
   }
 
   static Future<void> shutdown() async {
@@ -326,6 +392,8 @@ class JuceAudioEngine {
       await _ch.invokeMethod('shutdown');
     } on PlatformException catch (e) {
       _logError('shutdown', e);
+    } finally {
+      _v2StartupSnapshot = null;
     }
   }
 

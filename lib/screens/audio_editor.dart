@@ -12509,7 +12509,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<bool> _ensurePlaybackRouteReady({required String reason}) async {
-    if (_isBluetoothV2Session) return false;
+    if (_isBluetoothV2Session) {
+      final ready = await JuceAudioEngine.validatePlaybackV2();
+      if (!ready && mounted) {
+        _showSmallNotice(
+          'Bluetooth 2.0 route changed. Reopen the audio editor.',
+        );
+      }
+      return ready;
+    }
     var ok = false;
     try {
       ok = await JuceAudioEngine.preparePlaybackRoute(
@@ -29777,7 +29785,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _auditioningSamplePath = filePath;
         _samplePreviewPlaying = true;
       });
-      await JuceAudioEngine.preparePlaybackRoute(reason: 'samplePreview');
+      if (!await _ensurePlaybackRouteReady(reason: 'samplePreview')) {
+        if (mounted) {
+          setState(() {
+            _auditioningSamplePath = null;
+            _samplePreviewPlaying = false;
+          });
+        }
+        return;
+      }
       await _startSecurityScopedAccessForFile(filePath);
       await _samplePreviewPlayer.stop();
       await _samplePreviewPlayer.setFilePath(filePath);
@@ -42709,6 +42725,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _setRoutingSheetMonitoring(bool enabled) async {
+    if (_isBluetoothV2Session) {
+      _showSmallNotice(
+        'Monitoring is not available in this Bluetooth 2.0 checkpoint.',
+      );
+      return;
+    }
     if (_audioRouteInfo.isBluetoothOutput) {
       await _setAdvancedBluetoothMonitorOverride(enabled);
       return;
@@ -42719,6 +42741,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _showAudioRoutingSheet() async {
+    if (_isBluetoothV2Session) {
+      _showSmallNotice(
+        'Recording and routing controls are not available in this Bluetooth 2.0 checkpoint.',
+      );
+      return;
+    }
     await _loadInputDevicesFromJuce(scheduleRecordingPrewarm: false);
     if (Platform.isAndroid) {
       unawaited(_refreshAndroidOutputRouteLabel());

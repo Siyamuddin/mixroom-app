@@ -31,6 +31,7 @@ extern void mixroomScheduleOttPluginEditorAutotest(void);
 - (void)bindEventSink:(FlutterEventSink)events;
 - (void)clearEventSink;
 - (NSDictionary<NSString *, id> *)buildAudioRouteSnapshotV2;
+- (NSDictionary<NSString *, id> *)initialisePlaybackV2;
 @end
 
 @implementation JuceAudioEnginePlugin
@@ -867,12 +868,16 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     NSString *capturedAtUtc = [dateFormatter stringFromDate:[NSDate date]] ?: @"";
     const double captureDurationMs =
         MixroomMonotonicMilliseconds() - startedAtMs;
+    NSString *implementation = [JuceBridge getAudioRouteImplementationObjC];
+    if (![implementation isEqualToString:@"v2"]) {
+        implementation = @"legacy";
+    }
 
     return @{
         @"schemaVersion": @1,
         @"capturedAtUtc": capturedAtUtc,
         @"captureDurationMs": @((NSInteger)(captureDurationMs + 0.5)),
-        @"implementation": @"legacy",
+        @"implementation": implementation,
         @"generation": [NSNull null],
         @"transitionId": [NSNull null],
         @"coordinatorManaged": @NO,
@@ -890,6 +895,89 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         @"unavailableReasons": @{
             @"platform": @"macOSOnlyCheckpoint",
         },
+    };
+#endif
+}
+
+- (NSDictionary<NSString *, id> *)initialisePlaybackV2 {
+#if TARGET_OS_OSX
+    NSString *before = [JuceBridge getAudioRouteImplementationObjC] ?: @"none";
+    if (![before isEqualToString:@"none"] && ![before isEqualToString:@"v2"]) {
+        return @{
+            @"success": @NO,
+            @"diagnosticCode": @"implementation_conflict",
+            @"snapshot": [self buildAudioRouteSnapshotV2],
+        };
+    }
+
+    if (![JuceBridge initialisePlaybackV2ObjC]) {
+        return @{
+            @"success": @NO,
+            @"diagnosticCode": @"juce_open_failed",
+            @"snapshot": [self buildAudioRouteSnapshotV2],
+        };
+    }
+
+    NSDictionary<NSString *, id> *snapshot = [self buildAudioRouteSnapshotV2];
+    NSDictionary<NSString *, id> *juce =
+        [snapshot[@"juce"] isKindOfClass:[NSDictionary class]]
+            ? snapshot[@"juce"]
+            : @{};
+    NSArray *outputs = [snapshot[@"outputs"] isKindOfClass:[NSArray class]]
+        ? snapshot[@"outputs"]
+        : @[];
+    NSString *consistency =
+        [snapshot[@"captureConsistency"] isKindOfClass:[NSString class]]
+            ? snapshot[@"captureConsistency"]
+            : @"unavailable";
+    NSNumber *deviceOpen = [juce[@"deviceOpen"] isKindOfClass:[NSNumber class]]
+        ? juce[@"deviceOpen"]
+        : nil;
+    NSNumber *activeInputs =
+        [juce[@"activeInputChannels"] isKindOfClass:[NSNumber class]]
+            ? juce[@"activeInputChannels"]
+            : nil;
+    NSNumber *activeOutputs =
+        [juce[@"activeOutputChannels"] isKindOfClass:[NSNumber class]]
+            ? juce[@"activeOutputChannels"]
+            : nil;
+    NSNumber *sampleRate = [juce[@"sampleRateHz"] isKindOfClass:[NSNumber class]]
+        ? juce[@"sampleRateHz"]
+        : nil;
+    NSNumber *bufferFrames = [juce[@"bufferFrames"] isKindOfClass:[NSNumber class]]
+        ? juce[@"bufferFrames"]
+        : nil;
+
+    NSString *diagnosticCode = @"ok";
+    if (![consistency isEqualToString:@"stable"]) {
+        diagnosticCode = @"route_unstable";
+    } else if (deviceOpen == nil || !deviceOpen.boolValue) {
+        diagnosticCode = @"juce_open_failed";
+    } else if (activeInputs == nil || activeOutputs == nil ||
+               sampleRate == nil || bufferFrames == nil) {
+        diagnosticCode = @"actual_state_unavailable";
+    } else if (activeInputs.integerValue != 0) {
+        diagnosticCode = @"input_open";
+    } else if (activeOutputs.integerValue <= 0 || outputs.count != 1) {
+        diagnosticCode = @"no_output";
+    } else if (sampleRate.doubleValue <= 0.0 || bufferFrames.integerValue <= 0) {
+        diagnosticCode = @"actual_state_unavailable";
+    }
+
+    const BOOL success = [diagnosticCode isEqualToString:@"ok"];
+    if (!success) {
+        [JuceBridge shutdownEngineObjC];
+    }
+    return @{
+        @"success": @(success),
+        @"diagnosticCode": diagnosticCode,
+        @"snapshot": snapshot,
+    };
+#else
+    return @{
+        @"success": @NO,
+        @"diagnosticCode": @"actual_state_unavailable",
+        @"snapshot": [self buildAudioRouteSnapshotV2],
     };
 #endif
 }
@@ -2229,6 +2317,13 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     else if ([call.method isEqualToString:@"getAudioRouteSnapshotV2"]) {
 #if TARGET_OS_OSX
         result([self buildAudioRouteSnapshotV2]);
+#else
+        result(FlutterMethodNotImplemented);
+#endif
+    }
+    else if ([call.method isEqualToString:@"initialisePlaybackV2"]) {
+#if TARGET_OS_OSX
+        result([self initialisePlaybackV2]);
 #else
         result(FlutterMethodNotImplemented);
 #endif

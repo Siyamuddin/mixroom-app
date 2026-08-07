@@ -201,4 +201,33 @@ void main() {
     expect(configuration.requireNonBluetoothInput, isTrue);
     expect(configuration.monitoringAllowed, isFalse);
   });
+
+  test('playback startup result preserves verified snapshot and future fields',
+      () {
+    final result = AudioPlaybackStartupResultV2.fromMap(<String, dynamic>{
+      'success': true,
+      'diagnosticCode': 'ok',
+      'futureResultField': true,
+      'snapshot': snapshot().toRawMap()
+        ..['implementation'] = 'v2'
+        ..['futureSnapshotField'] = 'ignored',
+    });
+
+    expect(result.success, isTrue);
+    expect(result.diagnosticCode, 'ok');
+    expect(result.snapshot.implementation, BluetoothImplementationV2.v2);
+  });
+
+  test('missing playback startup snapshot fails closed', () {
+    final result = AudioPlaybackStartupResultV2.fromMap(<String, dynamic>{
+      'success': false,
+      'diagnosticCode': 'actual_state_unavailable',
+    });
+
+    expect(result.success, isFalse);
+    expect(
+      result.snapshot.captureConsistency,
+      AudioRouteCaptureConsistencyV2.unavailable,
+    );
+  });
 }

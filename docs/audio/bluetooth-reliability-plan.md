@@ -2,9 +2,10 @@
 
 ## Document status
 
-- Status: dormant shared contracts completed in `c780dfe7`; the macOS
-  read-only evidence adapter is implemented in the following independent
-  checkpoint. Later behavioral phases remain unapproved.
+- Status: shared contracts, macOS read-only evidence, and session isolation are
+  complete through `bcf595d3`. The first active macOS V2 playback-startup slice
+  is implemented as the next independent checkpoint. Live route handling and
+  later platform phases remain unapproved.
 - Applies to: Android, iOS, and macOS.
 - Excludes: Windows and every other unsupported platform.
 - Current production implementation: Legacy Bluetooth only.
@@ -589,9 +590,31 @@ Deliverables:
 V2 must remain marked unavailable on platforms without a completed adapter.
 
 Exit gate: switching sessions is safe, deterministic, and cannot affect
-production/default Legacy behavior.
+production/default Legacy behavior. Completed by commit `bcf595d3`.
 
-### Phase 4 — macOS V2 playback consistency
+### Phase 3A — First active macOS playback-startup slice
+
+Scope: initialize playback against the output that already exists when the
+editor opens. Do not react to later route changes.
+
+Deliverables:
+
+- independently open JUCE with the current/default Core Audio output and zero
+  input channels;
+- use route-native hardware settings instead of user hardware overrides;
+- validate the actual output identity, rate, buffer, channels, and input-closed
+  state before reporting success;
+- refuse playback if the verified startup route has changed and require an
+  editor reopen;
+- prevent Legacy and V2 engine ownership from overlapping; and
+- fail closed without falling through to Legacy, retrying, observing routes, or
+  changing devices.
+
+Exit gate: built-in output passes native lifecycle tests; the physically
+connected Bluetooth headset passes the same startup and playback checks; V2
+never opens an input or invokes Legacy repair/prewarm behavior.
+
+### Phase 4 — macOS V2 live playback consistency
 
 Scope: macOS playback and route changes only; no recording.
 
@@ -802,7 +825,10 @@ Each run records:
 
 ## Immediate next step
 
-Review the macOS read-only evidence checkpoint and its first redacted reports.
-After explicit approval, design the first isolated macOS V2 playback-only path
-using the captured Core Audio and JUCE facts. Do not add coordinator, route
-observer, selector, recording, or tuning behavior before that review.
+Connect the WH-1000XM4 before opening the editor and run the same project once
+with Legacy and once with Bluetooth 2.0. Confirm that V2 playback is clean, its
+report shows zero active inputs and valid actual hardware settings, and project
+or export settings did not change. If that startup slice passes, review its
+evidence before approving the next checkpoint: a compact serialized macOS route
+coordinator for live connect/disconnect. Do not add recording, monitoring,
+adaptive tuning, or another platform in that checkpoint.

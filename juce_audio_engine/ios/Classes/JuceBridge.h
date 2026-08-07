@@ -3,6 +3,8 @@
 @interface JuceBridge : NSObject
 
 + (void)initialiseEngineObjC;
++ (BOOL)initialisePlaybackV2ObjC;
++ (NSString * _Nonnull)getAudioRouteImplementationObjC;
 + (void)initializeMessageManager;
 + (void)shutdownEngineObjC;
 + (void)setFlutterAssetRootObjC:(NSString *)rootPath;

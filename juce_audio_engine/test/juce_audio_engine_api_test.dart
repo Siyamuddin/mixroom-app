@@ -45,6 +45,39 @@ void main() {
           return <String>['MacBook Pro Speakers', 'WH-1000XM4'];
         case 'selectOutputDevice':
           return true;
+        case 'initialisePlaybackV2':
+          return <String, dynamic>{
+            'success': true,
+            'diagnosticCode': 'ok',
+            'snapshot': <String, dynamic>{
+              'schemaVersion': 1,
+              'capturedAtUtc': '2026-08-08T12:00:00.000Z',
+              'captureDurationMs': 2,
+              'implementation': 'v2',
+              'coordinatorManaged': false,
+              'captureConsistency': 'stable',
+              'inputs': <Object>[],
+              'outputs': <Map<String, dynamic>>[
+                <String, dynamic>{
+                  'direction': 'output',
+                  'nativePortType': '0x626c746e',
+                  'normalizedKind': 'builtIn',
+                  'uid': 'output-uid',
+                  'name': 'MacBook Pro Speakers',
+                  'channelCount': 2,
+                },
+              ],
+              'session': <String, dynamic>{},
+              'juce': <String, dynamic>{
+                'deviceOpen': true,
+                'sampleRateHz': 48000.0,
+                'bufferFrames': 512,
+                'activeInputChannels': 0,
+                'activeOutputChannels': 2,
+              },
+              'unavailableReasons': <String, String>{},
+            },
+          };
         case 'getInputDeviceInfos':
           return <Map<String, dynamic>>[
             <String, dynamic>{
@@ -82,18 +115,35 @@ void main() {
 
   test('implementation-aware initialization keeps V2 off Legacy channel',
       () async {
-    final v2 = await JuceAudioEngine.initialiseForImplementation(
-      BluetoothImplementationV2.v2,
-    );
-    expect(v2, isFalse);
-    expect(calls, isEmpty);
-
     final legacy = await JuceAudioEngine.initialiseForImplementation(
       BluetoothImplementationV2.legacy,
     );
     expect(legacy, isTrue);
     expect(calls, hasLength(1));
     expect(calls.single.method, 'initialise');
+  });
+
+  test('V2 playback initialization uses only its dedicated native method',
+      () async {
+    final result = await JuceAudioEngine.initialisePlaybackV2(
+      platformOverride: TargetPlatform.macOS,
+    );
+
+    expect(result.success, isTrue);
+    expect(result.diagnosticCode, 'ok');
+    expect(result.snapshot.implementation, BluetoothImplementationV2.v2);
+    expect(calls, hasLength(1));
+    expect(calls.single.method, 'initialisePlaybackV2');
+  });
+
+  test('V2 playback startup stays native-call-free off macOS', () async {
+    final result = await JuceAudioEngine.initialisePlaybackV2(
+      platformOverride: TargetPlatform.android,
+    );
+
+    expect(result.success, isFalse);
+    expect(result.diagnosticCode, 'actual_state_unavailable');
+    expect(calls, isEmpty);
   });
 
   test('loadClip sends rowId + timeline payload', () async {

@@ -2357,6 +2357,17 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     // }).detach();
 }
 
++ (BOOL)initialisePlaybackV2ObjC
+{
+    return JuceEngine::get().initialisePlaybackV2();
+}
+
++ (NSString *)getAudioRouteImplementationObjC
+{
+    const auto value = JuceEngine::get().getAudioRouteImplementationName();
+    return [NSString stringWithUTF8String:value.toRawUTF8()];
+}
+
 + (void)initializeMessageManager
 {
     static bool initialized = false;

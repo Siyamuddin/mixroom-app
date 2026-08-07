@@ -5813,6 +5813,13 @@ class JuceEngine : public juce::MidiInputCallback,
                    public RoutedClipSource
 {
 public:
+    enum class AudioRouteImplementation
+    {
+        none,
+        legacy,
+        v2Playback,
+    };
+
     struct ExportOptions
     {
         juce::String format{"wav"}; // "wav" | "mp3"
@@ -5827,6 +5834,9 @@ public:
     static JuceEngine &get();
 
     void initialiseEngine();
+    bool initialisePlaybackV2();
+    juce::String getAudioRouteImplementationName() const;
+    bool isV2PlaybackSession() const noexcept;
     void loadTrack(int idx, const juce::File &file); // deprecated name (clip)
     void removeTrack(int clipIndex);                 // removes clip
     juce::StringArray getTrackEffects(int trackIndex);
@@ -6247,6 +6257,8 @@ private:
 
     bool engineInitialized = false;
     bool formatsRegistered = false; // will only be flipped once to true
+    AudioRouteImplementation audioRouteImplementation =
+        AudioRouteImplementation::none;
     juce::AudioFormatManager formatManager;
     juce::AudioPluginFormatManager pluginFormatManager;
     juce::AudioProcessorGraph graph;

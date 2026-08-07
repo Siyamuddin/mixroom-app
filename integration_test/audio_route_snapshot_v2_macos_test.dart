@@ -54,8 +54,60 @@ void main() {
       expect(after.sampleRate, before.sampleRate);
       expect(after.bufferSize, before.bufferSize);
       expect(firstSnapshot!.juce.inputOpen, before.inputChannelCount > 0);
+      final conflictingV2 = await JuceAudioEngine.initialisePlaybackV2();
+      expect(conflictingV2.success, isFalse);
+      expect(conflictingV2.diagnosticCode, 'implementation_conflict');
+      expect(conflictingV2.snapshot.juce.deviceOpen, isTrue);
     } finally {
       await JuceAudioEngine.shutdown();
     }
   });
+
+  testWidgets(
+    'V2 opens playback-only and can return to Legacy after shutdown',
+    (_) async {
+      final v2Started = await JuceAudioEngine.initialiseForImplementation(
+        BluetoothImplementationV2.v2,
+      );
+      expect(v2Started, isTrue);
+      try {
+        await JuceAudioEngine.initialise();
+        final ownershipSnapshot =
+            await JuceAudioEngine.getAudioRouteSnapshotV2();
+        expect(
+          ownershipSnapshot.implementation,
+          BluetoothImplementationV2.v2,
+        );
+
+        for (var index = 0; index < 20; index++) {
+          final snapshot = await JuceAudioEngine.getAudioRouteSnapshotV2();
+          expect(snapshot.implementation, BluetoothImplementationV2.v2);
+          expect(
+            snapshot.captureConsistency,
+            AudioRouteCaptureConsistencyV2.stable,
+          );
+          expect(snapshot.juce.deviceOpen, isTrue);
+          expect(snapshot.juce.activeInputChannels, 0);
+          expect((snapshot.juce.activeOutputChannels ?? 0), greaterThan(0));
+          expect((snapshot.juce.sampleRateHz ?? 0), greaterThan(0));
+          expect((snapshot.juce.bufferFrames ?? 0), greaterThan(0));
+        }
+        expect(await JuceAudioEngine.validatePlaybackV2(), isTrue);
+      } finally {
+        await JuceAudioEngine.shutdown();
+      }
+
+      final legacyStarted = await JuceAudioEngine.initialiseForImplementation(
+        BluetoothImplementationV2.legacy,
+      );
+      expect(legacyStarted, isTrue);
+      try {
+        final snapshot = await JuceAudioEngine.getAudioRouteSnapshotV2();
+        expect(snapshot.implementation, BluetoothImplementationV2.legacy);
+        expect(snapshot.juce.deviceOpen, isTrue);
+      } finally {
+        await JuceAudioEngine.shutdown();
+      }
+    },
+  );
 }

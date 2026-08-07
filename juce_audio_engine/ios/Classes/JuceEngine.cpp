@@ -1950,6 +1950,8 @@ bool JuceEngine::configureAudioDevice(double sampleRate,
                                       int desiredInputChannels,
                                       const juce::String &reason)
 {
+    if (isV2PlaybackSession())
+        return false;
     if (recordingActive)
     {
         juceLogToFlutter(("configureAudioDevice blocked while recording [" + reason + "]").toRawUTF8());
@@ -2000,6 +2002,8 @@ int JuceEngine::getMidiInputChannelFilter() const noexcept
 
 void JuceEngine::requestAudioDeviceRefreshAsync(const juce::String &reason)
 {
+    if (isV2PlaybackSession())
+        return;
     if (!engineInitialized)
         return;
 
@@ -2031,6 +2035,8 @@ void JuceEngine::requestAudioDeviceRefreshAsync(const juce::String &reason)
 void JuceEngine::prepareRecordingInputsAsync(int desiredInputChannels,
                                              const juce::String &reason)
 {
+    if (isV2PlaybackSession())
+        return;
     desiredInputChannels = juce::jmax(0, desiredInputChannels);
     applyPreferredAudioDeviceSetup(desiredInputChannels, true, reason + "-async");
 }
@@ -2038,12 +2044,16 @@ void JuceEngine::prepareRecordingInputsAsync(int desiredInputChannels,
 bool JuceEngine::prepareRecordingInputs(int desiredInputChannels,
                                         const juce::String &reason)
 {
+    if (isV2PlaybackSession())
+        return false;
     desiredInputChannels = juce::jmax(0, desiredInputChannels);
     return applyPreferredAudioDeviceSetup(desiredInputChannels, true, reason);
 }
 
 bool JuceEngine::preparePlaybackRoute(const juce::String &reason)
 {
+    if (isV2PlaybackSession())
+        return false;
     {
         const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
         ensureMasterOutputRouting();
@@ -2090,6 +2100,8 @@ bool JuceEngine::preparePlaybackRoute(const juce::String &reason)
 
 void JuceEngine::refreshAudioRouteAsync(const juce::String &reason)
 {
+    if (isV2PlaybackSession())
+        return;
     applyPreferredAudioDeviceSetup(
         desiredInputOpenChannels.load(std::memory_order_relaxed),
         true,
@@ -2098,7 +2110,7 @@ void JuceEngine::refreshAudioRouteAsync(const juce::String &reason)
 
 void JuceEngine::changeListenerCallback(juce::ChangeBroadcaster *source)
 {
-    if (source != &deviceManager || !engineInitialized)
+    if (source != &deviceManager || !engineInitialized || isV2PlaybackSession())
         return;
 
     int ignored = ignoredDeviceChangeCallbacks.load(std::memory_order_relaxed);
@@ -2340,6 +2352,9 @@ void JuceEngine::initialiseEngine()
         return;
     }
 
+    if (audioRouteImplementation == AudioRouteImplementation::none)
+        audioRouteImplementation = AudioRouteImplementation::legacy;
+
     const auto crashedPluginId =
         readHostedPluginGuardIdentifier(hostedPluginPendingLoadFile());
     if (crashedPluginId.isNotEmpty())
@@ -2367,19 +2382,27 @@ void JuceEngine::initialiseEngine()
 #if JUCE_IOS
         pluginFormatManager.addFormat(new juce::AudioUnitPluginFormat());
 #endif
+        formatsRegistered = true;
+    }
+
+    if (deviceManager.getCurrentAudioDevice() == nullptr)
+    {
         // On macOS, opening default input and output together can make JUCE create
-        // a CoreAudio aggregate/combiner device. Some Bluetooth output routes crash
-        // inside HAL during that initial open. Start playback-only and open inputs
-        // lazily when recording is armed.
-        deviceManager.initialise(
+        // a CoreAudio aggregate/combiner device. V2 is always output-only.
+        const auto deviceError = deviceManager.initialise(
 #if JUCE_MAC && !JUCE_IOS
             0, // numInputChannels
 #else
-            2, // numInputChannels
+            isV2PlaybackSession() ? 0 : 2, // numInputChannels
 #endif
             2, // numOutputChannels
             nullptr,
             true);
+        if (deviceError.isNotEmpty())
+        {
+            juceLogToFlutter(("Audio device initialization failed: " + deviceError).toRawUTF8());
+            return;
+        }
 
         {
             auto setup = deviceManager.getAudioDeviceSetup();
@@ -2387,17 +2410,24 @@ void JuceEngine::initialiseEngine()
             setup.useDefaultInputChannels = false;
             setup.useDefaultOutputChannels = true;
             setup.inputChannels.clear();
+            if (isV2PlaybackSession())
+                setup.inputDeviceName = {};
 
             desiredInputOpenChannels.store(0, std::memory_order_relaxed);
-            deviceManager.setAudioDeviceSetup(setup, true);
+            const auto setupError = deviceManager.setAudioDeviceSetup(setup, true);
+            if (setupError.isNotEmpty())
+            {
+                juceLogToFlutter(("Playback-only device setup failed: " + setupError).toRawUTF8());
+                deviceManager.closeAudioDevice();
+                return;
+            }
         }
         logCurrentAudioDeviceState("initialise");
-
-        formatsRegistered = true;
     }
 
     deviceManager.removeChangeListener(this);
-    deviceManager.addChangeListener(this);
+    if (!isV2PlaybackSession())
+        deviceManager.addChangeListener(this);
 
     const double hostRate = getKnownDeviceSampleRate(deviceManager, 44100.0);
     const int blockSize = getKnownDeviceBufferSize(deviceManager, 512);
@@ -2443,6 +2473,46 @@ void JuceEngine::initialiseEngine()
     engineInitialized = true;
 }
 
+bool JuceEngine::initialisePlaybackV2()
+{
+#if JUCE_MAC && !JUCE_IOS
+    if (engineInitialized)
+        return audioRouteImplementation == AudioRouteImplementation::v2Playback;
+    if (audioRouteImplementation != AudioRouteImplementation::none)
+        return false;
+
+    audioRouteImplementation = AudioRouteImplementation::v2Playback;
+    initialiseEngine();
+    if (!engineInitialized)
+    {
+        audioRouteImplementation = AudioRouteImplementation::none;
+        return false;
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
+juce::String JuceEngine::getAudioRouteImplementationName() const
+{
+    switch (audioRouteImplementation)
+    {
+    case AudioRouteImplementation::legacy:
+        return "legacy";
+    case AudioRouteImplementation::v2Playback:
+        return "v2";
+    case AudioRouteImplementation::none:
+        break;
+    }
+    return "none";
+}
+
+bool JuceEngine::isV2PlaybackSession() const noexcept
+{
+    return audioRouteImplementation == AudioRouteImplementation::v2Playback;
+}
+
 void JuceEngine::shutdownEngine()
 {
     juceLogToFlutter("JuceEngine::shutdownEngine called");
@@ -2450,6 +2520,7 @@ void JuceEngine::shutdownEngine()
     if (!engineInitialized)
     {
         juceLogToFlutter("... skipped — engine not initialized yet.");
+        audioRouteImplementation = AudioRouteImplementation::none;
         return;
     }
 
@@ -2555,6 +2626,7 @@ void JuceEngine::shutdownEngine()
     }
     busGraphInitialised = false;
     engineInitialized = false;
+    audioRouteImplementation = AudioRouteImplementation::none;
 }
 
 // ============================================================
@@ -12807,6 +12879,8 @@ juce::StringArray JuceEngine::getAvailableOutputDevices()
 
 bool JuceEngine::selectInputDevice(const juce::String &name)
 {
+    if (isV2PlaybackSession())
+        return false;
     const auto availableInputs = getAvailableInputDevices();
     if (name.isNotEmpty() && !availableInputs.contains(name))
     {
@@ -12859,6 +12933,8 @@ bool JuceEngine::selectInputDevice(const juce::String &name)
 
 bool JuceEngine::selectOutputDevice(const juce::String &name)
 {
+    if (isV2PlaybackSession())
+        return false;
     const auto availableOutputs = getAvailableOutputDevices();
     if (name.isNotEmpty() && !availableOutputs.contains(name))
     {
@@ -12952,6 +13028,11 @@ int JuceEngine::getNumInputChannels() const
 
 void JuceEngine::setLiveInputMonitoringEnabled(bool enabled)
 {
+    if (isV2PlaybackSession())
+    {
+        liveInputMonitoringEnabled = false;
+        return;
+    }
     const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
     if (liveInputMonitoringEnabled == enabled)
         return;
@@ -13026,6 +13107,8 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
                                      int channelStart,
                                      int channelCount)
 {
+    if (isV2PlaybackSession())
+        return false;
     if (recordingActive)
         return false;
 

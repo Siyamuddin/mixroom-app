@@ -333,6 +333,37 @@ class AudioRouteSnapshotV2 {
       };
 }
 
+class AudioPlaybackStartupResultV2 {
+  const AudioPlaybackStartupResultV2({
+    required this.success,
+    required this.diagnosticCode,
+    required this.snapshot,
+  });
+
+  final bool success;
+  final String diagnosticCode;
+  final AudioRouteSnapshotV2 snapshot;
+
+  factory AudioPlaybackStartupResultV2.fromMap(Map<String, dynamic> map) {
+    final rawSnapshot = map['snapshot'];
+    return AudioPlaybackStartupResultV2(
+      success: map['success'] == true,
+      diagnosticCode:
+          map['diagnosticCode']?.toString() ?? 'actual_state_unavailable',
+      snapshot: AudioRouteSnapshotV2.fromMap(
+        rawSnapshot is Map
+            ? Map<String, dynamic>.from(rawSnapshot)
+            : <String, dynamic>{
+                'captureConsistency': 'unavailable',
+                'unavailableReasons': <String, String>{
+                  'startup.snapshot': 'missingFromNativeResult',
+                },
+              },
+      ),
+    );
+  }
+}
+
 class DesiredAudioRouteConfigurationV2 {
   const DesiredAudioRouteConfigurationV2({
     required this.intent,
