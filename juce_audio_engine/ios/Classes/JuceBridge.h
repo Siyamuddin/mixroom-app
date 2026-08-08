@@ -3,7 +3,7 @@
 @interface JuceBridge : NSObject
 
 + (void)initialiseEngineObjC;
-+ (BOOL)initialisePlaybackV2ObjC;
++ (BOOL)initialisePlaybackV2ObjC:(NSString * _Nonnull)outputDeviceName;
 + (BOOL)quiescePlaybackRouteV2ObjC:(BOOL)closeRemovedDevice;
 + (BOOL)reconfigurePlaybackRouteV2ObjC:(NSString * _Nonnull)outputDeviceName;
 + (NSString * _Nonnull)getAudioRouteImplementationObjC;

@@ -75,6 +75,10 @@ void main() {
         final ownershipSnapshot =
             await JuceAudioEngine.getAudioRouteSnapshotV2();
         expect(ownershipSnapshot.implementation, BluetoothImplementationV2.v2);
+        expect(ownershipSnapshot.inputs, isEmpty);
+        expect(ownershipSnapshot.juce.inputDeviceName, isEmpty);
+        expect(ownershipSnapshot.juce.activeInputChannels, 0);
+        expect(ownershipSnapshot.juce.inputOpen, isFalse);
 
         final monitored = await JuceAudioEngine.startAudioRouteMonitoringV2();
         expect(monitored.coordinatorManaged, isTrue);
@@ -84,6 +88,8 @@ void main() {
         );
         expect(reapplied.succeeded, isTrue);
         expect(reapplied.snapshot.coordinatorManaged, isTrue);
+        expect(reapplied.snapshot.inputs, isEmpty);
+        expect(reapplied.snapshot.juce.inputDeviceName, isEmpty);
         expect(reapplied.snapshot.juce.activeInputChannels, 0);
         expect(
           (reapplied.snapshot.juce.activeOutputChannels ?? 0),

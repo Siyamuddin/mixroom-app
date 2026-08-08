@@ -2357,9 +2357,10 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     // }).detach();
 }
 
-+ (BOOL)initialisePlaybackV2ObjC
++ (BOOL)initialisePlaybackV2ObjC:(NSString *)outputDeviceName
 {
-    return JuceEngine::get().initialisePlaybackV2();
+    return JuceEngine::get().initialisePlaybackV2(
+        juceStringFromNSString(outputDeviceName));
 }
 
 + (BOOL)quiescePlaybackRouteV2ObjC:(BOOL)closeRemovedDevice

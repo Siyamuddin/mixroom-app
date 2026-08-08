@@ -1053,7 +1053,23 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         };
     }
 
-    if (![JuceBridge initialisePlaybackV2ObjC]) {
+    NSArray<NSDictionary<NSString *, id> *> *inventory =
+        MixroomCoreAudioDeviceInventory() ?: @[];
+    const AudioDeviceID expectedDefault = MixroomDefaultCoreAudioOutputDevice();
+    NSDictionary<NSString *, id> *target =
+        MixroomOutputForDeviceID(inventory, expectedDefault);
+    const BOOL targetUsable = target != nil &&
+        MixroomCoreAudioDeviceIsAlive(expectedDefault) &&
+        MixroomOutputNameIsUnique(inventory, target);
+    if (!targetUsable) {
+        return @{
+            @"success": @NO,
+            @"diagnosticCode": target == nil ? @"no_output" : @"actual_state_unavailable",
+            @"snapshot": [self buildAudioRouteSnapshotV2],
+        };
+    }
+    NSString *expectedFingerprint = MixroomEffectiveOutputFingerprint();
+    if (![JuceBridge initialisePlaybackV2ObjC:target[@"name"]]) {
         return @{
             @"success": @NO,
             @"diagnosticCode": @"juce_open_failed",
@@ -1069,6 +1085,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     NSArray *outputs = [snapshot[@"outputs"] isKindOfClass:[NSArray class]]
         ? snapshot[@"outputs"]
         : @[];
+    NSDictionary *actualOutput = outputs.count == 1 ? outputs.firstObject : nil;
     NSString *consistency =
         [snapshot[@"captureConsistency"] isKindOfClass:[NSString class]]
             ? snapshot[@"captureConsistency"]
@@ -1092,7 +1109,10 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         : nil;
 
     NSString *diagnosticCode = @"ok";
-    if (![consistency isEqualToString:@"stable"]) {
+    if (MixroomDefaultCoreAudioOutputDevice() != expectedDefault ||
+        ![MixroomEffectiveOutputFingerprint() isEqualToString:expectedFingerprint]) {
+        diagnosticCode = @"route_unstable";
+    } else if (![consistency isEqualToString:@"stable"]) {
         diagnosticCode = @"route_unstable";
     } else if (deviceOpen == nil || !deviceOpen.boolValue) {
         diagnosticCode = @"juce_open_failed";
@@ -1104,6 +1124,8 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     } else if (activeOutputs.integerValue <= 0 || outputs.count != 1) {
         diagnosticCode = @"no_output";
     } else if (sampleRate.doubleValue <= 0.0 || bufferFrames.integerValue <= 0) {
+        diagnosticCode = @"actual_state_unavailable";
+    } else if (![actualOutput[@"uid"] isEqualToString:target[@"uid"]]) {
         diagnosticCode = @"actual_state_unavailable";
     }
 
@@ -1192,6 +1214,43 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             self);
         [self updateObservedOutputDeviceV2:MixroomDefaultCoreAudioOutputDevice()];
     }
+    NSDictionary<NSString *, id> *snapshot = [self buildAudioRouteSnapshotV2];
+    NSArray *outputs = [snapshot[@"outputs"] isKindOfClass:[NSArray class]]
+        ? snapshot[@"outputs"]
+        : @[];
+    NSDictionary *actualOutput = outputs.count == 1 ? outputs.firstObject : nil;
+    NSArray<NSDictionary<NSString *, id> *> *inventory =
+        MixroomCoreAudioDeviceInventory() ?: @[];
+    NSDictionary<NSString *, id> *defaultOutput = MixroomOutputForDeviceID(
+        inventory,
+        MixroomDefaultCoreAudioOutputDevice());
+    const BOOL startupRouteMatchesDefault = defaultOutput != nil &&
+        actualOutput != nil &&
+        [actualOutput[@"uid"] isEqualToString:defaultOutput[@"uid"]];
+    if (!startupRouteMatchesDefault) {
+        if (self.eventSink == nil) {
+            [self stopAudioRouteMonitoringV2];
+            return @{
+                @"captureConsistency": @"unavailable",
+                @"unavailableReasons": @{
+                    @"coordinator": @"eventListenerUnavailable",
+                },
+            };
+        }
+        NSString *currentFingerprint = MixroomEffectiveOutputFingerprint();
+        self.audioRouteFingerprintV2 = currentFingerprint;
+        const BOOL wasPlaying = [JuceBridge quiescePlaybackRouteV2ObjC:NO];
+        self.routeTransitionWasPlayingV2 = wasPlaying;
+        self.audioRouteGenerationV2 += 1;
+        self.eventSink(@{
+            @"event": @"audioRouteChangedV2",
+            @"generation": @(self.audioRouteGenerationV2),
+            @"cause": @"startupOutputChanged",
+            @"fingerprint": currentFingerprint ?: @"",
+            @"transportWasPlaying": @(wasPlaying),
+            @"snapshot": [self buildAudioRouteSnapshotV2],
+        });
+    }
     return [self buildAudioRouteSnapshotV2];
 #else
     return @{
@@ -1276,6 +1335,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     NSArray<NSDictionary<NSString *, id> *> *inventory =
         MixroomCoreAudioDeviceInventory() ?: @[];
     const AudioDeviceID expectedDefault = MixroomDefaultCoreAudioOutputDevice();
+    NSString *expectedFingerprint = MixroomEffectiveOutputFingerprint();
     NSDictionary<NSString *, id> *target =
         MixroomOutputForDeviceID(inventory, expectedDefault);
     const BOOL targetUsable = target != nil &&
@@ -1308,14 +1368,15 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         ? snapshot[@"outputs"]
         : @[];
     NSDictionary *actualOutput = outputs.count == 1 ? outputs.firstObject : nil;
-    NSString *consistency = [snapshot[@"captureConsistency"] isKindOfClass:[NSString class]]
-        ? snapshot[@"captureConsistency"]
-        : @"unavailable";
+    NSString *actualFingerprint = MixroomEffectiveOutputFingerprint();
     NSString *diagnosticCode = @"ok";
-    if (!opened) {
-        diagnosticCode = @"fallback_failed";
-    } else if (![consistency isEqualToString:@"stable"]) {
+    if (generation != self.audioRouteGenerationV2 ||
+        MixroomDefaultCoreAudioOutputDevice() != expectedDefault) {
+        diagnosticCode = @"stale_generation";
+    } else if (![actualFingerprint isEqualToString:expectedFingerprint]) {
         diagnosticCode = @"route_unstable";
+    } else if (!opened) {
+        diagnosticCode = @"fallback_failed";
     } else if ([juce[@"activeInputChannels"] integerValue] != 0) {
         diagnosticCode = @"input_open";
     } else if (![juce[@"deviceOpen"] boolValue] ||
@@ -1327,9 +1388,6 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                target == nil ||
                ![actualOutput[@"uid"] isEqualToString:target[@"uid"]]) {
         diagnosticCode = @"actual_state_unavailable";
-    } else if (generation != self.audioRouteGenerationV2 ||
-               MixroomDefaultCoreAudioOutputDevice() != expectedDefault) {
-        diagnosticCode = @"stale_generation";
     } else if (usedFallback) {
         diagnosticCode = @"fallback_succeeded";
     }

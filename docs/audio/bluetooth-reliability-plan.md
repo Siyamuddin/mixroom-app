@@ -634,6 +634,18 @@ Deliverables:
 - attempt at most one unique built-in-output fallback; and
 - keep playback paused until the user deliberately resumes.
 
+The active macOS checkpoint uses these stable diagnostic codes: `ok`,
+`implementation_conflict`, `stale_generation`, `no_output`, `route_unstable`,
+`input_open`, `actual_state_unavailable`, `juce_open_failed`,
+`fallback_succeeded`, `fallback_failed`, and `coordinator_disposed`. Broader
+cross-platform codes above remain reserved for later phases.
+
+The initial WH-1000XM5 live-switching gate passed on 2026-08-09 after startup
+and transitions were consolidated onto one explicit output-only device open.
+Repeated speaker ↔ Bluetooth changes caused no headset reset or audible
+artifact. Changing output during playback paused the project, preserved the
+route transition, and resumed on the selected device only after user action.
+
 Exit gate: stable repeated Bluetooth → local → Bluetooth transitions on the
 available Mac, followed by broader Intel and Apple Silicon validation later.
 

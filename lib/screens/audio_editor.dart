@@ -9237,13 +9237,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _audioRouteCoordinatorV2 = coordinator;
         final initialRoute = await coordinator.start();
         if (!mounted) {
-          await coordinator.dispose();
+          await _shutdownAudioEngineV2Aware();
           return;
         }
         if (initialRoute.captureConsistency ==
             AudioRouteCaptureConsistencyV2.unavailable) {
-          await coordinator.dispose();
-          _audioRouteCoordinatorV2 = null;
+          await _shutdownAudioEngineV2Aware();
           _showSmallNotice(
             'Bluetooth 2.0 route monitoring is unavailable.',
           );
@@ -12581,8 +12580,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!mounted || state != AudioRouteCoordinatorStateV2.reconfiguring) {
       return;
     }
+    final pausedPosition = _isPlaying
+        ? _estimateTransportClockFromSample()
+        : _globalAudioClock;
+    _transportDesiredPlaying = false;
+    _transportCommandSerial++;
     _transportTicker?.stop();
-    setState(() => _isPlaying = false);
+    setState(() {
+      _isPlaying = false;
+      _syncTransportClock(pausedPosition, playing: false);
+    });
+    _stopMeterPolling();
   }
 
   void _handleAudioRouteTransitionV2(AudioRouteTransitionResultV2 result) {

@@ -2340,7 +2340,7 @@ void JuceEngine::clearMidiInputCallbacks()
 // ============================================================
 // Initialise / Shutdown
 // ============================================================
-void JuceEngine::initialiseEngine()
+void JuceEngine::initialiseEngine(const juce::String &v2OutputDeviceName)
 {
     GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
 
@@ -2387,31 +2387,37 @@ void JuceEngine::initialiseEngine()
 
     if (deviceManager.getCurrentAudioDevice() == nullptr)
     {
-        // On macOS, opening default input and output together can make JUCE create
-        // a CoreAudio aggregate/combiner device. V2 is always output-only.
-        const auto deviceError = deviceManager.initialise(
+        juce::String deviceError;
+        if (isV2PlaybackSession())
+        {
+            if (!openPlaybackOutputOnlyV2(v2OutputDeviceName))
+                deviceError = "V2 output-only device open failed";
+        }
+        else
+        {
+            deviceError = deviceManager.initialise(
 #if JUCE_MAC && !JUCE_IOS
-            0, // numInputChannels
+                0, // numInputChannels
 #else
-            isV2PlaybackSession() ? 0 : 2, // numInputChannels
+                2, // numInputChannels
 #endif
-            2, // numOutputChannels
-            nullptr,
-            true);
+                2, // numOutputChannels
+                nullptr,
+                true);
+        }
         if (deviceError.isNotEmpty())
         {
             juceLogToFlutter(("Audio device initialization failed: " + deviceError).toRawUTF8());
             return;
         }
 
+        if (!isV2PlaybackSession())
         {
             auto setup = deviceManager.getAudioDeviceSetup();
 
             setup.useDefaultInputChannels = false;
             setup.useDefaultOutputChannels = true;
             setup.inputChannels.clear();
-            if (isV2PlaybackSession())
-                setup.inputDeviceName = {};
 
             desiredInputOpenChannels.store(0, std::memory_order_relaxed);
             const auto setupError = deviceManager.setAudioDeviceSetup(setup, true);
@@ -2473,16 +2479,18 @@ void JuceEngine::initialiseEngine()
     engineInitialized = true;
 }
 
-bool JuceEngine::initialisePlaybackV2()
+bool JuceEngine::initialisePlaybackV2(const juce::String &outputDeviceName)
 {
 #if JUCE_MAC && !JUCE_IOS
+    if (outputDeviceName.isEmpty())
+        return false;
     if (engineInitialized)
         return audioRouteImplementation == AudioRouteImplementation::v2Playback;
     if (audioRouteImplementation != AudioRouteImplementation::none)
         return false;
 
     audioRouteImplementation = AudioRouteImplementation::v2Playback;
-    initialiseEngine();
+    initialiseEngine(outputDeviceName);
     if (!engineInitialized)
     {
         audioRouteImplementation = AudioRouteImplementation::none;
@@ -2490,6 +2498,52 @@ bool JuceEngine::initialisePlaybackV2()
     }
     return true;
 #else
+    return false;
+#endif
+}
+
+bool JuceEngine::openPlaybackOutputOnlyV2(const juce::String &outputDeviceName)
+{
+#if JUCE_MAC && !JUCE_IOS
+    if (!isV2PlaybackSession() || outputDeviceName.isEmpty())
+        return false;
+
+    deviceManager.closeAudioDevice();
+    juce::AudioDeviceManager::AudioDeviceSetup setup;
+    setup.inputDeviceName = {};
+    setup.outputDeviceName = outputDeviceName;
+    setup.sampleRate = 0.0;
+    setup.bufferSize = 0;
+    setup.useDefaultInputChannels = false;
+    setup.inputChannels.clear();
+    setup.useDefaultOutputChannels = true;
+    const auto error = deviceManager.initialise(
+        0,
+        2,
+        nullptr,
+        false,
+        {},
+        &setup);
+    if (error.isNotEmpty())
+    {
+        juceLogToFlutter(("V2 output-only open failed: " + error).toRawUTF8());
+        deviceManager.closeAudioDevice();
+        return false;
+    }
+
+    desiredInputOpenChannels.store(0, std::memory_order_relaxed);
+    liveInputMonitoringEnabled = false;
+    auto *device = deviceManager.getCurrentAudioDevice();
+    const bool valid = device != nullptr &&
+        device->getActiveInputChannels().countNumberOfSetBits() == 0 &&
+        device->getActiveOutputChannels().countNumberOfSetBits() > 0 &&
+        device->getCurrentSampleRate() > 1000.0 &&
+        device->getCurrentBufferSizeSamples() > 0;
+    if (!valid)
+        deviceManager.closeAudioDevice();
+    return valid;
+#else
+    juce::ignoreUnused(outputDeviceName);
     return false;
 #endif
 }
@@ -2523,44 +2577,10 @@ bool JuceEngine::reconfigurePlaybackRouteV2(const juce::String &outputDeviceName
         return false;
 
     quiescePlaybackRouteV2(false);
-    deviceManager.closeAudioDevice();
-    const auto openError = deviceManager.initialise(
-        0,
-        2,
-        nullptr,
-        false,
-        outputDeviceName);
-    if (openError.isNotEmpty())
-    {
-        juceLogToFlutter(("V2 output reopen failed: " + openError).toRawUTF8());
-        deviceManager.closeAudioDevice();
+    if (!openPlaybackOutputOnlyV2(outputDeviceName))
         return false;
-    }
 
-    auto setup = deviceManager.getAudioDeviceSetup();
-    setup.inputDeviceName = {};
-    setup.useDefaultInputChannels = false;
-    setup.inputChannels.clear();
-    setup.outputDeviceName = outputDeviceName;
-    setup.useDefaultOutputChannels = true;
-    const auto setupError = deviceManager.setAudioDeviceSetup(setup, true);
-    desiredInputOpenChannels.store(0, std::memory_order_relaxed);
-    liveInputMonitoringEnabled = false;
     auto *device = deviceManager.getCurrentAudioDevice();
-    const bool valid = setupError.isEmpty() &&
-        device != nullptr &&
-        device->getActiveInputChannels().countNumberOfSetBits() == 0 &&
-        device->getActiveOutputChannels().countNumberOfSetBits() > 0 &&
-        device->getCurrentSampleRate() > 1000.0 &&
-        device->getCurrentBufferSizeSamples() > 0;
-    if (!valid)
-    {
-        if (setupError.isNotEmpty())
-            juceLogToFlutter(("V2 playback-only setup failed: " + setupError).toRawUTF8());
-        deviceManager.closeAudioDevice();
-        return false;
-    }
-
     const double sampleRate = device->getCurrentSampleRate();
     hostSampleRateAtomic.store(sampleRate, std::memory_order_relaxed);
     prepareLiveClipProcessorsForCurrentDevice();
@@ -7140,7 +7160,19 @@ void JuceEngine::play()
     auto *dev = deviceManager.getCurrentAudioDevice();
     const bool missingOutputRoute =
         (dev == nullptr) || (dev->getActiveOutputChannels().countNumberOfSetBits() <= 0);
-    if (missingOutputRoute)
+    if (isV2PlaybackSession())
+    {
+        const bool invalidV2Route = v2PlaybackCallbackDetached ||
+            missingOutputRoute ||
+            dev->getActiveInputChannels().countNumberOfSetBits() != 0;
+        if (invalidV2Route)
+        {
+            pause();
+            juceLogToFlutter("V2 play blocked while output route is unavailable");
+            return;
+        }
+    }
+    else if (missingOutputRoute)
     {
         if (applyPreferredAudioDeviceSetup(0, true, "play-recover-output"))
             logCurrentAudioDeviceState("play:recovered-output-route");
@@ -7424,7 +7456,10 @@ juce::NamedValueSet JuceEngine::getEngineDiagnostics()
     out.set("pluginScanFailures", juce::var(pluginFailureValues));
     out.set("rowCount", (int)rows.size());
     out.set("clipCount", (int)clips.size());
-    out.set("inputDeviceName", getCurrentInputDeviceName());
+    const auto configuredInputName = isV2PlaybackSession()
+        ? deviceManager.getAudioDeviceSetup().inputDeviceName
+        : getCurrentInputDeviceName();
+    out.set("inputDeviceName", configuredInputName);
     out.set("outputDeviceName", getCurrentOutputDeviceName());
     out.set("inputChannelCount",
             device != nullptr ? device->getActiveInputChannels().countNumberOfSetBits() : 0);

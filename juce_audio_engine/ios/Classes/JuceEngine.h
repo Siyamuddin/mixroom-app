@@ -5833,8 +5833,8 @@ public:
 
     static JuceEngine &get();
 
-    void initialiseEngine();
-    bool initialisePlaybackV2();
+    void initialiseEngine(const juce::String &v2OutputDeviceName = {});
+    bool initialisePlaybackV2(const juce::String &outputDeviceName);
     bool quiescePlaybackRouteV2(bool closeRemovedDevice);
     bool reconfigurePlaybackRouteV2(const juce::String &outputDeviceName);
     juce::String getAudioRouteImplementationName() const;
@@ -6262,6 +6262,7 @@ private:
     AudioRouteImplementation audioRouteImplementation =
         AudioRouteImplementation::none;
     bool v2PlaybackCallbackDetached = false;
+    bool openPlaybackOutputOnlyV2(const juce::String &outputDeviceName);
     juce::AudioFormatManager formatManager;
     juce::AudioPluginFormatManager pluginFormatManager;
     juce::AudioProcessorGraph graph;
