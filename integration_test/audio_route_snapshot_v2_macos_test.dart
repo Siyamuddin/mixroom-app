@@ -74,10 +74,22 @@ void main() {
         await JuceAudioEngine.initialise();
         final ownershipSnapshot =
             await JuceAudioEngine.getAudioRouteSnapshotV2();
-        expect(
-          ownershipSnapshot.implementation,
-          BluetoothImplementationV2.v2,
+        expect(ownershipSnapshot.implementation, BluetoothImplementationV2.v2);
+
+        final monitored = await JuceAudioEngine.startAudioRouteMonitoringV2();
+        expect(monitored.coordinatorManaged, isTrue);
+        expect(monitored.generation, 0);
+        final reapplied = await JuceAudioEngine.applyAudioRouteConfigurationV2(
+          0,
         );
+        expect(reapplied.succeeded, isTrue);
+        expect(reapplied.snapshot.coordinatorManaged, isTrue);
+        expect(reapplied.snapshot.juce.activeInputChannels, 0);
+        expect(
+          (reapplied.snapshot.juce.activeOutputChannels ?? 0),
+          greaterThan(0),
+        );
+        JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(reapplied);
 
         for (var index = 0; index < 20; index++) {
           final snapshot = await JuceAudioEngine.getAudioRouteSnapshotV2();
@@ -93,7 +105,12 @@ void main() {
           expect((snapshot.juce.bufferFrames ?? 0), greaterThan(0));
         }
         expect(await JuceAudioEngine.validatePlaybackV2(), isTrue);
+        await JuceAudioEngine.stopAudioRouteMonitoringV2();
+        final afterMonitoring = await JuceAudioEngine.getAudioRouteSnapshotV2();
+        expect(afterMonitoring.coordinatorManaged, isFalse);
+        expect(afterMonitoring.juce.deviceOpen, isTrue);
       } finally {
+        await JuceAudioEngine.stopAudioRouteMonitoringV2();
         await JuceAudioEngine.shutdown();
       }
 

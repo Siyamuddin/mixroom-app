@@ -2494,6 +2494,90 @@ bool JuceEngine::initialisePlaybackV2()
 #endif
 }
 
+bool JuceEngine::quiescePlaybackRouteV2(bool closeRemovedDevice)
+{
+#if JUCE_MAC && !JUCE_IOS
+    if (!engineInitialized || !isV2PlaybackSession())
+        return false;
+
+    const bool wasPlaying = isPlayingAtomic.load(std::memory_order_relaxed);
+    pause();
+    if (!v2PlaybackCallbackDetached && metronomeCallback != nullptr)
+    {
+        deviceManager.removeAudioCallback(metronomeCallback.get());
+        v2PlaybackCallbackDetached = true;
+    }
+    if (closeRemovedDevice)
+        deviceManager.closeAudioDevice();
+    return wasPlaying;
+#else
+    juce::ignoreUnused(closeRemovedDevice);
+    return false;
+#endif
+}
+
+bool JuceEngine::reconfigurePlaybackRouteV2(const juce::String &outputDeviceName)
+{
+#if JUCE_MAC && !JUCE_IOS
+    if (!engineInitialized || !isV2PlaybackSession() || outputDeviceName.isEmpty())
+        return false;
+
+    quiescePlaybackRouteV2(false);
+    deviceManager.closeAudioDevice();
+    const auto openError = deviceManager.initialise(
+        0,
+        2,
+        nullptr,
+        false,
+        outputDeviceName);
+    if (openError.isNotEmpty())
+    {
+        juceLogToFlutter(("V2 output reopen failed: " + openError).toRawUTF8());
+        deviceManager.closeAudioDevice();
+        return false;
+    }
+
+    auto setup = deviceManager.getAudioDeviceSetup();
+    setup.inputDeviceName = {};
+    setup.useDefaultInputChannels = false;
+    setup.inputChannels.clear();
+    setup.outputDeviceName = outputDeviceName;
+    setup.useDefaultOutputChannels = true;
+    const auto setupError = deviceManager.setAudioDeviceSetup(setup, true);
+    desiredInputOpenChannels.store(0, std::memory_order_relaxed);
+    liveInputMonitoringEnabled = false;
+    auto *device = deviceManager.getCurrentAudioDevice();
+    const bool valid = setupError.isEmpty() &&
+        device != nullptr &&
+        device->getActiveInputChannels().countNumberOfSetBits() == 0 &&
+        device->getActiveOutputChannels().countNumberOfSetBits() > 0 &&
+        device->getCurrentSampleRate() > 1000.0 &&
+        device->getCurrentBufferSizeSamples() > 0;
+    if (!valid)
+    {
+        if (setupError.isNotEmpty())
+            juceLogToFlutter(("V2 playback-only setup failed: " + setupError).toRawUTF8());
+        deviceManager.closeAudioDevice();
+        return false;
+    }
+
+    const double sampleRate = device->getCurrentSampleRate();
+    hostSampleRateAtomic.store(sampleRate, std::memory_order_relaxed);
+    prepareLiveClipProcessorsForCurrentDevice();
+    armOutputSafetyForCurrentRoute();
+    if (v2PlaybackCallbackDetached && metronomeCallback != nullptr)
+    {
+        deviceManager.addAudioCallback(metronomeCallback.get());
+        v2PlaybackCallbackDetached = false;
+    }
+    logCurrentAudioDeviceState("v2-route-transition");
+    return true;
+#else
+    juce::ignoreUnused(outputDeviceName);
+    return false;
+#endif
+}
+
 juce::String JuceEngine::getAudioRouteImplementationName() const
 {
     switch (audioRouteImplementation)
@@ -2626,6 +2710,7 @@ void JuceEngine::shutdownEngine()
     }
     busGraphInitialised = false;
     engineInitialized = false;
+    v2PlaybackCallbackDetached = false;
     audioRouteImplementation = AudioRouteImplementation::none;
 }
 

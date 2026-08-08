@@ -2362,6 +2362,17 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     return JuceEngine::get().initialisePlaybackV2();
 }
 
++ (BOOL)quiescePlaybackRouteV2ObjC:(BOOL)closeRemovedDevice
+{
+    return JuceEngine::get().quiescePlaybackRouteV2(closeRemovedDevice);
+}
+
++ (BOOL)reconfigurePlaybackRouteV2ObjC:(NSString *)outputDeviceName
+{
+    return JuceEngine::get().reconfigurePlaybackRouteV2(
+        juceStringFromNSString(outputDeviceName));
+}
+
 + (NSString *)getAudioRouteImplementationObjC
 {
     const auto value = JuceEngine::get().getAudioRouteImplementationName();

@@ -124,6 +124,7 @@ import 'package:fftea/fftea.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:juce_audio_engine/audio_route_coordinator_v2.dart';
 import 'package:juce_audio_engine/audio_route_v2.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
 import 'package:mixroom/helpers/bluetooth_route_report_v2.dart';
@@ -5671,6 +5672,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   final Set<LogicalKeyboardKey> _desktopMidiHeldKeys = <LogicalKeyboardKey>{};
   Timer? _midiDevicePollTimer;
   StreamSubscription<Map<String, dynamic>>? _juceEngineEventSubscription;
+  AudioRouteCoordinatorV2? _audioRouteCoordinatorV2;
   StreamSubscription<List<DesktopFileDropItem>>? _desktopFinderDropSub;
   bool _midiDevicePollBusy = false;
   Map<String, String> _knownMidiDevicesById = <String, String>{};
@@ -9226,6 +9228,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _juceEngineEventSubscription ??= JuceAudioEngine.eventsStream.listen(
         _handleJuceEngineEvent,
       );
+      if (_isBluetoothV2Session) {
+        final coordinator = AudioRouteCoordinatorV2(
+          adapter: const MethodChannelAudioRouteAdapterV2(),
+          onStateChanged: _handleAudioRouteCoordinatorStateV2,
+          onTransition: _handleAudioRouteTransitionV2,
+        );
+        _audioRouteCoordinatorV2 = coordinator;
+        final initialRoute = await coordinator.start();
+        if (!mounted) {
+          await coordinator.dispose();
+          return;
+        }
+        if (initialRoute.captureConsistency ==
+            AudioRouteCaptureConsistencyV2.unavailable) {
+          await coordinator.dispose();
+          _audioRouteCoordinatorV2 = null;
+          _showSmallNotice(
+            'Bluetooth 2.0 route monitoring is unavailable.',
+          );
+          setState(() => _isLoadingNextScreen = false);
+          return;
+        }
+      }
       await _refreshPlatformCapabilities();
       if (!_isBluetoothV2Session) {
         await _refreshMicrophonePermissionState();
@@ -12407,8 +12432,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _meters.dispose();
     _transportClock.dispose();
     _timelineController.dispose();
-    unawaited(JuceAudioEngine.shutdown());
+    unawaited(_shutdownAudioEngineV2Aware());
     super.dispose();
+  }
+
+  Future<void> _shutdownAudioEngineV2Aware() async {
+    final coordinator = _audioRouteCoordinatorV2;
+    _audioRouteCoordinatorV2 = null;
+    await coordinator?.dispose();
+    await JuceAudioEngine.shutdown();
   }
 
   @override
@@ -12510,6 +12542,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<bool> _ensurePlaybackRouteReady({required String reason}) async {
     if (_isBluetoothV2Session) {
+      if (_audioRouteCoordinatorV2?.state !=
+          AudioRouteCoordinatorStateV2.stable) {
+        if (mounted) {
+          _showSmallNotice('Bluetooth 2.0 audio output is not ready yet.');
+        }
+        return false;
+      }
       final ready = await JuceAudioEngine.validatePlaybackV2();
       if (!ready && mounted) {
         _showSmallNotice(
@@ -12534,6 +12573,45 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       debugPrint('preparePlaybackRoute failed: $reason');
     }
     return ok;
+  }
+
+  void _handleAudioRouteCoordinatorStateV2(
+    AudioRouteCoordinatorStateV2 state,
+  ) {
+    if (!mounted || state != AudioRouteCoordinatorStateV2.reconfiguring) {
+      return;
+    }
+    _transportTicker?.stop();
+    setState(() => _isPlaying = false);
+  }
+
+  void _handleAudioRouteTransitionV2(AudioRouteTransitionResultV2 result) {
+    if (!mounted) return;
+    if (!result.succeeded) {
+      _showSmallNotice(
+        'Audio output is unavailable. Choose an output in macOS.',
+      );
+      return;
+    }
+
+    JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+    if (result.status == AudioRouteTransitionStatusV2.fallback) {
+      _showSmallNotice(
+        'Audio device disconnected. Using Mac speakers. Press Play to continue.',
+      );
+      return;
+    }
+
+    final juceName = result.snapshot.juce.outputDeviceName?.trim() ?? '';
+    final endpointName = result.snapshot.outputs.isEmpty
+        ? ''
+        : result.snapshot.outputs.first.name.trim();
+    final outputName = juceName.isNotEmpty
+        ? juceName
+        : (endpointName.isNotEmpty ? endpointName : 'Mac output');
+    _showSmallNotice(
+      'Audio output changed to $outputName. Press Play to continue.',
+    );
   }
 
   Future<void> _flushDeferredAndroidRouteRefreshIfNeeded() async {
@@ -16745,7 +16823,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       for (var track in _audioTracks) {
         track.audioStartTimer?.cancel();
       }
-      await JuceAudioEngine.shutdown();
+      await _shutdownAudioEngineV2Aware();
       Navigator.of(context).pop();
     }
   }

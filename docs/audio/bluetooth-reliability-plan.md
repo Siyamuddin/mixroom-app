@@ -2,9 +2,9 @@
 
 ## Document status
 
-- Status: shared contracts, macOS read-only evidence, and session isolation are
-  complete through `bcf595d3`. The first active macOS V2 playback-startup slice
-  is implemented as the next independent checkpoint. Live route handling and
+- Status: the first active macOS V2 playback-startup slice is complete through
+  `3606fa59`, and the shared live-route coordinator contract is complete in
+  `a44229b3`. The active macOS live-output adapter is the current checkpoint;
   later platform phases remain unapproved.
 - Applies to: Android, iOS, and macOS.
 - Excludes: Windows and every other unsupported platform.
@@ -612,7 +612,13 @@ Deliverables:
 
 Exit gate: built-in output passes native lifecycle tests; the physically
 connected Bluetooth headset passes the same startup and playback checks; V2
-never opens an input or invokes Legacy repair/prewarm behavior.
+never opens an input or invokes Legacy repair/prewarm behavior. Completed by
+commit `3606fa59`.
+
+Manual WH-1000XM5 evidence on 2026-08-08 confirmed clean 44.1 kHz playback with
+a 512-frame hardware buffer, zero active JUCE input channels, no microphone-use
+indicator, no callback overruns, and stable coexistence with Spotify. Legacy
+opened one input channel and lost output after Spotify paused; V2 did not.
 
 ### Phase 4 — macOS V2 live playback consistency
 
@@ -620,10 +626,13 @@ Scope: macOS playback and route changes only; no recording.
 
 Deliverables:
 
-- Core Audio output transport classification;
-- default/selected output observer through the coordinator;
-- playback-only startup and verified settings; and
-- confirmation that no unsafe aggregate/combiner is created.
+- observe only effective Core Audio default-output, inventory, and active-device
+  availability changes;
+- immediately pause transport and invalidate a removed output;
+- serialize the newest native generation through `AudioRouteCoordinatorV2`;
+- reopen the system output with zero inputs and verified native settings;
+- attempt at most one unique built-in-output fallback; and
+- keep playback paused until the user deliberately resumes.
 
 Exit gate: stable repeated Bluetooth → local → Bluetooth transitions on the
 available Mac, followed by broader Intel and Apple Silicon validation later.
@@ -825,10 +834,9 @@ Each run records:
 
 ## Immediate next step
 
-Connect the WH-1000XM4 before opening the editor and run the same project once
-with Legacy and once with Bluetooth 2.0. Confirm that V2 playback is clean, its
-report shows zero active inputs and valid actual hardware settings, and project
-or export settings did not change. If that startup slice passes, review its
-evidence before approving the next checkpoint: a compact serialized macOS route
-coordinator for live connect/disconnect. Do not add recording, monitoring,
-adaptive tuning, or another platform in that checkpoint.
+Validate the active macOS live-output coordinator with the WH-1000XM5: switch
+built-in → Bluetooth → built-in while stopped and playing, disconnect and
+reconnect repeatedly, and verify that transport pauses without losing position,
+input remains closed, the new output is verified within two seconds, and the
+user can deliberately resume. Do not add recording, monitoring, adaptive
+tuning, or another platform until this checkpoint passes.
