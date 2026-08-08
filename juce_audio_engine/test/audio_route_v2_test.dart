@@ -230,4 +230,49 @@ void main() {
       AudioRouteCaptureConsistencyV2.unavailable,
     );
   });
+
+  test('route-change event preserves generation and tolerates future fields',
+      () {
+    final event = AudioRouteChangeEventV2.fromMap(<String, dynamic>{
+      'generation': 7,
+      'cause': 'defaultOutputChanged',
+      'fingerprint': 'output-7',
+      'transportWasPlaying': true,
+      'snapshot': <String, dynamic>{
+        'implementation': 'v2',
+        'generation': 7,
+        'captureConsistency': 'stable',
+      },
+      'futureField': <String, Object>{'ignored': true},
+    });
+
+    expect(event.generation, 7);
+    expect(event.fingerprint, 'output-7');
+    expect(event.transportWasPlaying, isTrue);
+    expect(event.snapshot.implementation, BluetoothImplementationV2.v2);
+  });
+
+  test('transition result parses fallback and fails closed without snapshot',
+      () {
+    final fallback = AudioRouteTransitionResultV2.fromMap(<String, dynamic>{
+      'status': 'fallback',
+      'generation': 9,
+      'transitionId': 3,
+      'diagnosticCode': 'fallback_succeeded',
+      'elapsedMs': 24,
+      'snapshot': <String, dynamic>{
+        'implementation': 'v2',
+        'captureConsistency': 'stable',
+      },
+    });
+    final malformed = AudioRouteTransitionResultV2.fromMap(<String, dynamic>{});
+
+    expect(fallback.succeeded, isTrue);
+    expect(fallback.status, AudioRouteTransitionStatusV2.fallback);
+    expect(malformed.succeeded, isFalse);
+    expect(
+      malformed.snapshot.captureConsistency,
+      AudioRouteCaptureConsistencyV2.unavailable,
+    );
+  });
 }

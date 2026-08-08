@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'audio_route_coordinator_v2.dart';
 import 'audio_route_snapshot_provider_v2.dart';
 import 'audio_route_v2.dart';
 
@@ -43,6 +44,38 @@ class JuceEngineCapabilities {
       'supportedPluginFormats': supportedPluginFormats,
       'nativePluginEditor': nativePluginEditor,
     };
+  }
+}
+
+class MethodChannelAudioRouteAdapterV2 implements AudioRouteAdapterV2 {
+  const MethodChannelAudioRouteAdapterV2({this.platformOverride});
+
+  final TargetPlatform? platformOverride;
+
+  @override
+  Stream<AudioRouteChangeEventV2> get events =>
+      JuceAudioEngine.audioRouteChangeEventsV2;
+
+  @override
+  Future<AudioRouteSnapshotV2> startMonitoring() {
+    return JuceAudioEngine.startAudioRouteMonitoringV2(
+      platformOverride: platformOverride,
+    );
+  }
+
+  @override
+  Future<AudioRouteTransitionResultV2> applyPlaybackRoute(int generation) {
+    return JuceAudioEngine.applyAudioRouteConfigurationV2(
+      generation,
+      platformOverride: platformOverride,
+    );
+  }
+
+  @override
+  Future<void> stopMonitoring() {
+    return JuceAudioEngine.stopAudioRouteMonitoringV2(
+      platformOverride: platformOverride,
+    );
   }
 }
 
@@ -249,12 +282,17 @@ class JuceAudioEngine {
       MethodChannelAudioRouteSnapshotProviderV2();
   static AudioRouteSnapshotV2? _v2StartupSnapshot;
 
-  static Stream<Map<String, dynamic>> get _events => _eventCh
+  static final Stream<Map<String, dynamic>> _events = _eventCh
       .receiveBroadcastStream()
       .cast<Map<dynamic, dynamic>>()
-      .map((e) => Map<String, dynamic>.from(e));
+      .map((e) => Map<String, dynamic>.from(e))
+      .asBroadcastStream();
 
   static Stream<Map<String, dynamic>> get eventsStream => _events;
+
+  static Stream<AudioRouteChangeEventV2> get audioRouteChangeEventsV2 => _events
+      .where((event) => event['event'] == 'audioRouteChangedV2')
+      .map(AudioRouteChangeEventV2.fromMap);
 
   static void initialiseEventListeners() {
     try {
@@ -363,6 +401,107 @@ class JuceAudioEngine {
         },
       }),
     );
+  }
+
+  static Future<AudioRouteSnapshotV2> startAudioRouteMonitoringV2({
+    TargetPlatform? platformOverride,
+  }) async {
+    if (kIsWeb ||
+        (platformOverride ?? defaultTargetPlatform) != TargetPlatform.macOS) {
+      return _unavailableRouteSnapshotV2('macOSOnlyCheckpoint');
+    }
+    try {
+      final raw = await _ch.invokeMethod<Map<dynamic, dynamic>>(
+        'startAudioRouteMonitoringV2',
+      );
+      if (raw == null) {
+        return _unavailableRouteSnapshotV2('nativeMonitoringUnavailable');
+      }
+      return AudioRouteSnapshotV2.fromMap(Map<String, dynamic>.from(raw));
+    } on MissingPluginException {
+      return _unavailableRouteSnapshotV2('nativeMonitoringUnavailable');
+    } on PlatformException catch (error) {
+      return _unavailableRouteSnapshotV2(
+        error.code.isEmpty ? 'nativeMonitoringUnavailable' : error.code,
+      );
+    }
+  }
+
+  static Future<AudioRouteTransitionResultV2> applyAudioRouteConfigurationV2(
+    int generation, {
+    TargetPlatform? platformOverride,
+  }) async {
+    if (kIsWeb ||
+        (platformOverride ?? defaultTargetPlatform) != TargetPlatform.macOS) {
+      return _unavailableRouteTransitionV2(generation);
+    }
+    try {
+      final raw = await _ch.invokeMethod<Map<dynamic, dynamic>>(
+        'applyAudioRouteConfigurationV2',
+        <String, Object>{
+          'generation': generation,
+          'intent': 'playbackOnly',
+          'desiredInputChannels': 0,
+          'followSystemOutput': true,
+          'allowBuiltInFallback': true,
+        },
+      );
+      if (raw == null) return _unavailableRouteTransitionV2(generation);
+      return AudioRouteTransitionResultV2.fromMap(
+        Map<String, dynamic>.from(raw),
+      );
+    } on MissingPluginException {
+      return _unavailableRouteTransitionV2(generation);
+    } on PlatformException catch (error) {
+      return _unavailableRouteTransitionV2(
+        generation,
+        error.code.isEmpty ? 'actual_state_unavailable' : error.code,
+      );
+    }
+  }
+
+  static Future<void> stopAudioRouteMonitoringV2({
+    TargetPlatform? platformOverride,
+  }) async {
+    if (kIsWeb ||
+        (platformOverride ?? defaultTargetPlatform) != TargetPlatform.macOS) {
+      return;
+    }
+    try {
+      await _ch.invokeMethod<void>('stopAudioRouteMonitoringV2');
+    } on MissingPluginException {
+      return;
+    } on PlatformException catch (error) {
+      _logError('stopAudioRouteMonitoringV2', error);
+    }
+  }
+
+  static AudioRouteSnapshotV2 _unavailableRouteSnapshotV2(String reason) {
+    return AudioRouteSnapshotV2.fromMap(<String, dynamic>{
+      'captureConsistency': 'unavailable',
+      'unavailableReasons': <String, String>{'coordinator': reason},
+    });
+  }
+
+  static AudioRouteTransitionResultV2 _unavailableRouteTransitionV2(
+    int generation, [
+    String diagnosticCode = 'actual_state_unavailable',
+  ]) {
+    return AudioRouteTransitionResultV2(
+      status: AudioRouteTransitionStatusV2.failure,
+      generation: generation,
+      transitionId: 0,
+      diagnosticCode: diagnosticCode,
+      elapsedMs: 0,
+      transportWasPlaying: false,
+      snapshot: _unavailableRouteSnapshotV2('nativeApplyUnavailable'),
+    );
+  }
+
+  static void acceptVerifiedAudioRouteTransitionV2(
+    AudioRouteTransitionResultV2 result,
+  ) {
+    if (result.succeeded) _v2StartupSnapshot = result.snapshot;
   }
 
   static Future<bool> validatePlaybackV2() async {

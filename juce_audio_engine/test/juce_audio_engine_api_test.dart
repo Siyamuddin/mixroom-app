@@ -78,6 +78,35 @@ void main() {
               'unavailableReasons': <String, String>{},
             },
           };
+        case 'startAudioRouteMonitoringV2':
+          return <String, dynamic>{
+            'implementation': 'v2',
+            'generation': 0,
+            'transitionId': 0,
+            'coordinatorManaged': true,
+            'captureConsistency': 'stable',
+          };
+        case 'applyAudioRouteConfigurationV2':
+          final arguments =
+              Map<String, dynamic>.from(methodCall.arguments as Map);
+          final generation = (arguments['generation'] as num).toInt();
+          return <String, dynamic>{
+            'status': 'success',
+            'generation': generation,
+            'transitionId': 1,
+            'diagnosticCode': 'ok',
+            'elapsedMs': 3,
+            'transportWasPlaying': false,
+            'snapshot': <String, dynamic>{
+              'implementation': 'v2',
+              'generation': generation,
+              'transitionId': 1,
+              'coordinatorManaged': true,
+              'captureConsistency': 'stable',
+            },
+          };
+        case 'stopAudioRouteMonitoringV2':
+          return null;
         case 'getInputDeviceInfos':
           return <Map<String, dynamic>>[
             <String, dynamic>{
@@ -143,6 +172,57 @@ void main() {
 
     expect(result.success, isFalse);
     expect(result.diagnosticCode, 'actual_state_unavailable');
+    expect(calls, isEmpty);
+  });
+
+  test('V2 route coordinator methods use the isolated native contract',
+      () async {
+    final initial = await JuceAudioEngine.startAudioRouteMonitoringV2(
+      platformOverride: TargetPlatform.macOS,
+    );
+    final result = await JuceAudioEngine.applyAudioRouteConfigurationV2(
+      12,
+      platformOverride: TargetPlatform.macOS,
+    );
+    await JuceAudioEngine.stopAudioRouteMonitoringV2(
+      platformOverride: TargetPlatform.macOS,
+    );
+
+    expect(initial.coordinatorManaged, isTrue);
+    expect(result.generation, 12);
+    expect(result.succeeded, isTrue);
+    expect(
+      calls.map((call) => call.method),
+      <String>[
+        'startAudioRouteMonitoringV2',
+        'applyAudioRouteConfigurationV2',
+        'stopAudioRouteMonitoringV2',
+      ],
+    );
+    expect(
+      Map<String, dynamic>.from(calls[1].arguments as Map),
+      containsPair('desiredInputChannels', 0),
+    );
+  });
+
+  test('V2 route coordinator methods stay native-call-free off macOS',
+      () async {
+    final initial = await JuceAudioEngine.startAudioRouteMonitoringV2(
+      platformOverride: TargetPlatform.iOS,
+    );
+    final result = await JuceAudioEngine.applyAudioRouteConfigurationV2(
+      4,
+      platformOverride: TargetPlatform.android,
+    );
+    await JuceAudioEngine.stopAudioRouteMonitoringV2(
+      platformOverride: TargetPlatform.iOS,
+    );
+
+    expect(
+      initial.captureConsistency,
+      AudioRouteCaptureConsistencyV2.unavailable,
+    );
+    expect(result.succeeded, isFalse);
     expect(calls, isEmpty);
   });
 

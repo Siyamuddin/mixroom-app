@@ -30,6 +30,15 @@ enum AudioHardwareRatePolicyV2 { native, prefer48000 }
 
 enum AudioBufferPolicyV2 { routeNative, conservativeBluetooth }
 
+enum AudioRouteCoordinatorStateV2 {
+  stable,
+  preparingInput,
+  reconfiguring,
+  failed,
+}
+
+enum AudioRouteTransitionStatusV2 { success, fallback, failure }
+
 String _wireName(Object value) => value.toString().split('.').last;
 
 T _enumFromWire<T extends Enum>(
@@ -357,6 +366,91 @@ class AudioPlaybackStartupResultV2 {
                 'captureConsistency': 'unavailable',
                 'unavailableReasons': <String, String>{
                   'startup.snapshot': 'missingFromNativeResult',
+                },
+              },
+      ),
+    );
+  }
+}
+
+class AudioRouteChangeEventV2 {
+  const AudioRouteChangeEventV2({
+    required this.generation,
+    required this.cause,
+    required this.fingerprint,
+    required this.transportWasPlaying,
+    required this.snapshot,
+  });
+
+  final int generation;
+  final String cause;
+  final String fingerprint;
+  final bool transportWasPlaying;
+  final AudioRouteSnapshotV2 snapshot;
+
+  factory AudioRouteChangeEventV2.fromMap(Map<String, dynamic> map) {
+    final rawSnapshot = map['snapshot'];
+    return AudioRouteChangeEventV2(
+      generation: _nullableInt(map['generation']) ?? 0,
+      cause: map['cause']?.toString() ?? 'unknown',
+      fingerprint: map['fingerprint']?.toString() ?? '',
+      transportWasPlaying: map['transportWasPlaying'] == true,
+      snapshot: AudioRouteSnapshotV2.fromMap(
+        rawSnapshot is Map
+            ? Map<String, dynamic>.from(rawSnapshot)
+            : <String, dynamic>{
+                'captureConsistency': 'unavailable',
+                'unavailableReasons': <String, String>{
+                  'routeEvent.snapshot': 'missingFromNativeEvent',
+                },
+              },
+      ),
+    );
+  }
+}
+
+class AudioRouteTransitionResultV2 {
+  const AudioRouteTransitionResultV2({
+    required this.status,
+    required this.generation,
+    required this.transitionId,
+    required this.diagnosticCode,
+    required this.elapsedMs,
+    required this.transportWasPlaying,
+    required this.snapshot,
+  });
+
+  final AudioRouteTransitionStatusV2 status;
+  final int generation;
+  final int transitionId;
+  final String diagnosticCode;
+  final int elapsedMs;
+  final bool transportWasPlaying;
+  final AudioRouteSnapshotV2 snapshot;
+
+  bool get succeeded => status != AudioRouteTransitionStatusV2.failure;
+
+  factory AudioRouteTransitionResultV2.fromMap(Map<String, dynamic> map) {
+    final rawSnapshot = map['snapshot'];
+    return AudioRouteTransitionResultV2(
+      status: _enumFromWire(
+        AudioRouteTransitionStatusV2.values,
+        map['status'],
+        AudioRouteTransitionStatusV2.failure,
+      ),
+      generation: _nullableInt(map['generation']) ?? 0,
+      transitionId: _nullableInt(map['transitionId']) ?? 0,
+      diagnosticCode:
+          map['diagnosticCode']?.toString() ?? 'actual_state_unavailable',
+      elapsedMs: _nullableInt(map['elapsedMs']) ?? 0,
+      transportWasPlaying: map['transportWasPlaying'] == true,
+      snapshot: AudioRouteSnapshotV2.fromMap(
+        rawSnapshot is Map
+            ? Map<String, dynamic>.from(rawSnapshot)
+            : <String, dynamic>{
+                'captureConsistency': 'unavailable',
+                'unavailableReasons': <String, String>{
+                  'transition.snapshot': 'missingFromNativeResult',
                 },
               },
       ),
