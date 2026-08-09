@@ -2,10 +2,10 @@
 
 ## Document status
 
-- Status: the first active macOS V2 playback-startup slice is complete through
-  `3606fa59`, and the shared live-route coordinator contract is complete in
-  `a44229b3`. The active macOS live-output adapter is the current checkpoint;
-  later platform phases remain unapproved.
+- Status: the macOS V2 playback and live-output checkpoints are complete. The
+  Android Legacy audio/MIDI baseline has been restored from the proven `main`
+  implementation; its physical-device gate is pending before any Android V2
+  work may begin.
 - Applies to: Android, iOS, and macOS.
 - Excludes: Windows and every other unsupported platform.
 - Current production implementation: Legacy Bluetooth only.
@@ -653,6 +653,17 @@ available Mac, followed by broader Intel and Apple Silicon validation later.
 
 Scope: Android playback only; no recording.
 
+Prerequisite baseline status (2026-08-10): the established mobile MIDI render,
+processor-replacement, preview-readiness, and bounded graph-repair changes have
+been restored without adding an Android V2 path. MIDI readiness and Bluetooth
+contract tests pass, and Android, macOS, and unsigned iOS debug builds succeed.
+The Android on-device meter test and short audible built-in-speaker check remain
+the exit gate because the Samsung test phone was not connected during automated
+verification. Unrelated baseline test defects remain documented: the JVM plugin
+template attempts to load the unavailable native library, the iOS asset-style
+assertion detects pre-existing hardcoded SFZ paths, and two tablet row-gain
+interaction tests fail independently of the audio/MIDI changes.
+
 Deliverables:
 
 - A2DP/SCO/LE classification;
@@ -846,9 +857,9 @@ Each run records:
 
 ## Immediate next step
 
-Validate the active macOS live-output coordinator with the WH-1000XM5: switch
-built-in → Bluetooth → built-in while stopped and playing, disconnect and
-reconnect repeatedly, and verify that transport pauses without losing position,
-input remains closed, the new output is verified within two seconds, and the
-user can deliberately resume. Do not add recording, monitoring, adaptive
-tuning, or another platform until this checkpoint passes.
+Connect the Samsung test phone with Bluetooth disconnected and run the Android
+Legacy MIDI integration test. Require measurable output for sampled preview,
+timeline playback, multiple rows, Basic Synth, round-robin samples, and live
+MIDI events. Then perform one short built-in-speaker project check covering
+audio, MIDI, transport, metronome, and one effect. Do not implement Android V2
+until this baseline passes.
