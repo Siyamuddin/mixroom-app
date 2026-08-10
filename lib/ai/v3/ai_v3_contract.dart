@@ -1215,7 +1215,11 @@ void _validateCommand(String type, Map<String, dynamic> args, {
         'reset_fx',
         'reference',
       ]);
-      _validateMixTarget(type, args['target']);
+      _validateMixTarget(
+        type,
+        args['target'],
+        allowResourceRefs: allowResourceRefs,
+      );
       final intents = args['intents'];
       if (intents is! List || intents.isEmpty || intents.length > 4) {
         throw const AiV3ContractException('v3_mix_intents_invalid');
@@ -1307,7 +1311,11 @@ void _validateMidiNotes(Object? raw) {
   }
 }
 
-void _validateMixTarget(String type, Object? raw) {
+void _validateMixTarget(
+  String type,
+  Object? raw, {
+  required bool allowResourceRefs,
+}) {
   if (raw is! Map) {
     throw AiV3ContractException('v3_$type.target_invalid');
   }
@@ -1315,6 +1323,15 @@ void _validateMixTarget(String type, Object? raw) {
   final scope = target['scope'];
   switch (scope) {
     case 'row':
+      if (allowResourceRefs && target['row_ref'] != null) {
+        _requireExactKeys(
+          target,
+          const <String>{'scope', 'row_ref'},
+          'v3_$type.target_invalid',
+        );
+        _parseResourceRef(target['row_ref']);
+        return;
+      }
       _requireExactKeys(
         target,
         const <String>{'scope', 'row_id'},
@@ -1325,6 +1342,15 @@ void _validateMixTarget(String type, Object? raw) {
       }
       return;
     case 'group':
+      if (allowResourceRefs && target['group_ref'] != null) {
+        _requireExactKeys(
+          target,
+          const <String>{'scope', 'group_ref'},
+          'v3_$type.target_invalid',
+        );
+        _parseResourceRef(target['group_ref']);
+        return;
+      }
       _requireExactKeys(
         target,
         const <String>{'scope', 'group_id'},
@@ -1631,6 +1657,15 @@ void _canonicalizeIdentityResourceReferences(List<AiV3Command> commands) {
             canonicalize(command.arguments['row_ref']).toJson();
       }
     }
+    if (command.type == 'mix.apply_goal') {
+      final target = command.arguments['target'];
+      if (target is Map && target['group_ref'] != null) {
+        final mutableTarget = Map<String, dynamic>.from(target);
+        mutableTarget['group_ref'] =
+            canonicalize(mutableTarget['group_ref']).toJson();
+        command.arguments['target'] = mutableTarget;
+      }
+    }
     earlierCommands[command.commandId] = command;
   }
 }
@@ -1730,6 +1765,15 @@ void _validateResourceReferences(List<AiV3Command> commands) {
         removedGroupMemberKey = '${rowRef.commandId}.${rowRef.output}';
       } else if (args['row_id'] is int) {
         removedGroupMemberKey = 'stable_row:${args['row_id']}';
+      }
+    }
+    if (command.type == 'mix.apply_goal') {
+      final target = args['target'];
+      if (target is Map && target['group_ref'] != null) {
+        validateRef(
+          target['group_ref'],
+          const <AiV3ResourceKind>{AiV3ResourceKind.group},
+        );
       }
     }
     AiV3ResourceRef? consumedRef;
@@ -3053,6 +3097,14 @@ Map<String, dynamic> _aiV3CommandVariant(
             },
             'row_id': rowId,
           }),
+          if (includeResourceRefs)
+            _strictObjectSchema(<String, dynamic>{
+              'scope': const <String, dynamic>{
+                'type': 'string',
+                'enum': <String>['row'],
+              },
+              'row_ref': rowResourceRef,
+            }),
           _strictObjectSchema(<String, dynamic>{
             'scope': const <String, dynamic>{
               'type': 'string',
@@ -3063,6 +3115,14 @@ Map<String, dynamic> _aiV3CommandVariant(
               'minLength': 1,
             },
           }),
+          if (includeResourceRefs)
+            _strictObjectSchema(<String, dynamic>{
+              'scope': const <String, dynamic>{
+                'type': 'string',
+                'enum': <String>['group'],
+              },
+              'group_ref': groupResourceRef,
+            }),
           for (final scope in const <String>['all_rows', 'master'])
             _strictObjectSchema(<String, dynamic>{
               'scope': <String, dynamic>{
@@ -3200,7 +3260,12 @@ Map<String, dynamic> _aiV3CommandVariant(
   };
   if (type == 'mix.apply_goal') {
     variant['description'] =
-        'Use for subjective sonic or reference-mixing goals. Use exact row commands for explicit numeric gain or pan edits.';
+        includeResourceRefs
+            ? 'Use for subjective sonic or reference-mixing goals such as warmer, wider, punchier, or polished. Use deterministic V3 commands for explicitly named effects and numeric settings.'
+            : 'Use for subjective sonic or reference-mixing goals. Use exact row commands for explicit numeric gain or pan edits.';
+  } else if (includeResourceRefs && type == 'effect.ensure_configured') {
+    variant['description'] =
+        'Use when the user explicitly names an effect to add or configure. Do not route an explicitly named effect through mix.apply_goal.';
   } else if (includeCommandSemantics &&
       includeResourceRefs &&
       type == 'row.create') {

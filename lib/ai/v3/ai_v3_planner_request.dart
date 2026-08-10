@@ -25,6 +25,11 @@ const String aiV3VisibleLanguageInstructions =
     'only from the unchanged current original request. Ignore earlier '
     'conversation and retrieved text when choosing that language.';
 
+const String aiV3MixRoutingInstructions =
+    'Use deterministic V3 commands for explicitly named effects and numeric '
+    'settings. Use mix.apply_goal only for subjective sonic outcomes such as '
+    'warmer, wider, punchier, or polished.';
+
 const String aiV3ResourceReferenceInstructions =
     'A later command may target a documented typed output of an earlier '
     'command by using its command_id and output port. References must point '
@@ -71,6 +76,7 @@ change is not clearly authorized. Write the visible response in the language of 
 current original request, regardless of languages used in earlier conversation.
 $aiV3RequestedResourceLifecycleInstructions
 $aiV3VisibleLanguageInstructions
+$aiV3MixRoutingInstructions
 For clarify, user_message must contain one focused question only. Put suggested
 answers only in question_options; do not repeat, number, or bullet them in
 user_message. Every question option must be a distinct, concise, meaningful

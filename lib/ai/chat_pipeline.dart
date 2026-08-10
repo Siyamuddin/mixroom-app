@@ -44,6 +44,28 @@ class _AiV3PreparationFailureResponse {
   final String message;
 }
 
+Map<String, dynamic> aiV3BundleWithRuntimeAlreadySatisfiedReceipts(
+  Map<String, dynamic> bundle,
+  Set<String> commandIds,
+) {
+  if (commandIds.isEmpty || bundle['receipts'] is! List) return bundle;
+  return <String, dynamic>{
+    ...bundle,
+    'receipts': <Map<String, dynamic>>[
+      for (final rawReceipt in (bundle['receipts'] as List).whereType<Map>())
+        <String, dynamic>{
+          ...Map<String, dynamic>.from(rawReceipt),
+          if (commandIds.contains(
+            rawReceipt['command_id']?.toString().trim() ?? '',
+          )) ...const <String, dynamic>{
+            'status': 'already_satisfied',
+            'expanded_action_count': 0,
+          },
+        },
+    ],
+  };
+}
+
 List<String> aiV3VerifiedExecutionDetails(
   Map<String, dynamic> bundle, {
   Map<String, List<String>> executionSummariesByCommandId =
