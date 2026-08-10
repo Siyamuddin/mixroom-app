@@ -136,6 +136,19 @@ const Map<String, AiV3ResourceConsumerSpec> aiV3ResourceConsumerSpecs =
     operation: 'ensure_configured',
     preservesInputIdentity: true,
   ),
+  'mix.apply_goal': AiV3ResourceConsumerSpec(
+    commandType: 'mix.apply_goal',
+    idField: 'row_id',
+    referenceField: 'row_ref',
+    acceptedKinds: <AiV3ResourceKind>{
+      AiV3ResourceKind.audioRow,
+      AiV3ResourceKind.midiRow,
+    },
+    actionType: 'v3_deferred_mix_goal',
+    operation: 'apply_goal',
+    preservesInputIdentity: true,
+    referenceContainerField: 'target',
+  ),
   'automation.gain_fade': AiV3ResourceConsumerSpec(
     commandType: 'automation.gain_fade',
     idField: 'row_id',
@@ -452,7 +465,7 @@ final Set<String> aiV3RuntimeResourceRefConsumerTypes =
     });
 
 const String aiV3ResourceRefSurfaceRevision =
-    'generated_row_grouping_v1';
+    'runtime_deferred_row_set_mix_v1';
 
 const Map<String, Map<String, Set<AiV3ResourceKind>>>
 aiV3PossibleProducerOutputKinds =

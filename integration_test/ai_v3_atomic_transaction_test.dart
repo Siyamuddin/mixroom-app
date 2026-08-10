@@ -2835,6 +2835,73 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets(
+    'V3 materialized master polish applies every parameter strictly',
+    (tester) async {
+      _ignoreKnownEditorSemanticsAssertion();
+      final fixture = await _openAudioFixture(tester);
+      final controller = fixture.controller;
+      final before = controller.snapshot();
+
+      await controller.executeV3Handoff(
+        _handoff(
+          digest: controller.stateDigest,
+          actions: <Map<String, dynamic>>[
+            <String, dynamic>{
+              'type': 'v3_deferred_mix_goal',
+              'data': const <String, dynamic>{
+                'command_id': 'materialized-master-polish',
+                'operation': 'apply_goal',
+                'target': <String, dynamic>{'scope': 'master'},
+                'intents': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'kind': 'compressor',
+                    'direction': 'up',
+                    'descriptor': null,
+                  },
+                  <String, dynamic>{
+                    'kind': 'eq',
+                    'direction': null,
+                    'descriptor': 'dull_fix',
+                  },
+                  <String, dynamic>{
+                    'kind': 'limiter',
+                    'direction': 'up',
+                    'descriptor': null,
+                  },
+                ],
+                'intensity': 0.45,
+                'execution_profile': 'producer_safe',
+                'audibility': 'noticeable',
+                'style_tags': <String>['polished', 'clean', 'cohesive'],
+                'reset_fx': false,
+                'reference': null,
+              },
+            },
+          ],
+        ),
+      );
+
+      final applied = controller.snapshot();
+      expect(
+        _effectNames(applied['master_effects']),
+        containsAll(<Matcher>[
+          contains('Compressor'),
+          contains('EQ Parametric'),
+          contains('Limiter'),
+        ]),
+      );
+      expect(applied['undo_depth'], (before['undo_depth'] as int) + 1);
+
+      await controller.undo().timeout(const Duration(seconds: 20));
+      expect(controller.snapshot()['master_effects'], before['master_effects']);
+      await controller.redo().timeout(const Duration(seconds: 20));
+      expect(controller.snapshot()['master_effects'], applied['master_effects']);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets('V3 master effect removal restores exact parameters on Undo', (
     tester,
   ) async {
@@ -11178,6 +11245,674 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
+
+  testWidgets(
+    'V3 materializes a deferred mix goal on a generated stem row',
+    (tester) async {
+      _ignoreKnownEditorSemanticsAssertion();
+      final fixture = await _openAudioFixture(
+        tester,
+        fixtureId: 'audio_reference_valid',
+        stemSeparatorOverride:
+            ({
+              required String inputPath,
+              required String vocalsOutputPath,
+              required String instrumentalOutputPath,
+            }) async {
+              await File(inputPath).copy(vocalsOutputPath);
+              await File(inputPath).copy(instrumentalOutputPath);
+            },
+        sampleDurationOverride: (_) async => const Duration(milliseconds: 1200),
+      );
+      final controller = fixture.controller;
+      final before = controller.snapshot();
+      final rows = (before['rows'] as List).cast<Map<String, dynamic>>();
+      final clips = (before['clips'] as List).cast<Map<String, dynamic>>();
+      final source = clips.firstWhere((clip) => clip['kind'] == 'audio');
+      final sourceRowIndex = rows.indexWhere(
+        (row) => row['row_id'] == source['row_id'],
+      );
+      const instrumentalRowRef = <String, dynamic>{
+        'command_id': 'mix-stems',
+        'output': 'instrumental_row',
+      };
+
+      await controller.executeV3Handoff(
+        _handoff(
+          digest: controller.stateDigest,
+          actions: <Map<String, dynamic>>[
+            <String, dynamic>{
+              'type': 'v3_clip_separate_stems',
+              'data': <String, dynamic>{
+                'command_id': 'mix-stems',
+                'source_clip_id': source['clip_id'],
+                'source_row_id': source['row_id'],
+                'source_row_index': sourceRowIndex,
+                'start_ms': source['start_ms'],
+                'duration_ms': source['length_ms'],
+                'vocals_label': 'Deferred Mix Vocals',
+                'instrumental_label': 'Deferred Mix Instrumental',
+                'target': <String, dynamic>{
+                  'scope': 'clip',
+                  'clip_id': source['clip_id'],
+                  'clip_index': clips.indexOf(source),
+                  'row_id': source['row_id'],
+                  'row_index': sourceRowIndex,
+                },
+              },
+            },
+            <String, dynamic>{
+              'type': 'v3_deferred_mix_goal',
+              'data': const <String, dynamic>{
+                'command_id': 'warm-instrumental',
+                'resource_consumer_type': 'mix.apply_goal',
+                'operation': 'apply_goal',
+                'target': <String, dynamic>{
+                  'scope': 'row',
+                  'resource_ref': instrumentalRowRef,
+                },
+                'intents': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'kind': 'eq',
+                    'direction': null,
+                    'descriptor': 'warmth_boost',
+                  },
+                ],
+                'intensity': 0.5,
+                'execution_profile': 'producer_safe',
+                'audibility': 'noticeable',
+                'style_tags': <String>['warm'],
+                'reset_fx': false,
+                'reference': null,
+              },
+            },
+            <String, dynamic>{
+              'type': 'v3_automation_points',
+              'data': const <String, dynamic>{
+                'resource_consumer_type': 'automation.set_points',
+                'operation': 'set_points',
+                'target': <String, dynamic>{
+                  'scope': 'row',
+                  'automation_target_id': 'volume',
+                  'resource_ref': instrumentalRowRef,
+                },
+                'points': <Map<String, dynamic>>[
+                  <String, dynamic>{'time_ms': 0.0, 'value': 0.25},
+                  <String, dynamic>{'time_ms': 1000.0, 'value': 0.75},
+                ],
+              },
+            },
+          ],
+        ),
+      );
+      await _pumpFor(tester, const Duration(seconds: 2));
+
+      final applied = controller.snapshot();
+      final appliedRows = (applied['rows'] as List)
+          .cast<Map<String, dynamic>>();
+      final instrumental = appliedRows.singleWhere(
+        (row) => row['name'].toString().contains('Instrumental'),
+      );
+      final vocal = appliedRows.singleWhere(
+        (row) => row['name'].toString().contains('Vocals'),
+      );
+      expect(instrumental['automation'], const <Map<String, dynamic>>[
+        <String, dynamic>{'x': 0.0, 'value': 0.25},
+        <String, dynamic>{'x': 1000.0, 'value': 0.75},
+      ]);
+      expect(instrumental['effects'], isNotEmpty);
+      expect(vocal['effects'], isEmpty);
+      expect(applied['undo_depth'], (before['undo_depth'] as int) + 1);
+
+      await controller.undo().timeout(const Duration(seconds: 20));
+      expect(controller.snapshot()['rows'], before['rows']);
+      expect(controller.snapshot()['clips'], before['clips']);
+      await controller.redo().timeout(const Duration(seconds: 20));
+      expect(controller.snapshot()['rows'], applied['rows']);
+      expect(controller.snapshot()['clips'], applied['clips']);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'V3 rolls back a generated row when deferred mixing has no signal',
+    (tester) async {
+      _ignoreKnownEditorSemanticsAssertion();
+      final fixture = await _openAudioFixture(
+        tester,
+        fixtureId: 'audio_reference_valid',
+      );
+      final controller = fixture.controller;
+      final before = controller.snapshot();
+
+      await controller.executeV3Handoff(
+        _handoff(
+          digest: controller.stateDigest,
+          actions: <Map<String, dynamic>>[
+            <String, dynamic>{
+              'type': 'row_create',
+              'data': const <String, dynamic>{
+                'command_id': 'empty-row',
+                'operation': 'create',
+                'position': 'end',
+                'name': 'Empty Mix Row',
+                'lane_kind': 'audio',
+                'target': <String, dynamic>{'scope': 'project'},
+              },
+            },
+            <String, dynamic>{
+              'type': 'v3_deferred_mix_goal',
+              'data': const <String, dynamic>{
+                'command_id': 'mix-empty-row',
+                'resource_consumer_type': 'mix.apply_goal',
+                'operation': 'apply_goal',
+                'target': <String, dynamic>{
+                  'scope': 'row',
+                  'resource_ref': <String, dynamic>{
+                    'command_id': 'empty-row',
+                    'output': 'row',
+                  },
+                },
+                'intents': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'kind': 'eq',
+                    'direction': null,
+                    'descriptor': 'warmth_boost',
+                  },
+                ],
+                'intensity': 0.5,
+                'execution_profile': 'producer_safe',
+                'audibility': 'noticeable',
+                'style_tags': <String>['warm'],
+                'reset_fx': false,
+                'reference': null,
+              },
+            },
+          ],
+        ),
+      );
+      await _pumpFor(tester, const Duration(seconds: 1));
+
+      final after = controller.snapshot();
+      expect(after['rows'], before['rows']);
+      expect(after['clips'], before['clips']);
+      expect(after['undo_depth'], before['undo_depth']);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'V3 composes relative row gain and pan from a deferred mix result',
+    (tester) async {
+      _ignoreKnownEditorSemanticsAssertion();
+      final fixture = await _openAudioFixture(
+        tester,
+        fixtureId: 'audio_reference_valid',
+        sampleDurationOverride: (_) async => const Duration(milliseconds: 1200),
+      );
+      final controller = fixture.controller;
+      final before = controller.snapshot();
+      final initialRows = (before['rows'] as List).length;
+      final sourcePath = ((before['clips'] as List).first as Map)['file']
+          .toString();
+      const generatedRowRef = <String, dynamic>{
+        'command_id': 'runtime-mix-row',
+        'output': 'row',
+      };
+
+      await controller.executeV3Handoff(
+        _handoff(
+          digest: controller.stateDigest,
+          actions: <Map<String, dynamic>>[
+            <String, dynamic>{
+              'type': 'row_create',
+              'data': <String, dynamic>{
+                'command_id': 'runtime-mix-row',
+                'operation': 'create',
+                'position': 'end',
+                'predicted_row_index': initialRows,
+                'name': 'Runtime Mix Row',
+                'lane_kind': 'audio',
+                'target': const <String, dynamic>{'scope': 'project'},
+              },
+            },
+            <String, dynamic>{
+              'type': 'sample_insert',
+              'data': <String, dynamic>{
+                'command_id': 'runtime-mix-sample',
+                'resource_consumer_type': 'sample.place',
+                'operation': 'insert_audio_clips',
+                'items': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'library_path': sourcePath,
+                    'file_path': sourcePath,
+                    'row_index': initialRows,
+                    'start_ms': 0.0,
+                    'target': const <String, dynamic>{
+                      'scope': 'row',
+                      'resource_ref': generatedRowRef,
+                    },
+                  },
+                ],
+                'target': const <String, dynamic>{
+                  'scope': 'row',
+                  'resource_ref': generatedRowRef,
+                },
+              },
+            },
+            <String, dynamic>{
+              'type': 'v3_deferred_mix_goal',
+              'data': const <String, dynamic>{
+                'command_id': 'runtime-row-mix',
+                'resource_consumer_type': 'mix.apply_goal',
+                'operation': 'apply_goal',
+                'target': <String, dynamic>{
+                  'scope': 'row',
+                  'resource_ref': generatedRowRef,
+                },
+                'intents': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'kind': 'gain',
+                    'direction': 'up',
+                    'descriptor': null,
+                  },
+                  <String, dynamic>{
+                    'kind': 'pan',
+                    'direction': 'right',
+                    'descriptor': null,
+                  },
+                ],
+                'intensity': 0.5,
+                'execution_profile': 'producer_safe',
+                'audibility': 'noticeable',
+                'style_tags': <String>[],
+                'reset_fx': false,
+                'reference': null,
+              },
+            },
+            <String, dynamic>{
+              'type': 'row_mix',
+              'data': const <String, dynamic>{
+                'resource_consumer_type': 'row.adjust_gain_db',
+                'operation': 'adjust_gain',
+                'delta_db': 1.0,
+                'expected_gain_db': 1.0,
+                'target': <String, dynamic>{
+                  'scope': 'row',
+                  'resource_ref': generatedRowRef,
+                },
+              },
+            },
+            <String, dynamic>{
+              'type': 'row_mix',
+              'data': const <String, dynamic>{
+                'resource_consumer_type': 'row.adjust_pan',
+                'operation': 'adjust_pan',
+                'delta': 0.1,
+                'expected_pan_signed': 0.1,
+                'target': <String, dynamic>{
+                  'scope': 'row',
+                  'resource_ref': generatedRowRef,
+                },
+              },
+            },
+          ],
+        ),
+      );
+      await _pumpFor(tester, const Duration(seconds: 2));
+
+      final applied = controller.snapshot();
+      final generated = (applied['rows'] as List)
+          .cast<Map<String, dynamic>>()
+          .singleWhere((row) => row['name'] == 'Runtime Mix Row');
+      expect(generated['gain_ui'], greaterThan(rowGainDbToUi(1.0)));
+      expect(generated['pan_01'], closeTo(0.55, 0.00001));
+      expect(applied['undo_depth'], (before['undo_depth'] as int) + 1);
+
+      await controller.undo().timeout(const Duration(seconds: 20));
+      expect(controller.snapshot()['rows'], before['rows']);
+      expect(controller.snapshot()['clips'], before['clips']);
+      await controller.redo().timeout(const Duration(seconds: 20));
+      expect(controller.snapshot()['rows'], applied['rows']);
+      expect(controller.snapshot()['clips'], applied['clips']);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'V3 resolves generated group and all-row mix goals from live state',
+    (tester) async {
+      _ignoreKnownEditorSemanticsAssertion();
+      final fixture = await _openAudioFixture(
+        tester,
+        fixtureId: 'audio_reference_valid',
+        sampleDurationOverride: (_) async => const Duration(milliseconds: 1200),
+      );
+      final controller = fixture.controller;
+      final before = controller.snapshot();
+      final rows = (before['rows'] as List).cast<Map<String, dynamic>>();
+      final clips = (before['clips'] as List).cast<Map<String, dynamic>>();
+      final sourcePath = clips.first['file'].toString();
+      final stableRowId = rows.first['row_id'] as int;
+      final initialRows = rows.length;
+      const generatedRowRef = <String, dynamic>{
+        'command_id': 'generated-drums',
+        'output': 'row',
+      };
+      const groupRef = <String, dynamic>{
+        'command_id': 'rhythm-group',
+        'output': 'group',
+      };
+      const groupId = 'v3_deferred_mix_group_test';
+
+      await controller.executeV3Handoff(
+        _handoff(
+          digest: controller.stateDigest,
+          actions: <Map<String, dynamic>>[
+            <String, dynamic>{
+              'type': 'row_create',
+              'data': <String, dynamic>{
+                'command_id': 'generated-drums',
+                'operation': 'create',
+                'position': 'end',
+                'predicted_row_index': initialRows,
+                'name': 'Generated Drums',
+                'lane_kind': 'audio',
+                'target': const <String, dynamic>{'scope': 'project'},
+              },
+            },
+            <String, dynamic>{
+              'type': 'sample_insert',
+              'data': <String, dynamic>{
+                'command_id': 'place-drums',
+                'resource_consumer_type': 'sample.place',
+                'operation': 'insert_audio_clips',
+                'items': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'library_path': sourcePath,
+                    'file_path': sourcePath,
+                    'row_index': initialRows,
+                    'start_ms': 0.0,
+                    'target': const <String, dynamic>{
+                      'scope': 'row',
+                      'resource_ref': generatedRowRef,
+                    },
+                  },
+                ],
+                'target': const <String, dynamic>{
+                  'scope': 'row',
+                  'resource_ref': generatedRowRef,
+                },
+              },
+            },
+            <String, dynamic>{
+              'type': 'v3_group_edit',
+              'data': <String, dynamic>{
+                'command_id': 'rhythm-group',
+                'operation': 'create',
+                'group_id': groupId,
+                'name': 'Rhythm',
+                'member_targets': <Map<String, dynamic>>[
+                  <String, dynamic>{'scope': 'row', 'row_id': stableRowId},
+                  const <String, dynamic>{
+                    'scope': 'row',
+                    'resource_ref': generatedRowRef,
+                  },
+                ],
+                'affected_group_ids': const <String>[],
+                'dissolved_group_ids': const <String>[],
+              },
+            },
+            <String, dynamic>{
+              'type': 'v3_deferred_mix_goal',
+              'data': const <String, dynamic>{
+                'command_id': 'mix-group',
+                'operation': 'apply_goal',
+                'target': <String, dynamic>{
+                  'scope': 'group',
+                  'group_resource_ref': groupRef,
+                },
+                'intents': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'kind': 'eq',
+                    'direction': null,
+                    'descriptor': 'warmth_boost',
+                  },
+                ],
+                'intensity': 0.5,
+                'execution_profile': 'producer_safe',
+                'audibility': 'noticeable',
+                'style_tags': <String>['warm'],
+                'reset_fx': false,
+                'reference': null,
+              },
+            },
+            <String, dynamic>{
+              'type': 'v3_deferred_mix_goal',
+              'data': const <String, dynamic>{
+                'command_id': 'mix-all',
+                'operation': 'apply_goal',
+                'target': <String, dynamic>{'scope': 'all_rows'},
+                'intents': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'kind': 'reverb',
+                    'direction': 'up',
+                    'descriptor': null,
+                  },
+                ],
+                'intensity': 0.5,
+                'execution_profile': 'producer_safe',
+                'audibility': 'noticeable',
+                'style_tags': <String>[],
+                'reset_fx': false,
+                'reference': null,
+              },
+            },
+            <String, dynamic>{
+              'type': 'v3_group_edit',
+              'data': const <String, dynamic>{
+                'resource_consumer_type': 'group.set_collapsed',
+                'operation': 'set_collapsed',
+                'collapsed': true,
+                'target': <String, dynamic>{
+                  'scope': 'group',
+                  'resource_ref': groupRef,
+                },
+              },
+            },
+          ],
+        ),
+      );
+      await _pumpFor(tester, const Duration(seconds: 2));
+
+      final applied = controller.snapshot();
+      final appliedRows =
+          (applied['rows'] as List).cast<Map<String, dynamic>>();
+      final generated = appliedRows.singleWhere(
+        (row) => row['name'] == 'Generated Drums',
+      );
+      final stable = appliedRows.singleWhere(
+        (row) => row['row_id'] == stableRowId,
+      );
+      expect(
+        await controller.effectChain(appliedRows.indexOf(generated)),
+        isNotEmpty,
+      );
+      expect(
+        await controller.effectChain(appliedRows.indexOf(stable)),
+        isNotEmpty,
+      );
+      expect(_group(applied, groupId)['collapsed'], isTrue);
+      expect(applied['undo_depth'], (before['undo_depth'] as int) + 1);
+
+      await controller.undo().timeout(const Duration(seconds: 20));
+      expect(controller.snapshot()['rows'], before['rows']);
+      expect(controller.snapshot()['clips'], before['clips']);
+      expect(controller.snapshot()['groups'], before['groups']);
+      await controller.redo().timeout(const Duration(seconds: 20));
+      expect(controller.snapshot()['rows'], applied['rows']);
+      expect(controller.snapshot()['clips'], applied['clips']);
+      expect(controller.snapshot()['groups'], applied['groups']);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'V3 materializes master mixing after generation and continues the chain',
+    (tester) async {
+      _ignoreKnownEditorSemanticsAssertion();
+      final fixture = await _openAudioFixture(
+        tester,
+        fixtureId: 'audio_reference_valid',
+      );
+      final controller = fixture.controller;
+      final before = controller.snapshot();
+      final initialRows = (before['rows'] as List).length;
+      const generatedRowRef = <String, dynamic>{
+        'command_id': 'master-generated-row',
+        'output': 'row',
+      };
+
+      await controller.executeV3Handoff(
+        _handoff(
+          digest: controller.stateDigest,
+          actions: <Map<String, dynamic>>[
+            <String, dynamic>{
+              'type': 'row_create',
+              'data': <String, dynamic>{
+                'command_id': 'master-generated-row',
+                'operation': 'create',
+                'position': 'end',
+                'predicted_row_index': initialRows,
+                'name': 'Generated After Master',
+                'lane_kind': 'audio',
+                'target': const <String, dynamic>{'scope': 'project'},
+              },
+            },
+            <String, dynamic>{
+              'type': 'v3_deferred_mix_goal',
+              'data': const <String, dynamic>{
+                'command_id': 'polish-master',
+                'operation': 'apply_goal',
+                'target': <String, dynamic>{'scope': 'master'},
+                'intents': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'kind': 'reverb',
+                    'direction': 'up',
+                    'descriptor': null,
+                  },
+                ],
+                'intensity': 0.5,
+                'execution_profile': 'producer_safe',
+                'audibility': 'noticeable',
+                'style_tags': <String>[],
+                'reset_fx': false,
+                'reference': null,
+              },
+            },
+            <String, dynamic>{
+              'type': 'row_mute',
+              'data': const <String, dynamic>{
+                'resource_consumer_type': 'row.set_muted',
+                'operation': 'set_muted',
+                'muted': true,
+                'expected_muted': true,
+                'target': <String, dynamic>{
+                  'scope': 'row',
+                  'resource_ref': generatedRowRef,
+                },
+              },
+            },
+          ],
+        ),
+      );
+      await _pumpFor(tester, const Duration(seconds: 2));
+
+      final applied = controller.snapshot();
+      final generated = (applied['rows'] as List)
+          .cast<Map<String, dynamic>>()
+          .singleWhere((row) => row['name'] == 'Generated After Master');
+      expect(generated['muted'], isTrue);
+      expect(
+        _effectNames(applied['master_effects']),
+        contains(contains('Reverb')),
+      );
+      expect(applied['undo_depth'], (before['undo_depth'] as int) + 1);
+
+      await controller.undo().timeout(const Duration(seconds: 20));
+      expect(controller.snapshot()['rows'], before['rows']);
+      expect(controller.snapshot()['master_effects'], before['master_effects']);
+      await controller.redo().timeout(const Duration(seconds: 20));
+      expect(controller.snapshot()['rows'], applied['rows']);
+      expect(
+        controller.snapshot()['master_effects'],
+        applied['master_effects'],
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'V3 rolls back preceding changes when deferred master mixing has no signal',
+    (tester) async {
+      _ignoreKnownEditorSemanticsAssertion();
+      final fixture = await _openAudioFixture(
+        tester,
+        fixtureId: 'empty_one_row',
+      );
+      final controller = fixture.controller;
+      final before = controller.snapshot();
+
+      await controller.executeV3Handoff(
+        _handoff(
+          digest: controller.stateDigest,
+          actions: <Map<String, dynamic>>[
+            <String, dynamic>{
+              'type': 'row_create',
+              'data': <String, dynamic>{
+                'command_id': 'empty-master-row',
+                'operation': 'create',
+                'position': 'end',
+                'predicted_row_index': (before['rows'] as List).length,
+                'name': 'Still Empty',
+                'lane_kind': 'audio',
+                'target': const <String, dynamic>{'scope': 'project'},
+              },
+            },
+            <String, dynamic>{
+              'type': 'v3_deferred_mix_goal',
+              'data': const <String, dynamic>{
+                'command_id': 'empty-master-mix',
+                'operation': 'apply_goal',
+                'target': <String, dynamic>{'scope': 'master'},
+                'intents': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'kind': 'reverb',
+                    'direction': 'up',
+                    'descriptor': null,
+                  },
+                ],
+                'intensity': 0.5,
+                'execution_profile': 'producer_safe',
+                'audibility': 'noticeable',
+                'style_tags': <String>[],
+                'reset_fx': false,
+                'reference': null,
+              },
+            },
+          ],
+        ),
+      );
+      await _pumpFor(tester, const Duration(seconds: 1));
+
+      final after = controller.snapshot();
+      expect(after['rows'], before['rows']);
+      expect(after['clips'], before['clips']);
+      expect(after['master_effects'], before['master_effects']);
+      expect(after['undo_depth'], before['undo_depth']);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 }
 
 enum _StemTempoOrder { tempoLast, tempoFirst, multipleTempos }
@@ -11399,7 +12134,7 @@ Map<String, dynamic> _handoff({
     'receipts': <Map<String, dynamic>>[
       for (var index = 0; index < actions.length; index++)
         <String, dynamic>{
-          'command_id': 'test-$index',
+          'command_id': _commandIdForAction(actions[index], index),
           'type': actions[index]['type'],
           'status': 'prepared',
           'preview_label': 'Apply ${actions[index]['type']}',
@@ -11407,6 +12142,14 @@ Map<String, dynamic> _handoff({
     ],
   },
 };
+
+String _commandIdForAction(Map<String, dynamic> action, int index) {
+  final data = action['data'];
+  final commandId = data is Map
+      ? data['command_id']?.toString().trim() ?? ''
+      : '';
+  return commandId.isEmpty ? 'test-$index' : commandId;
+}
 
 Map<String, dynamic> _muteAction(int rowIndex, int rowId,
         [bool muted = true]) =>

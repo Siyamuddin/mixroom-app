@@ -67,6 +67,7 @@ import 'package:mixroom/ai/v3/ai_v3_capture.dart';
 import 'package:mixroom/ai/v3/ai_v3_adaptive_midi_planner.dart';
 import 'package:mixroom/ai/v3/ai_v3_planner_service.dart';
 import 'package:mixroom/ai/v3/ai_v3_contract.dart';
+import 'package:mixroom/ai/v3/ai_v3_mix_materializer.dart';
 import 'package:mixroom/ai/v3/ai_v3_preparer.dart';
 import 'package:mixroom/ai/v3/ai_v3_resources.dart';
 import 'package:mixroom/ai/v3/ai_v3_runtime_resources.dart';
@@ -5832,6 +5833,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   late final SpleeterStemSeparator _spleeterStemSeparator;
   final FocusNode _chatFocusNode = FocusNode();
   late final ChatPipeline _chatPipeline;
+  late final LocalMixingModel _mixModel;
   late final MixingMagnitudePredictor _magnitudePredictor;
   Future<void>? _aiModelsWarmupFuture;
   late final ProducerDataCollector _producerCollector;
@@ -9035,6 +9037,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           );
     unawaited(_magnitudePredictor.startBackgroundRefresh());
 
+    _mixModel = LocalMixingModel();
     _chatPipeline = ChatPipeline(
       llm: CloudLlmService(
         apiKey: LlmConfig.canUseDirectOpenAi ? LlmConfig.openAiApiKey : '',
@@ -9047,7 +9050,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         refreshAuthTokenProvider: authService.refreshIdTokenOrNull,
       ), // LocalLlmService(),
       projectBuilder: ProjectStateBuilder(classifier: _classifier),
-      mixModel: LocalMixingModel(),
+      mixModel: _mixModel,
       magnitudePredictor: _magnitudePredictor,
       aiV3Planner: LlmConfig.effectiveAiV3Enabled
           ? AiV3PlannerService(
@@ -43920,6 +43923,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return AssistantActionUtils.toActionDouble(raw);
   }
 
+  double _canonicalEffectParameterValue({
+    required double value,
+    required double? minimum,
+    required double? maximum,
+    required double interval,
+  }) {
+    if (minimum == null ||
+        maximum == null ||
+        !interval.isFinite ||
+        interval <= 0.0) {
+      return value;
+    }
+    final steps = ((value - minimum) / interval).round();
+    return (minimum + steps * interval).clamp(minimum, maximum).toDouble();
+  }
+
   int? _toActionInt(dynamic raw) {
     return AssistantActionUtils.toActionInt(raw);
   }
@@ -44827,6 +44846,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     int? chatFlowId,
     List<Map<String, dynamic>>? v3RuntimeExpectations,
     Map<String, List<String>>? v3ExecutionSummariesByCommandId,
+    Set<String>? v3RuntimeAlreadySatisfiedCommandIds,
     AiV3WorkflowRuntime? v3WorkflowRuntime,
   }) async {
     _assistantActionNoticeCaptureDepth += 1;
@@ -44837,6 +44857,42 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _assistantActionExecutionBatchDepth += 1;
     }
     final executionMessagesBefore = _assistantActionExecutionMessageCount;
+    Future<void> applyV3MixActions(Map<String, dynamic> data) async {
+      final rawMixActions = data['actions'];
+      if (rawMixActions is! List || rawMixActions.isEmpty) {
+        throw StateError('v3_mix_actions_missing');
+      }
+      final mixActions = rawMixActions
+          .map((raw) {
+            if (raw is! Map || raw['type'] is! String || raw['data'] is! Map) {
+              throw StateError('v3_mix_action_malformed');
+            }
+            return MixAction(
+              raw['type'].toString(),
+              Map<String, dynamic>.from(raw['data'] as Map),
+            );
+          })
+          .toList(growable: false);
+      final report = await applyMixingResult(
+        MixingResult(actions: mixActions, summary: '', isNoOp: false),
+        emitActionSummaries: false,
+        stageEffectEnsures: true,
+      );
+      if (report.attempted != mixActions.length ||
+          report.skippedReasons.isNotEmpty) {
+        throw StateError('v3_mix_actions_not_fully_applied');
+      }
+      final commandId = data['command_id']?.toString().trim() ?? '';
+      if (commandId.isNotEmpty && report.summaries.isNotEmpty) {
+        v3ExecutionSummariesByCommandId?[commandId] = List<String>.unmodifiable(
+          report.summaries,
+        );
+      }
+      if (v3RuntimeExpectations != null) {
+        _addAiV3Expectations(v3RuntimeExpectations, report.appliedMutations);
+      }
+    }
+
     try {
       var hadFailure = false;
       for (var actionIndex = 0; actionIndex < actions.length; actionIndex++) {
@@ -45741,14 +45797,40 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               }
               break;
             case 'row_mix':
-              await _applyRowMixAction(data);
+              final appliedData = await _applyRowMixAction(data);
+              if (appliedData == null && v3RuntimeExpectations != null) {
+                throw StateError('v3_row_mix_action_failed');
+              }
+              if (appliedData != null && v3RuntimeExpectations != null) {
+                final rowId = _toActionInt(appliedData['expected_row_id']);
+                final gainDb = _toActionDouble(appliedData['expected_gain_db']);
+                final panSigned = _toActionDouble(
+                  appliedData['expected_pan_signed'],
+                );
+                if (rowId != null && gainDb != null) {
+                  _addAiV3Expectation(v3RuntimeExpectations, <String, dynamic>{
+                    'kind': 'row_gain',
+                    'row_id': rowId,
+                    'value': rowGainDbToUi(gainDb),
+                  });
+                }
+                if (rowId != null && panSigned != null) {
+                  _addAiV3Expectation(v3RuntimeExpectations, <String, dynamic>{
+                    'kind': 'row_pan',
+                    'row_id': rowId,
+                    'value': ((panSigned.clamp(-1.0, 1.0) + 1.0) * 0.5)
+                        .toDouble(),
+                  });
+                }
+              }
               if (resolvedResourceRef != null &&
                   resolvedResourceRowId != null &&
-                  v3RuntimeExpectations != null) {
+                  v3RuntimeExpectations != null &&
+                  appliedData != null) {
                 _updateAiV3GeneratedRowExpectation(
                   v3RuntimeExpectations,
                   resolvedResourceRef,
-                  data,
+                  appliedData,
                 );
               }
               if (chatFlowId != null) {
@@ -45853,6 +45935,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   end: clip.offset + _clipTimelineDurationSec(clip),
                   producerActionIndex: actionIndex,
                   durationFollowsTempo: _clipFollowsProjectTempo(clip),
+                  rowId: clip.rowId,
                   pitchSemitones: 0.0,
                 );
               }
@@ -46205,42 +46288,194 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               }
               break;
             case 'v3_mix_actions':
-              final rawMixActions = data['actions'];
-              if (rawMixActions is! List || rawMixActions.isEmpty) {
-                throw StateError('v3_mix_actions_missing');
+              await applyV3MixActions(data);
+              if (chatFlowId != null) {
+                _throwIfChatFlowStopped(chatFlowId);
               }
-              final mixActions = rawMixActions
-                  .map((raw) {
-                    if (raw is! Map ||
-                        raw['type'] is! String ||
-                        raw['data'] is! Map) {
-                      throw StateError('v3_mix_action_malformed');
-                    }
-                    return MixAction(
-                      raw['type'].toString(),
-                      Map<String, dynamic>.from(raw['data'] as Map),
-                    );
-                  })
-                  .toList(growable: false);
-              final report = await applyMixingResult(
-                MixingResult(actions: mixActions, summary: '', isNoOp: false),
-                emitActionSummaries: false,
-                stageEffectEnsures: true,
-              );
-              if (report.attempted != mixActions.length ||
-                  report.skippedReasons.isNotEmpty) {
-                throw StateError('v3_mix_actions_not_fully_applied');
-              }
+              break;
+            case 'v3_deferred_mix_goal':
               final commandId = data['command_id']?.toString().trim() ?? '';
-              if (commandId.isNotEmpty && report.summaries.isNotEmpty) {
-                v3ExecutionSummariesByCommandId?[commandId] =
-                    List<String>.unmodifiable(report.summaries);
+              if (commandId.isEmpty) {
+                throw StateError('v3_mix_command_id_missing');
               }
-              if (v3RuntimeExpectations != null) {
-                _addAiV3Expectations(
-                  v3RuntimeExpectations,
-                  report.appliedMutations,
+              var target = _actionTarget(data);
+              final scope = target['scope']?.toString() ?? '';
+              if (scope == 'group' && target['group_resource_ref'] != null) {
+                if (v3WorkflowRuntime == null) {
+                  throw StateError('v3_resource_producer_context_missing');
+                }
+                late final AiV3ResourceRef groupRef;
+                try {
+                  groupRef = AiV3ResourceRef.fromJson(
+                    target['group_resource_ref'],
+                  );
+                } on FormatException {
+                  throw StateError('v3_resource_ref_invalid');
+                }
+                final groupBinding = v3WorkflowRuntime.resolve(
+                  groupRef,
+                  expectedKind: AiV3ResourceKind.group,
                 );
+                final groupId = groupBinding.stableId;
+                if (groupId is! String ||
+                    !_trackGroups.any((group) => group.id == groupId)) {
+                  throw StateError('v3_resource_binding_unavailable');
+                }
+                target = <String, dynamic>{
+                  'scope': 'group',
+                  'group_id': groupId,
+                };
+                data = <String, dynamic>{...data, 'target': target};
+              }
+              final reference = data['reference'];
+              if (reference is Map && reference['row_id'] is int) {
+                final referenceRowId = reference['row_id'] as int;
+                final referenceRowIndex = _rowIndexForId(referenceRowId);
+                if (!_isValidRowIndex(referenceRowIndex)) {
+                  throw StateError('v3_mix_reference_id_unknown');
+                }
+                data = <String, dynamic>{
+                  ...data,
+                  'reference': <String, dynamic>{
+                    ...Map<String, dynamic>.from(reference),
+                    'row_index': referenceRowIndex,
+                  },
+                };
+              }
+              final project = await _buildCurrentAiProjectState();
+              final allowedTargetRowIds = <int>{};
+              int? requiredTargetRow;
+              switch (scope) {
+                case 'row':
+                  final rowId = _toActionInt(target['row_id']);
+                  if (rowId == null) {
+                    throw StateError('v3_mix_action_target_invalid');
+                  }
+                  final rowIndex = _rowIndexForId(rowId);
+                  if (!_isValidRowIndex(rowIndex) ||
+                      _rowIdAt(rowIndex) != rowId) {
+                    throw StateError('v3_mix_action_target_invalid');
+                  }
+                  target = <String, dynamic>{
+                    ...target,
+                    'row_id': rowId,
+                    'row_index': rowIndex,
+                  };
+                  data = <String, dynamic>{...data, 'target': target};
+                  final projectRow = project.rows
+                      .where(
+                        (row) => row.rowIndex == rowIndex && row.rowId == rowId,
+                      )
+                      .firstOrNull;
+                  if (projectRow == null || projectRow.clips.isEmpty) {
+                    throw StateError('v3_mix_audio_missing');
+                  }
+                  requiredTargetRow = rowIndex;
+                  allowedTargetRowIds.add(rowId);
+                  break;
+                case 'group':
+                  final groupId = target['group_id']?.toString().trim() ?? '';
+                  final group = _trackGroups
+                      .where((candidate) => candidate.id == groupId)
+                      .firstOrNull;
+                  if (group == null || group.rowIds.length < 2) {
+                    throw StateError('v3_group_id_unknown');
+                  }
+                  allowedTargetRowIds.addAll(group.rowIds);
+                  if (!project.rows.any(
+                    (row) =>
+                        allowedTargetRowIds.contains(row.rowId) &&
+                        row.clips.isNotEmpty,
+                  )) {
+                    throw StateError('v3_mix_audio_missing');
+                  }
+                  break;
+                case 'all_rows':
+                  allowedTargetRowIds.addAll(
+                    project.rows
+                        .where((row) => row.clips.isNotEmpty)
+                        .map((row) => row.rowId),
+                  );
+                  if (allowedTargetRowIds.isEmpty) {
+                    throw StateError('v3_mix_audio_missing');
+                  }
+                  break;
+                case 'master':
+                  if (!project.rows.any((row) => row.clips.isNotEmpty)) {
+                    throw StateError('v3_mix_audio_missing');
+                  }
+                  break;
+                default:
+                  throw StateError('v3_mix_action_target_invalid');
+              }
+              if (allowedTargetRowIds.any((rowId) => rowId < 0)) {
+                throw StateError('v3_mix_audio_missing');
+              }
+              final materialized =
+                  await AiV3MixGoalMaterializer(
+                    mixModel: _mixModel,
+                    magnitudePredictor: _magnitudePredictor,
+                  ).materializeSingleGoal(
+                    data: data,
+                    project: project,
+                    roleOverrides: aiV3CurrentRoleOverrides(project),
+                    bypassLearnedMagnitudes: _producerDataMode,
+                    requiredTargetRow: requiredTargetRow,
+                    allowedTargetRowIds: scope == 'master'
+                        ? null
+                        : allowedTargetRowIds,
+                    projectId: _projectId,
+                  );
+              if (materialized.isNoChange) {
+                v3RuntimeAlreadySatisfiedCommandIds?.add(commandId);
+              } else {
+                final materializedData = <String, dynamic>{
+                  'command_id': commandId,
+                  'actions': materialized.actions
+                      .map((action) {
+                        final json = action.toJson();
+                        return <String, dynamic>{
+                          ...json,
+                          'data': <String, dynamic>{
+                            ...Map<String, dynamic>.from(json['data'] as Map),
+                            'force_individual_row': true,
+                          },
+                        };
+                      })
+                      .toList(growable: false),
+                  if (materialized.protectedReferenceRow != null)
+                    'protected_reference_row_index':
+                        materialized.protectedReferenceRow,
+                };
+                if (v3RuntimeExpectations != null) {
+                  final simulatedRowGain = List<double>.from(_rowGain);
+                  final simulatedRowPan = List<double>.from(_rowPan);
+                  _captureAiV3MixExpectations(
+                    v3RuntimeExpectations,
+                    materializedData,
+                    simulatedRowGain: simulatedRowGain,
+                    simulatedRowPan: simulatedRowPan,
+                    simulatedMasterMix: <String, double>{
+                      'gain': _masterGain,
+                      'pan': _masterPan,
+                    },
+                  );
+                  for (final generatedRow in v3RuntimeExpectations.where(
+                    (expectation) =>
+                        expectation['kind'] == 'generated_row_state' &&
+                        allowedTargetRowIds.contains(expectation['row_id']),
+                  )) {
+                    final generatedRowIndex = _rowIndexForId(
+                      generatedRow['row_id'] as int,
+                    );
+                    if (_isValidRowIndex(generatedRowIndex)) {
+                      generatedRow
+                        ..['gain'] = simulatedRowGain[generatedRowIndex]
+                        ..['pan'] = simulatedRowPan[generatedRowIndex];
+                    }
+                  }
+                }
+                await applyV3MixActions(materializedData);
               }
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
@@ -47545,14 +47780,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return out;
   }
 
-  Future<void> _applyRowMixAction(Map<String, dynamic> data) async {
+  Future<Map<String, dynamic>?> _applyRowMixAction(
+    Map<String, dynamic> data,
+  ) async {
     final operation = _normalizeRowMixOperation(data['operation']);
     if (operation != 'set_gain' &&
         operation != 'adjust_gain' &&
         operation != 'set_pan' &&
         operation != 'adjust_pan') {
       _insertAssistantChatText("I couldn't apply that row mix edit.");
-      return;
+      return null;
     }
 
     final rows = _resolveRowIndicesFromActionTarget(
@@ -47561,16 +47798,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
     if (rows.length != 1) {
       _insertAssistantChatText("I couldn't resolve which row to mix.");
-      return;
+      return null;
     }
     final row = rows.single;
     if (row < 0 || row >= _rowCount) {
       _insertAssistantChatText("I couldn't resolve which row to mix.");
-      return;
+      return null;
     }
 
     final mixData = _rowMixTargetData(data, row);
     final MixAction action;
+    late final Map<String, dynamic> appliedData;
     if (operation == 'set_gain' || operation == 'adjust_gain') {
       final oldGain = _rowGain[row];
       final value = _resolveRowMixGainValue(
@@ -47580,9 +47818,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       if (value == null) {
         _insertAssistantChatText("I couldn't resolve the gain change.");
-        return;
+        return null;
       }
-      if ((value - oldGain).abs() < 0.00001) return;
+      appliedData = <String, dynamic>{
+        ...data,
+        'expected_row_id': _rowIdAt(row),
+        'expected_gain_db': rowGainUiToDb(value),
+      };
+      if ((value - oldGain).abs() < 0.00001) return appliedData;
       action = MixAction('set_row_gain', {
         ...mixData,
         'force_individual_row': true,
@@ -47598,9 +47841,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       if (value == null) {
         _insertAssistantChatText("I couldn't resolve the pan change.");
-        return;
+        return null;
       }
-      if ((value - oldPan).abs() < 0.00001) return;
+      appliedData = <String, dynamic>{
+        ...data,
+        'expected_row_id': _rowIdAt(row),
+        'expected_pan_signed': (value * 2.0) - 1.0,
+      };
+      if ((value - oldPan).abs() < 0.00001) return appliedData;
       action = MixAction('set_row_pan', {
         ...mixData,
         'force_individual_row': true,
@@ -47618,7 +47866,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
     if (!report.changed) {
       _insertAssistantChatText("I couldn't apply that row mix edit.");
+      return null;
     }
+    return appliedData;
   }
 
   String _normalizeTransportControlOperation(Object? raw) {
@@ -61702,6 +61952,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
         case 'delete_effect':
           {
+            final forceIndividualRow = a.data['force_individual_row'] == true;
             final contains = (a.data['effect_name_contains'] as String)
                 .toLowerCase();
             final rowCandidates = rowCandidatesFromAction(a.data);
@@ -61718,6 +61969,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               for (final row in rowTargets) {
                 final effects = await JuceAudioEngine.getTrackEffectsForRow(
                   row,
+                  forceIndividualRow: forceIndividualRow,
                 );
                 final idx = effects.indexWhere(
                   (e) => e.toLowerCase().contains(contains),
@@ -61729,6 +61981,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   row: row,
                   effectIndex: idx,
                   pathOrName: effectName,
+                  forceIndividualRow: forceIndividualRow,
                   onChange: () {
                     setState(() {});
                     _refreshRowFx(row);
@@ -61737,7 +61990,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 );
                 await _undoManager.executeWithoutAdd(act);
                 final afterEffects =
-                    await JuceAudioEngine.getTrackEffectsForRow(row);
+                    await JuceAudioEngine.getTrackEffectsForRow(
+                      row,
+                      forceIndividualRow: forceIndividualRow,
+                    );
                 final removed =
                     afterEffects.length < beforeCount ||
                     !afterEffects.any(
@@ -61763,7 +62019,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             String? removedEffectName;
             EditorUndoAction? appliedAction;
             for (final row in rowCandidates) {
-              final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
+              final effects = await JuceAudioEngine.getTrackEffectsForRow(
+                row,
+                forceIndividualRow: forceIndividualRow,
+              );
               final idx = effects.indexWhere(
                 (e) => e.toLowerCase().contains(contains),
               );
@@ -61774,6 +62033,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 row: row,
                 effectIndex: idx,
                 pathOrName: effectName,
+                forceIndividualRow: forceIndividualRow,
                 onChange: () {
                   setState(() {});
                   _refreshRowFx(row);
@@ -61783,6 +62043,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               await _undoManager.executeWithoutAdd(act);
               final afterEffects = await JuceAudioEngine.getTrackEffectsForRow(
                 row,
+                forceIndividualRow: forceIndividualRow,
               );
               final removed =
                   afterEffects.length < beforeCount ||
@@ -61847,6 +62108,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           }
 
         case 'ensure_effect':
+          final forceIndividualRow = a.data['force_individual_row'] == true;
           final contains = (a.data['effect_name_contains'] as String)
               .toLowerCase();
           final rowCandidates = rowCandidatesFromAction(a.data);
@@ -61874,14 +62136,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             );
             var appliedCount = 0;
             for (final row in rowTargets) {
-              final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
+              final effects = await JuceAudioEngine.getTrackEffectsForRow(
+                row,
+                forceIndividualRow: forceIndividualRow,
+              );
               final already = effects.indexWhere(
                 (e) => e.toLowerCase().contains(contains),
               );
               if (already != -1) {
                 appliedCount += 1;
                 groupedActions.addAll(
-                  await _ensureAiCanonicalChainOrderOnRow(row),
+                  await _ensureAiCanonicalChainOrderOnRow(
+                    row,
+                    forceIndividualRow: forceIndividualRow,
+                  ),
                 );
                 continue;
               }
@@ -61889,6 +62157,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               final act = InsertEffectAction(
                 row: row,
                 pathOrName: effectName,
+                forceIndividualRow: forceIndividualRow,
                 onChange: () {
                   setState(() {});
                   _refreshRowFx(row);
@@ -61898,6 +62167,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               await _undoManager.executeWithoutAdd(act);
               final afterEffects = await JuceAudioEngine.getTrackEffectsForRow(
                 row,
+                forceIndividualRow: forceIndividualRow,
               );
               final inserted =
                   afterEffects.length > beforeCount &&
@@ -61911,7 +62181,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               }
               groupedActions.add(act);
               groupedActions.addAll(
-                await _ensureAiCanonicalChainOrderOnRow(row),
+                await _ensureAiCanonicalChainOrderOnRow(
+                  row,
+                  forceIndividualRow: forceIndividualRow,
+                ),
               );
               appliedCount += 1;
               _mixHighlighter.trigger([
@@ -61933,7 +62206,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           int? appliedRow;
           EditorUndoAction? appliedAction;
           for (final row in rowCandidates) {
-            final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
+            final effects = await JuceAudioEngine.getTrackEffectsForRow(
+              row,
+              forceIndividualRow: forceIndividualRow,
+            );
             final already = effects.indexWhere(
               (e) => e.toLowerCase().contains(contains),
             );
@@ -61945,6 +62221,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final act = InsertEffectAction(
               row: row,
               pathOrName: effectName,
+              forceIndividualRow: forceIndividualRow,
               onChange: () {
                 setState(() {});
                 _refreshRowFx(row);
@@ -61954,6 +62231,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             await _undoManager.executeWithoutAdd(act);
             final afterEffects = await JuceAudioEngine.getTrackEffectsForRow(
               row,
+              forceIndividualRow: forceIndividualRow,
             );
             final inserted =
                 afterEffects.length > beforeCount &&
@@ -61978,7 +62256,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             groupedActions.add(appliedAction);
           }
           groupedActions.addAll(
-            await _ensureAiCanonicalChainOrderOnRow(appliedRow),
+            await _ensureAiCanonicalChainOrderOnRow(
+              appliedRow,
+              forceIndividualRow: forceIndividualRow,
+            ),
           );
 
           _mixHighlighter.trigger([
@@ -62150,6 +62431,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               } else if (clamp01) {
                 next = next.clamp(0.0, 1.0);
               }
+              final interval = (_toActionDouble(picked['interval']) ?? 0.0)
+                  .abs();
+              next = _canonicalEffectParameterValue(
+                value: next,
+                minimum: pMin,
+                maximum: pMax,
+                interval: interval,
+              );
 
               // await _undoManager.execute(
               //   SetEffectParamAction(
@@ -62185,8 +62474,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 finalAct,
               ); // need this so that you can make a compound undo action while preserving execute order
               groupedActions.add(finalAct);
-              final interval = (_toActionDouble(picked['interval']) ?? 0.0)
-                  .abs();
               final currentInstanceIds =
                   await JuceAudioEngine.getTrackEffectInstanceIdsForRow(
                     row,
@@ -62353,6 +62640,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             } else if (clamp01) {
               next = next.clamp(0.0, 1.0);
             }
+            final interval = (_toActionDouble(picked['interval']) ?? 0.0).abs();
+            next = _canonicalEffectParameterValue(
+              value: next,
+              minimum: pMin,
+              maximum: pMax,
+              interval: interval,
+            );
 
             final finalAct = SetMasterEffectParamAction(
               effectIndex: fxIndex,
@@ -62368,7 +62662,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
             await _undoManager.executeWithoutAdd(finalAct);
             groupedActions.add(finalAct);
-            final interval = (_toActionDouble(picked['interval']) ?? 0.0).abs();
             final currentEffectIds = await JuceAudioEngine.getMasterEffectIds();
             final matchingIndexes = <int>[
               for (var index = 0; index < currentEffectIds.length; index++)
@@ -62425,6 +62718,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
         case 'hard_reset_row_fx':
           {
+            final forceIndividualRow = a.data['force_individual_row'] == true;
             final rowCandidates = rowCandidatesFromAction(a.data);
             if (rowCandidates.isEmpty) {
               skipAction('No target track for resetting effects.');
@@ -62440,7 +62734,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             // Query actual FX list
             var resetCount = 0;
             for (final row in rowTargets) {
-              final effects = await JuceAudioEngine.getTrackEffectsForRow(row);
+              final effects = await JuceAudioEngine.getTrackEffectsForRow(
+                row,
+                forceIndividualRow: forceIndividualRow,
+              );
 
               if (effects.isEmpty) continue;
 
@@ -62452,6 +62749,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   row: row,
                   effectIndex: fxIndex,
                   pathOrName: fxName,
+                  forceIndividualRow: forceIndividualRow,
                   onChange: () {
                     setState(() {});
                     _refreshRowFx(row);
@@ -63413,7 +63711,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return null;
   }
 
-  Future<Map<String, dynamic>> _buildProducerSnapshot() async {
+  Future<ProjectState> _buildCurrentAiProjectState() async {
     final maxRows = math.max(_rowCount, 1);
 
     final rowGain = List<double>.generate(
@@ -63438,7 +63736,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       maxRows: maxRows,
     );
     final aiTrackGroups = await _trackGroupsForAiProjectState();
-    final projectState = await builder.build(
+    return builder.build(
       audioTracks: _audioTracks,
       bpmFallback: _tempo,
       projectKey: _projectKey,
@@ -63450,6 +63748,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       timelineRows: _visibleAiRows(),
       trackGroups: aiTrackGroups,
     );
+  }
+
+  Future<Map<String, dynamic>> _buildProducerSnapshot() async {
+    final projectState = await _buildCurrentAiProjectState();
 
     final masterEffects = await JuceAudioEngine.getMasterEffects();
     final masterFx = <Map<String, dynamic>>[];
@@ -64262,9 +64564,31 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       return;
     }
+    final rawReceipts = bundle['receipts'];
+    final receiptCommandIds = rawReceipts is List
+        ? rawReceipts
+              .whereType<Map>()
+              .map((receipt) => receipt['command_id']?.toString().trim() ?? '')
+              .where((commandId) => commandId.isNotEmpty)
+              .toSet()
+        : const <String>{};
+    final deferredMixCommandIds = actions
+        .where((action) => action.type == 'v3_deferred_mix_goal')
+        .map((action) => action.data['command_id']?.toString().trim() ?? '')
+        .toList(growable: false);
+    if (deferredMixCommandIds.any(
+      (commandId) =>
+          commandId.isEmpty || !receiptCommandIds.contains(commandId),
+    )) {
+      _insertAiFailureSystemText(
+        'The prepared changes are invalid. Nothing was changed.',
+      );
+      return;
+    }
     final expectations = await _captureAiV3Expectations(actions);
     final workflowRuntime = AiV3WorkflowRuntime();
     final executionSummariesByCommandId = <String, List<String>>{};
+    final runtimeAlreadySatisfiedCommandIds = <String>{};
     final deferredActionNotices = <String>[];
     final deferredExecutionNotices = <String>[];
     final executionStopwatch = Stopwatch()..start();
@@ -64297,6 +64621,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     v3RuntimeExpectations: expectations,
                     v3ExecutionSummariesByCommandId:
                         executionSummariesByCommandId,
+                    v3RuntimeAlreadySatisfiedCommandIds:
+                        runtimeAlreadySatisfiedCommandIds,
                     v3WorkflowRuntime: workflowRuntime,
                   );
                   if (!applied) throw StateError('v3_action_not_fully_applied');
@@ -64332,21 +64658,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           Localizations.localeOf(context).languageCode == 'en'
           ? executionSummariesByCommandId
           : const <String, List<String>>{};
+      final verifiedBundle =
+          aiV3BundleWithRuntimeAlreadySatisfiedReceipts(
+            bundle,
+            runtimeAlreadySatisfiedCommandIds,
+          );
       final executionDetails = aiV3VerifiedExecutionDetails(
-        bundle,
+        verifiedBundle,
         executionSummariesByCommandId: localizedExecutionSummaries,
         actionNotices: verifiedActionNotices,
         receiptLabelLocalizer: _localizedAiV3ReceiptLabel,
         alreadySatisfiedLocalizer: _localizedAiV3AlreadySatisfiedLabel,
       );
       final conversationMessage = aiV3VerifiedConversationMessage(
-        bundle,
+        verifiedBundle,
         executionSummariesByCommandId: localizedExecutionSummaries,
         actionNotices: verifiedActionNotices,
         receiptLabelLocalizer: _localizedAiV3ReceiptLabel,
         alreadySatisfiedLocalizer: _localizedAiV3AlreadySatisfiedLabel,
       );
-      final completionMessage = aiV3VerifiedCompletionMessage(bundle);
+      final completionMessage = aiV3VerifiedCompletionMessage(verifiedBundle);
       _chatPipeline.recordAiV3Execution(
         handoff: handoff,
         result: <String, dynamic>{
@@ -64354,7 +64685,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           'pre_state_digest': expectedDigest,
           'post_state_digest': _freshAiV3StateFingerprint(),
           'applied_action_count': transaction.captured.length,
-          'command_receipts': bundle['receipts'] ?? const <Object>[],
+          'command_receipts':
+              verifiedBundle['receipts'] ?? const <Object>[],
           'expected_mutations': expectations,
           'observed_mutations': transaction.observed,
           'verification': 'passed',
@@ -64362,7 +64694,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         },
         conversationMessage: conversationMessage,
       );
-      final count = (bundle['receipts'] as List?)?.length ?? actions.length;
+      final count =
+          (verifiedBundle['receipts'] as List?)?.length ?? actions.length;
       final applied = L10n.translateWithParams(
         context,
         count == 1 ? 'Applied 1 change.' : 'Applied {count} changes.',
@@ -67175,6 +67508,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             'kind': 'mix_effect_presence',
             'row': row,
             'master': false,
+            if (data['force_individual_row'] == true)
+              'force_individual_row': true,
             'needle': needle,
             'present': type == 'ensure_effect',
           });
@@ -67231,6 +67566,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               'kind': 'mix_effects_empty',
               'row': row,
               'master': false,
+              if (data['force_individual_row'] == true)
+                'force_individual_row': true,
             });
           }
           break;
@@ -67802,10 +68139,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           break;
         case 'mix_effect_presence':
           final master = expectation['master'] == true;
+          final forceIndividualRow =
+              expectation['force_individual_row'] == true;
           final effects = master
               ? await JuceAudioEngine.getMasterEffects()
               : await JuceAudioEngine.getTrackEffectsForRow(
                   _aiV3ExpectationRow(expectation),
+                  forceIndividualRow: forceIndividualRow,
                 );
           final needle = expectation['needle'].toString().toLowerCase();
           final present = effects.any(
@@ -67814,19 +68154,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           if (present != (expectation['present'] == true)) return false;
           break;
         case 'mix_effects_empty':
+          final forceIndividualRow =
+              expectation['force_individual_row'] == true;
           final effects = expectation['master'] == true
               ? await JuceAudioEngine.getMasterEffects()
               : await JuceAudioEngine.getTrackEffectsForRow(
                   _aiV3ExpectationRow(expectation),
+                  forceIndividualRow: forceIndividualRow,
                 );
           if (effects.isNotEmpty) return false;
           break;
         case 'mix_effect_parameter_resolved':
           final master = expectation['master'] == true;
+          final forceIndividualRow =
+              expectation['force_individual_row'] == true;
           final effects = master
               ? await JuceAudioEngine.getMasterEffects()
               : await JuceAudioEngine.getTrackEffectsForRow(
                   _aiV3ExpectationRow(expectation),
+                  forceIndividualRow: forceIndividualRow,
                 );
           final needle = expectation['needle'].toString().toLowerCase();
           final effectIndex = effects.indexWhere(
@@ -67838,6 +68184,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               : await JuceAudioEngine.getTrackPluginParameters(
                   _aiV3ExpectationRow(expectation),
                   effectIndex,
+                  forceIndividualRow: forceIndividualRow,
                 );
           final exact =
               expectation['param_name']?.toString().trim().toLowerCase() ?? '';
@@ -68376,9 +68723,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           final runtimeClipId =
               expectation['runtime_clip_id']?.toString() ?? '';
           final generated = generatedResource(runtimeClipId);
-          if (expectation['resource_transformed'] == true &&
-              runtimeClipId.isNotEmpty &&
-              generated != null) {
+          if (runtimeClipId.isNotEmpty && generated != null) {
             final matchingIdentity = _audioTracks
                 .where(
                   (clip) =>
@@ -68391,6 +68736,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               if (matchingIdentity.isNotEmpty) return false;
             } else if (matchingIdentity.length != 1) {
               return false;
+            } else {
+              final clip = matchingIdentity.single;
+              final expectedRowId = _toActionInt(generated['row_id']);
+              final expectedFile = generated['file']?.toString();
+              if ((expectedRowId != null && clip.rowId != expectedRowId) ||
+                  (expectedFile != null && clip.file.path != expectedFile)) {
+                return false;
+              }
             }
             break;
           }
@@ -68798,6 +69151,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         case 'effect_parameter_value':
           final effects = expectation['master'] == true
               ? _aiV3MasterEffectsJson()
+              : expectation['force_individual_row'] == true
+              ? await _aiV3NativeRowEffectChain(
+                  _aiV3ExpectationRow(expectation),
+                )
               : _aiV3RowEffectsJson(_aiV3ExpectationRow(expectation));
           final requiresObservedEffect =
               kind == 'mix_effect_parameter_resolved' ||

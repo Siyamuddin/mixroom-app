@@ -70,6 +70,25 @@ class _RecordingMixModel extends LocalMixingModel {
   }
 }
 
+class _FixedMixModel extends LocalMixingModel {
+  _FixedMixModel(this.actions);
+
+  final List<MixAction> actions;
+
+  @override
+  MixingResult run({
+    required ProjectState project,
+    required GoalVector goal,
+    required bool strict,
+    Map<int, String> roleOverrides = const <int, String>{},
+    bool requirePermissionForBigMoves = false,
+  }) => MixingResult(
+    actions: actions,
+    summary: 'Test mix.',
+    isNoOp: actions.isEmpty,
+  );
+}
+
 class _AsyncPredictor implements MixingMagnitudePredictor {
   const _AsyncPredictor(this.refineResult);
 
@@ -105,10 +124,18 @@ class _AsyncPredictor implements MixingMagnitudePredictor {
       refineResult(actions);
 }
 
-RowState _row(int index, int id, double rms, {String groupId = ''}) => RowState(
+RowState _row(
+  int index,
+  int id,
+  double rms, {
+  String groupId = '',
+  String roleOverride = '',
+}) =>
+    RowState(
       rowIndex: index,
       rowId: id,
       rowName: index == 0 ? 'Vocal' : 'Reference',
+      roleOverride: roleOverride,
       groupId: groupId,
       clips: <ClipState>[
         ClipState(startMs: 0, endMs: 4000, fileName: 'row_$index.wav'),
@@ -238,6 +265,29 @@ AiV3PreparedBundle _bundle({
 }
 
 void main() {
+  test('runtime role overrides follow current project row indexes', () {
+    final project = ProjectState(
+      bpm: 120,
+      masterGain0to3: 1,
+      maxRows: 8,
+      rows: <RowState>[
+        _row(0, 20, 0.25, roleOverride: 'bass'),
+        _row(1, 10, 0.1, roleOverride: 'vocals'),
+        _row(2, 30, 0.2),
+      ],
+      overlapMatrix: const <List<int>>[
+        <int>[0, 0, 0],
+        <int>[0, 0, 0],
+        <int>[0, 0, 0],
+      ],
+    );
+
+    expect(
+      aiV3CurrentRoleOverrides(project),
+      const <int, String>{0: 'bass', 1: 'vocals'},
+    );
+  });
+
   test('role overrides affect only later mix goals in planner order', () async {
     Future<Map<int, String>> rolesSeen({required bool roleFirst}) async {
       final base = _bundle();
@@ -297,6 +347,177 @@ void main() {
     expect(result.metadata, contains('mix_materialization_steps'));
   });
 
+  test('single-goal materialization stays inside its required row', () async {
+    final materializer = AiV3MixGoalMaterializer(
+      mixModel: LocalMixingModel(),
+      magnitudePredictor: _Predictor((actions) => actions),
+    );
+    final result = await materializer.materializeSingleGoal(
+      data: _bundle().actions.single.data,
+      project: _project(),
+      roleOverrides: const <int, String>{},
+      bypassLearnedMagnitudes: true,
+      requiredTargetRow: 0,
+    );
+    expect(result.actions, isNotEmpty);
+    expect(
+      result.actions.every((action) => action.data['row'] == 0),
+      isTrue,
+    );
+  });
+
+  test('single-goal materialization rejects actions escaping its row',
+      () async {
+    expect(
+      () => AiV3MixGoalMaterializer(
+        mixModel: LocalMixingModel(),
+        magnitudePredictor: _Predictor(
+          (_) => <MixAction>[
+            MixAction('set_row_gain', const <String, dynamic>{
+              'row': 1,
+              'value': 1.0,
+            }),
+          ],
+        ),
+      ).materializeSingleGoal(
+        data: _bundle().actions.single.data,
+        project: _project(),
+        roleOverrides: const <int, String>{},
+        bypassLearnedMagnitudes: false,
+        requiredTargetRow: 0,
+      ),
+      throwsA(
+        isA<AiV3PreparationException>().having(
+          (error) => error.code,
+          'code',
+          'v3_mix_action_target_invalid',
+        ),
+      ),
+    );
+  });
+
+  test('bundle materialization contains a stable row goal automatically',
+      () async {
+    expect(
+      () => AiV3MixGoalMaterializer(
+        mixModel: LocalMixingModel(),
+        magnitudePredictor: _Predictor(
+          (_) => <MixAction>[
+            MixAction('set_row_gain', const <String, dynamic>{
+              'row': 1,
+              'value': 1.0,
+            }),
+          ],
+        ),
+      ).materialize(
+        bundle: _bundle(),
+        project: _project(),
+        roleOverrides: const <int, String>{},
+        bypassLearnedMagnitudes: false,
+      ),
+      throwsA(
+        isA<AiV3PreparationException>().having(
+          (error) => error.code,
+          'code',
+          'v3_mix_action_target_invalid',
+        ),
+      ),
+    );
+  });
+
+  test('bundle materialization rejects escaping heuristic actions', () async {
+    expect(
+      () => AiV3MixGoalMaterializer(
+        mixModel: _FixedMixModel(<MixAction>[
+          MixAction('set_master_gain', const <String, dynamic>{
+            'value': 1.0,
+          }),
+        ]),
+        magnitudePredictor: _Predictor((actions) => actions),
+      ).materialize(
+        bundle: _bundle(),
+        project: _project(),
+        roleOverrides: const <int, String>{},
+        bypassLearnedMagnitudes: true,
+      ),
+      throwsA(
+        isA<AiV3PreparationException>().having(
+          (error) => error.code,
+          'code',
+          'v3_mix_action_target_invalid',
+        ),
+      ),
+    );
+  });
+
+  test('row-set materialization permits every row in the resolved set',
+      () async {
+    final result = await AiV3MixGoalMaterializer(
+      mixModel: LocalMixingModel(),
+      magnitudePredictor: _Predictor(
+        (_) => <MixAction>[
+          MixAction('set_row_gain', const <String, dynamic>{
+            'row': 0,
+            'value': 0.9,
+          }),
+          MixAction('set_row_pan', const <String, dynamic>{
+            'row': 1,
+            'value': 0.6,
+          }),
+        ],
+      ),
+    ).materializeSingleGoal(
+      data: _bundle(
+        target: const <String, dynamic>{'scope': 'all_rows'},
+        intentKind: 'balance',
+      ).actions.single.data,
+      project: _project(),
+      roleOverrides: const <int, String>{},
+      bypassLearnedMagnitudes: false,
+      allowedTargetRowIds: const <int>{10, 20},
+    );
+
+    expect(result.actions, hasLength(2));
+    expect(
+      result.metadata['allowed_target_row_ids'],
+      <int>[10, 20],
+    );
+  });
+
+  test('row-set materialization rejects unrelated rows and master actions',
+      () async {
+    for (final escaped in <MixAction>[
+      MixAction('set_row_gain', const <String, dynamic>{
+        'row': 1,
+        'value': 1.0,
+      }),
+      MixAction('set_master_gain', const <String, dynamic>{'value': 1.0}),
+    ]) {
+      expect(
+        () => AiV3MixGoalMaterializer(
+          mixModel: LocalMixingModel(),
+          magnitudePredictor: _Predictor((_) => <MixAction>[escaped]),
+        ).materializeSingleGoal(
+          data: _bundle(
+            target: const <String, dynamic>{'scope': 'all_rows'},
+            intentKind: 'balance',
+          ).actions.single.data,
+          project: _project(),
+          roleOverrides: const <int, String>{},
+          bypassLearnedMagnitudes: false,
+          allowedTargetRowIds: const <int>{10},
+        ),
+        throwsA(
+          isA<AiV3PreparationException>().having(
+            (error) => error.code,
+            'code',
+            'v3_mix_action_target_invalid',
+          ),
+        ),
+      );
+    }
+  });
+
   test('reference materialization never emits an action for the reference row',
       () async {
     final result = await AiV3MixGoalMaterializer(
@@ -348,6 +569,41 @@ void main() {
     );
   });
 
+  test('bundle materialization contains group goals to current members',
+      () async {
+    expect(
+      () => AiV3MixGoalMaterializer(
+        mixModel: LocalMixingModel(),
+        magnitudePredictor: _Predictor(
+          (_) => <MixAction>[
+            MixAction('set_master_gain', const <String, dynamic>{
+              'value': 1.0,
+            }),
+          ],
+        ),
+      ).materialize(
+        bundle: _bundle(
+          target: const <String, dynamic>{
+            'scope': 'group',
+            'group_id': 'vocals',
+            'group_name': 'Vocals',
+          },
+          intentKind: 'balance',
+        ),
+        project: _project(grouped: true),
+        roleOverrides: const <int, String>{},
+        bypassLearnedMagnitudes: false,
+      ),
+      throwsA(
+        isA<AiV3PreparationException>().having(
+          (error) => error.code,
+          'code',
+          'v3_mix_action_target_invalid',
+        ),
+      ),
+    );
+  });
+
   test('materializes a master target through the existing mix engine',
       () async {
     final result = await AiV3MixGoalMaterializer(
@@ -369,6 +625,65 @@ void main() {
     expect(raw, isNotEmpty);
     expect(
         raw.any((action) => action['type'] == 'ensure_master_effect'), isTrue);
+  });
+
+  test('master materialization permits only master actions', () async {
+    final result = await AiV3MixGoalMaterializer(
+      mixModel: LocalMixingModel(),
+      magnitudePredictor: _Predictor(
+        (_) => <MixAction>[
+          MixAction('set_master_gain', const <String, dynamic>{
+            'mode': 'set',
+            'value': 1.1,
+          }),
+        ],
+      ),
+    ).materializeSingleGoal(
+      data: _bundle(
+        target: const <String, dynamic>{'scope': 'master'},
+        intentKind: 'reverb',
+        direction: 'up',
+      ).actions.single.data,
+      project: _project(),
+      roleOverrides: const <int, String>{},
+      bypassLearnedMagnitudes: false,
+    );
+
+    expect(result.actions.single.type, 'set_master_gain');
+    expect(result.metadata['master_only'], isTrue);
+  });
+
+  test('master materialization rejects row actions', () async {
+    expect(
+      () => AiV3MixGoalMaterializer(
+        mixModel: LocalMixingModel(),
+        magnitudePredictor: _Predictor(
+          (_) => <MixAction>[
+            MixAction('set_row_gain', const <String, dynamic>{
+              'row': 0,
+              'mode': 'set',
+              'value': 1.0,
+            }),
+          ],
+        ),
+      ).materializeSingleGoal(
+        data: _bundle(
+          target: const <String, dynamic>{'scope': 'master'},
+          intentKind: 'reverb',
+          direction: 'up',
+        ).actions.single.data,
+        project: _project(),
+        roleOverrides: const <int, String>{},
+        bypassLearnedMagnitudes: false,
+      ),
+      throwsA(
+        isA<AiV3PreparationException>().having(
+          (error) => error.code,
+          'code',
+          'v3_mix_action_target_invalid',
+        ),
+      ),
+    );
   });
 
   test('empty refinement is a non-blocking already-satisfied result', () async {
