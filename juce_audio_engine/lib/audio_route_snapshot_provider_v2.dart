@@ -16,12 +16,14 @@ class MethodChannelAudioRouteSnapshotProviderV2
 
   bool get _isSupported =>
       !kIsWeb &&
-      (_platformOverride ?? defaultTargetPlatform) == TargetPlatform.macOS;
+      ((_platformOverride ?? defaultTargetPlatform) == TargetPlatform.macOS ||
+          (_platformOverride ?? defaultTargetPlatform) ==
+              TargetPlatform.android);
 
   @override
   Future<AudioRouteSnapshotV2> readSnapshot() async {
     if (!_isSupported) {
-      return _unavailable('platform', 'macOSOnlyCheckpoint');
+      return _unavailable('platform', 'platformSnapshotUnavailable');
     }
 
     try {

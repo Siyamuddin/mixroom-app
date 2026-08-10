@@ -124,6 +124,39 @@ void main() {
     expect(facts.toMap()['inputOpen'], isNull);
   });
 
+  test(
+      'parses Android Oboe facts without confusing requested and accepted values',
+      () {
+    final facts = JuceRouteFactsV2.fromMap(<String, dynamic>{
+      'requestedSampleRateHz': null,
+      'sampleRateHz': 48000,
+      'requestedBufferFrames': 1024,
+      'bufferFrames': 960,
+      'oboeSampleRateHz': 44100,
+      'oboeBufferFrames': 1024,
+      'routedDeviceId': '37',
+      'audioBackend': 'AAudio',
+      'performanceMode': 'None',
+      'sharingMode': 'Shared',
+      'bufferCapacityFrames': 1920,
+      'framesPerBurst': 240,
+      'framesPerCallback': null,
+      'streamState': 'Started',
+      'futureOboeFact': true,
+    });
+
+    expect(facts.requestedSampleRateHz, isNull);
+    expect(facts.sampleRateHz, 48000);
+    expect(facts.requestedBufferFrames, 1024);
+    expect(facts.bufferFrames, 960);
+    expect(facts.oboeSampleRateHz, 44100);
+    expect(facts.oboeBufferFrames, 1024);
+    expect(facts.routedDeviceId, '37');
+    expect(facts.audioBackend, 'AAudio');
+    expect(facts.performanceMode, 'None');
+    expect(facts.framesPerCallback, isNull);
+  });
+
   test('preserves AVAudioSession and JUCE disagreement', () {
     final value = snapshot(
       session: const AudioSessionFactsV2(

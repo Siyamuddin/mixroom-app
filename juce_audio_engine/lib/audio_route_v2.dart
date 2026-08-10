@@ -116,6 +116,9 @@ class AudioSessionFactsV2 {
     this.outputChannelCount,
     this.active,
     this.streamRunning,
+    this.communicationDeviceSelected,
+    this.communicationDeviceType,
+    this.bluetoothScoActive,
   });
 
   final String? category;
@@ -126,6 +129,9 @@ class AudioSessionFactsV2 {
   final int? outputChannelCount;
   final bool? active;
   final bool? streamRunning;
+  final bool? communicationDeviceSelected;
+  final String? communicationDeviceType;
+  final bool? bluetoothScoActive;
 
   factory AudioSessionFactsV2.fromMap(Map<String, dynamic> map) {
     return AudioSessionFactsV2(
@@ -137,6 +143,10 @@ class AudioSessionFactsV2 {
       outputChannelCount: _nullableInt(map['outputChannelCount']),
       active: _nullableBool(map['active']),
       streamRunning: _nullableBool(map['streamRunning']),
+      communicationDeviceSelected:
+          _nullableBool(map['communicationDeviceSelected']),
+      communicationDeviceType: map['communicationDeviceType']?.toString(),
+      bluetoothScoActive: _nullableBool(map['bluetoothScoActive']),
     );
   }
 
@@ -149,6 +159,9 @@ class AudioSessionFactsV2 {
         'outputChannelCount': outputChannelCount,
         'active': active,
         'streamRunning': streamRunning,
+        'communicationDeviceSelected': communicationDeviceSelected,
+        'communicationDeviceType': communicationDeviceType,
+        'bluetoothScoActive': bluetoothScoActive,
       };
 }
 
@@ -169,6 +182,18 @@ class JuceRouteFactsV2 {
     this.realtimeCallbackBudgetMs,
     this.realtimeCallbackOverBudgetCount,
     this.xRunCount,
+    this.requestedSampleRateHz,
+    this.requestedBufferFrames,
+    this.oboeSampleRateHz,
+    this.oboeBufferFrames,
+    this.routedDeviceId,
+    this.audioBackend,
+    this.performanceMode,
+    this.sharingMode,
+    this.bufferCapacityFrames,
+    this.framesPerBurst,
+    this.framesPerCallback,
+    this.streamState,
   });
 
   final bool? deviceOpen;
@@ -186,6 +211,18 @@ class JuceRouteFactsV2 {
   final double? realtimeCallbackBudgetMs;
   final int? realtimeCallbackOverBudgetCount;
   final int? xRunCount;
+  final double? requestedSampleRateHz;
+  final int? requestedBufferFrames;
+  final double? oboeSampleRateHz;
+  final int? oboeBufferFrames;
+  final String? routedDeviceId;
+  final String? audioBackend;
+  final String? performanceMode;
+  final String? sharingMode;
+  final int? bufferCapacityFrames;
+  final int? framesPerBurst;
+  final int? framesPerCallback;
+  final String? streamState;
 
   bool? get inputOpen =>
       activeInputChannels == null ? null : activeInputChannels! > 0;
@@ -210,6 +247,18 @@ class JuceRouteFactsV2 {
       realtimeCallbackOverBudgetCount:
           _nullableInt(map['realtimeCallbackOverBudgetCount']),
       xRunCount: _nullableInt(map['xRunCount']),
+      requestedSampleRateHz: _nullableDouble(map['requestedSampleRateHz']),
+      requestedBufferFrames: _nullableInt(map['requestedBufferFrames']),
+      oboeSampleRateHz: _nullableDouble(map['oboeSampleRateHz']),
+      oboeBufferFrames: _nullableInt(map['oboeBufferFrames']),
+      routedDeviceId: map['routedDeviceId']?.toString(),
+      audioBackend: map['audioBackend']?.toString(),
+      performanceMode: map['performanceMode']?.toString(),
+      sharingMode: map['sharingMode']?.toString(),
+      bufferCapacityFrames: _nullableInt(map['bufferCapacityFrames']),
+      framesPerBurst: _nullableInt(map['framesPerBurst']),
+      framesPerCallback: _nullableInt(map['framesPerCallback']),
+      streamState: map['streamState']?.toString(),
     );
   }
 
@@ -231,6 +280,18 @@ class JuceRouteFactsV2 {
       'realtimeCallbackBudgetMs': realtimeCallbackBudgetMs,
       'realtimeCallbackOverBudgetCount': realtimeCallbackOverBudgetCount,
       'xRunCount': xRunCount,
+      'requestedSampleRateHz': requestedSampleRateHz,
+      'requestedBufferFrames': requestedBufferFrames,
+      'oboeSampleRateHz': oboeSampleRateHz,
+      'oboeBufferFrames': oboeBufferFrames,
+      'routedDeviceId': routedDeviceId,
+      'audioBackend': audioBackend,
+      'performanceMode': performanceMode,
+      'sharingMode': sharingMode,
+      'bufferCapacityFrames': bufferCapacityFrames,
+      'framesPerBurst': framesPerBurst,
+      'framesPerCallback': framesPerCallback,
+      'streamState': streamState,
     };
   }
 }

@@ -13,6 +13,9 @@ object JuceBridge {
     // Engine lifecycle
     @JvmStatic external fun initialiseEngineJNI()
     @JvmStatic external fun initialisePlaybackV2JNI(): Boolean
+    @JvmStatic external fun setBluetoothMediaPlaybackPolicyV2JNI(enabled: Boolean)
+    @JvmStatic external fun resetPlaybackPolicyV2JNI()
+    @JvmStatic external fun getOboeOutputStreamFactsV2JNI(): HashMap<String, Any>
     @JvmStatic external fun shutdownEngineJNI()
     @JvmStatic external fun shutdownEngineSynchronouslyJNI()
 

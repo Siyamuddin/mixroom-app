@@ -20,6 +20,11 @@ class BluetoothRouteReportSerializerV2 {
   String encode(AudioRouteSnapshotV2 snapshot) => jsonEncode(toMap(snapshot));
 
   Map<String, dynamic> toMap(AudioRouteSnapshotV2 snapshot) {
+    final juce = snapshot.juce.toMap(includeDeviceNames: false);
+    final routedDeviceId = juce.remove('routedDeviceId')?.toString();
+    if (routedDeviceId != null && routedDeviceId.isNotEmpty) {
+      juce['routedDeviceToken'] = _tokenizeIdentity('output', routedDeviceId);
+    }
     return <String, dynamic>{
       'schemaVersion': snapshot.schemaVersion,
       'capturedAtUtc': snapshot.capturedAtUtc.toUtc().toIso8601String(),
@@ -32,7 +37,7 @@ class BluetoothRouteReportSerializerV2 {
       'inputs': _sanitizeEndpoints(snapshot.inputs),
       'outputs': _sanitizeEndpoints(snapshot.outputs),
       'session': snapshot.session.toMap(),
-      'juce': snapshot.juce.toMap(includeDeviceNames: false),
+      'juce': juce,
       'unavailableReasons': snapshot.unavailableReasons,
     };
   }
@@ -53,17 +58,21 @@ class BluetoothRouteReportSerializerV2 {
     final identity = endpoint.uid.isNotEmpty
         ? endpoint.uid
         : '${endpoint.nativePortType}|${endpoint.name}|$index';
-    final digest = sha256.convert(<int>[
-      ..._sessionSalt,
-      ...utf8.encode('${endpoint.direction.name}|$identity'),
-    ]);
+    final token = _tokenizeIdentity(endpoint.direction.name, identity);
     return <String, dynamic>{
       'direction': endpoint.direction.name,
-      'endpointToken':
-          '${endpoint.direction.name}-${digest.toString().substring(0, 8)}',
+      'endpointToken': token,
       'nativePortType': endpoint.nativePortType,
       'normalizedKind': endpoint.normalizedKind.name,
       'channelCount': endpoint.channelCount,
     };
+  }
+
+  String _tokenizeIdentity(String direction, String identity) {
+    final digest = sha256.convert(<int>[
+      ..._sessionSalt,
+      ...utf8.encode('$direction|$identity'),
+    ]);
+    return '$direction-${digest.toString().substring(0, 8)}';
   }
 }

@@ -1,6 +1,7 @@
 #define JUCE_GUI_BASICS_INCLUDE_ANDROID 1
 #include "JuceEngine.h"
 #include "JuceBridge.h"
+#include "MixroomOboePlaybackV2.h"
 #include "InstrumentRenderers.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_core/native/juce_JNIHelpers_android.h>
@@ -1327,6 +1328,46 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_initialisePlaybackV2JNI(JNIEnv *
     else
         success = JuceEngine::get().initialisePlaybackV2Android();
     return success ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_setBluetoothMediaPlaybackPolicyV2JNI(
+    JNIEnv *, jclass, jboolean enabled)
+{
+    mixroom::android_audio_v2::setBluetoothMediaPolicyEnabled(enabled != JNI_FALSE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_resetPlaybackPolicyV2JNI(JNIEnv *, jclass)
+{
+    mixroom::android_audio_v2::resetPlaybackPolicy();
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getOboeOutputStreamFactsV2JNI(JNIEnv *env, jclass)
+{
+    const auto facts = mixroom::android_audio_v2::getOutputStreamFacts();
+    juce::NamedValueSet values;
+    values.set("available", facts.available);
+    values.set("running", facts.running);
+    if (facts.available)
+    {
+        values.set("routedDeviceId", facts.routedDeviceId);
+        values.set("requestedSampleRateHz", facts.requestedSampleRate);
+        values.set("sampleRateHz", facts.sampleRate);
+        values.set("requestedBufferFrames", facts.requestedBufferSizeFrames);
+        values.set("bufferFrames", facts.bufferSizeFrames);
+        values.set("bufferCapacityFrames", facts.bufferCapacityFrames);
+        values.set("framesPerBurst", facts.framesPerBurst);
+        values.set("framesPerCallback", facts.framesPerCallback);
+        if (facts.xRunCount >= 0)
+            values.set("xRunCount", facts.xRunCount);
+        values.set("audioBackend", juce::String(facts.audioApi));
+        values.set("performanceMode", juce::String(facts.performanceMode));
+        values.set("sharingMode", juce::String(facts.sharingMode));
+        values.set("streamState", juce::String(facts.streamState));
+    }
+    return namedValueStatsToJavaMap(env, values);
 }
 
 extern "C" JNIEXPORT void JNICALL

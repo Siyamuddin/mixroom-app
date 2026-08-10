@@ -187,7 +187,7 @@ void main() {
     expect(calls, isEmpty);
   });
 
-  test('Android V2 readiness uses native engine facts without route matching',
+  test('Android V2 readiness delegates actual-state and route verification',
       () async {
     final ready = await JuceAudioEngine.validatePlaybackV2(
       platformOverride: TargetPlatform.android,

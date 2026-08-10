@@ -3,9 +3,9 @@
 ## Document status
 
 - Status: the macOS V2 playback and live-output checkpoints are complete. The
-  Android Legacy baseline and Android V2 built-in-speaker, output-only
-  foundation have passed their physical-device gates. Preconnected Bluetooth
-  playback is the next Android checkpoint.
+  Android Legacy baseline, Android V2 built-in-speaker foundation, and Android
+  V2 preconnected Bluetooth media playback have passed their initial
+  physical-device gates.
 - Applies to: Android, iOS, and macOS.
 - Excludes: Windows and every other unsupported platform.
 - Current production implementation: Legacy Bluetooth only.
@@ -675,6 +675,35 @@ This evidence validates the generic output-only engine foundation. It does not
 yet validate Bluetooth routing, Bluetooth rate/buffer behavior, or live route
 changes on Android.
 
+Preconnected Bluetooth checkpoint design (2026-08-10): Android resolves the
+media output by native device ID, using the media-attributes route on API 33+
+and one unambiguous active A2DP endpoint on API 29–32. SCO is rejected. A2DP
+and verified playback-only BLE routes enable one isolated Oboe policy:
+output-only shared media/music playback, unspecified/native rate,
+`PerformanceMode::None`, and one conservative buffer request bounded by the
+stream capacity. Startup reads back the actual routed ID, API, performance and
+sharing modes, rate, buffer, capacity, burst size, stream state, and xruns.
+Any ambiguous, changed, duplex, non-AAudio, or otherwise unverifiable route is
+closed synchronously without retry or Legacy fallback. Built-in V2 and Legacy
+retain their existing stream construction.
+
+Preconnected Bluetooth evidence (2026-08-10): on the Samsung SM-S918N, V2
+opened the already-selected A2DP output as `bluetoothMedia` with
+`MODE_NORMAL`, media/music attributes, AAudio shared `PerformanceMode::None`,
+44.1 kHz, a verified 1792-frame buffer and capacity, an 896-frame native
+burst, two outputs, zero inputs, no SCO route, and no microphone permission or
+activation. After the functional gate and sustained playback, the route and
+accepted configuration remained unchanged across 100,329 callbacks. The
+stream reported zero xruns; two isolated historical callback-over-budget
+events did not recur as xrun growth or audible instability, and the recorded
+maximum callback time of 10.998 ms remained below the current 40.635 ms
+budget. Audio clips, MIDI preview and timeline playback, combined audio/MIDI,
+metronome, effects, seeking, repeated Play/Pause, normal editor activity, and
+coexistence with another media application remained clean. The V2 built-in
+speaker regression check also passed. The manual Legacy comparison was not
+repeated because the Legacy baseline had already passed and this checkpoint's
+Legacy isolation remains covered by automated tests.
+
 Deliverables:
 
 - A2DP/SCO/LE classification;
@@ -868,8 +897,9 @@ Each run records:
 
 ## Immediate next step
 
-Design the Android preconnected-Bluetooth playback checkpoint on top of the
-verified output-only foundation. Add only route classification, media-route
-verification, route-supported rate/buffer handling, and truthful accepted-state
-diagnostics. Keep live connect/disconnect observation, recording, monitoring,
-adaptive tuning, retries, and vendor-specific behavior outside that checkpoint.
+Commit the Android preconnected-Bluetooth checkpoint after final automated
+verification. The following checkpoint is Android live output coordination:
+detect an effective media-output change, pause transport, apply and verify one
+output-only configuration through the shared coordinator, and wait for the
+user to resume. Recording, monitoring, Bluetooth input, polling, vendor
+workarounds, and automatic resume remain deferred.

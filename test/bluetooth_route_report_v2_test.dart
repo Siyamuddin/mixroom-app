@@ -50,6 +50,7 @@ AudioRouteSnapshotV2 snapshot() {
       inputDeviceName: "Alex's iPhone Microphone",
       outputDeviceName: "Alex's Headphones",
       xRunCount: null,
+      routedDeviceId: 'private-output-uid',
     ),
     unavailableReasons: const <String, String>{
       'juce.xRunCount': 'unsupportedByIosBackend',
@@ -72,6 +73,10 @@ void main() {
     expect(encoded, isNot(contains('outputDeviceName')));
     expect((report['inputs'] as List).single, isNot(contains('uid')));
     expect((report['outputs'] as List).single, isNot(contains('name')));
+    expect(
+      (report['juce'] as Map<String, dynamic>)['routedDeviceToken'],
+      startsWith('output-'),
+    );
   });
 
   test('endpoint tokens are stable only for the same session salt', () {

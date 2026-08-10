@@ -117,8 +117,7 @@ void main() {
     );
   });
 
-  test('unsupported platforms return unavailable without a method call',
-      () async {
+  test('Android provider invokes the native snapshot method', () async {
     calls = 0;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (_) async {
@@ -132,12 +131,34 @@ void main() {
 
     final snapshot = await provider.readSnapshot();
 
+    expect(calls, 1);
+    expect(snapshot.captureConsistency, AudioRouteCaptureConsistencyV2.stable);
+  });
+
+  test('unsupported platforms return unavailable without a method call',
+      () async {
+    calls = 0;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (_) async {
+      calls++;
+      return nativeSnapshot();
+    });
+    final provider = MethodChannelAudioRouteSnapshotProviderV2(
+      channel: channel,
+      platformOverride: TargetPlatform.iOS,
+    );
+
+    final snapshot = await provider.readSnapshot();
+
     expect(calls, 0);
     expect(
       snapshot.captureConsistency,
       AudioRouteCaptureConsistencyV2.unavailable,
     );
-    expect(snapshot.unavailableReasons['platform'], 'macOSOnlyCheckpoint');
+    expect(
+      snapshot.unavailableReasons['platform'],
+      'platformSnapshotUnavailable',
+    );
   });
 
   test('missing native method returns a controlled unavailable snapshot',

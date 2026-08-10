@@ -40331,7 +40331,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _copyBluetoothReportV2() async {
-    if (!kDebugMode || !Platform.isMacOS) return;
+    if (!kDebugMode || (!Platform.isMacOS && !Platform.isAndroid)) return;
 
     final snapshot = await JuceAudioEngine.getAudioRouteSnapshotV2();
     if (!mounted) return;
@@ -40439,6 +40439,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   );
                 }
               },
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: () => unawaited(_copyBluetoothReportV2()),
+              child: const Text('Copy Bluetooth Report'),
             ),
           ),
         ],

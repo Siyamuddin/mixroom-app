@@ -2,11 +2,13 @@ package com.mixroom.juce_audio_engine
 
 import android.content.Context
 import android.content.res.AssetManager
+import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.FlutterPlugin.FlutterPluginBinding
@@ -33,6 +35,9 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
   private lateinit var applicationContext: Context
   private lateinit var promptAnalysisService: PromptAnalysisService
   private var engineOwnership = EngineOwnership.NONE
+  private var verifiedPlaybackRouteV2: AndroidRouteEndpointV2? = null
+  private var bluetoothMediaPolicyActiveV2 = false
+  private var v2SessionRequested = false
 
   private var eventsSink: EventChannel.EventSink? = null
   private var logsSink: EventChannel.EventSink? = null
@@ -573,6 +578,86 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
   }
 
+  private fun AudioDeviceInfo.toRouteEndpointV2(): AndroidRouteEndpointV2 {
+    val channels = channelCounts.maxOrNull()?.takeIf { it > 0 }
+    return AndroidRouteEndpointV2(
+      id = id,
+      type = type,
+      name = productName?.toString().orEmpty(),
+      channelCount = channels,
+    )
+  }
+
+  @Suppress("DEPRECATION")
+  private fun resolveMediaRouteV2(): AndroidMediaRouteResolutionV2 {
+    val audioManager =
+      applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    return try {
+      val outputs = audioManager
+        .getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+        .filter { it.isSink }
+        .map { it.toRouteEndpointV2() }
+      val mediaDevices = if (Build.VERSION.SDK_INT >= 33) {
+          val attributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+            .build()
+          audioManager.getAudioDevicesForAttributes(attributes)
+            .filter { it.isSink }
+            .map { it.toRouteEndpointV2() }
+        } else {
+          emptyList()
+        }
+      AndroidMediaRouteResolverV2.resolve(
+        apiLevel = Build.VERSION.SDK_INT,
+        bluetoothA2dpActive = audioManager.isBluetoothA2dpOn,
+        bluetoothScoActive =
+          Build.VERSION.SDK_INT < Build.VERSION_CODES.S && audioManager.isBluetoothScoOn,
+        mediaDevices = mediaDevices,
+        outputDevices = outputs,
+      )
+    } catch (_: SecurityException) {
+      AndroidMediaRouteResolutionV2(null, "bluetooth_route_unverified")
+    } catch (_: IllegalStateException) {
+      AndroidMediaRouteResolutionV2(null, "bluetooth_route_unverified")
+    }
+  }
+
+  private fun cleanupFailedPlaybackV2() {
+    JuceBridge.shutdownEngineSynchronouslyJNI()
+    JuceBridge.resetPlaybackPolicyV2JNI()
+    verifiedPlaybackRouteV2 = null
+    bluetoothMediaPolicyActiveV2 = false
+    engineOwnership = EngineOwnership.NONE
+  }
+
+  private fun currentOboeFactsV2(): Map<String, Any> =
+    JuceBridge.getOboeOutputStreamFactsV2JNI()
+
+  private fun validateVerifiedBluetoothRouteV2(
+    expected: AndroidRouteEndpointV2,
+    actual: AndroidMediaRouteResolutionV2,
+    oboe: Map<String, Any>,
+  ): String {
+    return AndroidBluetoothStartupValidatorV2.validate(
+      expected,
+      actual,
+      AndroidOboeOutputFactsV2.fromMap(oboe),
+    )
+  }
+
+  private fun validatePlaybackV2Now(): String {
+    val readiness = AndroidPlaybackReadinessV2.validate(currentPlaybackFactsV2())
+    if (readiness != "ok") return readiness
+    val expected = verifiedPlaybackRouteV2 ?: return "ok"
+    if (!bluetoothMediaPolicyActiveV2) return "ok"
+    return validateVerifiedBluetoothRouteV2(
+      expected,
+      resolveMediaRouteV2(),
+      currentOboeFactsV2(),
+    )
+  }
+
   @Suppress("DEPRECATION")
   private fun currentPlaybackFactsV2(): AndroidPlaybackFactsV2 {
     val audioManager =
@@ -613,22 +698,68 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
       else -> "MODE_UNKNOWN($mode)"
     }
 
-  private fun buildPlaybackSnapshotV2(): Map<String, Any?> {
+  @Suppress("DEPRECATION")
+  private fun capturePlaybackSnapshotV2(
+    implementationOverride: String? = null,
+  ): Map<String, Any?> {
+    val started = SystemClock.elapsedRealtimeNanos()
+    val firstRoute = resolveMediaRouteV2()
     val diagnostics = JuceBridge.getEngineDiagnosticsJNI()
     val facts = currentPlaybackFactsV2()
+    val oboe = currentOboeFactsV2()
+    val secondRoute = resolveMediaRouteV2()
+    val firstFingerprint = firstRoute.endpoint?.fingerprint
+    val secondFingerprint = secondRoute.endpoint?.fingerprint
+    val consistency = when {
+      firstRoute.diagnosticCode != "ok" || secondRoute.diagnosticCode != "ok" -> "unavailable"
+      firstFingerprint == secondFingerprint -> "stable"
+      else -> "routeChangedDuringCapture"
+    }
+    val output = secondRoute.endpoint?.let { endpoint ->
+      mapOf(
+        "direction" to "output",
+        "nativePortType" to endpoint.type.toString(),
+        "normalizedKind" to endpoint.kind.wireValue,
+        "uid" to endpoint.id.toString(),
+        "name" to endpoint.name,
+        "channelCount" to endpoint.channelCount,
+      )
+    }
+    val audioManager =
+      applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    val communicationDevice = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      audioManager.communicationDevice
+    } else {
+      null
+    }
+    val unavailable = mutableMapOf<String, String>()
+    if (output == null) {
+      unavailable["route.outputEndpoint"] =
+        if (secondRoute.diagnosticCode == "ok") "notObservableOnThisAndroidVersion"
+        else secondRoute.diagnosticCode
+    }
+    if (oboe["available"] != true) {
+      unavailable["juce.oboe"] = "bluetoothMediaPolicyStreamUnavailable"
+    }
+    if (oboe["xRunCount"] == null) {
+      unavailable["juce.xRunCount"] = "notReportedByActiveOboeStream"
+    }
     return mapOf(
       "schemaVersion" to 1,
       "capturedAtUtc" to Instant.now().toString(),
-      "captureDurationMs" to 0,
-      "implementation" to "v2",
+      "captureDurationMs" to
+        ((SystemClock.elapsedRealtimeNanos() - started) / 1_000_000L).toInt(),
+      "implementation" to
+        (implementationOverride ?:
+          if (v2SessionRequested) "v2" else "legacy"),
       "generation" to null,
       "transitionId" to null,
       "coordinatorManaged" to false,
-      "captureConsistency" to "stable",
+      "captureConsistency" to consistency,
       "inputs" to emptyList<Map<String, Any?>>(),
-      "outputs" to emptyList<Map<String, Any?>>(),
+      "outputs" to listOfNotNull(output),
       "session" to mapOf(
-        "category" to null,
+        "category" to "USAGE_MEDIA/CONTENT_TYPE_MUSIC",
         "mode" to audioModeName(facts.audioMode),
         "sampleRateHz" to facts.sampleRateHz,
         "ioBufferDurationSeconds" to
@@ -640,7 +771,11 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         "inputChannelCount" to facts.activeInputChannels,
         "outputChannelCount" to facts.activeOutputChannels,
         "active" to null,
-        "streamRunning" to null,
+        "streamRunning" to (oboe["running"] as? Boolean),
+        "communicationDeviceSelected" to (communicationDevice != null),
+        "communicationDeviceType" to communicationDevice?.type?.toString(),
+        "bluetoothScoActive" to
+          (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && audioManager.isBluetoothScoOn),
       ),
       "juce" to mapOf(
         "deviceOpen" to facts.deviceOpen,
@@ -658,14 +793,24 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         "realtimeCallbackBudgetMs" to diagnostics["realtimeCallbackBudgetMs"],
         "realtimeCallbackOverBudgetCount" to
           diagnostics["realtimeCallbackOverBudgetCount"],
-        "xRunCount" to null,
+        "xRunCount" to oboe["xRunCount"],
+        "requestedSampleRateHz" to
+          (oboe["requestedSampleRateHz"] as? Number)?.takeIf { it.toInt() > 0 },
+        "requestedBufferFrames" to
+          (oboe["requestedBufferFrames"] as? Number)?.takeIf { it.toInt() > 0 },
+        "oboeSampleRateHz" to oboe["sampleRateHz"],
+        "oboeBufferFrames" to oboe["bufferFrames"],
+        "audioBackend" to oboe["audioBackend"],
+        "performanceMode" to oboe["performanceMode"],
+        "sharingMode" to oboe["sharingMode"],
+        "bufferCapacityFrames" to oboe["bufferCapacityFrames"],
+        "framesPerBurst" to oboe["framesPerBurst"],
+        "framesPerCallback" to
+          (oboe["framesPerCallback"] as? Number)?.takeIf { it.toInt() > 0 },
+        "streamState" to oboe["streamState"],
+        "routedDeviceId" to oboe["routedDeviceId"]?.toString(),
       ),
-      "unavailableReasons" to mapOf(
-        "route.outputEndpoint" to "notResolvedInAndroidOutputOnlyCheckpoint",
-        "session.category" to "notReadBackWithoutOboeBackendIntrospection",
-        "session.streamRunning" to "notExposedByCurrentAndroidBackend",
-        "juce.xRunCount" to "notExposedByCurrentAndroidBackend",
-      ),
+      "unavailableReasons" to unavailable,
     )
   }
 
@@ -694,21 +839,71 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     if (engineOwnership != EngineOwnership.NONE) {
       return playbackStartupResult(false, "implementation_conflict")
     }
+    v2SessionRequested = true
+
+    return try {
+      initialisePlaybackV2Unchecked()
+    } catch (error: Exception) {
+      Log.e("JuceAudioEngine", "Android V2 startup failed", error)
+      if (engineOwnership == EngineOwnership.V2_PLAYBACK) {
+        cleanupFailedPlaybackV2()
+      } else {
+        JuceBridge.resetPlaybackPolicyV2JNI()
+      }
+      playbackStartupResult(false, "actual_state_unavailable")
+    }
+  }
+
+  private fun initialisePlaybackV2Unchecked(): Map<String, Any?> {
+    JuceBridge.resetPlaybackPolicyV2JNI()
+    val expectedRoute = resolveMediaRouteV2()
+    if (expectedRoute.diagnosticCode != "ok") {
+      return playbackStartupResult(
+        false,
+        expectedRoute.diagnosticCode,
+        capturePlaybackSnapshotV2(implementationOverride = "v2"),
+      )
+    }
 
     engineOwnership = EngineOwnership.V2_PLAYBACK
+    verifiedPlaybackRouteV2 = expectedRoute.endpoint
+    bluetoothMediaPolicyActiveV2 = expectedRoute.isBluetooth
+    JuceBridge.setBluetoothMediaPlaybackPolicyV2JNI(bluetoothMediaPolicyActiveV2)
     preparePlaybackOnlyModeV2()
     if (!JuceBridge.initialisePlaybackV2JNI()) {
-      JuceBridge.shutdownEngineSynchronouslyJNI()
-      engineOwnership = EngineOwnership.NONE
+      cleanupFailedPlaybackV2()
       return playbackStartupResult(false, "juce_open_failed")
     }
 
-    val snapshot = buildPlaybackSnapshotV2()
+    val snapshot = capturePlaybackSnapshotV2()
+    if (
+      bluetoothMediaPolicyActiveV2 &&
+      snapshot["captureConsistency"] != "stable"
+    ) {
+      val consistency = snapshot["captureConsistency"]?.toString()
+      cleanupFailedPlaybackV2()
+      return playbackStartupResult(
+        false,
+        if (consistency == "routeChangedDuringCapture") "route_unstable"
+        else "bluetooth_route_unverified",
+        snapshot,
+      )
+    }
     val code = AndroidPlaybackReadinessV2.validate(currentPlaybackFactsV2())
     if (code != "ok") {
-      JuceBridge.shutdownEngineSynchronouslyJNI()
-      engineOwnership = EngineOwnership.NONE
+      cleanupFailedPlaybackV2()
       return playbackStartupResult(false, code, snapshot)
+    }
+    if (bluetoothMediaPolicyActiveV2) {
+      val bluetoothCode = validateVerifiedBluetoothRouteV2(
+        expectedRoute.endpoint!!,
+        resolveMediaRouteV2(),
+        currentOboeFactsV2(),
+      )
+      if (bluetoothCode != "ok") {
+        cleanupFailedPlaybackV2()
+        return playbackStartupResult(false, bluetoothCode, snapshot)
+      }
     }
     return playbackStartupResult(true, "ok", snapshot)
   }
@@ -803,6 +998,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             return
           }
           normalizeAudioModeAfterRecordingStop()
+          v2SessionRequested = false
           JuceBridge.initialiseEngineJNI()
           preparePlaybackRoute("initialise")
           engineOwnership = EngineOwnership.LEGACY
@@ -811,8 +1007,11 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         "initialisePlaybackV2" -> {
           result.success(initialisePlaybackV2())
         }
+        "getAudioRouteSnapshotV2" -> {
+          result.success(capturePlaybackSnapshotV2())
+        }
         "validatePlaybackV2" -> {
-          result.success(AndroidPlaybackReadinessV2.validate(currentPlaybackFactsV2()))
+          result.success(validatePlaybackV2Now())
         }
         "shutdown" -> {
           if (engineOwnership == EngineOwnership.V2_PLAYBACK) {
@@ -825,6 +1024,10 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             JuceBridge.shutdownEngineSynchronouslyJNI()
             normalizeAudioModeAfterRecordingStop()
           }
+          JuceBridge.resetPlaybackPolicyV2JNI()
+          verifiedPlaybackRouteV2 = null
+          bluetoothMediaPolicyActiveV2 = false
+          v2SessionRequested = false
           engineOwnership = EngineOwnership.NONE
           result.success(null)
         }
@@ -866,7 +1069,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         "play" -> {
           val routeReady = if (engineOwnership == EngineOwnership.V2_PLAYBACK) {
-            AndroidPlaybackReadinessV2.validate(currentPlaybackFactsV2()) == "ok" &&
+            validatePlaybackV2Now() == "ok" &&
               JuceBridge.playPlaybackV2JNI()
           } else {
             preparePlaybackRoute("play").also { if (it) JuceBridge.playJNI() }
@@ -1839,6 +2042,10 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
   override fun onDetachedFromEngine(binding: FlutterPluginBinding) {
     if (engineOwnership == EngineOwnership.V2_PLAYBACK) {
       JuceBridge.shutdownEngineSynchronouslyJNI()
+      JuceBridge.resetPlaybackPolicyV2JNI()
+      verifiedPlaybackRouteV2 = null
+      bluetoothMediaPolicyActiveV2 = false
+      v2SessionRequested = false
       engineOwnership = EngineOwnership.NONE
     }
     methodChannel.setMethodCallHandler(null)
