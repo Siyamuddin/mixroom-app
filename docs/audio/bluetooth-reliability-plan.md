@@ -796,6 +796,37 @@ classification, accepted hardware-state verification, and evidence for a
 Bluetooth device selected before editor startup. Do not add route observation
 or recovery here.
 
+Implementation status (2026-08-10): implemented and accepted on physical iPad
+hardware. iOS captures one observable output identity after
+configuring playback/default and before opening JUCE, rejects HFP, then requires
+the same UID, native port type, and normalized kind after the output-only open.
+Play performs the same read-only identity/profile check and never repairs or
+reopens the route. The accepted native rate and buffer remain untouched. The
+iOS startup codes for this checkpoint are `ok`, `implementation_conflict`,
+`no_output`, `input_open`, `bluetooth_duplex_forbidden`, `route_unstable`,
+`actual_state_unavailable`, and `juce_open_failed`.
+
+Pre-change A2DP evidence (2026-08-10): the iPad selected
+`BluetoothA2DPOutput` before editor startup and remained on the same redacted
+endpoint across playback. AVAudioSession remained playback/default at 44.1 kHz
+and 256 frames with two outputs and zero inputs. JUCE remained open with its
+callback attached. Across 6,916 callbacks there was one isolated over-budget
+callback and no audible crackle, jitter, dropout, or quality degradation. This
+does not justify buffer or sample-rate tuning.
+
+Post-change A2DP evidence (2026-08-10): the guarded startup selected one stable
+`BluetoothA2DPOutput` endpoint at 44.1 kHz and 256 frames, with two outputs,
+zero inputs, an open JUCE device, and an attached callback. After playback and
+one background/resume cycle, the redacted endpoint token, native port type,
+normalized kind, session category/mode, rate, buffer, and channel state were
+unchanged. Two of 5,545 callbacks exceeded the realtime budget; the 370.377 ms
+maximum coincided with app suspension/resume while the average remained 0.516
+ms. This is bounded lifecycle interruption evidence, not sustained callback
+pressure, and does not justify route-specific buffering or retry logic. Audio,
+MIDI, metronome, effects, seeking, repeated Play/Pause, and playback after
+background/resume remained clean. Reopening on the built-in speaker also
+passed, with no microphone activation or observed regression.
+
 Exit gate: stable, high-quality preconnected Bluetooth playback with zero
 inputs and no headset/call-quality profile.
 
@@ -974,8 +1005,9 @@ Each run records:
 
 ## Immediate next step
 
-Commit the accepted Checkpoint 6A foundation, then design Checkpoint 6B for
-preconnected iOS Bluetooth media playback. Live connection, disconnection,
-fallback, and the known Legacy crash remain isolated in Checkpoint 6C.
-Recording, monitoring, Bluetooth input, adaptive buffering, polling, and
-automatic resume remain deferred.
+Design Checkpoint 6C as a compact iOS live-output slice: observe native route
+changes, pause at the preserved position, safely detach a removed output,
+serialize one generation-protected reconfiguration, verify the replacement
+route, and remain paused until the user resumes. It must directly address the
+known disconnect crash without adding polling, recursive retries, automatic
+resume, recording, monitoring, Bluetooth input, or adaptive buffering.

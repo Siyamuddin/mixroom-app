@@ -86,6 +86,22 @@ void main() {
     expect(changed.nextSession, BluetoothImplementationV2.v2);
   });
 
+  test('only Legacy sessions allow microphone and input lifecycle work', () {
+    const legacy = BluetoothImplementationSessionV2(
+      active: BluetoothImplementationV2.legacy,
+      nextSession: BluetoothImplementationV2.v2,
+      selectionEnabled: true,
+    );
+    const v2 = BluetoothImplementationSessionV2(
+      active: BluetoothImplementationV2.v2,
+      nextSession: BluetoothImplementationV2.legacy,
+      selectionEnabled: true,
+    );
+
+    expect(legacy.allowsLegacyInputLifecycle, isTrue);
+    expect(v2.allowsLegacyInputLifecycle, isFalse);
+  });
+
   test(
     'release and unsupported sessions force Legacy and ignore writes',
     () async {

@@ -28304,6 +28304,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _refreshMicrophonePermissionAndInputs() async {
+    if (!(_bluetoothImplementationSessionV2?.allowsLegacyInputLifecycle ??
+        true)) {
+      return;
+    }
     await _refreshMicrophonePermissionState();
     if (!mounted) return;
     await _loadInputDevicesFromJuce();

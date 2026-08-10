@@ -13,6 +13,9 @@ class BluetoothImplementationSessionV2 {
   final BluetoothImplementationV2 nextSession;
   final bool selectionEnabled;
 
+  bool get allowsLegacyInputLifecycle =>
+      active == BluetoothImplementationV2.legacy;
+
   BluetoothImplementationSessionV2 withNextSession(
     BluetoothImplementationV2 implementation,
   ) {

@@ -547,6 +547,8 @@ class JuceAudioEngine {
         (platform == TargetPlatform.iOS &&
             (current.session.category != 'AVAudioSessionCategoryPlayback' ||
                 current.session.mode != 'AVAudioSessionModeDefault')) ||
+        (platform == TargetPlatform.iOS &&
+            current.session.inputChannelCount != 0) ||
         current.juce.activeInputChannels != 0 ||
         (current.juce.activeOutputChannels ?? 0) <= 0 ||
         (current.juce.sampleRateHz ?? 0) <= 0 ||
@@ -556,6 +558,17 @@ class JuceAudioEngine {
     }
     final expected = startup.outputs.single;
     final actual = current.outputs.single;
+    if (platform == TargetPlatform.iOS) {
+      return expected.normalizedKind != AudioRouteKindV2.bluetoothDuplex &&
+          actual.normalizedKind != AudioRouteKindV2.bluetoothDuplex &&
+          expected.uid.isNotEmpty &&
+          actual.uid.isNotEmpty &&
+          expected.nativePortType.isNotEmpty &&
+          actual.nativePortType.isNotEmpty &&
+          expected.uid == actual.uid &&
+          expected.nativePortType == actual.nativePortType &&
+          expected.normalizedKind == actual.normalizedKind;
+    }
     if (expected.uid.isNotEmpty && actual.uid.isNotEmpty) {
       return expected.uid == actual.uid;
     }

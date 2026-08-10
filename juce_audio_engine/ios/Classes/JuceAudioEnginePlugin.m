@@ -243,6 +243,47 @@ static NSString *MixroomIOSRouteFingerprint(
     return [parts componentsJoinedByString:@";"];
 }
 
+static NSDictionary<NSString *, id> *MixroomIOSSingleOutputEndpoint(
+    AVAudioSessionRouteDescription *route
+) {
+    if (route.outputs.count != 1) {
+        return nil;
+    }
+    return MixroomIOSRouteEndpoint(route.outputs.firstObject, @"output");
+}
+
+static BOOL MixroomIOSOutputIdentityIsObservable(
+    NSDictionary<NSString *, id> *endpoint
+) {
+    NSString *uid = [endpoint[@"uid"] isKindOfClass:[NSString class]]
+        ? endpoint[@"uid"]
+        : @"";
+    NSString *portType =
+        [endpoint[@"nativePortType"] isKindOfClass:[NSString class]]
+            ? endpoint[@"nativePortType"]
+            : @"";
+    return uid.length > 0 && portType.length > 0;
+}
+
+static BOOL MixroomIOSOutputIdentitiesMatch(
+    NSDictionary<NSString *, id> *expected,
+    NSDictionary<NSString *, id> *actual
+) {
+    if (!MixroomIOSOutputIdentityIsObservable(expected) ||
+        !MixroomIOSOutputIdentityIsObservable(actual)) {
+        return NO;
+    }
+    return [expected[@"uid"] isEqual:actual[@"uid"]] &&
+        [expected[@"nativePortType"] isEqual:actual[@"nativePortType"]] &&
+        [expected[@"normalizedKind"] isEqual:actual[@"normalizedKind"]];
+}
+
+static BOOL MixroomIOSOutputIsBluetoothDuplex(
+    NSDictionary<NSString *, id> *endpoint
+) {
+    return [endpoint[@"normalizedKind"] isEqual:@"bluetoothDuplex"];
+}
+
 static BOOL MixroomConfigureIOSPlaybackSession(NSError **error) {
     AVAudioSession *session = [AVAudioSession sharedInstance];
     if (![session setCategory:AVAudioSessionCategoryPlayback
@@ -1065,14 +1106,6 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     if (![diagnostics[@"bufferSize"] isKindOfClass:[NSNumber class]]) {
         unavailable[@"juce.bufferFrames"] = @"missingFromJuceDiagnostics";
     }
-    if (session.sampleRate <= 0.0) {
-        unavailable[@"session.sampleRateHz"] = @"notAvailableFromAVAudioSession";
-    }
-    if (session.IOBufferDuration <= 0.0) {
-        unavailable[@"session.ioBufferDurationSeconds"] =
-            @"notAvailableFromAVAudioSession";
-    }
-
     id (^diagnosticNumber)(NSString *) = ^id(NSString *key) {
         id value = diagnostics[key];
         return [value isKindOfClass:[NSNumber class]] ? value : [NSNull null];
@@ -1187,6 +1220,22 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             : nil;
     if (deviceOpenValue == nil) {
         unavailable[@"juce.deviceOpen"] = @"missingFromJuceDiagnostics";
+    }
+    if (![diagnostics[@"audioCallbackAttached"] isKindOfClass:[NSNumber class]]) {
+        unavailable[@"juce.audioCallbackAttached"] = @"missingFromJuceDiagnostics";
+    }
+    if (![diagnostics[@"sampleRate"] isKindOfClass:[NSNumber class]]) {
+        unavailable[@"juce.sampleRateHz"] = @"missingFromJuceDiagnostics";
+    }
+    if (![diagnostics[@"bufferSize"] isKindOfClass:[NSNumber class]]) {
+        unavailable[@"juce.bufferFrames"] = @"missingFromJuceDiagnostics";
+    }
+    if (session.sampleRate <= 0.0) {
+        unavailable[@"session.sampleRateHz"] = @"notAvailableFromAVAudioSession";
+    }
+    if (session.IOBufferDuration <= 0.0) {
+        unavailable[@"session.ioBufferDurationSeconds"] =
+            @"notAvailableFromAVAudioSession";
     }
     unavailable[@"session.active"] = @"notDirectlyObservableFromAVAudioSession";
     unavailable[@"session.streamRunning"] = @"reportedThroughJuceCallbackState";
@@ -1366,6 +1415,26 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             @"snapshot": [self buildAudioRouteSnapshotV2],
         };
     }
+
+    NSDictionary<NSString *, id> *expectedOutput =
+        MixroomIOSSingleOutputEndpoint(session.currentRoute);
+    NSString *preflightCode = @"ok";
+    if (expectedOutput == nil) {
+        preflightCode = @"no_output";
+    } else if (!MixroomIOSOutputIdentityIsObservable(expectedOutput)) {
+        preflightCode = @"actual_state_unavailable";
+    } else if (MixroomIOSOutputIsBluetoothDuplex(expectedOutput)) {
+        preflightCode = @"bluetooth_duplex_forbidden";
+    }
+    if (![preflightCode isEqualToString:@"ok"]) {
+        [session setActive:NO error:nil];
+        return @{
+            @"success": @NO,
+            @"diagnosticCode": preflightCode,
+            @"snapshot": [self buildAudioRouteSnapshotV2],
+        };
+    }
+
     if (![JuceBridge initialisePlaybackV2ObjC:@""]) {
         [session setActive:NO error:nil];
         return @{
@@ -1415,6 +1484,10 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         ? juce[@"bufferFrames"]
         : nil;
     NSDictionary *output = outputs.count == 1 ? outputs.firstObject : nil;
+    NSNumber *sessionInputChannels =
+        [sessionFacts[@"inputChannelCount"] isKindOfClass:[NSNumber class]]
+            ? sessionFacts[@"inputChannelCount"]
+            : nil;
 
     NSString *diagnosticCode = @"ok";
     if (!sessionConfigured) {
@@ -1432,12 +1505,20 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         diagnosticCode = @"actual_state_unavailable";
     } else if (activeInputs.integerValue != 0) {
         diagnosticCode = @"input_open";
+    } else if (sessionInputChannels == nil) {
+        diagnosticCode = @"actual_state_unavailable";
+    } else if (sessionInputChannels.integerValue != 0) {
+        diagnosticCode = @"input_open";
     } else if (activeOutputs.integerValue <= 0 || outputs.count != 1 ||
                ![output[@"uid"] isKindOfClass:[NSString class]] ||
                [output[@"uid"] length] == 0) {
         diagnosticCode = @"no_output";
     } else if (sampleRate.doubleValue <= 0.0 || bufferFrames.integerValue <= 0) {
         diagnosticCode = @"actual_state_unavailable";
+    } else if (MixroomIOSOutputIsBluetoothDuplex(output)) {
+        diagnosticCode = @"bluetooth_duplex_forbidden";
+    } else if (!MixroomIOSOutputIdentitiesMatch(expectedOutput, output)) {
+        diagnosticCode = @"route_unstable";
     }
 
     const BOOL success = [diagnosticCode isEqualToString:@"ok"];

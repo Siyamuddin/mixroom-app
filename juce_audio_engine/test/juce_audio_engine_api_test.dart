@@ -3,7 +3,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:juce_audio_engine/audio_route_v2.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
 
-Map<String, dynamic> _v2Snapshot() => <String, dynamic>{
+Map<String, dynamic> _v2Snapshot({
+  String nativePortType = 'Speaker',
+  String normalizedKind = 'builtIn',
+  String uid = 'output-uid',
+  int sessionInputChannels = 0,
+}) =>
+    <String, dynamic>{
       'schemaVersion': 1,
       'capturedAtUtc': '2026-08-08T12:00:00.000Z',
       'captureDurationMs': 2,
@@ -14,9 +20,9 @@ Map<String, dynamic> _v2Snapshot() => <String, dynamic>{
       'outputs': <Map<String, dynamic>>[
         <String, dynamic>{
           'direction': 'output',
-          'nativePortType': 'builtInSpeaker',
-          'normalizedKind': 'builtIn',
-          'uid': 'output-uid',
+          'nativePortType': nativePortType,
+          'normalizedKind': normalizedKind,
+          'uid': uid,
           'name': 'Built-in Output',
           'channelCount': 2,
         },
@@ -26,6 +32,8 @@ Map<String, dynamic> _v2Snapshot() => <String, dynamic>{
         'mode': 'AVAudioSessionModeDefault',
         'sampleRateHz': 48000.0,
         'ioBufferDurationSeconds': 0.01,
+        'inputChannelCount': sessionInputChannels,
+        'outputChannelCount': 2,
       },
       'juce': <String, dynamic>{
         'deviceOpen': true,
@@ -43,6 +51,27 @@ void main() {
 
   const MethodChannel channel = MethodChannel('juce_audio_engine');
   final List<MethodCall> calls = <MethodCall>[];
+
+  void useIOSRouteSnapshots({
+    required Map<String, dynamic> startup,
+    required Map<String, dynamic> current,
+    bool startupSuccess = true,
+    String diagnosticCode = 'ok',
+  }) {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+      calls.add(methodCall);
+      if (methodCall.method == 'initialisePlaybackV2') {
+        return <String, dynamic>{
+          'success': startupSuccess,
+          'diagnosticCode': diagnosticCode,
+          'snapshot': startup,
+        };
+      }
+      if (methodCall.method == 'getAudioRouteSnapshotV2') return current;
+      return null;
+    });
+  }
 
   setUp(() {
     calls.clear();
@@ -235,6 +264,142 @@ void main() {
 
     expect(ready, isFalse);
     expect(calls.single.method, 'getAudioRouteSnapshotV2');
+  });
+
+  for (final route in <({String type, String kind})>[
+    (type: 'Speaker', kind: 'builtIn'),
+    (type: 'Headphones', kind: 'wired'),
+    (type: 'USBAudio', kind: 'external'),
+    (type: 'BluetoothA2DPOutput', kind: 'bluetoothMedia'),
+    (type: 'BluetoothLE', kind: 'bluetoothLe'),
+  ]) {
+    test('iOS V2 readiness accepts stable ${route.kind} output', () async {
+      final snapshot = _v2Snapshot(
+        nativePortType: route.type,
+        normalizedKind: route.kind,
+      );
+      useIOSRouteSnapshots(startup: snapshot, current: snapshot);
+
+      final startup = await JuceAudioEngine.initialisePlaybackV2(
+        platformOverride: TargetPlatform.iOS,
+      );
+      final ready = await JuceAudioEngine.validatePlaybackV2(
+        platformOverride: TargetPlatform.iOS,
+      );
+
+      expect(startup.success, isTrue);
+      expect(ready, isTrue);
+    });
+  }
+
+  test('iOS V2 startup preserves the duplex rejection code', () async {
+    final snapshot = _v2Snapshot(
+      nativePortType: 'BluetoothHFP',
+      normalizedKind: 'bluetoothDuplex',
+    );
+    useIOSRouteSnapshots(
+      startup: snapshot,
+      current: snapshot,
+      startupSuccess: false,
+      diagnosticCode: 'bluetooth_duplex_forbidden',
+    );
+
+    final startup = await JuceAudioEngine.initialisePlaybackV2(
+      platformOverride: TargetPlatform.iOS,
+    );
+
+    expect(startup.success, isFalse);
+    expect(startup.diagnosticCode, 'bluetooth_duplex_forbidden');
+  });
+
+  test('iOS V2 readiness rejects duplex output before Play', () async {
+    final media = _v2Snapshot(
+      nativePortType: 'BluetoothA2DPOutput',
+      normalizedKind: 'bluetoothMedia',
+    );
+    final duplex = _v2Snapshot(
+      nativePortType: 'BluetoothHFP',
+      normalizedKind: 'bluetoothDuplex',
+    );
+    useIOSRouteSnapshots(startup: media, current: duplex);
+
+    await JuceAudioEngine.initialisePlaybackV2(
+      platformOverride: TargetPlatform.iOS,
+    );
+    final ready = await JuceAudioEngine.validatePlaybackV2(
+      platformOverride: TargetPlatform.iOS,
+    );
+
+    expect(ready, isFalse);
+  });
+
+  test('iOS V2 readiness rejects every native identity change', () async {
+    final startupSnapshot = _v2Snapshot(
+      nativePortType: 'BluetoothA2DPOutput',
+      normalizedKind: 'bluetoothMedia',
+    );
+    final changedSnapshots = <Map<String, dynamic>>[
+      _v2Snapshot(
+        nativePortType: 'BluetoothA2DPOutput',
+        normalizedKind: 'bluetoothMedia',
+        uid: 'changed-uid',
+      ),
+      _v2Snapshot(
+        nativePortType: 'BluetoothLE',
+        normalizedKind: 'bluetoothMedia',
+      ),
+      _v2Snapshot(
+        nativePortType: 'BluetoothA2DPOutput',
+        normalizedKind: 'bluetoothLe',
+      ),
+    ];
+
+    for (final changed in changedSnapshots) {
+      calls.clear();
+      useIOSRouteSnapshots(startup: startupSnapshot, current: changed);
+      await JuceAudioEngine.initialisePlaybackV2(
+        platformOverride: TargetPlatform.iOS,
+      );
+
+      expect(
+        await JuceAudioEngine.validatePlaybackV2(
+          platformOverride: TargetPlatform.iOS,
+        ),
+        isFalse,
+      );
+    }
+  });
+
+  test('iOS V2 readiness rejects missing identity and session input', () async {
+    final startupSnapshot = _v2Snapshot(
+      nativePortType: 'BluetoothA2DPOutput',
+      normalizedKind: 'bluetoothMedia',
+    );
+    for (final invalid in <Map<String, dynamic>>[
+      _v2Snapshot(
+        nativePortType: 'BluetoothA2DPOutput',
+        normalizedKind: 'bluetoothMedia',
+        uid: '',
+      ),
+      _v2Snapshot(
+        nativePortType: 'BluetoothA2DPOutput',
+        normalizedKind: 'bluetoothMedia',
+        sessionInputChannels: 1,
+      ),
+    ]) {
+      calls.clear();
+      useIOSRouteSnapshots(startup: startupSnapshot, current: invalid);
+      await JuceAudioEngine.initialisePlaybackV2(
+        platformOverride: TargetPlatform.iOS,
+      );
+
+      expect(
+        await JuceAudioEngine.validatePlaybackV2(
+          platformOverride: TargetPlatform.iOS,
+        ),
+        isFalse,
+      );
+    }
   });
 
   test('Android V2 readiness delegates actual-state and route verification',
