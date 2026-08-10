@@ -368,24 +368,34 @@ class JuceAudioEngine {
     final platform = platformOverride ?? defaultTargetPlatform;
     if (kIsWeb ||
         (platform != TargetPlatform.macOS &&
-            platform != TargetPlatform.android)) {
+            platform != TargetPlatform.android &&
+            platform != TargetPlatform.iOS)) {
+      _v2StartupSnapshot = null;
       return _unavailablePlaybackStartupV2();
     }
     try {
       final raw = await _ch.invokeMethod<Map<dynamic, dynamic>>(
         'initialisePlaybackV2',
       );
-      if (raw == null) return _unavailablePlaybackStartupV2();
-      return AudioPlaybackStartupResultV2.fromMap(
+      if (raw == null) {
+        _v2StartupSnapshot = null;
+        return _unavailablePlaybackStartupV2();
+      }
+      final result = AudioPlaybackStartupResultV2.fromMap(
         Map<String, dynamic>.from(raw),
       );
+      _v2StartupSnapshot = result.success ? result.snapshot : null;
+      return result;
     } on MissingPluginException {
+      _v2StartupSnapshot = null;
       return _unavailablePlaybackStartupV2();
     } on PlatformException catch (error) {
+      _v2StartupSnapshot = null;
       return _unavailablePlaybackStartupV2(
         error.code.isEmpty ? 'actual_state_unavailable' : error.code,
       );
     } on Object {
+      _v2StartupSnapshot = null;
       return _unavailablePlaybackStartupV2();
     }
   }
@@ -532,6 +542,11 @@ class JuceAudioEngine {
     if (current.implementation != BluetoothImplementationV2.v2 ||
         current.captureConsistency != AudioRouteCaptureConsistencyV2.stable ||
         current.juce.deviceOpen != true ||
+        (platform == TargetPlatform.iOS &&
+            current.juce.audioCallbackAttached != true) ||
+        (platform == TargetPlatform.iOS &&
+            (current.session.category != 'AVAudioSessionCategoryPlayback' ||
+                current.session.mode != 'AVAudioSessionModeDefault')) ||
         current.juce.activeInputChannels != 0 ||
         (current.juce.activeOutputChannels ?? 0) <= 0 ||
         (current.juce.sampleRateHz ?? 0) <= 0 ||

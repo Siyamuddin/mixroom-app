@@ -2497,9 +2497,11 @@ void JuceEngine::initialiseEngine(const juce::String &v2OutputDeviceName)
 
 bool JuceEngine::initialisePlaybackV2(const juce::String &outputDeviceName)
 {
+#if (JUCE_MAC && !JUCE_IOS) || JUCE_IOS
 #if JUCE_MAC && !JUCE_IOS
     if (outputDeviceName.isEmpty())
         return false;
+#endif
     if (engineInitialized)
         return audioRouteImplementation == AudioRouteImplementation::v2Playback;
     if (audioRouteImplementation != AudioRouteImplementation::none)
@@ -2520,11 +2522,17 @@ bool JuceEngine::initialisePlaybackV2(const juce::String &outputDeviceName)
 
 bool JuceEngine::openPlaybackOutputOnlyV2(const juce::String &outputDeviceName)
 {
+#if (JUCE_MAC && !JUCE_IOS) || JUCE_IOS
 #if JUCE_MAC && !JUCE_IOS
     if (!isV2PlaybackSession() || outputDeviceName.isEmpty())
         return false;
+#else
+    if (!isV2PlaybackSession())
+        return false;
+#endif
 
     deviceManager.closeAudioDevice();
+#if JUCE_MAC && !JUCE_IOS
     juce::AudioDeviceManager::AudioDeviceSetup setup;
     setup.inputDeviceName = {};
     setup.outputDeviceName = outputDeviceName;
@@ -2540,6 +2548,14 @@ bool JuceEngine::openPlaybackOutputOnlyV2(const juce::String &outputDeviceName)
         false,
         {},
         &setup);
+#else
+    juce::ignoreUnused(outputDeviceName);
+    const auto error = deviceManager.initialise(
+        0,
+        2,
+        nullptr,
+        true);
+#endif
     if (error.isNotEmpty())
     {
         juceLogToFlutter(("V2 output-only open failed: " + error).toRawUTF8());
@@ -7459,6 +7475,9 @@ juce::NamedValueSet JuceEngine::getEngineDiagnostics()
     const auto bufferSize = getKnownDeviceBufferSize(deviceManager, 512);
 
     out.set("deviceOpen", device != nullptr);
+    out.set("audioCallbackAttached",
+            engineInitialized && metronomeCallback != nullptr &&
+                (!isV2PlaybackSession() || !v2PlaybackCallbackDetached));
     out.set("sampleRate", sampleRate);
     out.set("bufferSize", bufferSize);
     out.set("cpuUsage", deviceManager.getCpuUsage());

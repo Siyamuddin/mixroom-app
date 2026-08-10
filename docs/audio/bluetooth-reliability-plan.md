@@ -748,20 +748,66 @@ Deliverables:
 Exit gate: no sustained audible crackling or recurring xrun growth after route
 stabilization on the agreed representative devices.
 
-### Phase 6 — iOS V2 playback-only and disconnect safety
+### Phase 6 — iOS V2 playback and route safety
 
-Scope: iOS playback and route lifecycle only; no recording.
+Scope: iOS playback only; no recording. This phase is deliberately split into
+three checkpoints so route changes are not added before the output-only engine
+is proven.
 
-Deliverables:
+#### Checkpoint 6A — built-in output-only foundation
 
-- direct route observer and generation invalidation;
-- output-only session configuration;
-- atomic JUCE reopen and actual-state verification;
-- safe speaker/system fallback on disconnect; and
-- Legacy/V2 A/B diagnostics for connect/disconnect/background/interruption.
+Implementation status (2026-08-10): implemented and accepted on physical iPad
+hardware. Debug iOS builds now use the same session-fixed Legacy/V2 selection
+contract as the other supported platforms. V2 configures `AVAudioSession` as
+playback/default with the existing
+mix-with-other-apps policy, opens JUCE with two outputs and zero inputs, retains
+the shared graph and processors, and verifies the actual session, route, JUCE
+device, callback, rate, buffer, and channel state before reporting success.
+Failure closes the partial engine and deactivates the session without falling
+through to Legacy.
 
-Exit gate: zero crashes in the initial iOS disconnect stress run and no input
-open during playback.
+The iOS snapshot reads every active AVAudioSession endpoint around one
+synchronous JUCE diagnostic read, reports capture consistency, keeps native
+and JUCE facts separate, and derives input-open state only from active JUCE
+input channels. Reports use the existing redacted per-session serializer. iOS
+does not create or call the live route coordinator in this checkpoint.
+
+Exit gate: with Bluetooth disconnected, audio clips, MIDI/instruments,
+metronome, effects, seeking, and repeated Play/Pause work through the built-in
+output; diagnostics show playback/default, a ready callback, positive actual
+rate/buffer, zero active inputs, and no microphone indicator. Legacy must still
+work after switching back and reopening.
+
+Physical foundation evidence (2026-08-10, iPad on iOS 26.5): the built-in
+speaker route was stable and reported `AVAudioSessionCategoryPlayback`,
+`AVAudioSessionModeDefault`, 48 kHz, a 256-frame buffer, two active outputs,
+zero inputs, an open JUCE device, and an attached callback. Across 2,629
+callbacks the maximum measured callback time was 0.781 ms against a 5.333 ms
+budget, with zero callback overruns. The functional project gate passed for
+normal audio/MIDI playback and editor operation, with no microphone activation
+or observed regression. The initial home-screen termination was confirmed by
+the device console as the standard iOS restriction on launching an unattached
+Flutter debug build, not a Mixroom crash; the Xcode-attached build ran normally.
+
+#### Checkpoint 6B — preconnected Bluetooth media playback
+
+Use the same proven output-only engine. Add only Bluetooth route/profile
+classification, accepted hardware-state verification, and evidence for a
+Bluetooth device selected before editor startup. Do not add route observation
+or recovery here.
+
+Exit gate: stable, high-quality preconnected Bluetooth playback with zero
+inputs and no headset/call-quality profile.
+
+#### Checkpoint 6C — live route coordination and disconnect safety
+
+Add direct AVAudioSession route observation, generation invalidation, atomic
+output reopen, verified system/speaker fallback, and paused transport recovery.
+This checkpoint owns the known iOS disconnect crash and includes repeated
+connect/disconnect, interruption, and background/resume testing.
+
+Exit gate: zero crashes in the iOS route-change stress run, no input open during
+playback, and deterministic verified recovery or a clear failed state.
 
 ### Phase 7 — Intent-driven recording across all platforms
 
@@ -928,11 +974,8 @@ Each run records:
 
 ## Immediate next step
 
-Commit the accepted Android live-output checkpoint, then design the first iOS
-V2 output-only startup checkpoint. That iOS step should establish isolated,
-preconnected Bluetooth playback with no input or prewarming and verified
-AVAudioSession/JUCE state. Live iOS connection, disconnection, fallback, and
-the known Legacy disconnect crash remain a separate following checkpoint so
-startup correctness is proven first. Android recording, monitoring, Bluetooth
-input, adaptive buffering, polling, vendor workarounds, and automatic resume
-remain deferred.
+Commit the accepted Checkpoint 6A foundation, then design Checkpoint 6B for
+preconnected iOS Bluetooth media playback. Live connection, disconnection,
+fallback, and the known Legacy crash remain isolated in Checkpoint 6C.
+Recording, monitoring, Bluetooth input, adaptive buffering, polling, and
+automatic resume remain deferred.

@@ -135,6 +135,24 @@ void main() {
     expect(snapshot.captureConsistency, AudioRouteCaptureConsistencyV2.stable);
   });
 
+  test('iOS provider invokes the native snapshot method', () async {
+    calls = 0;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (_) async {
+      calls++;
+      return nativeSnapshot();
+    });
+    final provider = MethodChannelAudioRouteSnapshotProviderV2(
+      channel: channel,
+      platformOverride: TargetPlatform.iOS,
+    );
+
+    final snapshot = await provider.readSnapshot();
+
+    expect(calls, 1);
+    expect(snapshot.captureConsistency, AudioRouteCaptureConsistencyV2.stable);
+  });
+
   test('unsupported platforms return unavailable without a method call',
       () async {
     calls = 0;
@@ -145,7 +163,7 @@ void main() {
     });
     final provider = MethodChannelAudioRouteSnapshotProviderV2(
       channel: channel,
-      platformOverride: TargetPlatform.iOS,
+      platformOverride: TargetPlatform.windows,
     );
 
     final snapshot = await provider.readSnapshot();

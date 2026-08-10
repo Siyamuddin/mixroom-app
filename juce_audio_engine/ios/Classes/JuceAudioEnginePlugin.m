@@ -154,6 +154,106 @@ static NSString *MixroomRouteKindForPortType(NSString *portType) {
 #endif
 }
 
+#if !TARGET_OS_OSX
+static double MixroomIOSMonotonicMilliseconds(void) {
+    return [NSProcessInfo processInfo].systemUptime * 1000.0;
+}
+
+static NSString *MixroomIOSRouteKind(NSString *portType) {
+    if ([portType isEqualToString:AVAudioSessionPortBluetoothA2DP]) {
+        return @"bluetoothMedia";
+    }
+    if ([portType isEqualToString:AVAudioSessionPortBluetoothHFP]) {
+        return @"bluetoothDuplex";
+    }
+    if ([portType isEqualToString:AVAudioSessionPortBluetoothLE]) {
+        return @"bluetoothLe";
+    }
+    if ([portType isEqualToString:AVAudioSessionPortBuiltInSpeaker] ||
+        [portType isEqualToString:AVAudioSessionPortBuiltInReceiver] ||
+        [portType isEqualToString:AVAudioSessionPortBuiltInMic]) {
+        return @"builtIn";
+    }
+    if ([portType isEqualToString:AVAudioSessionPortHeadphones] ||
+        [portType isEqualToString:AVAudioSessionPortHeadsetMic] ||
+        [portType isEqualToString:AVAudioSessionPortLineIn] ||
+        [portType isEqualToString:AVAudioSessionPortLineOut]) {
+        return @"wired";
+    }
+    if ([portType isEqualToString:AVAudioSessionPortUSBAudio] ||
+        [portType isEqualToString:AVAudioSessionPortAirPlay] ||
+        [portType isEqualToString:AVAudioSessionPortHDMI] ||
+        [portType isEqualToString:AVAudioSessionPortCarAudio]) {
+        return @"external";
+    }
+    return @"unknown";
+}
+
+static NSDictionary<NSString *, id> *MixroomIOSRouteEndpoint(
+    AVAudioSessionPortDescription *port,
+    NSString *direction
+) {
+    NSArray<AVAudioSessionChannelDescription *> *channels = port.channels;
+    return @{
+        @"direction": direction,
+        @"nativePortType": port.portType ?: @"",
+        @"normalizedKind": MixroomIOSRouteKind(port.portType),
+        @"uid": port.UID ?: @"",
+        @"name": port.portName ?: @"",
+        @"channelCount": channels == nil ? [NSNull null] : @(channels.count),
+    };
+}
+
+static NSArray<NSDictionary<NSString *, id> *> *MixroomIOSRouteEndpoints(
+    AVAudioSessionRouteDescription *route,
+    BOOL inputs
+) {
+    NSArray<AVAudioSessionPortDescription *> *ports = inputs
+        ? route.inputs
+        : route.outputs;
+    NSMutableArray<NSDictionary<NSString *, id> *> *endpoints =
+        [NSMutableArray arrayWithCapacity:ports.count];
+    NSString *direction = inputs ? @"input" : @"output";
+    for (AVAudioSessionPortDescription *port in ports) {
+        [endpoints addObject:MixroomIOSRouteEndpoint(port, direction)];
+    }
+    return endpoints;
+}
+
+static NSString *MixroomIOSRouteFingerprint(
+    AVAudioSessionRouteDescription *route
+) {
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    void (^appendPorts)(NSArray<AVAudioSessionPortDescription *> *, NSString *) =
+        ^(NSArray<AVAudioSessionPortDescription *> *ports, NSString *direction) {
+            for (AVAudioSessionPortDescription *port in ports) {
+                NSNumber *channels = port.channels == nil
+                    ? nil
+                    : @(port.channels.count);
+                [parts addObject:[NSString stringWithFormat:@"%@|%@|%@|%@",
+                    direction,
+                    port.UID ?: @"",
+                    port.portType ?: @"",
+                    channels ?: @"unknown"]];
+            }
+        };
+    appendPorts(route.inputs, @"input");
+    appendPorts(route.outputs, @"output");
+    [parts sortUsingSelector:@selector(compare:)];
+    return [parts componentsJoinedByString:@";"];
+}
+
+static BOOL MixroomConfigureIOSPlaybackSession(NSError **error) {
+    AVAudioSession *session = [AVAudioSession sharedInstance];
+    if (![session setCategory:AVAudioSessionCategoryPlayback
+                  withOptions:AVAudioSessionCategoryOptionMixWithOthers
+                        error:error]) {
+        return NO;
+    }
+    return [session setMode:AVAudioSessionModeDefault error:error];
+}
+#endif
+
 #if TARGET_OS_OSX
 static const AudioObjectPropertyElement kMixroomCoreAudioElement =
     kAudioObjectPropertyElementMain;
@@ -956,6 +1056,22 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     if (deviceOpenValue == nil) {
         unavailable[@"juce.deviceOpen"] = @"missingFromJuceDiagnostics";
     }
+    if (![diagnostics[@"audioCallbackAttached"] isKindOfClass:[NSNumber class]]) {
+        unavailable[@"juce.audioCallbackAttached"] = @"missingFromJuceDiagnostics";
+    }
+    if (![diagnostics[@"sampleRate"] isKindOfClass:[NSNumber class]]) {
+        unavailable[@"juce.sampleRateHz"] = @"missingFromJuceDiagnostics";
+    }
+    if (![diagnostics[@"bufferSize"] isKindOfClass:[NSNumber class]]) {
+        unavailable[@"juce.bufferFrames"] = @"missingFromJuceDiagnostics";
+    }
+    if (session.sampleRate <= 0.0) {
+        unavailable[@"session.sampleRateHz"] = @"notAvailableFromAVAudioSession";
+    }
+    if (session.IOBufferDuration <= 0.0) {
+        unavailable[@"session.ioBufferDurationSeconds"] =
+            @"notAvailableFromAVAudioSession";
+    }
 
     id (^diagnosticNumber)(NSString *) = ^id(NSString *key) {
         id value = diagnostics[key];
@@ -1032,12 +1148,104 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         @"unavailableReasons": unavailable,
     };
 #else
+    const double startedAtMs = MixroomIOSMonotonicMilliseconds();
+    AVAudioSession *session = [AVAudioSession sharedInstance];
+    AVAudioSessionRouteDescription *firstRoute = session.currentRoute;
+    NSDictionary<NSString *, id> *diagnostics =
+        [JuceBridge getEngineDiagnosticsObjC] ?: @{};
+    AVAudioSessionRouteDescription *secondRoute = session.currentRoute;
+
+    NSMutableDictionary<NSString *, NSString *> *unavailable =
+        [NSMutableDictionary dictionary];
+    NSString *captureConsistency = @"unavailable";
+    if (firstRoute == nil || secondRoute == nil) {
+        unavailable[@"avAudioSession.route"] = @"routeReadFailed";
+    } else if (![MixroomIOSRouteFingerprint(firstRoute)
+                    isEqualToString:MixroomIOSRouteFingerprint(secondRoute)]) {
+        captureConsistency = @"routeChangedDuringCapture";
+    } else {
+        captureConsistency = @"stable";
+    }
+
+    NSArray<NSDictionary<NSString *, id> *> *inputs = secondRoute == nil
+        ? @[]
+        : MixroomIOSRouteEndpoints(secondRoute, YES);
+    NSArray<NSDictionary<NSString *, id> *> *outputs = secondRoute == nil
+        ? @[]
+        : MixroomIOSRouteEndpoints(secondRoute, NO);
+    if (outputs.count == 0) {
+        unavailable[@"route.outputEndpoint"] = @"noActiveOutput";
+    }
+
+    id (^diagnosticValue)(NSString *) = ^id(NSString *key) {
+        id value = diagnostics[key];
+        return value ?: [NSNull null];
+    };
+    NSNumber *deviceOpenValue =
+        [diagnostics[@"deviceOpen"] isKindOfClass:[NSNumber class]]
+            ? diagnostics[@"deviceOpen"]
+            : nil;
+    if (deviceOpenValue == nil) {
+        unavailable[@"juce.deviceOpen"] = @"missingFromJuceDiagnostics";
+    }
+    unavailable[@"session.active"] = @"notDirectlyObservableFromAVAudioSession";
+    unavailable[@"session.streamRunning"] = @"reportedThroughJuceCallbackState";
+    unavailable[@"juce.xRunCount"] = @"unsupportedByCurrentIOSBackend";
+
+    NSISO8601DateFormatter *dateFormatter =
+        [[[NSISO8601DateFormatter alloc] init] autorelease];
+    dateFormatter.formatOptions = NSISO8601DateFormatWithInternetDateTime |
+        NSISO8601DateFormatWithFractionalSeconds;
+    NSString *implementation = [JuceBridge getAudioRouteImplementationObjC];
+    if (![implementation isEqualToString:@"v2"]) {
+        implementation = @"legacy";
+    }
+
     return @{
         @"schemaVersion": @1,
-        @"captureConsistency": @"unavailable",
-        @"unavailableReasons": @{
-            @"platform": @"macOSOnlyCheckpoint",
+        @"capturedAtUtc": [dateFormatter stringFromDate:[NSDate date]] ?: @"",
+        @"captureDurationMs": @((NSInteger)(
+            MixroomIOSMonotonicMilliseconds() - startedAtMs + 0.5)),
+        @"implementation": implementation,
+        @"generation": [NSNull null],
+        @"transitionId": [NSNull null],
+        @"coordinatorManaged": @NO,
+        @"captureConsistency": captureConsistency,
+        @"inputs": inputs,
+        @"outputs": outputs,
+        @"session": @{
+            @"category": session.category ?: [NSNull null],
+            @"mode": session.mode ?: [NSNull null],
+            @"sampleRateHz": session.sampleRate > 0.0
+                ? @(session.sampleRate)
+                : [NSNull null],
+            @"ioBufferDurationSeconds": session.IOBufferDuration > 0.0
+                ? @(session.IOBufferDuration)
+                : [NSNull null],
+            @"inputChannelCount": @(session.inputNumberOfChannels),
+            @"outputChannelCount": @(session.outputNumberOfChannels),
+            @"active": [NSNull null],
+            @"streamRunning": [NSNull null],
         },
+        @"juce": @{
+            @"deviceOpen": deviceOpenValue ?: [NSNull null],
+            @"audioCallbackAttached": diagnosticValue(@"audioCallbackAttached"),
+            @"sampleRateHz": diagnosticValue(@"sampleRate"),
+            @"bufferFrames": diagnosticValue(@"bufferSize"),
+            @"activeInputChannels": diagnosticValue(@"inputChannelCount"),
+            @"activeOutputChannels": diagnosticValue(@"outputChannelCount"),
+            @"inputDeviceName": diagnosticValue(@"inputDeviceName"),
+            @"outputDeviceName": diagnosticValue(@"outputDeviceName"),
+            @"realtimeCallbackCount": diagnosticValue(@"realtimeCallbackCount"),
+            @"realtimeCallbackLastMs": diagnosticValue(@"realtimeCallbackLastMs"),
+            @"realtimeCallbackMaxMs": diagnosticValue(@"realtimeCallbackMaxMs"),
+            @"realtimeCallbackAverageMs": diagnosticValue(@"realtimeCallbackAvgMs"),
+            @"realtimeCallbackBudgetMs": diagnosticValue(@"realtimeCallbackBudgetMs"),
+            @"realtimeCallbackOverBudgetCount": diagnosticValue(
+                @"realtimeCallbackOverBudgetCount"),
+            @"xRunCount": [NSNull null],
+        },
+        @"unavailableReasons": unavailable,
     };
 #endif
 }
@@ -1139,10 +1347,108 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         @"snapshot": snapshot,
     };
 #else
+    NSString *before = [JuceBridge getAudioRouteImplementationObjC] ?: @"none";
+    if (![before isEqualToString:@"none"] && ![before isEqualToString:@"v2"]) {
+        return @{
+            @"success": @NO,
+            @"diagnosticCode": @"implementation_conflict",
+            @"snapshot": [self buildAudioRouteSnapshotV2],
+        };
+    }
+
+    AVAudioSession *session = [AVAudioSession sharedInstance];
+    NSError *sessionError = nil;
+    if (!MixroomConfigureIOSPlaybackSession(&sessionError)) {
+        [session setActive:NO error:nil];
+        return @{
+            @"success": @NO,
+            @"diagnosticCode": @"actual_state_unavailable",
+            @"snapshot": [self buildAudioRouteSnapshotV2],
+        };
+    }
+    if (![JuceBridge initialisePlaybackV2ObjC:@""]) {
+        [session setActive:NO error:nil];
+        return @{
+            @"success": @NO,
+            @"diagnosticCode": @"juce_open_failed",
+            @"snapshot": [self buildAudioRouteSnapshotV2],
+        };
+    }
+
+    sessionError = nil;
+    const BOOL sessionConfigured = MixroomConfigureIOSPlaybackSession(&sessionError);
+    NSDictionary<NSString *, id> *snapshot = [self buildAudioRouteSnapshotV2];
+    NSDictionary<NSString *, id> *sessionFacts =
+        [snapshot[@"session"] isKindOfClass:[NSDictionary class]]
+            ? snapshot[@"session"]
+            : @{};
+    NSDictionary<NSString *, id> *juce =
+        [snapshot[@"juce"] isKindOfClass:[NSDictionary class]]
+            ? snapshot[@"juce"]
+            : @{};
+    NSArray *outputs = [snapshot[@"outputs"] isKindOfClass:[NSArray class]]
+        ? snapshot[@"outputs"]
+        : @[];
+    NSString *consistency =
+        [snapshot[@"captureConsistency"] isKindOfClass:[NSString class]]
+            ? snapshot[@"captureConsistency"]
+            : @"unavailable";
+    NSNumber *deviceOpen = [juce[@"deviceOpen"] isKindOfClass:[NSNumber class]]
+        ? juce[@"deviceOpen"]
+        : nil;
+    NSNumber *callbackAttached =
+        [juce[@"audioCallbackAttached"] isKindOfClass:[NSNumber class]]
+            ? juce[@"audioCallbackAttached"]
+            : nil;
+    NSNumber *activeInputs =
+        [juce[@"activeInputChannels"] isKindOfClass:[NSNumber class]]
+            ? juce[@"activeInputChannels"]
+            : nil;
+    NSNumber *activeOutputs =
+        [juce[@"activeOutputChannels"] isKindOfClass:[NSNumber class]]
+            ? juce[@"activeOutputChannels"]
+            : nil;
+    NSNumber *sampleRate = [juce[@"sampleRateHz"] isKindOfClass:[NSNumber class]]
+        ? juce[@"sampleRateHz"]
+        : nil;
+    NSNumber *bufferFrames = [juce[@"bufferFrames"] isKindOfClass:[NSNumber class]]
+        ? juce[@"bufferFrames"]
+        : nil;
+    NSDictionary *output = outputs.count == 1 ? outputs.firstObject : nil;
+
+    NSString *diagnosticCode = @"ok";
+    if (!sessionConfigured) {
+        diagnosticCode = @"actual_state_unavailable";
+    } else if (![consistency isEqualToString:@"stable"]) {
+        diagnosticCode = @"route_unstable";
+    } else if (![sessionFacts[@"category"] isEqual:AVAudioSessionCategoryPlayback] ||
+               ![sessionFacts[@"mode"] isEqual:AVAudioSessionModeDefault]) {
+        diagnosticCode = @"actual_state_unavailable";
+    } else if (deviceOpen == nil || !deviceOpen.boolValue ||
+               callbackAttached == nil || !callbackAttached.boolValue) {
+        diagnosticCode = @"juce_open_failed";
+    } else if (activeInputs == nil || activeOutputs == nil ||
+               sampleRate == nil || bufferFrames == nil) {
+        diagnosticCode = @"actual_state_unavailable";
+    } else if (activeInputs.integerValue != 0) {
+        diagnosticCode = @"input_open";
+    } else if (activeOutputs.integerValue <= 0 || outputs.count != 1 ||
+               ![output[@"uid"] isKindOfClass:[NSString class]] ||
+               [output[@"uid"] length] == 0) {
+        diagnosticCode = @"no_output";
+    } else if (sampleRate.doubleValue <= 0.0 || bufferFrames.integerValue <= 0) {
+        diagnosticCode = @"actual_state_unavailable";
+    }
+
+    const BOOL success = [diagnosticCode isEqualToString:@"ok"];
+    if (!success) {
+        [JuceBridge shutdownEngineObjC];
+        [session setActive:NO error:nil];
+    }
     return @{
-        @"success": @NO,
-        @"diagnosticCode": @"actual_state_unavailable",
-        @"snapshot": [self buildAudioRouteSnapshotV2],
+        @"success": @(success),
+        @"diagnosticCode": diagnosticCode,
+        @"snapshot": snapshot,
     };
 #endif
 }
@@ -1857,9 +2163,17 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         result(@"testing blabla success");
     } else if ([call.method isEqualToString:@"shutdown"]) {
         [self stopAudioRouteMonitoringV2];
-        [JuceBridge shutdownEngineObjC];
-        [self restoreBluetoothPlaybackAfterRecordingStop];
 #if !TARGET_OS_OSX
+        const BOOL wasV2 = [[JuceBridge getAudioRouteImplementationObjC]
+            isEqualToString:@"v2"];
+#endif
+        [JuceBridge shutdownEngineObjC];
+#if TARGET_OS_OSX
+        [self restoreBluetoothPlaybackAfterRecordingStop];
+#else
+        if (!wasV2) {
+            [self restoreBluetoothPlaybackAfterRecordingStop];
+        }
         AVAudioSession *session = [AVAudioSession sharedInstance];
         [session setActive:NO error:nil];
 #endif
@@ -2800,18 +3114,10 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         result([self buildAudioRouteInfo]);
     }
     else if ([call.method isEqualToString:@"getAudioRouteSnapshotV2"]) {
-#if TARGET_OS_OSX
         result([self buildAudioRouteSnapshotV2]);
-#else
-        result(FlutterMethodNotImplemented);
-#endif
     }
     else if ([call.method isEqualToString:@"initialisePlaybackV2"]) {
-#if TARGET_OS_OSX
         result([self initialisePlaybackV2]);
-#else
-        result(FlutterMethodNotImplemented);
-#endif
     }
     else if ([call.method isEqualToString:@"startAudioRouteMonitoringV2"]) {
 #if TARGET_OS_OSX

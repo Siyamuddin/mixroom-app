@@ -9234,7 +9234,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _juceEngineEventSubscription ??= JuceAudioEngine.eventsStream.listen(
         _handleJuceEngineEvent,
       );
-      if (_isBluetoothV2Session && (Platform.isMacOS || Platform.isAndroid)) {
+      if (_isBluetoothV2Session && _usesLiveAudioRouteCoordinatorV2) {
         final coordinator = AudioRouteCoordinatorV2(
           adapter: const MethodChannelAudioRouteAdapterV2(),
           onStateChanged: _handleAudioRouteCoordinatorStateV2,
@@ -12550,8 +12550,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<bool> _ensurePlaybackRouteReady({required String reason}) async {
     if (_isBluetoothV2Session) {
-      if (_audioRouteCoordinatorV2?.state !=
-          AudioRouteCoordinatorStateV2.stable) {
+      if (_usesLiveAudioRouteCoordinatorV2 &&
+          _audioRouteCoordinatorV2?.state !=
+              AudioRouteCoordinatorStateV2.stable) {
         if (mounted) {
           _showSmallNotice('Bluetooth 2.0 audio output is not ready yet.');
         }
@@ -38826,8 +38827,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 ),
                               ),
                               const SizedBox(height: 10),
-                              if (kDebugMode && Platform.isAndroid) ...[
-                                _buildAndroidBluetoothV2DebugControls(),
+                              if (kDebugMode &&
+                                  (Platform.isAndroid || Platform.isIOS)) ...[
+                                _buildMobileBluetoothV2DebugControls(),
                                 const SizedBox(height: 10),
                               ],
                               if (showAudioRoutingLauncher) ...[
@@ -40338,7 +40340,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _copyBluetoothReportV2() async {
-    if (!kDebugMode || (!Platform.isMacOS && !Platform.isAndroid)) return;
+    if (!kDebugMode ||
+        (!Platform.isMacOS && !Platform.isAndroid && !Platform.isIOS)) {
+      return;
+    }
 
     final snapshot = await JuceAudioEngine.getAudioRouteSnapshotV2();
     if (!mounted) return;
@@ -40388,9 +40393,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return true;
   }
 
-  Widget _buildAndroidBluetoothV2DebugControls() {
+  bool get _usesLiveAudioRouteCoordinatorV2 =>
+      Platform.isMacOS || Platform.isAndroid;
+
+  Widget _buildMobileBluetoothV2DebugControls() {
     final session = _bluetoothImplementationSessionV2;
-    if (!kDebugMode || !Platform.isAndroid || session == null) {
+    if (!kDebugMode ||
+        (!Platform.isAndroid && !Platform.isIOS) ||
+        session == null) {
       return const SizedBox.shrink();
     }
     return Container(

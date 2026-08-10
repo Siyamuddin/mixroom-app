@@ -56,6 +56,23 @@ void main() {
     expect(session.selectionEnabled, isTrue);
   });
 
+  test('debug iOS persists V2 for the next session', () async {
+    final saved = await preferences.saveNextSession(
+      BluetoothImplementationV2.v2,
+      debugOverride: true,
+      platformOverride: TargetPlatform.iOS,
+    );
+    final session = await preferences.loadSession(
+      debugOverride: true,
+      platformOverride: TargetPlatform.iOS,
+    );
+
+    expect(saved, isTrue);
+    expect(session.active, BluetoothImplementationV2.v2);
+    expect(session.nextSession, BluetoothImplementationV2.v2);
+    expect(session.selectionEnabled, isTrue);
+  });
+
   test('changing the next session never changes the active implementation', () {
     const session = BluetoothImplementationSessionV2(
       active: BluetoothImplementationV2.legacy,
@@ -79,7 +96,8 @@ void main() {
       for (final configuration in <({bool debug, TargetPlatform platform})>[
         (debug: false, platform: TargetPlatform.macOS),
         (debug: false, platform: TargetPlatform.android),
-        (debug: true, platform: TargetPlatform.iOS),
+        (debug: false, platform: TargetPlatform.iOS),
+        (debug: true, platform: TargetPlatform.windows),
       ]) {
         final session = await preferences.loadSession(
           debugOverride: configuration.debug,

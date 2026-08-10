@@ -3,6 +3,41 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:juce_audio_engine/audio_route_v2.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
 
+Map<String, dynamic> _v2Snapshot() => <String, dynamic>{
+      'schemaVersion': 1,
+      'capturedAtUtc': '2026-08-08T12:00:00.000Z',
+      'captureDurationMs': 2,
+      'implementation': 'v2',
+      'coordinatorManaged': false,
+      'captureConsistency': 'stable',
+      'inputs': <Object>[],
+      'outputs': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'direction': 'output',
+          'nativePortType': 'builtInSpeaker',
+          'normalizedKind': 'builtIn',
+          'uid': 'output-uid',
+          'name': 'Built-in Output',
+          'channelCount': 2,
+        },
+      ],
+      'session': <String, dynamic>{
+        'category': 'AVAudioSessionCategoryPlayback',
+        'mode': 'AVAudioSessionModeDefault',
+        'sampleRateHz': 48000.0,
+        'ioBufferDurationSeconds': 0.01,
+      },
+      'juce': <String, dynamic>{
+        'deviceOpen': true,
+        'audioCallbackAttached': true,
+        'sampleRateHz': 48000.0,
+        'bufferFrames': 512,
+        'activeInputChannels': 0,
+        'activeOutputChannels': 2,
+      },
+      'unavailableReasons': <String, String>{},
+    };
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -49,35 +84,10 @@ void main() {
           return <String, dynamic>{
             'success': true,
             'diagnosticCode': 'ok',
-            'snapshot': <String, dynamic>{
-              'schemaVersion': 1,
-              'capturedAtUtc': '2026-08-08T12:00:00.000Z',
-              'captureDurationMs': 2,
-              'implementation': 'v2',
-              'coordinatorManaged': false,
-              'captureConsistency': 'stable',
-              'inputs': <Object>[],
-              'outputs': <Map<String, dynamic>>[
-                <String, dynamic>{
-                  'direction': 'output',
-                  'nativePortType': '0x626c746e',
-                  'normalizedKind': 'builtIn',
-                  'uid': 'output-uid',
-                  'name': 'MacBook Pro Speakers',
-                  'channelCount': 2,
-                },
-              ],
-              'session': <String, dynamic>{},
-              'juce': <String, dynamic>{
-                'deviceOpen': true,
-                'sampleRateHz': 48000.0,
-                'bufferFrames': 512,
-                'activeInputChannels': 0,
-                'activeOutputChannels': 2,
-              },
-              'unavailableReasons': <String, String>{},
-            },
+            'snapshot': _v2Snapshot(),
           };
+        case 'getAudioRouteSnapshotV2':
+          return _v2Snapshot();
         case 'validatePlaybackV2':
           return 'ok';
         case 'startAudioRouteMonitoringV2':
@@ -177,14 +187,54 @@ void main() {
     expect(calls.single.method, 'initialisePlaybackV2');
   });
 
-  test('V2 playback startup stays native-call-free on iOS', () async {
+  test('V2 playback initialization uses its native method on iOS', () async {
     final result = await JuceAudioEngine.initialisePlaybackV2(
       platformOverride: TargetPlatform.iOS,
     );
 
-    expect(result.success, isFalse);
-    expect(result.diagnosticCode, 'actual_state_unavailable');
-    expect(calls, isEmpty);
+    expect(result.success, isTrue);
+    expect(result.diagnosticCode, 'ok');
+    expect(calls.single.method, 'initialisePlaybackV2');
+  });
+
+  test('iOS V2 readiness verifies the playback-only session and graph',
+      () async {
+    final startup = await JuceAudioEngine.initialisePlaybackV2(
+      platformOverride: TargetPlatform.iOS,
+    );
+    expect(startup.success, isTrue);
+    calls.clear();
+
+    final ready = await JuceAudioEngine.validatePlaybackV2(
+      platformOverride: TargetPlatform.iOS,
+    );
+
+    expect(ready, isTrue);
+    expect(calls, hasLength(1));
+    expect(calls.single.method, 'getAudioRouteSnapshotV2');
+  });
+
+  test('iOS V2 readiness rejects a non-playback session', () async {
+    final startup = await JuceAudioEngine.initialisePlaybackV2(
+      platformOverride: TargetPlatform.iOS,
+    );
+    expect(startup.success, isTrue);
+    calls.clear();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+      calls.add(methodCall);
+      final snapshot = _v2Snapshot();
+      final session = snapshot['session']! as Map<String, dynamic>;
+      session['category'] = 'AVAudioSessionCategoryPlayAndRecord';
+      return snapshot;
+    });
+
+    final ready = await JuceAudioEngine.validatePlaybackV2(
+      platformOverride: TargetPlatform.iOS,
+    );
+
+    expect(ready, isFalse);
+    expect(calls.single.method, 'getAudioRouteSnapshotV2');
   });
 
   test('Android V2 readiness delegates actual-state and route verification',

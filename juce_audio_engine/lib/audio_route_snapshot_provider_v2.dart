@@ -18,7 +18,8 @@ class MethodChannelAudioRouteSnapshotProviderV2
       !kIsWeb &&
       ((_platformOverride ?? defaultTargetPlatform) == TargetPlatform.macOS ||
           (_platformOverride ?? defaultTargetPlatform) ==
-              TargetPlatform.android);
+              TargetPlatform.android ||
+          (_platformOverride ?? defaultTargetPlatform) == TargetPlatform.iOS);
 
   @override
   Future<AudioRouteSnapshotV2> readSnapshot() async {
