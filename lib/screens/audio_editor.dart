@@ -12566,7 +12566,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               : 'Bluetooth 2.0 route changed. Reopen the audio editor.',
         );
       }
-      return ready;
+      if (!ready) return false;
+      return JuceAudioEngine.preparePlaybackGraph(reason: reason);
     }
     var ok = false;
     try {
@@ -77842,7 +77843,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<bool> _prepareLiveMidiPreviewRoute() async {
     if (!_liveMidiEventPlaybackSupported) return false;
-    if (kIsWeb || !midiPreviewNeedsMobileRoute(defaultTargetPlatform)) {
+    if (kIsWeb) return true;
+    if (!midiPreviewNeedsPlaybackReadiness(
+      defaultTargetPlatform,
+      isBluetoothV2Session: _isBluetoothV2Session,
+    )) {
       return true;
     }
     final pending = _liveMidiPreviewRoutePrepareFuture;

@@ -4746,6 +4746,12 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     return JuceEngine::get().preparePlaybackRoute(why);
 }
 
++ (BOOL)preparePlaybackGraphObjC:(NSString *)reason
+{
+    const auto why = reason == nil ? juce::String("dart") : juceStringFromNSString(reason);
+    return JuceEngine::get().preparePlaybackGraph(why);
+}
+
 + (void)refreshAudioRouteObjC:(NSString *)reason
 {
     const auto why = reason == nil ? juce::String("dart") : juceStringFromNSString(reason);

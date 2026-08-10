@@ -1776,6 +1776,9 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         "preparePlaybackRoute" -> {
           result.success(preparePlaybackRoute(args.stringValue("reason")))
         }
+        "preparePlaybackGraph" -> {
+          result.success(JuceBridge.preparePlaybackGraphJNI(args.stringValue("reason")))
+        }
         "getRecordingPeak" -> {
           result.success(JuceBridge.getRecordingPeakJNI())
         }

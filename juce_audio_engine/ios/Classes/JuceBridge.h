@@ -300,6 +300,7 @@
               desiredInputChannels:(NSInteger)desiredInputChannels
                             reason:(NSString *)reason;
 + (BOOL)preparePlaybackRouteObjC:(NSString *)reason;
++ (BOOL)preparePlaybackGraphObjC:(NSString *)reason;
 + (void)refreshAudioRouteObjC:(NSString *)reason;
 + (void)setLiveInputMonitoringEnabledObjC:(BOOL)enabled;
 + (void)setMidiInputChannelFilterObjC:(NSInteger)channel;

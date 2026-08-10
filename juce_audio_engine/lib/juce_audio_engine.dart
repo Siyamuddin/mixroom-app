@@ -2938,6 +2938,22 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<bool> preparePlaybackGraph({
+    String reason = 'dart',
+  }) async {
+    try {
+      final res = await _ch.invokeMethod<bool>('preparePlaybackGraph', {
+        'reason': reason,
+      });
+      return res ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException catch (e) {
+      _logError('preparePlaybackGraph', e);
+      return false;
+    }
+  }
+
   static Future<void> refreshAudioRoute({
     String reason = 'dart',
   }) async {

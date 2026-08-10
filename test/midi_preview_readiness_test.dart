@@ -3,12 +3,42 @@ import 'package:flutter/foundation.dart';
 import 'package:mixroom/helpers/midi_preview_readiness.dart';
 
 void main() {
-  test('only mobile platforms require playback-route preparation', () {
-    expect(midiPreviewNeedsMobileRoute(TargetPlatform.android), isTrue);
-    expect(midiPreviewNeedsMobileRoute(TargetPlatform.iOS), isTrue);
-    expect(midiPreviewNeedsMobileRoute(TargetPlatform.macOS), isFalse);
-    expect(midiPreviewNeedsMobileRoute(TargetPlatform.windows), isFalse);
-    expect(midiPreviewNeedsMobileRoute(TargetPlatform.linux), isFalse);
+  test('playback readiness is limited to mobile and macOS V2', () {
+    expect(
+      midiPreviewNeedsPlaybackReadiness(
+        TargetPlatform.android,
+        isBluetoothV2Session: false,
+      ),
+      isTrue,
+    );
+    expect(
+      midiPreviewNeedsPlaybackReadiness(
+        TargetPlatform.iOS,
+        isBluetoothV2Session: false,
+      ),
+      isTrue,
+    );
+    expect(
+      midiPreviewNeedsPlaybackReadiness(
+        TargetPlatform.macOS,
+        isBluetoothV2Session: true,
+      ),
+      isTrue,
+    );
+    expect(
+      midiPreviewNeedsPlaybackReadiness(
+        TargetPlatform.macOS,
+        isBluetoothV2Session: false,
+      ),
+      isFalse,
+    );
+    expect(
+      midiPreviewNeedsPlaybackReadiness(
+        TargetPlatform.windows,
+        isBluetoothV2Session: true,
+      ),
+      isFalse,
+    );
   });
 
   test('ready target skips processor replacement', () async {

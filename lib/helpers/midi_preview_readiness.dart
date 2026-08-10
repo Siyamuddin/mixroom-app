@@ -2,8 +2,13 @@ import 'package:flutter/foundation.dart';
 
 typedef MidiPreviewStep = Future<bool> Function();
 
-bool midiPreviewNeedsMobileRoute(TargetPlatform platform) =>
-    platform == TargetPlatform.android || platform == TargetPlatform.iOS;
+bool midiPreviewNeedsPlaybackReadiness(
+  TargetPlatform platform, {
+  required bool isBluetoothV2Session,
+}) =>
+    platform == TargetPlatform.android ||
+    platform == TargetPlatform.iOS ||
+    (platform == TargetPlatform.macOS && isBluetoothV2Session);
 
 /// Runs the bounded readiness sequence required before a live MIDI preview.
 Future<bool> ensureMidiPreviewReady({

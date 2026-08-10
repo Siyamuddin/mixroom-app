@@ -6148,6 +6148,7 @@ public:
     bool prepareRecordingInputs(int desiredInputChannels,
                                 const juce::String &reason);
     bool preparePlaybackRoute(const juce::String &reason);
+    bool preparePlaybackGraph(const juce::String &reason);
     void prepareRecordingInputsAsync(int desiredInputChannels,
                                      const juce::String &reason);
     void refreshAudioRouteAsync(const juce::String &reason);

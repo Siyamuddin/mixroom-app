@@ -126,7 +126,10 @@ void main() {
           }
           expect(loaded, isTrue);
           final routeReady = _useAndroidV2
-              ? await JuceAudioEngine.validatePlaybackV2()
+              ? await JuceAudioEngine.validatePlaybackV2() &&
+                    await JuceAudioEngine.preparePlaybackGraph(
+                      reason: 'midiPreviewColdProjectLoad',
+                    )
               : await JuceAudioEngine.preparePlaybackRoute(
                   reason: asProjectLoad
                       ? 'midiPreviewColdProjectLoad'

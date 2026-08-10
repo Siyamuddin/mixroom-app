@@ -2098,6 +2098,22 @@ bool JuceEngine::preparePlaybackRoute(const juce::String &reason)
     return true;
 }
 
+bool JuceEngine::preparePlaybackGraph(const juce::String &reason)
+{
+    {
+        const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+        ensureMasterOutputRouting();
+    }
+
+    auto *device = deviceManager.getCurrentAudioDevice();
+    const bool ready =
+        device != nullptr &&
+        device->getActiveOutputChannels().countNumberOfSetBits() > 0;
+    if (!ready)
+        juceLogToFlutter(("preparePlaybackGraph failed [" + reason + "]").toRawUTF8());
+    return ready;
+}
+
 void JuceEngine::refreshAudioRouteAsync(const juce::String &reason)
 {
     if (isV2PlaybackSession())

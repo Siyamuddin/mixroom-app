@@ -2770,6 +2770,10 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSString *reason = args[@"reason"] ?: @"dart";
         result(@([JuceBridge preparePlaybackRouteObjC:reason]));
     }
+    else if ([call.method isEqualToString:@"preparePlaybackGraph"]) {
+        NSString *reason = args[@"reason"] ?: @"dart";
+        result(@([JuceBridge preparePlaybackGraphObjC:reason]));
+    }
     else if ([call.method isEqualToString:@"refreshAudioRoute"]) {
         NSString *reason = args[@"reason"] ?: @"dart";
         [JuceBridge refreshAudioRouteObjC:reason];

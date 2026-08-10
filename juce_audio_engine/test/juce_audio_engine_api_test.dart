@@ -402,6 +402,14 @@ void main() {
     expect(calls.single.arguments, <String, dynamic>{'reason': 'projectLoad'});
   });
 
+  test('preparePlaybackGraph routes reason payload', () async {
+    await JuceAudioEngine.preparePlaybackGraph(reason: 'midiPreview');
+
+    expect(calls, hasLength(1));
+    expect(calls.single.method, 'preparePlaybackGraph');
+    expect(calls.single.arguments, <String, dynamic>{'reason': 'midiPreview'});
+  });
+
   test('getInputDeviceInfos parses macOS input metadata', () async {
     final infos = await JuceAudioEngine.getInputDeviceInfos();
 
