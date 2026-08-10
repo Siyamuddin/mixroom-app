@@ -4,12 +4,17 @@ import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:juce_audio_engine/audio_route_v2.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
 
 const _uprightPiano =
     'sfz_asset:assets/instruments/VSCO-2-CE-1.1.0/UprightPiano.sfz';
 const _tubaStaccato =
     'sfz_asset:assets/instruments/VSCO-2-CE-1.1.0/TubaStac.sfz';
+const _useAndroidV2 = bool.fromEnvironment(
+  'MIXROOM_ANDROID_V2_TEST',
+  defaultValue: false,
+);
 
 Map<String, dynamic> _note(int id, int pitch) => <String, dynamic>{
   'id': id,
@@ -75,7 +80,13 @@ void main() {
       final rowIds = <int>[];
       final clipIds = <int>[0, 1, 2, 3];
 
-      await JuceAudioEngine.initialise();
+      final implementation = _useAndroidV2
+          ? BluetoothImplementationV2.v2
+          : BluetoothImplementationV2.legacy;
+      expect(
+        await JuceAudioEngine.initialiseForImplementation(implementation),
+        isTrue,
+      );
       try {
         await JuceAudioEngine.setRowMetersEnabled(true);
 
@@ -114,14 +125,14 @@ void main() {
             if (asProjectLoad) await JuceAudioEngine.endProjectClipLoad();
           }
           expect(loaded, isTrue);
-          expect(
-            await JuceAudioEngine.preparePlaybackRoute(
-              reason: asProjectLoad
-                  ? 'midiPreviewColdProjectLoad'
-                  : 'midiPreviewIntegration',
-            ),
-            isTrue,
-          );
+          final routeReady = _useAndroidV2
+              ? await JuceAudioEngine.validatePlaybackV2()
+              : await JuceAudioEngine.preparePlaybackRoute(
+                  reason: asProjectLoad
+                      ? 'midiPreviewColdProjectLoad'
+                      : 'midiPreviewIntegration',
+                );
+          expect(routeReady, isTrue);
           final updated = await JuceAudioEngine.updateMidiClipEvents(
             clipId,
             instrumentId: instrumentId,
@@ -315,7 +326,7 @@ void main() {
         // Keep this line stable so local/CI logs can scrape audible evidence.
         // ignore: avoid_print
         print(
-          'MIXROOM_MIDI_PREVIEW ${jsonEncode(<String, dynamic>{'passed': true, 'strikes': results})}',
+          'MIXROOM_MIDI_PREVIEW ${jsonEncode(<String, dynamic>{'passed': true, 'implementation': implementation.name, 'strikes': results})}',
         );
       } finally {
         await JuceAudioEngine.setRowMetersEnabled(false);

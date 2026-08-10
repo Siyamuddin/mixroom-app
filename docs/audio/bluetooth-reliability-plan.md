@@ -3,9 +3,9 @@
 ## Document status
 
 - Status: the macOS V2 playback and live-output checkpoints are complete. The
-  Android Legacy audio/MIDI baseline has been restored from the proven `main`
-  implementation; its physical-device gate is pending before any Android V2
-  work may begin.
+  Android Legacy baseline and Android V2 built-in-speaker, output-only
+  foundation have passed their physical-device gates. Preconnected Bluetooth
+  playback is the next Android checkpoint.
 - Applies to: Android, iOS, and macOS.
 - Excludes: Windows and every other unsupported platform.
 - Current production implementation: Legacy Bluetooth only.
@@ -131,6 +131,13 @@ sections.
 Risks to address: coarse A2DP/SCO/LE reporting, user settings leaking into a
 Bluetooth route, no complete actual-state snapshot, overlapping repair paths,
 and delayed post-record work that can race a newer route.
+
+Android Legacy baseline evidence (2026-08-10, Samsung SM-S918N, built-in output,
+Bluetooth disconnected): the on-device meter integration test produced
+measurable output for Upright Piano preview and timeline playback, a second MIDI
+row, Basic Synth, sampled round-robin notes, and live MIDI note-on/off. A manual
+normal-app check confirmed that MIDI and audio played normally. This establishes
+the pre-V2 regression baseline; it is not evidence about Bluetooth routing.
 
 ### iOS Legacy behavior
 
@@ -653,16 +660,20 @@ available Mac, followed by broader Intel and Apple Silicon validation later.
 
 Scope: Android playback only; no recording.
 
-Prerequisite baseline status (2026-08-10): the established mobile MIDI render,
-processor-replacement, preview-readiness, and bounded graph-repair changes have
-been restored without adding an Android V2 path. MIDI readiness and Bluetooth
-contract tests pass, and Android, macOS, and unsigned iOS debug builds succeed.
-The Android on-device meter test and short audible built-in-speaker check remain
-the exit gate because the Samsung test phone was not connected during automated
-verification. Unrelated baseline test defects remain documented: the JVM plugin
-template attempts to load the unavailable native library, the iOS asset-style
-assertion detects pre-existing hardcoded SFZ paths, and two tablet row-gain
-interaction tests fail independently of the audio/MIDI changes.
+Foundation status (2026-08-10): the branch is based directly on current
+`origin/main`, including the original PRO-9 MIDI work. On a Samsung SM-S918N
+with Bluetooth disconnected, both Legacy and V2 passed the same on-device meter
+suite for Upright Piano preview and timeline playback, a second MIDI row, Basic
+Synth, sampled round-robin notes, and live MIDI note-on/off. V2 opened the
+system-selected output at the accepted 48 kHz rate and 1920-frame buffer with
+two active outputs, zero active inputs, and an attached callback. A normal-app
+manual gate confirmed correct project rendering and working audio, MIDI,
+transport, metronome, and effects in both implementations, with no microphone
+activation, false route-change notice, silence, or crash.
+
+This evidence validates the generic output-only engine foundation. It does not
+yet validate Bluetooth routing, Bluetooth rate/buffer behavior, or live route
+changes on Android.
 
 Deliverables:
 
@@ -857,9 +868,8 @@ Each run records:
 
 ## Immediate next step
 
-Connect the Samsung test phone with Bluetooth disconnected and run the Android
-Legacy MIDI integration test. Require measurable output for sampled preview,
-timeline playback, multiple rows, Basic Synth, round-robin samples, and live
-MIDI events. Then perform one short built-in-speaker project check covering
-audio, MIDI, transport, metronome, and one effect. Do not implement Android V2
-until this baseline passes.
+Design the Android preconnected-Bluetooth playback checkpoint on top of the
+verified output-only foundation. Add only route classification, media-route
+verification, route-supported rate/buffer handling, and truthful accepted-state
+diagnostics. Keep live connect/disconnect observation, recording, monitoring,
+adaptive tuning, retries, and vendor-specific behavior outside that checkpoint.

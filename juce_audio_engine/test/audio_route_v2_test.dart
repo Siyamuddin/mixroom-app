@@ -218,6 +218,16 @@ void main() {
     expect(result.snapshot.implementation, BluetoothImplementationV2.v2);
   });
 
+  test('JUCE callback readiness remains nullable and forward compatible', () {
+    final present = JuceRouteFactsV2.fromMap(<String, dynamic>{
+      'audioCallbackAttached': true,
+    });
+    final missing = JuceRouteFactsV2.fromMap(const <String, dynamic>{});
+
+    expect(present.audioCallbackAttached, isTrue);
+    expect(missing.audioCallbackAttached, isNull);
+  });
+
   test('missing playback startup snapshot fails closed', () {
     final result = AudioPlaybackStartupResultV2.fromMap(<String, dynamic>{
       'success': false,

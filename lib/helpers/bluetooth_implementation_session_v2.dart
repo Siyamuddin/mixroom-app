@@ -74,9 +74,11 @@ class BluetoothImplementationPreferencesV2 {
     bool? debugOverride,
     TargetPlatform? platformOverride,
   }) {
+    final platform = platformOverride ?? defaultTargetPlatform;
     return !kIsWeb &&
         (debugOverride ?? kDebugMode) &&
-        (platformOverride ?? defaultTargetPlatform) == TargetPlatform.macOS;
+        (platform == TargetPlatform.macOS ||
+            platform == TargetPlatform.android);
   }
 
   BluetoothImplementationV2 _parse(String? value) {

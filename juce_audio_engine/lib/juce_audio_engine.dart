@@ -365,8 +365,10 @@ class JuceAudioEngine {
   static Future<AudioPlaybackStartupResultV2> initialisePlaybackV2({
     TargetPlatform? platformOverride,
   }) async {
+    final platform = platformOverride ?? defaultTargetPlatform;
     if (kIsWeb ||
-        (platformOverride ?? defaultTargetPlatform) != TargetPlatform.macOS) {
+        (platform != TargetPlatform.macOS &&
+            platform != TargetPlatform.android)) {
       return _unavailablePlaybackStartupV2();
     }
     try {
@@ -504,7 +506,20 @@ class JuceAudioEngine {
     if (result.succeeded) _v2StartupSnapshot = result.snapshot;
   }
 
-  static Future<bool> validatePlaybackV2() async {
+  static Future<bool> validatePlaybackV2(
+      {TargetPlatform? platformOverride}) async {
+    final platform = platformOverride ?? defaultTargetPlatform;
+    if (!kIsWeb && platform == TargetPlatform.android) {
+      try {
+        final code = await _ch.invokeMethod<String>('validatePlaybackV2');
+        return code == 'ok';
+      } on MissingPluginException {
+        return false;
+      } on PlatformException catch (error) {
+        _logError('validatePlaybackV2', error);
+        return false;
+      }
+    }
     final startup = _v2StartupSnapshot;
     if (startup == null || startup.outputs.length != 1) return false;
     final current = await getAudioRouteSnapshotV2();

@@ -4276,6 +4276,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   static const Key _projectSettingsCloseButtonKey = Key(
     'project_settings_close_button',
   );
+  static const Key _androidBluetoothV2DebugCardKey = Key(
+    'android_bluetooth_v2_debug_card',
+  );
+  static const Key _androidBluetoothV2SelectorKey = Key(
+    'android_bluetooth_v2_selector',
+  );
   static const double _kTransportBarHeight = 88.0;
   static const double _kIosSnackBarExtraLift = 16.0;
   static const double _kChatBarStackHeight = 68.0;
@@ -9228,7 +9234,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _juceEngineEventSubscription ??= JuceAudioEngine.eventsStream.listen(
         _handleJuceEngineEvent,
       );
-      if (_isBluetoothV2Session) {
+      if (_isBluetoothV2Session && Platform.isMacOS) {
         final coordinator = AudioRouteCoordinatorV2(
           adapter: const MethodChannelAudioRouteAdapterV2(),
           onStateChanged: _handleAudioRouteCoordinatorStateV2,
@@ -12513,7 +12519,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
-  Future<void> _requestAndroidRouteRefresh({required String reason}) async {
+  Future<void> _requestAndroidRouteRefresh({
+    required String reason,
+  }) async {
+    if (_isBluetoothV2Session) return;
     if (defaultTargetPlatform != TargetPlatform.android) {
       await JuceAudioEngine.refreshAudioRoute(reason: reason);
       return;
@@ -12541,7 +12550,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<bool> _ensurePlaybackRouteReady({required String reason}) async {
     if (_isBluetoothV2Session) {
-      if (_audioRouteCoordinatorV2?.state !=
+      if (Platform.isMacOS &&
+          _audioRouteCoordinatorV2?.state !=
           AudioRouteCoordinatorStateV2.stable) {
         if (mounted) {
           _showSmallNotice('Bluetooth 2.0 audio output is not ready yet.');
@@ -12551,7 +12561,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final ready = await JuceAudioEngine.validatePlaybackV2();
       if (!ready && mounted) {
         _showSmallNotice(
-          'Bluetooth 2.0 route changed. Reopen the audio editor.',
+          Platform.isAndroid
+              ? 'Bluetooth 2.0 audio output is unavailable. Reopen the audio editor.'
+              : 'Bluetooth 2.0 route changed. Reopen the audio editor.',
         );
       }
       return ready;
@@ -12623,6 +12635,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _flushDeferredAndroidRouteRefreshIfNeeded() async {
+    if (_isBluetoothV2Session) return;
     if (defaultTargetPlatform != TargetPlatform.android) return;
     if (!_pendingAndroidRouteRefresh ||
         _androidRouteRefreshInFlight ||
@@ -38696,6 +38709,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     unawaited(() async {
       await Future<void>.delayed(const Duration(milliseconds: 180));
       if (!mounted || !_isProjectSettingsOpen) return;
+      if (_isBluetoothV2Session) return;
       if (!showAudioRouting) return;
       await _refreshMicrophonePermissionState();
       if (_inputDevices.isEmpty && !_loadingDevices) {
@@ -38729,10 +38743,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final showInlineAudioRouting =
         PlatformCapabilities.current.isDesktop ||
         mixroomUsesTabletLandscapeShell(context);
-    final showAudioRoutingLauncher = showProjectSettingsAudioRoutingLauncher(
-      showInlineAudioRouting: showInlineAudioRouting,
-      isMobilePlatform: Platform.isIOS || Platform.isAndroid,
-    );
+    final showAudioRoutingLauncher =
+        !_isBluetoothV2Session &&
+        showProjectSettingsAudioRoutingLauncher(
+          showInlineAudioRouting: showInlineAudioRouting,
+          isMobilePlatform: Platform.isIOS || Platform.isAndroid,
+        );
     final usesTabletDawLayout = _usesTabletDesktopDawShell(context);
     final usesTabletDesktopLayout = usesTabletDawLayout;
     final _TopPopupLayout popupLayout = _resolveTopPopupLayout(
@@ -38802,6 +38818,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 ),
                               ),
                               const SizedBox(height: 10),
+                              if (kDebugMode && Platform.isAndroid) ...[
+                                _buildAndroidBluetoothV2DebugControls(),
+                                const SizedBox(height: 10),
+                              ],
                               if (showAudioRoutingLauncher) ...[
                                 _buildAudioRoutingLauncher(),
                                 const SizedBox(height: 10),
@@ -40358,6 +40378,71 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
     _showSmallNotice('Reopen the audio editor to apply.');
     return true;
+  }
+
+  Widget _buildAndroidBluetoothV2DebugControls() {
+    final session = _bluetoothImplementationSessionV2;
+    if (!kDebugMode || !Platform.isAndroid || session == null) {
+      return const SizedBox.shrink();
+    }
+    return Container(
+      key: _androidBluetoothV2DebugCardKey,
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Internal audio implementation',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Active: ${_bluetoothImplementationLabel(session.active)}',
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Next editor session',
+            style: TextStyle(color: Colors.white54, fontSize: 11),
+          ),
+          SizedBox(
+            width: double.infinity,
+            child: DropdownButton<BluetoothImplementationV2>(
+              key: _androidBluetoothV2SelectorKey,
+              value: session.nextSession,
+              isExpanded: true,
+              dropdownColor: const Color(0xFF242424),
+              style: const TextStyle(color: Colors.white),
+              underline: const SizedBox.shrink(),
+              items: BluetoothImplementationV2.values
+                  .map(
+                    (value) => DropdownMenuItem(
+                      value: value,
+                      child: Text(_bluetoothImplementationLabel(value)),
+                    ),
+                  )
+                  .toList(growable: false),
+              onChanged: (value) {
+                if (value != null) {
+                  unawaited(
+                    _setBluetoothImplementationForNextSession(value),
+                  );
+                }
+              },
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _showDesktopDiagnosticsDialog() async {
@@ -77628,6 +77713,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _setDawPanelVisible('piano_roll', true);
     _syncMeterPollingForVisibility();
     if (_liveMidiEventPlaybackSupported && clip.engineClipId >= 0) {
+      // Prime the output route before the first audition. Processor readiness
+      // remains in the awaited key-preview path, avoiding concurrent reloads.
+      unawaited(_prepareLiveMidiPreviewRoute());
       unawaited(_syncLiveMidiInputTargetClip());
     }
   }
@@ -77752,21 +77840,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
-  Future<bool> _prepareLiveMidiPreviewRoute() {
-    if (!_liveMidiEventPlaybackSupported) return Future<bool>.value(false);
+  Future<bool> _prepareLiveMidiPreviewRoute() async {
+    if (!_liveMidiEventPlaybackSupported) return false;
     if (kIsWeb || !midiPreviewNeedsMobileRoute(defaultTargetPlatform)) {
-      return Future<bool>.value(true);
+      return true;
     }
     final pending = _liveMidiPreviewRoutePrepareFuture;
-    if (pending != null) return pending;
+    if (pending != null) return await pending;
 
     final next = _ensurePlaybackRouteReady(reason: 'midiPreview');
-    _liveMidiPreviewRoutePrepareFuture = next.whenComplete(() {
+    _liveMidiPreviewRoutePrepareFuture = next;
+    try {
+      return await next;
+    } finally {
       if (identical(_liveMidiPreviewRoutePrepareFuture, next)) {
         _liveMidiPreviewRoutePrepareFuture = null;
       }
-    });
-    return _liveMidiPreviewRoutePrepareFuture!;
+    }
   }
 
   Future<bool> _ensureLiveMidiClipReadyForPreview(AudioTrack clip) async {

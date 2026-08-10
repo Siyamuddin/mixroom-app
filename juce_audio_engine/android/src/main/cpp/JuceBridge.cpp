@@ -1314,11 +1314,38 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_initialiseEngineJNI(JNIEnv *env,
     JuceEngine::get().initialiseEngine();
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_initialisePlaybackV2JNI(JNIEnv *env, jclass)
+{
+    if (!ensureJuceAndroidRuntimeInitialised(env))
+        return JNI_FALSE;
+
+    bool success = false;
+    if (auto *mm = juce::MessageManager::getInstance())
+        mm->callSync([&success]
+                     { success = JuceEngine::get().initialisePlaybackV2Android(); });
+    else
+        success = JuceEngine::get().initialisePlaybackV2Android();
+    return success ? JNI_TRUE : JNI_FALSE;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_shutdownEngineJNI(JNIEnv *, jclass)
 {
     juce::MessageManager::callAsync([]
                                     { JuceEngine::get().shutdownEngine(); });
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_shutdownEngineSynchronouslyJNI(JNIEnv *, jclass)
+{
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        mm->callSync([]
+                     { JuceEngine::get().shutdownEngine(); });
+        return;
+    }
+    JuceEngine::get().shutdownEngine();
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -1331,6 +1358,18 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_playJNI(JNIEnv *, jclass)
         return;
     }
     JuceEngine::get().play();
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_playPlaybackV2JNI(JNIEnv *, jclass)
+{
+    bool success = false;
+    if (auto *mm = juce::MessageManager::getInstance())
+        mm->callSync([&success]
+                     { success = JuceEngine::get().playPlaybackV2Android(); });
+    else
+        success = JuceEngine::get().playPlaybackV2Android();
+    return success ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT void JNICALL

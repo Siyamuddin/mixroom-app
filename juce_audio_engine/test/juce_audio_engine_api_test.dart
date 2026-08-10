@@ -78,6 +78,8 @@ void main() {
               'unavailableReasons': <String, String>{},
             },
           };
+        case 'validatePlaybackV2':
+          return 'ok';
         case 'startAudioRouteMonitoringV2':
           return <String, dynamic>{
             'implementation': 'v2',
@@ -165,14 +167,34 @@ void main() {
     expect(calls.single.method, 'initialisePlaybackV2');
   });
 
-  test('V2 playback startup stays native-call-free off macOS', () async {
+  test('V2 playback initialization uses its native method on Android',
+      () async {
     final result = await JuceAudioEngine.initialisePlaybackV2(
       platformOverride: TargetPlatform.android,
+    );
+
+    expect(result.success, isTrue);
+    expect(calls.single.method, 'initialisePlaybackV2');
+  });
+
+  test('V2 playback startup stays native-call-free on iOS', () async {
+    final result = await JuceAudioEngine.initialisePlaybackV2(
+      platformOverride: TargetPlatform.iOS,
     );
 
     expect(result.success, isFalse);
     expect(result.diagnosticCode, 'actual_state_unavailable');
     expect(calls, isEmpty);
+  });
+
+  test('Android V2 readiness uses native engine facts without route matching',
+      () async {
+    final ready = await JuceAudioEngine.validatePlaybackV2(
+      platformOverride: TargetPlatform.android,
+    );
+
+    expect(ready, isTrue);
+    expect(calls.single.method, 'validatePlaybackV2');
   });
 
   test('V2 route coordinator methods use the isolated native contract',

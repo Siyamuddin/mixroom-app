@@ -16,11 +16,14 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.time.Instant
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 
 class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
+  private enum class EngineOwnership { NONE, LEGACY, V2_PLAYBACK }
+
   private lateinit var methodChannel: MethodChannel
   private lateinit var eventsChannel: EventChannel
   private lateinit var logsChannel: EventChannel
@@ -29,6 +32,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
   private var instrumentExtractionFuture: Future<*>? = null
   private lateinit var applicationContext: Context
   private lateinit var promptAnalysisService: PromptAnalysisService
+  private var engineOwnership = EngineOwnership.NONE
 
   private var eventsSink: EventChannel.EventSink? = null
   private var logsSink: EventChannel.EventSink? = null
@@ -548,6 +552,167 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     )
   }
 
+  @Suppress("DEPRECATION")
+  private fun preparePlaybackOnlyModeV2() {
+    val audioManager =
+      applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    audioManager.mode = AudioManager.MODE_NORMAL
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      try {
+        audioManager.clearCommunicationDevice()
+      } catch (_: SecurityException) {
+      } catch (_: IllegalStateException) {
+      }
+    } else {
+      try {
+        if (audioManager.isBluetoothScoOn) audioManager.stopBluetoothSco()
+        audioManager.isBluetoothScoOn = false
+      } catch (_: SecurityException) {
+      } catch (_: IllegalStateException) {
+      }
+    }
+  }
+
+  @Suppress("DEPRECATION")
+  private fun currentPlaybackFactsV2(): AndroidPlaybackFactsV2 {
+    val audioManager =
+      applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    val diagnostics = JuceBridge.getEngineDiagnosticsJNI()
+    val bluetoothCommunicationDeviceSelected =
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        when (audioManager.communicationDevice?.type) {
+          AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+          AudioDeviceInfo.TYPE_BLE_HEADSET -> true
+          else -> false
+        }
+      } else {
+        false
+      }
+    val scoActive =
+      Build.VERSION.SDK_INT < Build.VERSION_CODES.S && audioManager.isBluetoothScoOn
+    return AndroidPlaybackFactsV2(
+      ownedByV2 = engineOwnership == EngineOwnership.V2_PLAYBACK,
+      audioMode = audioManager.mode,
+      bluetoothCommunicationDeviceSelected = bluetoothCommunicationDeviceSelected,
+      bluetoothScoActive = scoActive,
+      deviceOpen = diagnostics["deviceOpen"] == true,
+      callbackAttached = diagnostics["audioCallbackAttached"] == true,
+      activeInputChannels = (diagnostics["inputChannelCount"] as? Number)?.toInt() ?: 0,
+      activeOutputChannels = (diagnostics["outputChannelCount"] as? Number)?.toInt() ?: 0,
+      sampleRateHz = (diagnostics["sampleRate"] as? Number)?.toDouble() ?: 0.0,
+      bufferFrames = (diagnostics["bufferSize"] as? Number)?.toInt() ?: 0,
+    )
+  }
+
+  private fun audioModeName(mode: Int): String =
+    when (mode) {
+      AudioManager.MODE_NORMAL -> "MODE_NORMAL"
+      AudioManager.MODE_RINGTONE -> "MODE_RINGTONE"
+      AudioManager.MODE_IN_CALL -> "MODE_IN_CALL"
+      AudioManager.MODE_IN_COMMUNICATION -> "MODE_IN_COMMUNICATION"
+      else -> "MODE_UNKNOWN($mode)"
+    }
+
+  private fun buildPlaybackSnapshotV2(): Map<String, Any?> {
+    val diagnostics = JuceBridge.getEngineDiagnosticsJNI()
+    val facts = currentPlaybackFactsV2()
+    return mapOf(
+      "schemaVersion" to 1,
+      "capturedAtUtc" to Instant.now().toString(),
+      "captureDurationMs" to 0,
+      "implementation" to "v2",
+      "generation" to null,
+      "transitionId" to null,
+      "coordinatorManaged" to false,
+      "captureConsistency" to "stable",
+      "inputs" to emptyList<Map<String, Any?>>(),
+      "outputs" to emptyList<Map<String, Any?>>(),
+      "session" to mapOf(
+        "category" to null,
+        "mode" to audioModeName(facts.audioMode),
+        "sampleRateHz" to facts.sampleRateHz,
+        "ioBufferDurationSeconds" to
+          if (facts.sampleRateHz > 0.0 && facts.bufferFrames > 0) {
+            facts.bufferFrames / facts.sampleRateHz
+          } else {
+            null
+          },
+        "inputChannelCount" to facts.activeInputChannels,
+        "outputChannelCount" to facts.activeOutputChannels,
+        "active" to null,
+        "streamRunning" to null,
+      ),
+      "juce" to mapOf(
+        "deviceOpen" to facts.deviceOpen,
+        "audioCallbackAttached" to facts.callbackAttached,
+        "sampleRateHz" to facts.sampleRateHz,
+        "bufferFrames" to facts.bufferFrames,
+        "activeInputChannels" to facts.activeInputChannels,
+        "activeOutputChannels" to facts.activeOutputChannels,
+        "inputDeviceName" to null,
+        "outputDeviceName" to diagnostics["outputDeviceName"],
+        "realtimeCallbackCount" to diagnostics["realtimeCallbackCount"],
+        "realtimeCallbackLastMs" to diagnostics["realtimeCallbackLastMs"],
+        "realtimeCallbackMaxMs" to diagnostics["realtimeCallbackMaxMs"],
+        "realtimeCallbackAverageMs" to diagnostics["realtimeCallbackAvgMs"],
+        "realtimeCallbackBudgetMs" to diagnostics["realtimeCallbackBudgetMs"],
+        "realtimeCallbackOverBudgetCount" to
+          diagnostics["realtimeCallbackOverBudgetCount"],
+        "xRunCount" to null,
+      ),
+      "unavailableReasons" to mapOf(
+        "route.outputEndpoint" to "notResolvedInAndroidOutputOnlyCheckpoint",
+        "session.category" to "notReadBackWithoutOboeBackendIntrospection",
+        "session.streamRunning" to "notExposedByCurrentAndroidBackend",
+        "juce.xRunCount" to "notExposedByCurrentAndroidBackend",
+      ),
+    )
+  }
+
+  private fun playbackStartupResult(
+    success: Boolean,
+    diagnosticCode: String,
+    snapshot: Map<String, Any?>? = null,
+  ): Map<String, Any?> = mapOf(
+    "success" to success,
+    "diagnosticCode" to diagnosticCode,
+    "snapshot" to (snapshot ?: mapOf(
+      "schemaVersion" to 1,
+      "capturedAtUtc" to Instant.now().toString(),
+      "implementation" to "v2",
+      "coordinatorManaged" to false,
+      "captureConsistency" to "unavailable",
+      "inputs" to emptyList<Map<String, Any?>>(),
+      "outputs" to emptyList<Map<String, Any?>>(),
+      "session" to emptyMap<String, Any?>(),
+      "juce" to emptyMap<String, Any?>(),
+      "unavailableReasons" to mapOf("startup" to diagnosticCode),
+    )),
+  )
+
+  private fun initialisePlaybackV2(): Map<String, Any?> {
+    if (engineOwnership != EngineOwnership.NONE) {
+      return playbackStartupResult(false, "implementation_conflict")
+    }
+
+    engineOwnership = EngineOwnership.V2_PLAYBACK
+    preparePlaybackOnlyModeV2()
+    if (!JuceBridge.initialisePlaybackV2JNI()) {
+      JuceBridge.shutdownEngineSynchronouslyJNI()
+      engineOwnership = EngineOwnership.NONE
+      return playbackStartupResult(false, "juce_open_failed")
+    }
+
+    val snapshot = buildPlaybackSnapshotV2()
+    val code = AndroidPlaybackReadinessV2.validate(currentPlaybackFactsV2())
+    if (code != "ok") {
+      JuceBridge.shutdownEngineSynchronouslyJNI()
+      engineOwnership = EngineOwnership.NONE
+      return playbackStartupResult(false, code, snapshot)
+    }
+    return playbackStartupResult(true, "ok", snapshot)
+  }
+
   private fun hasPlaybackRoutingAnomaly(audioManager: AudioManager): Boolean {
     if (audioManager.mode != AudioManager.MODE_NORMAL) {
       return true
@@ -604,21 +769,63 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
   override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
     val args = argsFrom(call)
 
+    if (
+      engineOwnership == EngineOwnership.V2_PLAYBACK &&
+      call.method in setOf(
+        "initialise",
+        "selectInputDevice",
+        "prepareRecordingInputs",
+        "refreshAudioRoute",
+        "preparePlaybackRoute",
+        "setLiveInputMonitoringEnabled",
+        "startRecording",
+        "stopRecording",
+        "stopRecordingWithoutPlaybackRestore",
+        "restoreBluetoothPlaybackAfterRecordingStop",
+      )
+    ) {
+      result.error(
+        "implementation_conflict",
+        "Legacy audio operation is unavailable in a Bluetooth 2.0 session",
+        null,
+      )
+      return
+    }
+
     try {
       when (call.method) {
         "getPlatformVersion" -> {
           result.success("Android ${android.os.Build.VERSION.RELEASE}")
         }
         "initialise" -> {
+          if (engineOwnership == EngineOwnership.V2_PLAYBACK) {
+            result.error("implementation_conflict", "Bluetooth 2.0 owns the engine", null)
+            return
+          }
           normalizeAudioModeAfterRecordingStop()
           JuceBridge.initialiseEngineJNI()
           preparePlaybackRoute("initialise")
+          engineOwnership = EngineOwnership.LEGACY
           result.success(null)
         }
+        "initialisePlaybackV2" -> {
+          result.success(initialisePlaybackV2())
+        }
+        "validatePlaybackV2" -> {
+          result.success(AndroidPlaybackReadinessV2.validate(currentPlaybackFactsV2()))
+        }
         "shutdown" -> {
-          normalizeAudioModeAfterRecordingStop()
-          JuceBridge.shutdownEngineJNI()
-          normalizeAudioModeAfterRecordingStop()
+          if (engineOwnership == EngineOwnership.V2_PLAYBACK) {
+            JuceBridge.shutdownEngineSynchronouslyJNI()
+          } else {
+            normalizeAudioModeAfterRecordingStop()
+            // Ownership cannot be released until the shared native engine is
+            // fully closed; otherwise a quickly reopened editor can overlap
+            // Legacy teardown with V2 startup.
+            JuceBridge.shutdownEngineSynchronouslyJNI()
+            normalizeAudioModeAfterRecordingStop()
+          }
+          engineOwnership = EngineOwnership.NONE
           result.success(null)
         }
         "loadTrack" -> {
@@ -658,9 +865,11 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           result.success(JuceBridge.getTrackDurationJNI(args.intValue("track")))
         }
         "play" -> {
-          val routeReady = preparePlaybackRoute("play")
-          if (routeReady) {
-            JuceBridge.playJNI()
+          val routeReady = if (engineOwnership == EngineOwnership.V2_PLAYBACK) {
+            AndroidPlaybackReadinessV2.validate(currentPlaybackFactsV2()) == "ok" &&
+              JuceBridge.playPlaybackV2JNI()
+          } else {
+            preparePlaybackRoute("play").also { if (it) JuceBridge.playJNI() }
           }
           result.success(routeReady)
         }
@@ -1625,6 +1834,10 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
   }
 
   override fun onDetachedFromEngine(binding: FlutterPluginBinding) {
+    if (engineOwnership == EngineOwnership.V2_PLAYBACK) {
+      JuceBridge.shutdownEngineSynchronouslyJNI()
+      engineOwnership = EngineOwnership.NONE
+    }
     methodChannel.setMethodCallHandler(null)
     eventsChannel.setStreamHandler(null)
     logsChannel.setStreamHandler(null)

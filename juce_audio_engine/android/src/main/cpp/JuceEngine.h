@@ -4599,6 +4599,7 @@ public:
     static JuceEngine &get();
 
     void initialiseEngine();
+    bool initialisePlaybackV2Android();
     void loadTrack(int idx, const juce::File &file); // deprecated name (clip)
     void removeTrack(int clipIndex);                 // removes clip
     juce::StringArray getTrackEffects(int trackIndex);
@@ -4705,6 +4706,7 @@ public:
 
     // Transport
     void play();
+    bool playPlaybackV2Android();
     void pause();
     void setTransportSeconds(double t);
     double getTransportSeconds() const;
@@ -4983,6 +4985,7 @@ private:
 
     bool engineInitialized = false;
     bool formatsRegistered = false; // will only be flipped once to true
+    bool audioCallbackAttached = false;
     juce::AudioFormatManager formatManager;
     juce::AudioPluginFormatManager pluginFormatManager;
     juce::AudioProcessorGraph graph;
@@ -5629,6 +5632,8 @@ private:
         juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync);
     void clearLiveInputMonitorConnectionsLocked(
         juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync);
+    void registerFormatsIfNeeded();
+    void initialiseSharedPlaybackGraph();
 };
 
 class MetronomeAudioCallback : public juce::AudioIODeviceCallback

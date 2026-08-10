@@ -155,6 +155,7 @@ class AudioSessionFactsV2 {
 class JuceRouteFactsV2 {
   const JuceRouteFactsV2({
     this.deviceOpen,
+    this.audioCallbackAttached,
     this.sampleRateHz,
     this.bufferFrames,
     this.activeInputChannels,
@@ -171,6 +172,7 @@ class JuceRouteFactsV2 {
   });
 
   final bool? deviceOpen;
+  final bool? audioCallbackAttached;
   final double? sampleRateHz;
   final int? bufferFrames;
   final int? activeInputChannels;
@@ -191,6 +193,7 @@ class JuceRouteFactsV2 {
   factory JuceRouteFactsV2.fromMap(Map<String, dynamic> map) {
     return JuceRouteFactsV2(
       deviceOpen: _nullableBool(map['deviceOpen']),
+      audioCallbackAttached: _nullableBool(map['audioCallbackAttached']),
       sampleRateHz: _nullableDouble(map['sampleRateHz']),
       bufferFrames: _nullableInt(map['bufferFrames']),
       activeInputChannels: _nullableInt(map['activeInputChannels']),
@@ -213,6 +216,7 @@ class JuceRouteFactsV2 {
   Map<String, dynamic> toMap({bool includeDeviceNames = true}) {
     return <String, dynamic>{
       'deviceOpen': deviceOpen,
+      'audioCallbackAttached': audioCallbackAttached,
       'sampleRateHz': sampleRateHz,
       'bufferFrames': bufferFrames,
       'activeInputChannels': activeInputChannels,

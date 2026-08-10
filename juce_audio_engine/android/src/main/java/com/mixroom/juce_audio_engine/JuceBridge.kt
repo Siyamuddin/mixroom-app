@@ -12,10 +12,13 @@ object JuceBridge {
 
     // Engine lifecycle
     @JvmStatic external fun initialiseEngineJNI()
+    @JvmStatic external fun initialisePlaybackV2JNI(): Boolean
     @JvmStatic external fun shutdownEngineJNI()
+    @JvmStatic external fun shutdownEngineSynchronouslyJNI()
 
     // Playback control
     @JvmStatic external fun playJNI()
+    @JvmStatic external fun playPlaybackV2JNI(): Boolean
     @JvmStatic external fun pauseJNI()
 
     // Legacy track/clip API
