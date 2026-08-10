@@ -1538,6 +1538,13 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   int? _pendingSelectionBoxPointer;
   Offset? _pendingSelectionBoxStart;
   bool _suppressNextTimelineTapAfterSelectionBox = false;
+  /// BandLab-style "selection armed" cue at the long-press point.
+  Offset? _selectionArmIndicatorAt;
+  static const double _selectionArmIndicatorHideDistance = 8.0;
+  /// Resting ring size (28px diameter); pulse expands to [_selectionArmIndicatorPulseRadius].
+  static const double _selectionArmIndicatorRadius = 14.0;
+  /// Peak ring size during the one-shot arm pulse (visible around a fingertip).
+  static const double _selectionArmIndicatorPulseRadius = 38.0;
   bool _foregroundGridEnabled = true;
   final Set<String> _paintStrokeKeys = <String>{};
   bool _paintStrokeActive = false;
@@ -2222,12 +2229,15 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   void _beginSelectionBoxAt(
     Offset localPosition, {
     bool preserveExistingSelection = false,
+    bool showArmIndicator = false,
   }) {
     _cancelDeadZoneHoldTimer();
     _resetDeadZonePointerState();
     _clearPendingClipTapState();
     _clearPendingAutomationClipSelection();
     _clearAutomationClipMenu();
+    _isUserInteracting = false;
+    _interactionMode = '';
     _selectionBoxBaseClipIndices
       ..clear()
       ..addAll(
@@ -2238,6 +2248,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _selectionBoxActive = true;
     _selectionBoxStart = localPosition;
     _selectionBoxCurrent = localPosition;
+    _selectionArmIndicatorAt = showArmIndicator ? localPosition : null;
     _clipPopupMs = null;
     _showPastePopup = false;
     _pasteRow = null;
@@ -2249,6 +2260,26 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _updateSelectionFromRect(
       Rect.fromLTWH(localPosition.dx, localPosition.dy, 0, 0),
     );
+  }
+
+  void _clearSelectionArmIndicator() {
+    _selectionArmIndicatorAt = null;
+  }
+
+  void _clearSelectionBoxGestureState() {
+    _selectionBoxActive = false;
+    _selectionBoxStart = null;
+    _selectionBoxCurrent = null;
+    _selectionBoxBaseClipIndices.clear();
+    _clearSelectionArmIndicator();
+  }
+
+  void _maybeHideSelectionArmIndicatorForRect(Rect rect) {
+    if (_selectionArmIndicatorAt == null) return;
+    if (rect.longestSide >= _selectionArmIndicatorHideDistance ||
+        rect.shortestSide >= _selectionArmIndicatorHideDistance) {
+      _clearSelectionArmIndicator();
+    }
   }
 
   void _clearPendingSelectionBox() {
@@ -2344,7 +2375,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
     final desktopBoxSelectionShortcut = desktopPrimaryPointer &&
         desktopSelectionModifierPressed &&
-        _getGestureClipIndexAt(event.localPosition) == null &&
         _canStartSelectionBoxAt(
           event.localPosition,
           allowStartingOverClip: true,
@@ -2410,6 +2440,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           _restoreGestureSelectionSnapshot(snapshot);
         }
         _timelineKeyboardModifierPointer = null;
+        _clearPendingSelectionBox();
+        _clearSelectionBoxGestureState();
         _clearPendingClipTapState();
         _clearPendingAutomationClipSelection();
         _clearAutomationClipMenu();
@@ -2490,6 +2522,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           final rect = _currentSelectionRect();
           if (rect != null) {
             _updateSelectionFromRect(rect);
+            _maybeHideSelectionArmIndicatorForRect(rect);
           }
         });
       }
@@ -2501,6 +2534,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         final rect = _currentSelectionRect();
         if (rect != null) {
           _updateSelectionFromRect(rect);
+          _maybeHideSelectionArmIndicatorForRect(rect);
         }
       });
       return;
@@ -2908,10 +2942,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
     if (_selectionBoxActive) {
       setState(() {
-        _selectionBoxActive = false;
-        _selectionBoxStart = null;
-        _selectionBoxCurrent = null;
-        _selectionBoxBaseClipIndices.clear();
+        _clearSelectionBoxGestureState();
         _timelineKeyboardModifierPointer = null;
         _suppressImmediateTapAfterSelectionBox();
       });
@@ -2997,12 +3028,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _clearPendingSelectionBox();
     }
     if (_selectionBoxActive) {
-      setState(() {
-        _selectionBoxActive = false;
-        _selectionBoxStart = null;
-        _selectionBoxCurrent = null;
-        _selectionBoxBaseClipIndices.clear();
-      });
+      setState(_clearSelectionBoxGestureState);
+    } else {
+      _clearSelectionArmIndicator();
     }
     _tentativeClipSelectionActive = false;
     if (_activeTimelinePointers.isEmpty) {
@@ -3295,10 +3323,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     setState(() {
       _activeTool = tool;
       _clearPendingSelectionBox();
-      _selectionBoxActive = false;
-      _selectionBoxStart = null;
-      _selectionBoxCurrent = null;
-      _selectionBoxBaseClipIndices.clear();
+      _clearSelectionBoxGestureState();
       _resetPaintStrokeState();
       _resetDeleteStrokeState();
       _showPastePopup = false;
@@ -10365,6 +10390,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           ),
         ),
         if (_currentSelectionRect() != null) _buildSelectionBoxOverlay(),
+        if (_selectionArmIndicatorAt != null) _buildSelectionArmIndicatorOverlay(),
         ..._buildExpandedRows(viewportWidth),
         Positioned(
           top: _addRowSectionTop,
@@ -10403,6 +10429,31 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
               width: 1.2,
             ),
             borderRadius: BorderRadius.circular(4),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSelectionArmIndicatorOverlay() {
+    final point = _selectionArmIndicatorAt;
+    if (point == null) return const SizedBox.shrink();
+    // Layout to the pulse peak so the expanding ring is not clipped by the Stack.
+    final layoutRadius = _selectionArmIndicatorPulseRadius;
+    final layoutDiameter = layoutRadius * 2;
+    final peakScale =
+        _selectionArmIndicatorPulseRadius / _selectionArmIndicatorRadius;
+    return Positioned(
+      left: _headerWidth + point.dx - layoutRadius,
+      top: point.dy - layoutRadius,
+      width: layoutDiameter,
+      height: layoutDiameter,
+      child: IgnorePointer(
+        child: Center(
+          child: _SelectionArmRing(
+            key: ValueKey<Offset>(point),
+            radius: _selectionArmIndicatorRadius,
+            peakScale: peakScale,
           ),
         ),
       ),
@@ -15762,6 +15813,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _clearPendingSelectionBox();
       _clearPastePopup();
       setState(() {
+        _clearSelectionBoxGestureState();
         _clearPendingClipTapState();
         _clearPendingAutomationClipSelection();
         _clearAutomationClipMenu();
@@ -16239,42 +16291,22 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       });
       return;
     }
-    final pressedClipIndex = _getGestureClipIndexAt(details.localPosition);
-    if (pressedClipIndex != null) {
-      setState(() {
-        _resetTrimInteractionState();
-        _clearPendingClipTapState();
-        _clearPastePopup();
-        _touchMultiSelectMode = true;
-        if (!_selectedClipIndices.contains(pressedClipIndex)) {
-          _setPrimaryClipSelection(
-            pressedClipIndex,
-            preserveExistingSelection: true,
-          );
-        } else {
-          _selectedClipIndex = pressedClipIndex;
-          _clipPopupMs = null;
-          _setClipVisualStackSelection(
-            _selectedClipIndices,
-            primaryClipIndex: pressedClipIndex,
-          );
-          _emitSelectionChanged();
-        }
-      });
-      unawaited(AppHaptics.impact(AppHapticImpact.medium));
+    if (!_canStartSelectionBoxAt(
+      details.localPosition,
+      allowStartingOverClip: true,
+    )) {
       return;
     }
     setState(() {
-      _clearAutomationClipMenu();
-      _selectionBoxBaseClipIndices.clear();
+      _resetTrimInteractionState();
+      _clearPastePopup();
       _touchMultiSelectMode = true;
-      _selectionBoxActive = true;
-      _selectionBoxStart = details.localPosition;
-      _selectionBoxCurrent = details.localPosition;
-      _clipPopupMs = null;
-      _updateSelectionFromRect(Rect.fromLTWH(
-          details.localPosition.dx, details.localPosition.dy, 0, 0));
+      _beginSelectionBoxAt(
+        details.localPosition,
+        showArmIndicator: true,
+      );
     });
+    unawaited(AppHaptics.impact(AppHapticImpact.medium));
   }
 
   void _onTimelineLongPressMoveUpdate(LongPressMoveUpdateDetails details) {
@@ -16284,23 +16316,25 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       final rect = _currentSelectionRect();
       if (rect != null) {
         _updateSelectionFromRect(rect);
+        _maybeHideSelectionArmIndicatorForRect(rect);
       }
     });
   }
 
   void _onTimelineLongPressEnd(LongPressEndDetails details) {
-    if (!_selectionBoxActive) return;
+    if (!_selectionBoxActive && _selectionArmIndicatorAt == null) return;
     setState(() {
-      _selectionBoxActive = false;
-      _selectionBoxStart = null;
-      _selectionBoxCurrent = null;
-      _selectionBoxBaseClipIndices.clear();
+      _clearSelectionBoxGestureState();
+      _suppressImmediateTapAfterSelectionBox();
     });
   }
 
   // --- Drag/Trim/Pan Handlers ---
 
   void _handleDragUpdate(ScaleUpdateDetails details) {
+    if (_selectionBoxActive || _pendingSelectionBoxPointer != null) {
+      return;
+    }
     if (_hasActiveAutomationClipDrag) {
       final row = _automationClipDragRow;
       final targetId = _automationClipDragTargetId;
@@ -17114,10 +17148,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _highlightedSegmentRow = _magnetEnabled ? tapRow : null;
       _highlightedSegmentStartMs = _magnetEnabled ? quantizedStartMs : null;
       _highlightedSegmentEndMs = _magnetEnabled ? quantizedEndMs : null;
-      _selectionBoxActive = false;
-      _selectionBoxStart = null;
-      _selectionBoxCurrent = null;
-      _selectionBoxBaseClipIndices.clear();
+      _clearSelectionBoxGestureState();
       _suppressNextTimelineTapAfterInstrumentLaneCreate = true;
     });
   }
@@ -23056,6 +23087,92 @@ class HeaderDbfsReadoutPro extends StatelessWidget {
                 ),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Hollow fingertip ring shown when marquee selection arms on long-press.
+class _SelectionArmRing extends StatefulWidget {
+  final double radius;
+  final double peakScale;
+
+  const _SelectionArmRing({
+    super.key,
+    required this.radius,
+    required this.peakScale,
+  });
+
+  @override
+  State<_SelectionArmRing> createState() => _SelectionArmRingState();
+}
+
+class _SelectionArmRingState extends State<_SelectionArmRing>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 280),
+    );
+    // One-shot pulse: rest → peak (radius 38) → rest, same shape as 1.0→1.15→1.0.
+    final peak = widget.peakScale;
+    _scale = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween<double>(begin: 1.0, end: peak)
+            .chain(CurveTween(curve: Curves.easeOutCubic)),
+        weight: 55,
+      ),
+      TweenSequenceItem(
+        tween: Tween<double>(begin: peak, end: 1.0)
+            .chain(CurveTween(curve: Curves.easeInCubic)),
+        weight: 45,
+      ),
+    ]).animate(_controller);
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final diameter = widget.radius * 2;
+    return AnimatedBuilder(
+      animation: _scale,
+      builder: (context, child) {
+        return Transform.scale(
+          scale: _scale.value,
+          child: child,
+        );
+      },
+      child: SizedBox(
+        width: diameter,
+        height: diameter,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.transparent,
+            border: Border.all(
+              color: const Color.fromRGBO(107, 184, 255, 0.95),
+              width: 3.0,
+            ),
+            boxShadow: const [
+              BoxShadow(
+                color: Color.fromRGBO(43, 136, 222, 0.35),
+                blurRadius: 12,
+                spreadRadius: 0,
+              ),
+            ],
           ),
         ),
       ),
