@@ -408,9 +408,11 @@ class JuceAudioEngine {
   static Future<AudioRouteSnapshotV2> startAudioRouteMonitoringV2({
     TargetPlatform? platformOverride,
   }) async {
+    final platform = platformOverride ?? defaultTargetPlatform;
     if (kIsWeb ||
-        (platformOverride ?? defaultTargetPlatform) != TargetPlatform.macOS) {
-      return _unavailableRouteSnapshotV2('macOSOnlyCheckpoint');
+        (platform != TargetPlatform.macOS &&
+            platform != TargetPlatform.android)) {
+      return _unavailableRouteSnapshotV2('platformMonitoringUnavailable');
     }
     try {
       final raw = await _ch.invokeMethod<Map<dynamic, dynamic>>(
@@ -433,8 +435,10 @@ class JuceAudioEngine {
     int generation, {
     TargetPlatform? platformOverride,
   }) async {
+    final platform = platformOverride ?? defaultTargetPlatform;
     if (kIsWeb ||
-        (platformOverride ?? defaultTargetPlatform) != TargetPlatform.macOS) {
+        (platform != TargetPlatform.macOS &&
+            platform != TargetPlatform.android)) {
       return _unavailableRouteTransitionV2(generation);
     }
     try {
@@ -465,8 +469,10 @@ class JuceAudioEngine {
   static Future<void> stopAudioRouteMonitoringV2({
     TargetPlatform? platformOverride,
   }) async {
+    final platform = platformOverride ?? defaultTargetPlatform;
     if (kIsWeb ||
-        (platformOverride ?? defaultTargetPlatform) != TargetPlatform.macOS) {
+        (platform != TargetPlatform.macOS &&
+            platform != TargetPlatform.android)) {
       return;
     }
     try {

@@ -1330,6 +1330,31 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_initialisePlaybackV2JNI(JNIEnv *
     return success ? JNI_TRUE : JNI_FALSE;
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_quiescePlaybackV2JNI(
+    JNIEnv *, jclass, jboolean closeDevice)
+{
+    bool wasPlaying = false;
+    if (auto *mm = juce::MessageManager::getInstance())
+        mm->callSync([&wasPlaying, closeDevice]
+                     { wasPlaying = JuceEngine::get().quiescePlaybackV2Android(closeDevice != JNI_FALSE); });
+    else
+        wasPlaying = JuceEngine::get().quiescePlaybackV2Android(closeDevice != JNI_FALSE);
+    return wasPlaying ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_reconfigurePlaybackV2JNI(JNIEnv *, jclass)
+{
+    bool success = false;
+    if (auto *mm = juce::MessageManager::getInstance())
+        mm->callSync([&success]
+                     { success = JuceEngine::get().reconfigurePlaybackV2Android(); });
+    else
+        success = JuceEngine::get().reconfigurePlaybackV2Android();
+    return success ? JNI_TRUE : JNI_FALSE;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_setBluetoothMediaPlaybackPolicyV2JNI(
     JNIEnv *, jclass, jboolean enabled)

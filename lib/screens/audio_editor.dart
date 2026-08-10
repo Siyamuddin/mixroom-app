@@ -9234,7 +9234,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _juceEngineEventSubscription ??= JuceAudioEngine.eventsStream.listen(
         _handleJuceEngineEvent,
       );
-      if (_isBluetoothV2Session && Platform.isMacOS) {
+      if (_isBluetoothV2Session && (Platform.isMacOS || Platform.isAndroid)) {
         final coordinator = AudioRouteCoordinatorV2(
           adapter: const MethodChannelAudioRouteAdapterV2(),
           onStateChanged: _handleAudioRouteCoordinatorStateV2,
@@ -12550,8 +12550,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<bool> _ensurePlaybackRouteReady({required String reason}) async {
     if (_isBluetoothV2Session) {
-      if (Platform.isMacOS &&
-          _audioRouteCoordinatorV2?.state !=
+      if (_audioRouteCoordinatorV2?.state !=
           AudioRouteCoordinatorStateV2.stable) {
         if (mounted) {
           _showSmallNotice('Bluetooth 2.0 audio output is not ready yet.');
@@ -12610,7 +12609,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!mounted) return;
     if (!result.succeeded) {
       _showSmallNotice(
-        'Audio output is unavailable. Choose an output in macOS.',
+        Platform.isAndroid
+            ? 'Audio output is unavailable. Choose an output in Android.'
+            : 'Audio output is unavailable. Choose an output in macOS.',
       );
       return;
     }
@@ -12618,7 +12619,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
     if (result.status == AudioRouteTransitionStatusV2.fallback) {
       _showSmallNotice(
-        'Audio device disconnected. Using Mac speakers. Press Play to continue.',
+        Platform.isAndroid
+            ? 'Bluetooth disconnected. Using phone speaker. Press Play to continue.'
+            : 'Audio device disconnected. Using Mac speakers. Press Play to continue.',
       );
       return;
     }
@@ -12627,12 +12630,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final endpointName = result.snapshot.outputs.isEmpty
         ? ''
         : result.snapshot.outputs.first.name.trim();
-    final outputName = juceName.isNotEmpty
-        ? juceName
-        : (endpointName.isNotEmpty ? endpointName : 'Mac output');
-    _showSmallNotice(
-      'Audio output changed to $outputName. Press Play to continue.',
-    );
+    if (Platform.isAndroid) {
+      _showSmallNotice('Audio output changed. Press Play to continue.');
+    } else {
+      final outputName = juceName.isNotEmpty
+          ? juceName
+          : (endpointName.isNotEmpty ? endpointName : 'Mac output');
+      _showSmallNotice(
+        'Audio output changed to $outputName. Press Play to continue.',
+      );
+    }
   }
 
   Future<void> _flushDeferredAndroidRouteRefreshIfNeeded() async {

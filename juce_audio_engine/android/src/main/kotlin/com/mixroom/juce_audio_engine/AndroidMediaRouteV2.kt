@@ -157,3 +157,58 @@ internal object AndroidBluetoothStartupValidatorV2 {
     return "ok"
   }
 }
+
+internal object AndroidLiveRouteValidatorV2 {
+  fun validate(
+    expected: AndroidMediaRouteResolutionV2,
+    actual: AndroidMediaRouteResolutionV2,
+    actualEndpoint: AndroidRouteEndpointV2?,
+    stream: AndroidOboeOutputFactsV2,
+  ): String {
+    if (expected.diagnosticCode != "ok") return expected.diagnosticCode
+    if (actual.diagnosticCode != "ok") return actual.diagnosticCode
+    if (
+      !stream.available ||
+      !stream.running ||
+      (stream.routedDeviceId ?: 0) <= 0 ||
+      (stream.sampleRateHz ?: 0) <= 0 ||
+      (stream.bufferFrames ?: 0) <= 0 ||
+      (stream.bufferCapacityFrames ?: 0) <= 0 ||
+      (stream.framesPerBurst ?: 0) <= 0 ||
+      stream.audioBackend != "AAudio" ||
+      stream.sharingMode != "Shared"
+    ) {
+      return "actual_state_unavailable"
+    }
+
+    val expectedEndpoint = expected.endpoint
+    if (expectedEndpoint != null) {
+      val actualResolved = actual.endpoint ?: return "route_unstable"
+      if (
+        actualResolved.fingerprint != expectedEndpoint.fingerprint ||
+        stream.routedDeviceId != expectedEndpoint.id
+      ) {
+        return "route_unstable"
+      }
+      if (expectedEndpoint.kind == AndroidRouteKindV2.BLUETOOTH_DUPLEX) {
+        return "bluetooth_duplex_forbidden"
+      }
+      if (
+        expected.isBluetooth &&
+        stream.performanceMode != "None"
+      ) {
+        return "actual_state_unavailable"
+      }
+      return "ok"
+    }
+
+    val routedEndpoint = actualEndpoint ?: return "actual_state_unavailable"
+    if (stream.routedDeviceId != routedEndpoint.id) return "route_unstable"
+    return when (routedEndpoint.kind) {
+      AndroidRouteKindV2.BLUETOOTH_DUPLEX -> "bluetooth_duplex_forbidden"
+      AndroidRouteKindV2.BLUETOOTH_MEDIA,
+      AndroidRouteKindV2.BLUETOOTH_LE -> "route_unstable"
+      else -> "ok"
+    }
+  }
+}

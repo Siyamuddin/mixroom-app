@@ -4600,6 +4600,8 @@ public:
 
     void initialiseEngine();
     bool initialisePlaybackV2Android();
+    bool quiescePlaybackV2Android(bool closeDevice);
+    bool reconfigurePlaybackV2Android();
     void loadTrack(int idx, const juce::File &file); // deprecated name (clip)
     void removeTrack(int clipIndex);                 // removes clip
     juce::StringArray getTrackEffects(int trackIndex);
@@ -4986,6 +4988,7 @@ private:
     bool engineInitialized = false;
     bool formatsRegistered = false; // will only be flipped once to true
     bool audioCallbackAttached = false;
+    bool v2PlaybackCallbackDetached = false;
     juce::AudioFormatManager formatManager;
     juce::AudioPluginFormatManager pluginFormatManager;
     juce::AudioProcessorGraph graph;

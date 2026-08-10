@@ -5,7 +5,8 @@
 - Status: the macOS V2 playback and live-output checkpoints are complete. The
   Android Legacy baseline, Android V2 built-in-speaker foundation, and Android
   V2 preconnected Bluetooth media playback have passed their initial
-  physical-device gates.
+  physical-device gates. Android live-output coordination has also passed its
+  focused Samsung/Sony hardware gate.
 - Applies to: Android, iOS, and macOS.
 - Excludes: Windows and every other unsupported platform.
 - Current production implementation: Legacy Bluetooth only.
@@ -704,6 +705,36 @@ speaker regression check also passed. The manual Legacy comparison was not
 repeated because the Legacy baseline had already passed and this checkpoint's
 Legacy isolation remains covered by automated tests.
 
+Android live-output checkpoint implementation (2026-08-10): Android V2 now
+uses the existing shared coordinator and its single 100 ms settling window.
+Public device and playback callbacks are only change signals; the existing
+media-route resolver and the actual Oboe routed device remain the source of
+truth. A meaningful effective-output change pauses transport at its current
+position, detaches the callback, reopens one system-selected output with zero
+inputs while preserving the graph, verifies the accepted route and stream
+facts, and waits for explicit user Play. Duplicate fingerprints are ignored,
+stale generations cannot publish success, a verified Bluetooth-to-speaker
+transition is the only fallback result, and failures wait for a new native
+route event. No retry, polling, API fallback, vendor branch, input, automatic
+resume, or Legacy repair path was added. Automated resolver, validator,
+coordinator, contract, selector, diagnostics, and MIDI-readiness tests pass;
+the focused physical connect/disconnect acceptance also passed as recorded
+below.
+
+Android live-output evidence (2026-08-10): on the Samsung SM-S918N with Sony
+headphones, speaker → Bluetooth, Bluetooth → speaker, stopped transitions,
+playing transitions, disconnect/reconnect, and repeated back-and-forth changes
+all completed cleanly. Playing transitions paused the project and required
+explicit user Play before resuming on the selected output. Audio and MIDI
+remained functional, with no microphone activation, call-quality route,
+crackle, permanent silence, visual regression, or crash. One apparent failure
+to auto-select Bluetooth was reproduced while the headphones were connected
+to a Mac through multipoint. The captured Android report consistently showed
+the built-in speaker as both the system media endpoint and actual Oboe route;
+after removing that external-device conflict, Android selected Bluetooth and
+Mixroom followed it reliably. This was not evidence of a missed Mixroom route
+transition.
+
 Deliverables:
 
 - A2DP/SCO/LE classification;
@@ -897,9 +928,11 @@ Each run records:
 
 ## Immediate next step
 
-Commit the Android preconnected-Bluetooth checkpoint after final automated
-verification. The following checkpoint is Android live output coordination:
-detect an effective media-output change, pause transport, apply and verify one
-output-only configuration through the shared coordinator, and wait for the
-user to resume. Recording, monitoring, Bluetooth input, polling, vendor
-workarounds, and automatic resume remain deferred.
+Commit the accepted Android live-output checkpoint, then design the first iOS
+V2 output-only startup checkpoint. That iOS step should establish isolated,
+preconnected Bluetooth playback with no input or prewarming and verified
+AVAudioSession/JUCE state. Live iOS connection, disconnection, fallback, and
+the known Legacy disconnect crash remain a separate following checkpoint so
+startup correctness is proven first. Android recording, monitoring, Bluetooth
+input, adaptive buffering, polling, vendor workarounds, and automatic resume
+remain deferred.

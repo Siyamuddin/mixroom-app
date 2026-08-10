@@ -1183,8 +1183,72 @@ bool JuceEngine::initialisePlaybackV2Android()
 
     deviceManager.removeChangeListener(this);
     initialiseSharedPlaybackGraph();
+    v2PlaybackCallbackDetached = false;
     logCurrentAudioDeviceState("android-v2-initialise");
     return engineInitialized && audioCallbackAttached;
+#else
+    return false;
+#endif
+}
+
+bool JuceEngine::quiescePlaybackV2Android(bool closeDevice)
+{
+#if JUCE_ANDROID
+    if (!engineInitialized || metronomeCallback == nullptr)
+        return false;
+
+    const bool wasPlaying = isPlayingAtomic.load(std::memory_order_relaxed);
+    pause();
+    if (!v2PlaybackCallbackDetached && audioCallbackAttached)
+    {
+        deviceManager.removeAudioCallback(metronomeCallback.get());
+        audioCallbackAttached = false;
+        v2PlaybackCallbackDetached = true;
+    }
+    if (closeDevice)
+        deviceManager.closeAudioDevice();
+    return wasPlaying;
+#else
+    juce::ignoreUnused(closeDevice);
+    return false;
+#endif
+}
+
+bool JuceEngine::reconfigurePlaybackV2Android()
+{
+#if JUCE_ANDROID
+    if (!engineInitialized || metronomeCallback == nullptr)
+        return false;
+
+    quiescePlaybackV2Android(false);
+    deviceManager.closeAudioDevice();
+    const juce::String initError = deviceManager.initialise(
+        0, // numInputChannels
+        2, // numOutputChannels
+        nullptr,
+        true);
+    auto *device = deviceManager.getCurrentAudioDevice();
+    const bool valid = initError.isEmpty() && device != nullptr && device->isOpen() &&
+        device->getActiveOutputChannels().countNumberOfSetBits() > 0 &&
+        device->getActiveInputChannels().countNumberOfSetBits() == 0 &&
+        device->getCurrentSampleRate() > 1000.0 &&
+        device->getCurrentBufferSizeSamples() > 0;
+    if (!valid)
+    {
+        juceLogToFlutter(("Android V2 route reopen failed: " + initError).toRawUTF8());
+        deviceManager.closeAudioDevice();
+        return false;
+    }
+
+    hostSampleRateAtomic.store(device->getCurrentSampleRate(), std::memory_order_relaxed);
+    desiredInputOpenChannels.store(0, std::memory_order_relaxed);
+    prepareLiveClipProcessorsForCurrentDevice();
+    armOutputSafetyForCurrentRoute(true);
+    deviceManager.addAudioCallback(metronomeCallback.get());
+    audioCallbackAttached = true;
+    v2PlaybackCallbackDetached = false;
+    logCurrentAudioDeviceState("android-v2-route-transition");
+    return true;
 #else
     return false;
 #endif
@@ -1303,6 +1367,7 @@ void JuceEngine::shutdownEngine()
     busGraphInitialised = false;
     engineInitialized = false;
     audioCallbackAttached = false;
+    v2PlaybackCallbackDetached = false;
 }
 
 // ============================================================

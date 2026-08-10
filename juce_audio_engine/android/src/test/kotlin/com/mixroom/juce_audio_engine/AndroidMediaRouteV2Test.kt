@@ -166,4 +166,87 @@ internal class AndroidMediaRouteV2Test {
       )
     }
   }
+
+  @Test
+  fun liveTransitionAcceptsExactBluetoothMediaRoute() {
+    val endpoint = endpoint(17, AudioDeviceInfo.TYPE_BLUETOOTH_A2DP)
+    val route = AndroidMediaRouteResolutionV2(endpoint, "ok")
+
+    assertEquals(
+      "ok",
+      AndroidLiveRouteValidatorV2.validate(
+        route,
+        route,
+        endpoint,
+        validStream(17),
+      ),
+    )
+  }
+
+  @Test
+  fun liveTransitionAcceptsVerifiedSystemDefaultSpeaker() {
+    val expected = AndroidMediaRouteResolutionV2(null, "ok")
+    val speaker = endpoint(3, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+
+    assertEquals(
+      "ok",
+      AndroidLiveRouteValidatorV2.validate(
+        expected,
+        expected,
+        speaker,
+        validStream(3),
+      ),
+    )
+  }
+
+  @Test
+  fun liveTransitionRejectsRouteChangesAndDuplexRoutes() {
+    val bluetooth = endpoint(17, AudioDeviceInfo.TYPE_BLUETOOTH_A2DP)
+    val changed = endpoint(18, AudioDeviceInfo.TYPE_BLUETOOTH_A2DP)
+    val sco = endpoint(19, AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+
+    assertEquals(
+      "route_unstable",
+      AndroidLiveRouteValidatorV2.validate(
+        AndroidMediaRouteResolutionV2(bluetooth, "ok"),
+        AndroidMediaRouteResolutionV2(changed, "ok"),
+        changed,
+        validStream(18),
+      ),
+    )
+    assertEquals(
+      "bluetooth_duplex_forbidden",
+      AndroidLiveRouteValidatorV2.validate(
+        AndroidMediaRouteResolutionV2(sco, "ok"),
+        AndroidMediaRouteResolutionV2(sco, "ok"),
+        sco,
+        validStream(19),
+      ),
+    )
+  }
+
+  @Test
+  fun liveTransitionRejectsUnusableStreamAndBluetoothLowLatencyMode() {
+    val bluetooth = endpoint(17, AudioDeviceInfo.TYPE_BLUETOOTH_A2DP)
+    val route = AndroidMediaRouteResolutionV2(bluetooth, "ok")
+
+    assertEquals(
+      "actual_state_unavailable",
+      AndroidLiveRouteValidatorV2.validate(
+        route,
+        route,
+        bluetooth,
+        validStream(17).copy(running = false),
+      ),
+    )
+    assertEquals(
+      "actual_state_unavailable",
+      AndroidLiveRouteValidatorV2.validate(
+        route,
+        route,
+        bluetooth,
+        validStream(17).copy(performanceMode = "LowLatency"),
+      ),
+    )
+  }
 }
