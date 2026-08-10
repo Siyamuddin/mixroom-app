@@ -55,6 +55,11 @@ AudioRouteSnapshotV2 snapshot() {
     unavailableReasons: const <String, String>{
       'juce.xRunCount': 'unsupportedByIosBackend',
     },
+    observation: const AudioRouteObservationFactsV2(
+      active: true,
+      meaningfulChangeCount: 3,
+      lastCause: 'oldDeviceUnavailable',
+    ),
   );
 }
 
@@ -108,5 +113,10 @@ void main() {
       (report['unavailableReasons'] as Map)['juce.xRunCount'],
       'unsupportedByIosBackend',
     );
+    expect(report['observation'], <String, dynamic>{
+      'active': true,
+      'meaningfulChangeCount': 3,
+      'lastCause': 'oldDeviceUnavailable',
+    });
   });
 }

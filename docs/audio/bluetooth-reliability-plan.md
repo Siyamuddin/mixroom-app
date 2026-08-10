@@ -837,6 +837,41 @@ output reopen, verified system/speaker fallback, and paused transport recovery.
 This checkpoint owns the known iOS disconnect crash and includes repeated
 connect/disconnect, interruption, and background/resume testing.
 
+Checkpoint 6C.1 is intentionally observation-only. After the editor finishes
+loading its project and rows, an iOS V2 session registers one
+`AVAudioSessionRouteChangeNotification` observer. It compares a native
+output-only fingerprint made from UID, port type, and channel count, ignores
+duplicates, and records one monotonically increasing generation and native
+reason for each meaningful change. Observation never pauses transport, touches
+JUCE, changes AVAudioSession, opens input, or activates the coordinator.
+Android and macOS behavior are unchanged.
+
+Initial physical evidence (2026-08-11, iPad on iOS 26.5): the built-in and
+A2DP snapshots were individually stable, output-only, and correct at 48 kHz
+and 44.1 kHz respectively. Their observation counts both read zero because the
+attached device log showed that the editor audio engine shut down between the
+two captures and a new V2 engine/observer session started on A2DP; counts are
+session-local, so this pair does not verify or disprove notification handling.
+The foreground same-editor switch must be repeated without leaving or
+reopening the editor.
+
+The repeat same-editor gate passed. The observer reported generation/count
+`0` on the built-in speaker, `1` after selecting A2DP, and `2` after returning
+to the built-in speaker. The original redacted speaker token returned, and the
+disconnect cause was `oldDeviceUnavailable`; the connect notification carried
+Apple's truthful `unknown` reason. All three captures were stable and remained
+playback/default with two active outputs, zero inputs, an open device, an
+attached callback, and zero callback overruns. The attached console showed no
+observer-created assertion or crash during these foreground changes.
+
+Powering off Bluetooth while Mixroom was backgrounded reproduced a concrete
+debug failure. The attached debugger stopped on the realtime scratch-capacity
+assertion at `NativeEffects.h:28` after the route disappeared. This is evidence
+for the known disconnect/lifecycle defect and not evidence that the read-only
+observer called an audio setter or JUCE lifecycle operation. Release builds do
+not stop on JUCE debug assertions, but the oversized callback-block condition
+still requires safe quiescing in the following disconnect-safety checkpoint.
+
 Exit gate: zero crashes in the iOS route-change stress run, no input open during
 playback, and deterministic verified recovery or a clear failed state.
 
@@ -1005,9 +1040,9 @@ Each run records:
 
 ## Immediate next step
 
-Design Checkpoint 6C as a compact iOS live-output slice: observe native route
-changes, pause at the preserved position, safely detach a removed output,
-serialize one generation-protected reconfiguration, verify the replacement
-route, and remain paused until the user resumes. It must directly address the
-known disconnect crash without adding polling, recursive retries, automatic
-resume, recording, monitoring, Bluetooth input, or adaptive buffering.
+Run the Checkpoint 6C.1 physical iPad gate. Verify built-in → Bluetooth →
+built-in and one Bluetooth power-off while stopped and playing. Reports must
+show observation active, monotonically increasing meaningful-change counts,
+the latest native cause, zero inputs, and no rendering, audio, MIDI, microphone,
+or project regression. The following checkpoint may add safe pause/detach
+behavior only after this read-only evidence passes.

@@ -34,6 +34,10 @@ extern void mixroomScheduleOttPluginEditorAutotest(void);
 @property (nonatomic, assign) uint32_t observedOutputDeviceV2;
 @property (nonatomic, copy) NSString *audioRouteFingerprintV2;
 @property (nonatomic, assign) BOOL routeTransitionWasPlayingV2;
+@property (nonatomic, assign) BOOL iosAudioRouteObservationV2;
+@property (nonatomic, assign) uint64_t iosObservedRouteGenerationV2;
+@property (nonatomic, copy) NSString *iosObservedRouteFingerprintV2;
+@property (nonatomic, copy) NSString *iosLastObservedRouteCauseV2;
 - (void)bindEventSink:(FlutterEventSink)events;
 - (void)clearEventSink;
 - (NSDictionary<NSString *, id> *)buildAudioRouteSnapshotV2;
@@ -43,6 +47,11 @@ extern void mixroomScheduleOttPluginEditorAutotest(void);
 - (void)stopAudioRouteMonitoringV2;
 - (void)handleAudioRoutePropertyChangeV2:(NSString *)cause;
 - (void)updateObservedOutputDeviceV2:(uint32_t)deviceID;
+- (BOOL)startIOSAudioRouteObservationV2;
+- (void)stopIOSAudioRouteObservationV2;
+#if !TARGET_OS_OSX
+- (void)handleIOSObservedRouteChangeV2:(NSNotification *)notification;
+#endif
 @end
 
 #if TARGET_OS_OSX
@@ -241,6 +250,47 @@ static NSString *MixroomIOSRouteFingerprint(
     appendPorts(route.outputs, @"output");
     [parts sortUsingSelector:@selector(compare:)];
     return [parts componentsJoinedByString:@";"];
+}
+
+static NSString *MixroomIOSOutputFingerprint(
+    AVAudioSessionRouteDescription *route
+) {
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    for (AVAudioSessionPortDescription *port in route.outputs) {
+        NSNumber *channels = port.channels == nil
+            ? nil
+            : @(port.channels.count);
+        [parts addObject:[NSString stringWithFormat:@"%@|%@|%@",
+            port.UID ?: @"",
+            port.portType ?: @"",
+            channels ?: @"unknown"]];
+    }
+    [parts sortUsingSelector:@selector(compare:)];
+    return [parts componentsJoinedByString:@";"];
+}
+
+static NSString *MixroomIOSObservedRouteCause(
+    AVAudioSessionRouteChangeReason reason
+) {
+    switch (reason) {
+        case AVAudioSessionRouteChangeReasonNewDeviceAvailable:
+            return @"newDeviceAvailable";
+        case AVAudioSessionRouteChangeReasonOldDeviceUnavailable:
+            return @"oldDeviceUnavailable";
+        case AVAudioSessionRouteChangeReasonCategoryChange:
+            return @"categoryChanged";
+        case AVAudioSessionRouteChangeReasonOverride:
+            return @"routeOverride";
+        case AVAudioSessionRouteChangeReasonWakeFromSleep:
+            return @"wakeFromSleep";
+        case AVAudioSessionRouteChangeReasonNoSuitableRouteForCategory:
+            return @"noSuitableRoute";
+        case AVAudioSessionRouteChangeReasonRouteConfigurationChange:
+            return @"routeConfigurationChanged";
+        case AVAudioSessionRouteChangeReasonUnknown:
+        default:
+            return @"unknown";
+    }
 }
 
 static NSDictionary<NSString *, id> *MixroomIOSSingleOutputEndpoint(
@@ -1256,7 +1306,9 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         @"captureDurationMs": @((NSInteger)(
             MixroomIOSMonotonicMilliseconds() - startedAtMs + 0.5)),
         @"implementation": implementation,
-        @"generation": [NSNull null],
+        @"generation": self.iosAudioRouteObservationV2
+            ? @(self.iosObservedRouteGenerationV2)
+            : [NSNull null],
         @"transitionId": [NSNull null],
         @"coordinatorManaged": @NO,
         @"captureConsistency": captureConsistency,
@@ -1295,6 +1347,11 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             @"xRunCount": [NSNull null],
         },
         @"unavailableReasons": unavailable,
+        @"observation": @{
+            @"active": @(self.iosAudioRouteObservationV2),
+            @"meaningfulChangeCount": @(self.iosObservedRouteGenerationV2),
+            @"lastCause": self.iosLastObservedRouteCauseV2 ?: [NSNull null],
+        },
     };
 #endif
 }
@@ -1561,6 +1618,95 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     #pragma unused(deviceID)
 #endif
 }
+
+- (BOOL)startIOSAudioRouteObservationV2 {
+#if TARGET_OS_OSX
+    return NO;
+#else
+    if (![[JuceBridge getAudioRouteImplementationObjC] isEqualToString:@"v2"]) {
+        return NO;
+    }
+    if (self.iosAudioRouteObservationV2) {
+        return YES;
+    }
+    AVAudioSessionRouteDescription *route =
+        [AVAudioSession sharedInstance].currentRoute;
+    if (route == nil) {
+        return NO;
+    }
+    self.iosObservedRouteGenerationV2 = 0;
+    self.iosLastObservedRouteCauseV2 = nil;
+    self.iosObservedRouteFingerprintV2 =
+        MixroomIOSOutputFingerprint(route);
+    self.iosAudioRouteObservationV2 = YES;
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(handleIOSObservedRouteChangeV2:)
+               name:AVAudioSessionRouteChangeNotification
+             object:[AVAudioSession sharedInstance]];
+    return YES;
+#endif
+}
+
+- (void)stopIOSAudioRouteObservationV2 {
+#if !TARGET_OS_OSX
+    if (self.iosAudioRouteObservationV2) {
+        [[NSNotificationCenter defaultCenter]
+            removeObserver:self
+                      name:AVAudioSessionRouteChangeNotification
+                    object:[AVAudioSession sharedInstance]];
+    }
+    self.iosAudioRouteObservationV2 = NO;
+    self.iosObservedRouteGenerationV2 = 0;
+    self.iosObservedRouteFingerprintV2 = nil;
+    self.iosLastObservedRouteCauseV2 = nil;
+#endif
+}
+
+#if !TARGET_OS_OSX
+- (void)handleIOSObservedRouteChangeV2:(NSNotification *)notification {
+    NSNumber *reasonValue =
+        [notification.userInfo[AVAudioSessionRouteChangeReasonKey]
+            isKindOfClass:[NSNumber class]]
+            ? notification.userInfo[AVAudioSessionRouteChangeReasonKey]
+            : nil;
+    const AVAudioSessionRouteChangeReason reason = reasonValue == nil
+        ? AVAudioSessionRouteChangeReasonUnknown
+        : (AVAudioSessionRouteChangeReason)reasonValue.unsignedIntegerValue;
+    void (^observe)(void) = ^{
+        if (!self.iosAudioRouteObservationV2 ||
+            ![[JuceBridge getAudioRouteImplementationObjC] isEqualToString:@"v2"]) {
+            return;
+        }
+        AVAudioSessionRouteDescription *route =
+            [AVAudioSession sharedInstance].currentRoute;
+        if (route == nil) {
+            return;
+        }
+        NSString *fingerprint = MixroomIOSOutputFingerprint(route);
+        if ([fingerprint isEqualToString:self.iosObservedRouteFingerprintV2]) {
+            return;
+        }
+        self.iosObservedRouteGenerationV2 += 1;
+        self.iosObservedRouteFingerprintV2 = fingerprint;
+        self.iosLastObservedRouteCauseV2 =
+            MixroomIOSObservedRouteCause(reason);
+        if (self.eventSink != nil) {
+            self.eventSink(@{
+                @"event": @"audioRouteObservedV2",
+                @"generation": @(self.iosObservedRouteGenerationV2),
+                @"cause": self.iosLastObservedRouteCauseV2 ?: @"unknown",
+                @"snapshot": [self buildAudioRouteSnapshotV2],
+            });
+        }
+    };
+    if ([NSThread isMainThread]) {
+        observe();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), observe);
+    }
+}
+#endif
 
 - (NSDictionary<NSString *, id> *)startAudioRouteMonitoringV2 {
 #if TARGET_OS_OSX
@@ -1933,6 +2079,7 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
 }
 
 - (void)dealloc {
+    [self stopIOSAudioRouteObservationV2];
     [self stopAudioRouteMonitoringV2];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
@@ -2243,6 +2390,7 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"_internalLog"]) {
         result(@"testing blabla success");
     } else if ([call.method isEqualToString:@"shutdown"]) {
+        [self stopIOSAudioRouteObservationV2];
         [self stopAudioRouteMonitoringV2];
 #if !TARGET_OS_OSX
         const BOOL wasV2 = [[JuceBridge getAudioRouteImplementationObjC]
@@ -3199,6 +3347,13 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     }
     else if ([call.method isEqualToString:@"initialisePlaybackV2"]) {
         result([self initialisePlaybackV2]);
+    }
+    else if ([call.method isEqualToString:@"startAudioRouteObservationV2"]) {
+        result(@([self startIOSAudioRouteObservationV2]));
+    }
+    else if ([call.method isEqualToString:@"stopAudioRouteObservationV2"]) {
+        [self stopIOSAudioRouteObservationV2];
+        result(nil);
     }
     else if ([call.method isEqualToString:@"startAudioRouteMonitoringV2"]) {
 #if TARGET_OS_OSX

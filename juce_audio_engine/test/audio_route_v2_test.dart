@@ -116,6 +116,29 @@ void main() {
     );
   });
 
+  test('parses read-only observation evidence independently of coordinator',
+      () {
+    final parsed = AudioRouteSnapshotV2.fromMap(<String, dynamic>{
+      'capturedAtUtc': '2026-08-11T01:00:00Z',
+      'implementation': 'v2',
+      'generation': 2,
+      'transitionId': null,
+      'coordinatorManaged': false,
+      'captureConsistency': 'stable',
+      'observation': <String, dynamic>{
+        'active': true,
+        'meaningfulChangeCount': 2,
+        'lastCause': 'oldDeviceUnavailable',
+      },
+    });
+
+    expect(parsed.generation, 2);
+    expect(parsed.coordinatorManaged, isFalse);
+    expect(parsed.observation.active, isTrue);
+    expect(parsed.observation.meaningfulChangeCount, 2);
+    expect(parsed.observation.lastCause, 'oldDeviceUnavailable');
+  });
+
   test('input-open availability remains unknown without a JUCE channel count',
       () {
     const facts = JuceRouteFactsV2(activeInputChannels: null);

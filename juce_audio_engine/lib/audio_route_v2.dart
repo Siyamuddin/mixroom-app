@@ -311,6 +311,7 @@ class AudioRouteSnapshotV2 {
     required this.session,
     required this.juce,
     required this.unavailableReasons,
+    this.observation = const AudioRouteObservationFactsV2(),
   });
 
   final int schemaVersion;
@@ -326,6 +327,7 @@ class AudioRouteSnapshotV2 {
   final AudioSessionFactsV2 session;
   final JuceRouteFactsV2 juce;
   final Map<String, String> unavailableReasons;
+  final AudioRouteObservationFactsV2 observation;
 
   bool get hasBluetoothOutput => outputs.any(
         (endpoint) => <AudioRouteKindV2>{
@@ -387,6 +389,9 @@ class AudioRouteSnapshotV2 {
       session: AudioSessionFactsV2.fromMap(nestedMap('session')),
       juce: JuceRouteFactsV2.fromMap(nestedMap('juce')),
       unavailableReasons: Map<String, String>.unmodifiable(unavailable),
+      observation: AudioRouteObservationFactsV2.fromMap(
+        nestedMap('observation'),
+      ),
     );
   }
 
@@ -404,6 +409,34 @@ class AudioRouteSnapshotV2 {
         'session': session.toMap(),
         'juce': juce.toMap(),
         'unavailableReasons': unavailableReasons,
+        'observation': observation.toMap(),
+      };
+}
+
+class AudioRouteObservationFactsV2 {
+  const AudioRouteObservationFactsV2({
+    this.active = false,
+    this.meaningfulChangeCount = 0,
+    this.lastCause,
+  });
+
+  final bool active;
+  final int meaningfulChangeCount;
+  final String? lastCause;
+
+  factory AudioRouteObservationFactsV2.fromMap(Map<String, dynamic> map) {
+    final cause = map['lastCause']?.toString().trim();
+    return AudioRouteObservationFactsV2(
+      active: map['active'] == true,
+      meaningfulChangeCount: _nullableInt(map['meaningfulChangeCount']) ?? 0,
+      lastCause: cause == null || cause.isEmpty ? null : cause,
+    );
+  }
+
+  Map<String, dynamic> toMap() => <String, dynamic>{
+        'active': active,
+        'meaningfulChangeCount': meaningfulChangeCount,
+        'lastCause': lastCause,
       };
 }
 
@@ -467,6 +500,36 @@ class AudioRouteChangeEventV2 {
                 'captureConsistency': 'unavailable',
                 'unavailableReasons': <String, String>{
                   'routeEvent.snapshot': 'missingFromNativeEvent',
+                },
+              },
+      ),
+    );
+  }
+}
+
+class AudioRouteObservationEventV2 {
+  const AudioRouteObservationEventV2({
+    required this.generation,
+    required this.cause,
+    required this.snapshot,
+  });
+
+  final int generation;
+  final String cause;
+  final AudioRouteSnapshotV2 snapshot;
+
+  factory AudioRouteObservationEventV2.fromMap(Map<String, dynamic> map) {
+    final rawSnapshot = map['snapshot'];
+    return AudioRouteObservationEventV2(
+      generation: _nullableInt(map['generation']) ?? 0,
+      cause: map['cause']?.toString() ?? 'unknown',
+      snapshot: AudioRouteSnapshotV2.fromMap(
+        rawSnapshot is Map
+            ? Map<String, dynamic>.from(rawSnapshot)
+            : <String, dynamic>{
+                'captureConsistency': 'unavailable',
+                'unavailableReasons': <String, String>{
+                  'observationEvent.snapshot': 'missingFromNativeEvent',
                 },
               },
       ),

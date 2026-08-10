@@ -39,6 +39,7 @@ class BluetoothRouteReportSerializerV2 {
       'session': snapshot.session.toMap(),
       'juce': juce,
       'unavailableReasons': snapshot.unavailableReasons,
+      'observation': snapshot.observation.toMap(),
     };
   }
 

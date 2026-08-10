@@ -9280,6 +9280,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _refreshProducerCaptureUiAllowlistAccess();
       await _sampleBrowserPreferencesFuture;
       await _loadProjectIfAny();
+      if (_isBluetoothV2Session && Platform.isIOS) {
+        final observationStarted =
+            await JuceAudioEngine.startIOSAudioRouteObservationV2();
+        if (!observationStarted) {
+          debugPrint(
+            'iOS Bluetooth V2 read-only route observation unavailable',
+          );
+        }
+      }
       if (!_isBluetoothV2Session) {
         _scheduleRecordingInputPrewarm(reason: 'projectLoaded');
       }
@@ -12472,8 +12481,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     } else if (defaultTargetPlatform == TargetPlatform.iOS) {
       if (state == AppLifecycleState.resumed) {
-        unawaited(_refreshMicrophonePermissionAndInputs());
-        unawaited(_refreshAudioRouteInfo());
+        if (_bluetoothImplementationSessionV2 != null &&
+            !_isBluetoothV2Session) {
+          unawaited(_refreshMicrophonePermissionAndInputs());
+          unawaited(_refreshAudioRouteInfo());
+        }
       } else if (state == AppLifecycleState.paused ||
           state == AppLifecycleState.inactive ||
           state == AppLifecycleState.hidden ||
