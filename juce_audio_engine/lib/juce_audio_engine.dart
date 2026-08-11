@@ -496,7 +496,8 @@ class JuceAudioEngine {
     TargetPlatform? platformOverride,
   }) async {
     final platform = platformOverride ?? defaultTargetPlatform;
-    if (kIsWeb || platform != TargetPlatform.macOS) {
+    if (kIsWeb ||
+        (platform != TargetPlatform.macOS && platform != TargetPlatform.iOS)) {
       return _unavailableRouteTransitionV2(
         generation,
         'recording_route_unsupported',
@@ -547,7 +548,10 @@ class JuceAudioEngine {
     TargetPlatform? platformOverride,
   }) async {
     final platform = platformOverride ?? defaultTargetPlatform;
-    if (kIsWeb || platform != TargetPlatform.macOS) return;
+    if (kIsWeb ||
+        (platform != TargetPlatform.macOS && platform != TargetPlatform.iOS)) {
+      return;
+    }
     try {
       await _ch.invokeMethod<void>('abortRecordingV2');
     } on MissingPluginException {
@@ -610,10 +614,13 @@ class JuceAudioEngine {
         (platform == TargetPlatform.iOS &&
             current.juce.audioCallbackAttached != true) ||
         (platform == TargetPlatform.iOS &&
-            (current.session.category != 'AVAudioSessionCategoryPlayback' ||
+            (current.session.category !=
+                    (expectedInputChannels == 0
+                        ? 'AVAudioSessionCategoryPlayback'
+                        : 'AVAudioSessionCategoryPlayAndRecord') ||
                 current.session.mode != 'AVAudioSessionModeDefault')) ||
         (platform == TargetPlatform.iOS &&
-            current.session.inputChannelCount != 0) ||
+            current.session.inputChannelCount != expectedInputChannels) ||
         current.juce.activeInputChannels != expectedInputChannels ||
         (current.juce.activeOutputChannels ?? 0) <= 0 ||
         (current.juce.sampleRateHz ?? 0) <= 0 ||
@@ -621,7 +628,9 @@ class JuceAudioEngine {
         current.outputs.length != 1) {
       return false;
     }
-    if (platform == TargetPlatform.macOS && expectedInputChannels == 1) {
+    if ((platform == TargetPlatform.macOS ||
+            platform == TargetPlatform.iOS) &&
+        expectedInputChannels == 1) {
       if (startup.inputs.length != 1 ||
           current.intent == AudioRouteIntentV2.playbackOnly ||
           current.inputs.length != 1 ||

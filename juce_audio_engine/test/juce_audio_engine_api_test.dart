@@ -169,6 +169,9 @@ void main() {
             ];
             final juce = snapshot['juce']! as Map<String, dynamic>;
             juce['activeInputChannels'] = 1;
+            final session = snapshot['session']! as Map<String, dynamic>;
+            session['category'] = 'AVAudioSessionCategoryPlayAndRecord';
+            session['inputChannelCount'] = 1;
           }
           return <String, dynamic>{
             'status': 'success',
@@ -481,33 +484,81 @@ void main() {
     });
   }
 
-  test('macOS V2 recording intent uses the isolated native contract', () async {
-    final result = await JuceAudioEngine.setAudioRouteIntentV2(
-      AudioRouteIntentV2.preparingRecording,
-      generation: 7,
-      platformOverride: TargetPlatform.macOS,
-    );
+  for (final platform in <TargetPlatform>[
+    TargetPlatform.macOS,
+    TargetPlatform.iOS,
+  ]) {
+    test('V2 recording intent uses the isolated native contract on $platform',
+        () async {
+      final result = await JuceAudioEngine.setAudioRouteIntentV2(
+        AudioRouteIntentV2.preparingRecording,
+        generation: 7,
+        platformOverride: platform,
+      );
 
-    expect(result.succeeded, isTrue);
-    expect(result.snapshot.intent, AudioRouteIntentV2.preparingRecording);
-    expect(result.snapshot.juce.activeInputChannels, 1);
-    expect(calls.single.method, 'setAudioRouteIntentV2');
-    expect(
-      Map<String, dynamic>.from(calls.single.arguments as Map)['intent'],
-      'preparingRecording',
-    );
-  });
+      expect(result.succeeded, isTrue);
+      expect(result.snapshot.intent, AudioRouteIntentV2.preparingRecording);
+      expect(result.snapshot.juce.activeInputChannels, 1);
+      expect(calls.single.method, 'setAudioRouteIntentV2');
+      expect(
+        Map<String, dynamic>.from(calls.single.arguments as Map)['intent'],
+        'preparingRecording',
+      );
+    });
+  }
 
-  test('recording intent remains native-call-free off macOS', () async {
+  test('recording intent remains native-call-free on Android', () async {
     final result = await JuceAudioEngine.setAudioRouteIntentV2(
       AudioRouteIntentV2.preparingRecording,
       generation: 2,
-      platformOverride: TargetPlatform.iOS,
+      platformOverride: TargetPlatform.android,
     );
 
     expect(result.succeeded, isFalse);
     expect(result.diagnosticCode, 'recording_route_unsupported');
     expect(calls, isEmpty);
+  });
+
+  test('iOS V2 readiness accepts its verified mono recording route', () async {
+    await JuceAudioEngine.initialisePlaybackV2(
+      platformOverride: TargetPlatform.iOS,
+    );
+    final transition = await JuceAudioEngine.setAudioRouteIntentV2(
+      AudioRouteIntentV2.preparingRecording,
+      generation: 0,
+      platformOverride: TargetPlatform.iOS,
+    );
+    JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(transition);
+    calls.clear();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+      calls.add(methodCall);
+      final snapshot = _v2Snapshot();
+      snapshot['intent'] = 'preparingRecording';
+      snapshot['inputs'] = <Map<String, dynamic>>[
+        <String, dynamic>{
+          'direction': 'input',
+          'nativePortType': 'MicrophoneBuiltIn',
+          'normalizedKind': 'builtIn',
+          'uid': 'built-in-input',
+          'name': 'Built-in Microphone',
+          'channelCount': 1,
+        },
+      ];
+      final juce = snapshot['juce']! as Map<String, dynamic>;
+      juce['activeInputChannels'] = 1;
+      final session = snapshot['session']! as Map<String, dynamic>;
+      session['category'] = 'AVAudioSessionCategoryPlayAndRecord';
+      session['inputChannelCount'] = 1;
+      return snapshot;
+    });
+
+    final ready = await JuceAudioEngine.validatePlaybackV2(
+      platformOverride: TargetPlatform.iOS,
+    );
+
+    expect(ready, isTrue);
+    expect(calls.single.method, 'getAudioRouteSnapshotV2');
   });
 
   test('loadClip sends rowId + timeline payload', () async {

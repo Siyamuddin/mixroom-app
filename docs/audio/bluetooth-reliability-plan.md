@@ -1003,6 +1003,36 @@ mode. Repeated Record/Stop, a quick cancellation, and Bluetooth disconnection
 during recording all passed; disconnection safely required an editor reopen
 without a crash or freeze.
 
+#### Checkpoint 7C — iOS built-in recording foundation
+
+The first iOS recording checkpoint reuses the same coordinator intents and
+writer lifecycle with Bluetooth disconnected. A V2 editor remains
+`playbackOnly` until Record requests permission. Native code then quiesces the
+device, configures AVAudioSession as `playAndRecord`/`default`, selects exactly
+one built-in microphone through `setPreferredInput`, and opens JUCE once with
+one input and two outputs. The writer may start only after the session, route,
+callback, rate, buffer, and active channels are read back and verified.
+
+Stop finalizes the WAV before clearing preferred input, restoring
+`playback`/`default`, and reopening output-only JUCE once. Preparation failure
+gets one bounded output-only restoration. Route changes during preparation or
+recording use the existing safe invalidation boundary and require reopening
+the editor. Bluetooth output/input, external input, monitoring, background
+recording, and interruption recovery remain outside this checkpoint.
+
+Initial physical evidence (2026-08-12, iPad on iOS 26.5) verified the full
+built-in route lifecycle. Playback-only used the speaker at 48 kHz and 256
+frames with zero inputs. Recording used `playAndRecord`/`default`, the built-in
+microphone as one mono input, the same built-in speaker as two outputs, and an
+attached callback. The first hardware run exposed an incorrect teardown order:
+the session was changed while the input device remained open, leaving the
+engine closed after Stop. Reordering teardown to finalize, detach and close,
+clear preferred input, restore `playback`/`default`, and reopen output-only
+resolved it. Repeated recording then succeeded without reopening the editor;
+the final report showed `playbackOnly`, zero inputs, `inputOpen: false`, and an
+attached 48 kHz/256-frame output callback. Recording-start cancellation and a
+Legacy Record/Stop regression check also passed.
+
 ### Phase 8 — Complete A/B hardware validation
 
 Run Legacy and V2 with the same build, project, device, headset, actions, and
@@ -1151,9 +1181,6 @@ Each run records:
 
 ## Immediate next step
 
-Checkpoint 7B passed its automated and physical Mac gates. Commit it as one
-focused change. The following recording checkpoint should add explicit macOS
-input selection without weakening output-only playback: supported non-Bluetooth
-inputs first, then Bluetooth headset input as an intentional duplex/call-quality
-mode with a clear user notice and verified restoration to media-quality output
-after recording.
+Checkpoint 7C is accepted. The next checkpoint keeps this lifecycle and permits
+preconnected iOS Bluetooth media output with the built-in device microphone,
+without enabling Bluetooth headset input or adding another coordinator.

@@ -12474,7 +12474,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final coordinator = _audioRouteCoordinatorV2;
     _audioRouteCoordinatorV2 = null;
     if (_isBluetoothV2Session &&
-        Platform.isMacOS &&
+        (Platform.isMacOS || Platform.isIOS) &&
         coordinator?.intent != AudioRouteIntentV2.playbackOnly) {
       await JuceAudioEngine.abortRecordingV2();
     }
@@ -12627,7 +12627,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _handleAudioRouteIntentInvalidatedV2(AudioRouteChangeEventV2 event) {
-    if (!mounted || !Platform.isMacOS || !_isBluetoothV2Session) return;
+    if (!mounted ||
+        (!Platform.isMacOS && !Platform.isIOS) ||
+        !_isBluetoothV2Session) {
+      return;
+    }
     final pausedPosition = _isPlaying
         ? _estimateTransportClockFromSample()
         : _globalAudioClock;
@@ -12646,10 +12650,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _recordingPeaks.clear();
       _syncTransportClock(pausedPosition, playing: false);
     });
-    unawaited(_abortMacRecordingV2AfterRouteChange());
+    unawaited(_abortRecordingV2AfterRouteChange());
   }
 
-  Future<void> _abortMacRecordingV2AfterRouteChange() async {
+  Future<void> _abortRecordingV2AfterRouteChange() async {
     await JuceAudioEngine.abortRecordingV2();
     if (!mounted) return;
     _showSmallNotice(
@@ -20487,12 +20491,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _startRecordingJuce() async {
     if (_isBluetoothV2Session) {
-      if (!Platform.isMacOS ||
+      if ((!Platform.isMacOS && !Platform.isIOS) ||
           _selectedRow < 0 ||
           _selectedRow >= _rows.length ||
           _rows[_selectedRow].kind == TimelineRowKind.instrument) {
         _showSmallNotice(
-          'Only audio recording with the built-in Mac microphone is available in this Bluetooth 2.0 checkpoint.',
+          'Only audio recording with the built-in device microphone is available in this Bluetooth 2.0 checkpoint.',
         );
         return;
       }
@@ -20524,7 +20528,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (_isBluetoothV2Session) {
-      if (!Platform.isMacOS || _v2RecordingRouteInvalidated) return false;
+      if ((!Platform.isMacOS && !Platform.isIOS) ||
+          _v2RecordingRouteInvalidated) {
+        return false;
+      }
       final coordinator = _audioRouteCoordinatorV2;
       if (coordinator == null ||
           coordinator.state != AudioRouteCoordinatorStateV2.stable ||
@@ -20549,8 +20556,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (mounted) {
           _showSmallNotice(
             result.diagnosticCode == 'bluetooth_input_forbidden'
-                ? 'Bluetooth microphones are not supported. Use the built-in Mac microphone.'
-                : 'Recording with the built-in Mac microphone is unavailable for the current output.',
+                ? 'Bluetooth microphones are not supported. Use the built-in device microphone.'
+                : 'Recording with the built-in device microphone is unavailable for the current output.',
           );
         }
         return false;
@@ -20677,7 +20684,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
       if (_recordStartCancelRequested) return;
-      if (_isBluetoothV2Session && Platform.isMacOS) {
+      if (_isBluetoothV2Session &&
+          (Platform.isMacOS || Platform.isIOS)) {
         _recordingStartMs = _globalAudioClock.inMilliseconds.toDouble();
       }
 
@@ -20718,8 +20726,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
 
       if (!ok) {
-        if (_isBluetoothV2Session && Platform.isMacOS) {
-          await _restoreMacV2PlaybackOnlyAfterRecording();
+        if (_isBluetoothV2Session &&
+            (Platform.isMacOS || Platform.isIOS)) {
+          await _restoreV2PlaybackOnlyAfterRecording();
         }
         _liveInputMonitoringEffective = null;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -20729,14 +20738,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
         return;
       }
-      if (_isBluetoothV2Session && Platform.isMacOS) {
+      if (_isBluetoothV2Session &&
+          (Platform.isMacOS || Platform.isIOS)) {
         final coordinator = _audioRouteCoordinatorV2;
         final recordingResult = await coordinator?.transitionIntent(
           AudioRouteIntentV2.recording,
         );
         if (recordingResult == null || !recordingResult.succeeded) {
           await JuceAudioEngine.stopRecording();
-          await _restoreMacV2PlaybackOnlyAfterRecording();
+          await _restoreV2PlaybackOnlyAfterRecording();
           if (mounted) {
             _showSmallNotice('Failed to verify the recording input.');
           }
@@ -20766,8 +20776,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       if (startPlaybackAfterRecorder && !_isPlaying) {
         await JuceAudioEngine.stopRecording();
-        if (_isBluetoothV2Session && Platform.isMacOS) {
-          await _restoreMacV2PlaybackOnlyAfterRecording();
+        if (_isBluetoothV2Session &&
+            (Platform.isMacOS || Platform.isIOS)) {
+          await _restoreV2PlaybackOnlyAfterRecording();
         }
         if (mounted) {
           _showSmallNotice(
@@ -20825,16 +20836,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _recordStartCancelRequested = false;
       _recordTransitionInFlight = false;
       if (_isBluetoothV2Session &&
-          Platform.isMacOS &&
+          (Platform.isMacOS || Platform.isIOS) &&
           !_isRecording &&
           !_v2RecordingRouteInvalidated &&
           _audioRouteCoordinatorV2?.intent != AudioRouteIntentV2.playbackOnly) {
-        await _restoreMacV2PlaybackOnlyAfterRecording();
+        await _restoreV2PlaybackOnlyAfterRecording();
       }
     }
   }
 
-  Future<bool> _restoreMacV2PlaybackOnlyAfterRecording() async {
+  Future<bool> _restoreV2PlaybackOnlyAfterRecording() async {
     final coordinator = _audioRouteCoordinatorV2;
     if (coordinator == null || _v2RecordingRouteInvalidated) return false;
     final result = await coordinator.transitionIntent(
@@ -20960,8 +20971,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       } else {
         await JuceAudioEngine.stopRecording();
       }
-      if (_isBluetoothV2Session && Platform.isMacOS) {
-        final restored = await _restoreMacV2PlaybackOnlyAfterRecording();
+      if (_isBluetoothV2Session &&
+          (Platform.isMacOS || Platform.isIOS)) {
+        final restored = await _restoreV2PlaybackOnlyAfterRecording();
         if (!restored) {
           _v2RecordingRouteInvalidated = true;
           if (mounted) {
@@ -41913,6 +41925,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   void _startRecordingRoutePolicyPolling() {
     _recordingRoutePolicyTimer?.cancel();
+    if (_isBluetoothV2Session) return;
     if (!_supportsNativeBluetoothMonitorPolicy()) return;
     _recordingRoutePolicyTimer = Timer.periodic(const Duration(seconds: 1), (
       _,
@@ -44191,7 +44204,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _handleRecordPressed({required bool keepPlayingOnStop}) async {
     if (_isBluetoothV2Session) {
-      if (!Platform.isMacOS) {
+      if (!Platform.isMacOS && !Platform.isIOS) {
         _showSmallNotice(
           'Recording is not available in this Bluetooth 2.0 checkpoint.',
         );

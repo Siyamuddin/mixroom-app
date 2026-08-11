@@ -97,7 +97,7 @@ void main() {
       preflightStart,
     );
     final restoreStart = source.indexOf(
-      'Future<bool> _restoreMacV2PlaybackOnlyAfterRecording()',
+      'Future<bool> _restoreV2PlaybackOnlyAfterRecording()',
       recordingStart,
     );
     final permissionStart = source.indexOf(

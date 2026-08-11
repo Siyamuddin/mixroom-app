@@ -2583,11 +2583,18 @@ bool JuceEngine::openPlaybackOutputOnlyV2(const juce::String &outputDeviceName)
 bool JuceEngine::openRecordingInputV2(const juce::String &outputDeviceName,
                                       const juce::String &inputDeviceName)
 {
+#if (JUCE_MAC && !JUCE_IOS) || JUCE_IOS
 #if JUCE_MAC && !JUCE_IOS
     if (!isV2PlaybackSession() || outputDeviceName.isEmpty() || inputDeviceName.isEmpty())
         return false;
+#else
+    if (!isV2PlaybackSession())
+        return false;
+    juce::ignoreUnused(outputDeviceName, inputDeviceName);
+#endif
 
     deviceManager.closeAudioDevice();
+#if JUCE_MAC && !JUCE_IOS
     juce::AudioDeviceManager::AudioDeviceSetup setup;
     setup.inputDeviceName = inputDeviceName;
     setup.outputDeviceName = outputDeviceName;
@@ -2598,6 +2605,9 @@ bool JuceEngine::openRecordingInputV2(const juce::String &outputDeviceName,
     setup.inputChannels.setBit(0);
     setup.useDefaultOutputChannels = true;
     const auto error = deviceManager.initialise(1, 2, nullptr, false, {}, &setup);
+#else
+    const auto error = deviceManager.initialise(1, 2, nullptr, true);
+#endif
     if (error.isNotEmpty())
     {
         juceLogToFlutter(("V2 recording input open failed: " + error).toRawUTF8());
@@ -2679,7 +2689,7 @@ bool JuceEngine::reconfigurePlaybackRouteV2(const juce::String &outputDeviceName
 bool JuceEngine::reconfigureRecordingRouteV2(const juce::String &outputDeviceName,
                                               const juce::String &inputDeviceName)
 {
-#if JUCE_MAC && !JUCE_IOS
+#if (JUCE_MAC && !JUCE_IOS) || JUCE_IOS
     if (!engineInitialized || !isV2PlaybackSession())
         return false;
     quiescePlaybackRouteV2(false);
@@ -2705,7 +2715,7 @@ bool JuceEngine::reconfigureRecordingRouteV2(const juce::String &outputDeviceNam
 
 bool JuceEngine::validateRecordingRouteV2() const
 {
-#if JUCE_MAC && !JUCE_IOS
+#if (JUCE_MAC && !JUCE_IOS) || JUCE_IOS
     if (!engineInitialized || !isV2PlaybackSession() || v2PlaybackCallbackDetached)
         return false;
     auto *device = deviceManager.getCurrentAudioDevice();
@@ -13361,7 +13371,7 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
         return false;
 
     const bool v2Recording = isV2PlaybackSession();
-#if JUCE_MAC && !JUCE_IOS
+#if (JUCE_MAC && !JUCE_IOS) || JUCE_IOS
     if (v2Recording)
     {
         if (!validateRecordingRouteV2() || channelStart != 0 || channelCount != 1)
