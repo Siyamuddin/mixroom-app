@@ -318,6 +318,34 @@ void main() {
     expect(event.snapshot.implementation, BluetoothImplementationV2.v2);
   });
 
+  test('observation event preserves iOS route-safety facts', () {
+    final event = AudioRouteObservationEventV2.fromMap(<String, dynamic>{
+      'generation': 2,
+      'cause': 'oldDeviceUnavailable',
+      'transportWasPlaying': true,
+      'callbackDetached': true,
+      'deviceClosed': true,
+      'snapshot': <String, dynamic>{
+        'implementation': 'v2',
+        'generation': 2,
+        'captureConsistency': 'stable',
+      },
+      'futureField': true,
+    });
+    final legacyEvent = AudioRouteObservationEventV2.fromMap(
+      const <String, dynamic>{},
+    );
+
+    expect(event.generation, 2);
+    expect(event.cause, 'oldDeviceUnavailable');
+    expect(event.transportWasPlaying, isTrue);
+    expect(event.callbackDetached, isTrue);
+    expect(event.deviceClosed, isTrue);
+    expect(legacyEvent.transportWasPlaying, isFalse);
+    expect(legacyEvent.callbackDetached, isFalse);
+    expect(legacyEvent.deviceClosed, isFalse);
+  });
+
   test('transition result parses fallback and fails closed without snapshot',
       () {
     final fallback = AudioRouteTransitionResultV2.fromMap(<String, dynamic>{

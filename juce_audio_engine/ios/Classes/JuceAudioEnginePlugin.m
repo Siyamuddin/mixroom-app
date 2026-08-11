@@ -1687,16 +1687,39 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         if ([fingerprint isEqualToString:self.iosObservedRouteFingerprintV2]) {
             return;
         }
+        const BOOL removed =
+            reason == AVAudioSessionRouteChangeReasonOldDeviceUnavailable;
+        const BOOL transportWasPlaying =
+            [JuceBridge quiescePlaybackRouteV2ObjC:removed];
         self.iosObservedRouteGenerationV2 += 1;
         self.iosObservedRouteFingerprintV2 = fingerprint;
         self.iosLastObservedRouteCauseV2 =
             MixroomIOSObservedRouteCause(reason);
         if (self.eventSink != nil) {
+            NSDictionary<NSString *, id> *snapshot =
+                [self buildAudioRouteSnapshotV2];
+            NSDictionary<NSString *, id> *juce =
+                [snapshot[@"juce"] isKindOfClass:[NSDictionary class]]
+                    ? snapshot[@"juce"]
+                    : @{};
+            NSNumber *callbackAttached =
+                [juce[@"audioCallbackAttached"] isKindOfClass:[NSNumber class]]
+                    ? juce[@"audioCallbackAttached"]
+                    : nil;
+            NSNumber *deviceOpen =
+                [juce[@"deviceOpen"] isKindOfClass:[NSNumber class]]
+                    ? juce[@"deviceOpen"]
+                    : nil;
             self.eventSink(@{
                 @"event": @"audioRouteObservedV2",
                 @"generation": @(self.iosObservedRouteGenerationV2),
                 @"cause": self.iosLastObservedRouteCauseV2 ?: @"unknown",
-                @"snapshot": [self buildAudioRouteSnapshotV2],
+                @"transportWasPlaying": @(transportWasPlaying),
+                @"callbackDetached": @(
+                    callbackAttached != nil && !callbackAttached.boolValue),
+                @"deviceClosed": @(
+                    deviceOpen != nil && !deviceOpen.boolValue),
+                @"snapshot": snapshot,
             });
         }
     };

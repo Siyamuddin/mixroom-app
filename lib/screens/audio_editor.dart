@@ -5678,7 +5678,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   final Set<LogicalKeyboardKey> _desktopMidiHeldKeys = <LogicalKeyboardKey>{};
   Timer? _midiDevicePollTimer;
   StreamSubscription<Map<String, dynamic>>? _juceEngineEventSubscription;
+  StreamSubscription<AudioRouteObservationEventV2>?
+      _iosAudioRouteObservationSubscriptionV2;
   AudioRouteCoordinatorV2? _audioRouteCoordinatorV2;
+  int _lastIOSAudioRouteObservationGenerationV2 = 0;
+  bool _iosAudioRouteReopenRequiredV2 = false;
   StreamSubscription<List<DesktopFileDropItem>>? _desktopFinderDropSub;
   bool _midiDevicePollBusy = false;
   Map<String, String> _knownMidiDevicesById = <String, String>{};
@@ -9280,13 +9284,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _refreshProducerCaptureUiAllowlistAccess();
       await _sampleBrowserPreferencesFuture;
       await _loadProjectIfAny();
+      if (!mounted) {
+        await _shutdownAudioEngineV2Aware();
+        return;
+      }
       if (_isBluetoothV2Session && Platform.isIOS) {
+        _iosAudioRouteObservationSubscriptionV2 ??= JuceAudioEngine
+            .audioRouteObservationEventsV2
+            .listen(_handleIOSAudioRouteObservationV2);
         final observationStarted =
             await JuceAudioEngine.startIOSAudioRouteObservationV2();
         if (!observationStarted) {
-          debugPrint(
-            'iOS Bluetooth V2 read-only route observation unavailable',
-          );
+          await _iosAudioRouteObservationSubscriptionV2?.cancel();
+          _iosAudioRouteObservationSubscriptionV2 = null;
+          debugPrint('iOS Bluetooth V2 route safety observation unavailable');
         }
       }
       if (!_isBluetoothV2Session) {
@@ -12451,6 +12462,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _shutdownAudioEngineV2Aware() async {
+    final iosObservationSubscription = _iosAudioRouteObservationSubscriptionV2;
+    _iosAudioRouteObservationSubscriptionV2 = null;
+    if (Platform.isIOS && _isBluetoothV2Session) {
+      await JuceAudioEngine.stopIOSAudioRouteObservationV2();
+    }
+    await iosObservationSubscription?.cancel();
     final coordinator = _audioRouteCoordinatorV2;
     _audioRouteCoordinatorV2 = null;
     await coordinator?.dispose();
@@ -12562,6 +12579,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<bool> _ensurePlaybackRouteReady({required String reason}) async {
     if (_isBluetoothV2Session) {
+      if (Platform.isIOS && _iosAudioRouteReopenRequiredV2) {
+        if (mounted) {
+          _showSmallNotice(
+            'Audio output changed. Reopen the audio editor to continue.',
+          );
+        }
+        return false;
+      }
       if (_usesLiveAudioRouteCoordinatorV2 &&
           _audioRouteCoordinatorV2?.state !=
               AudioRouteCoordinatorStateV2.stable) {
@@ -12597,6 +12622,43 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       debugPrint('preparePlaybackRoute failed: $reason');
     }
     return ok;
+  }
+
+  void _handleIOSAudioRouteObservationV2(AudioRouteObservationEventV2 event) {
+    if (!mounted || !_isBluetoothV2Session || !Platform.isIOS) return;
+    if (event.generation <= _lastIOSAudioRouteObservationGenerationV2) return;
+    _lastIOSAudioRouteObservationGenerationV2 = event.generation;
+    if (_iosAudioRouteReopenRequiredV2) return;
+
+    final pausedPosition = _isPlaying
+        ? _estimateTransportClockFromSample()
+        : _globalAudioClock;
+    _iosAudioRouteReopenRequiredV2 = true;
+    _transportDesiredPlaying = false;
+    final commandSerial = ++_transportCommandSerial;
+    _transportTicker?.stop();
+    setState(() {
+      _isPlaying = false;
+      _syncTransportClock(pausedPosition, playing: false);
+    });
+    _stopMeterPolling();
+    unawaited(
+      _synchronizeIOSRouteSafetyPositionV2(commandSerial: commandSerial),
+    );
+    _showSmallNotice(
+      'Audio output changed. Reopen the audio editor to continue.',
+    );
+  }
+
+  Future<void> _synchronizeIOSRouteSafetyPositionV2({
+    required int commandSerial,
+  }) async {
+    await _pauseAudio(
+      _safeAudioEditorStateSetter,
+      commandSerial: commandSerial,
+    );
+    if (!mounted || commandSerial != _transportCommandSerial) return;
+    _syncTransportClock(_globalAudioClock, playing: false);
   }
 
   void _handleAudioRouteCoordinatorStateV2(

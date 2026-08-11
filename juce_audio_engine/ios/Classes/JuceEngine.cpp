@@ -2582,7 +2582,7 @@ bool JuceEngine::openPlaybackOutputOnlyV2(const juce::String &outputDeviceName)
 
 bool JuceEngine::quiescePlaybackRouteV2(bool closeRemovedDevice)
 {
-#if JUCE_MAC && !JUCE_IOS
+#if (JUCE_MAC && !JUCE_IOS) || JUCE_IOS
     if (!engineInitialized || !isV2PlaybackSession())
         return false;
 

@@ -872,6 +872,28 @@ observer called an audio setter or JUCE lifecycle operation. Release builds do
 not stop on JUCE debug assertions, but the oversized callback-block condition
 still requires safe quiescing in the following disconnect-safety checkpoint.
 
+Checkpoint 6C.2 adds only that safety boundary. A meaningful iOS output change
+pauses native transport, detaches the JUCE callback, and closes the device only
+when AVAudioSession reports `oldDeviceUnavailable`. The existing observation
+event then reports whether playback had been active and whether the callback
+was detached/device closed. Dart invalidates in-flight Play, freezes the UI at
+the paused native position, blocks Play and MIDI preview, and requires the
+editor to be reopened. There is no device reopen, AVAudioSession mutation,
+coordinator activation, retry, fallback, or effect scratch-buffer change in
+this checkpoint.
+
+Physical safety evidence (2026-08-11, iPad on iOS 26.5): a stopped
+built-in-to-A2DP change produced one generation with the JUCE callback detached,
+zero inputs, a responsive editor, a single reopen notice, and blocked Play.
+After reopening on A2DP, powering off the headphones during playback paused the
+project and produced `oldDeviceUnavailable`; the verified speaker snapshot
+showed `deviceOpen: false`, `audioCallbackAttached: false`, and zero active
+channels. Repeating the power-off while Mixroom was backgrounded also returned
+to a responsive, paused, reopen-required editor. The sole attached Flutter
+debug session recorded no `NativeEffects.h:28` assertion, `SIGTRAP`, crash, or
+debugger stop. The earlier `SIGKILL` was traced to two competing `flutter run`
+install sessions and is excluded from Bluetooth evidence.
+
 Exit gate: zero crashes in the iOS route-change stress run, no input open during
 playback, and deterministic verified recovery or a clear failed state.
 
@@ -1040,9 +1062,9 @@ Each run records:
 
 ## Immediate next step
 
-Run the Checkpoint 6C.1 physical iPad gate. Verify built-in → Bluetooth →
-built-in and one Bluetooth power-off while stopped and playing. Reports must
-show observation active, monotonically increasing meaningful-change counts,
-the latest native cause, zero inputs, and no rendering, audio, MIDI, microphone,
-or project regression. The following checkpoint may add safe pause/detach
-behavior only after this read-only evidence passes.
+Run the Checkpoint 6C.2 physical iPad gate. Verify that one foreground route
+change and one background Bluetooth power-off pause and invalidate the current
+V2 session, detach its callback, close a removed output, preserve position, and
+leave the editor responsive. Reopening the editor must restore ordinary
+playback on the newly selected system output. Automatic device reopening is the
+following checkpoint and must not be added until this safety gate passes.
