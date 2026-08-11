@@ -6,6 +6,9 @@
 + (BOOL)initialisePlaybackV2ObjC:(NSString * _Nonnull)outputDeviceName;
 + (BOOL)quiescePlaybackRouteV2ObjC:(BOOL)closeRemovedDevice;
 + (BOOL)reconfigurePlaybackRouteV2ObjC:(NSString * _Nonnull)outputDeviceName;
++ (BOOL)reconfigureRecordingRouteV2ObjC:(NSString * _Nonnull)outputDeviceName
+                              inputName:(NSString * _Nonnull)inputDeviceName;
++ (BOOL)validateRecordingRouteV2ObjC;
 + (NSString * _Nonnull)getAudioRouteImplementationObjC;
 + (void)initializeMessageManager;
 + (void)shutdownEngineObjC;

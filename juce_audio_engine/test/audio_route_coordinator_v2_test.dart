@@ -68,7 +68,10 @@ AudioRouteTransitionResultV2 _result(
 class _FakeAdapter implements AudioRouteAdapterV2 {
   final controller = StreamController<AudioRouteChangeEventV2>.broadcast();
   final appliedGenerations = <int>[];
+  final appliedIntents = <AudioRouteIntentV2>[];
   final results = <int, Future<AudioRouteTransitionResultV2>>{};
+  final intentResults =
+      <AudioRouteIntentV2, Future<AudioRouteTransitionResultV2>>{};
   var startCount = 0;
   var stopCount = 0;
 
@@ -87,6 +90,15 @@ class _FakeAdapter implements AudioRouteAdapterV2 {
   ) async {
     appliedGenerations.add(generation);
     return results[generation] ?? _result(generation);
+  }
+
+  @override
+  Future<AudioRouteTransitionResultV2> applyIntent(
+    AudioRouteIntentV2 intent,
+    int generation,
+  ) async {
+    appliedIntents.add(intent);
+    return intentResults[intent] ?? _result(generation);
   }
 
   @override
@@ -228,5 +240,140 @@ void main() {
     await coordinator.dispose();
     await _flush();
     expect(adapter.appliedGenerations, <int>[1]);
+  });
+
+  test('serializes recording intents through the existing coordinator',
+      () async {
+    final adapter = _FakeAdapter();
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+
+    final preparing = await coordinator.transitionIntent(
+      AudioRouteIntentV2.preparingRecording,
+    );
+    final recording = await coordinator.transitionIntent(
+      AudioRouteIntentV2.recording,
+    );
+    final playback = await coordinator.transitionIntent(
+      AudioRouteIntentV2.playbackOnly,
+    );
+
+    expect(preparing.succeeded, isTrue);
+    expect(recording.succeeded, isTrue);
+    expect(playback.succeeded, isTrue);
+    expect(adapter.appliedIntents, <AudioRouteIntentV2>[
+      AudioRouteIntentV2.preparingRecording,
+      AudioRouteIntentV2.recording,
+      AudioRouteIntentV2.playbackOnly,
+    ]);
+    expect(coordinator.intent, AudioRouteIntentV2.playbackOnly);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+    await coordinator.dispose();
+  });
+
+  test('blocks route readiness until recording verification completes',
+      () async {
+    final adapter = _FakeAdapter();
+    final recording = Completer<AudioRouteTransitionResultV2>();
+    adapter.intentResults[AudioRouteIntentV2.recording] = recording.future;
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+    await coordinator.transitionIntent(AudioRouteIntentV2.preparingRecording);
+
+    final transition = coordinator.transitionIntent(
+      AudioRouteIntentV2.recording,
+    );
+    await _flush();
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.preparingInput);
+
+    recording.complete(_result(0));
+    expect((await transition).succeeded, isTrue);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+    await coordinator.dispose();
+  });
+
+  test('route change invalidates recording without applying playback route',
+      () async {
+    final adapter = _FakeAdapter();
+    final invalidated = <AudioRouteChangeEventV2>[];
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+      onIntentInvalidated: invalidated.add,
+    );
+    await coordinator.start();
+    await coordinator.transitionIntent(AudioRouteIntentV2.preparingRecording);
+    await coordinator.transitionIntent(AudioRouteIntentV2.recording);
+
+    adapter.controller.add(_event(1, 'changed-during-recording'));
+    await _flush();
+
+    expect(invalidated, hasLength(1));
+    expect(adapter.appliedGenerations, isEmpty);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.failed);
+    await coordinator.dispose();
+  });
+
+  test('route change also invalidates an in-flight input preparation',
+      () async {
+    final adapter = _FakeAdapter();
+    final preparing = Completer<AudioRouteTransitionResultV2>();
+    adapter.intentResults[AudioRouteIntentV2.preparingRecording] =
+        preparing.future;
+    final invalidated = <AudioRouteChangeEventV2>[];
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+      onIntentInvalidated: invalidated.add,
+    );
+    await coordinator.start();
+
+    final transition = coordinator.transitionIntent(
+      AudioRouteIntentV2.preparingRecording,
+    );
+    await _flush();
+    adapter.controller.add(_event(1, 'changed-during-preparation'));
+    await _flush();
+    preparing.complete(_result(0));
+    final result = await transition;
+
+    expect(invalidated, hasLength(1));
+    expect(result.succeeded, isFalse);
+    expect(result.diagnosticCode, 'stale_generation');
+    expect(adapter.appliedGenerations, isEmpty);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.failed);
+    await coordinator.dispose();
+  });
+
+  test('failed input preparation with verified cleanup keeps playback usable',
+      () async {
+    final adapter = _FakeAdapter();
+    adapter.intentResults[AudioRouteIntentV2.preparingRecording] = Future.value(
+      _result(
+        0,
+        status: AudioRouteTransitionStatusV2.failure,
+        code: 'no_input',
+      ),
+    );
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+
+    final result = await coordinator.transitionIntent(
+      AudioRouteIntentV2.preparingRecording,
+    );
+
+    expect(result.succeeded, isFalse);
+    expect(coordinator.intent, AudioRouteIntentV2.playbackOnly);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+    await coordinator.dispose();
   });
 }

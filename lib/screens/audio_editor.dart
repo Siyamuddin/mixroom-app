@@ -5679,6 +5679,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Timer? _midiDevicePollTimer;
   StreamSubscription<Map<String, dynamic>>? _juceEngineEventSubscription;
   AudioRouteCoordinatorV2? _audioRouteCoordinatorV2;
+  bool _v2RecordingRouteInvalidated = false;
   StreamSubscription<List<DesktopFileDropItem>>? _desktopFinderDropSub;
   bool _midiDevicePollBusy = false;
   Map<String, String> _knownMidiDevicesById = <String, String>{};
@@ -9241,6 +9242,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           adapter: const MethodChannelAudioRouteAdapterV2(),
           onStateChanged: _handleAudioRouteCoordinatorStateV2,
           onTransition: _handleAudioRouteTransitionV2,
+          onIntentInvalidated: _handleAudioRouteIntentInvalidatedV2,
         );
         _audioRouteCoordinatorV2 = coordinator;
         final initialRoute = await coordinator.start();
@@ -9291,6 +9293,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           adapter: const MethodChannelAudioRouteAdapterV2(),
           onStateChanged: _handleAudioRouteCoordinatorStateV2,
           onTransition: _handleAudioRouteTransitionV2,
+          onIntentInvalidated: _handleAudioRouteIntentInvalidatedV2,
         );
         _audioRouteCoordinatorV2 = coordinator;
         final initialRoute = await coordinator.start();
@@ -12470,6 +12473,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _shutdownAudioEngineV2Aware() async {
     final coordinator = _audioRouteCoordinatorV2;
     _audioRouteCoordinatorV2 = null;
+    if (_isBluetoothV2Session &&
+        Platform.isMacOS &&
+        coordinator?.intent != AudioRouteIntentV2.playbackOnly) {
+      await JuceAudioEngine.abortRecordingV2();
+    }
     await coordinator?.dispose();
     await JuceAudioEngine.shutdown();
   }
@@ -12616,6 +12624,37 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       debugPrint('preparePlaybackRoute failed: $reason');
     }
     return ok;
+  }
+
+  void _handleAudioRouteIntentInvalidatedV2(AudioRouteChangeEventV2 event) {
+    if (!mounted || !Platform.isMacOS || !_isBluetoothV2Session) return;
+    final pausedPosition = _isPlaying
+        ? _estimateTransportClockFromSample()
+        : _globalAudioClock;
+    _v2RecordingRouteInvalidated = true;
+    _transportDesiredPlaying = false;
+    ++_transportCommandSerial;
+    _transportTicker?.stop();
+    _recordingPeakTimer?.cancel();
+    _recordingPeakTimer = null;
+    _stopMeterPolling();
+    setState(() {
+      _isPlaying = false;
+      _isRecording = false;
+      _recordStartVisualPending = false;
+      _recordingFilePath = null;
+      _recordingPeaks.clear();
+      _syncTransportClock(pausedPosition, playing: false);
+    });
+    unawaited(_abortMacRecordingV2AfterRouteChange());
+  }
+
+  Future<void> _abortMacRecordingV2AfterRouteChange() async {
+    await JuceAudioEngine.abortRecordingV2();
+    if (!mounted) return;
+    _showSmallNotice(
+      'Audio output changed during recording. Reopen the audio editor to continue.',
+    );
   }
 
   Future<void> _synchronizeIOSRouteSafetyPositionV2({
@@ -20447,6 +20486,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _startRecordingJuce() async {
+    if (_isBluetoothV2Session) {
+      if (!Platform.isMacOS ||
+          _selectedRow < 0 ||
+          _selectedRow >= _rows.length ||
+          _rows[_selectedRow].kind == TimelineRowKind.instrument) {
+        _showSmallNotice(
+          'Only audio recording with the built-in Mac microphone is available in this Bluetooth 2.0 checkpoint.',
+        );
+        return;
+      }
+      await _startAudioRecordingJuce();
+      return;
+    }
     final midiClipIndex =
         _activeMidiRecordingClipIndex() ??
         await _ensureSelectedInstrumentLaneMidiRecordingClip();
@@ -20469,6 +20521,44 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<bool> _prepareAudioRecordingStartPreflight() async {
     if (!await _ensureMicrophonePermissionForRecording()) {
       return false;
+    }
+
+    if (_isBluetoothV2Session) {
+      if (!Platform.isMacOS || _v2RecordingRouteInvalidated) return false;
+      final coordinator = _audioRouteCoordinatorV2;
+      if (coordinator == null ||
+          coordinator.state != AudioRouteCoordinatorStateV2.stable ||
+          coordinator.intent != AudioRouteIntentV2.playbackOnly) {
+        _showSmallNotice('Bluetooth 2.0 audio output is not ready yet.');
+        return false;
+      }
+      if (_isPlaying) {
+        _transportDesiredPlaying = false;
+        ++_transportCommandSerial;
+        await _pausePlayback();
+        if (!mounted) return false;
+        setState(() {
+          _isPlaying = false;
+          _syncTransportClock(_globalAudioClock, playing: false);
+        });
+      }
+      final result = await coordinator.transitionIntent(
+        AudioRouteIntentV2.preparingRecording,
+      );
+      if (!result.succeeded) {
+        if (mounted) {
+          _showSmallNotice(
+            result.diagnosticCode == 'bluetooth_input_forbidden'
+                ? 'Bluetooth microphones are not supported. Use the built-in Mac microphone.'
+                : 'Built-in Mac recording is unavailable for the current audio route.',
+          );
+        }
+        return false;
+      }
+      JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+      _selectedChannelStart = 0;
+      _selectedChannelCount = 1;
+      return true;
     }
 
     if (Platform.isAndroid || Platform.isIOS) {
@@ -20587,8 +20677,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
       if (_recordStartCancelRequested) return;
+      if (_isBluetoothV2Session && Platform.isMacOS) {
+        _recordingStartMs = _globalAudioClock.inMilliseconds.toDouble();
+      }
 
-      final startPlaybackAfterRecorder = Platform.isIOS;
+      final startPlaybackAfterRecorder =
+          Platform.isIOS || (_isBluetoothV2Session && Platform.isMacOS);
 
       // 3) Keep Android's working order: start transport before arming the native
       // recorder. iOS uses the opposite order to avoid route churn between input
@@ -20619,11 +20713,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       // 5) Arm the native recorder.
       final ok = await JuceAudioEngine.startRecording(
         filePath,
-        _selectedChannelStart,
-        _selectedChannelCount,
+        _isBluetoothV2Session ? 0 : _selectedChannelStart,
+        _isBluetoothV2Session ? 1 : _selectedChannelCount,
       );
 
       if (!ok) {
+        if (_isBluetoothV2Session && Platform.isMacOS) {
+          await _restoreMacV2PlaybackOnlyAfterRecording();
+        }
         _liveInputMonitoringEffective = null;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -20631,6 +20728,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ),
         );
         return;
+      }
+      if (_isBluetoothV2Session && Platform.isMacOS) {
+        final coordinator = _audioRouteCoordinatorV2;
+        final recordingResult = await coordinator?.transitionIntent(
+          AudioRouteIntentV2.recording,
+        );
+        if (recordingResult == null || !recordingResult.succeeded) {
+          await JuceAudioEngine.stopRecording();
+          await _restoreMacV2PlaybackOnlyAfterRecording();
+          if (mounted) {
+            _showSmallNotice('Failed to verify the recording input.');
+          }
+          return;
+        }
+        JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(recordingResult);
       }
       if (_recordStartCancelRequested) {
         await JuceAudioEngine.stopRecording();
@@ -20651,6 +20763,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       // not invalidated between arm and first capture.
       if (startPlaybackAfterRecorder && !_isPlaying) {
         await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
+      }
+      if (startPlaybackAfterRecorder && !_isPlaying) {
+        await JuceAudioEngine.stopRecording();
+        if (_isBluetoothV2Session && Platform.isMacOS) {
+          await _restoreMacV2PlaybackOnlyAfterRecording();
+        }
+        if (mounted) {
+          _showSmallNotice(
+            'Recording stopped because playback could not start.',
+          );
+        }
+        return;
       }
       if (_recordStartCancelRequested) {
         await JuceAudioEngine.stopRecording();
@@ -20700,7 +20824,28 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       _recordStartCancelRequested = false;
       _recordTransitionInFlight = false;
+      if (_isBluetoothV2Session &&
+          Platform.isMacOS &&
+          !_isRecording &&
+          !_v2RecordingRouteInvalidated &&
+          _audioRouteCoordinatorV2?.intent != AudioRouteIntentV2.playbackOnly) {
+        await _restoreMacV2PlaybackOnlyAfterRecording();
+      }
     }
+  }
+
+  Future<bool> _restoreMacV2PlaybackOnlyAfterRecording() async {
+    final coordinator = _audioRouteCoordinatorV2;
+    if (coordinator == null || _v2RecordingRouteInvalidated) return false;
+    final result = await coordinator.transitionIntent(
+      AudioRouteIntentV2.playbackOnly,
+    );
+    if (!result.succeeded) {
+      await JuceAudioEngine.abortRecordingV2();
+      return false;
+    }
+    JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+    return true;
   }
 
   Future<bool> _ensureMicrophonePermissionForRecording() async {
@@ -20728,7 +20873,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
 
     if (granted) {
-      unawaited(_loadInputDevicesFromJuce());
+      if (!_isBluetoothV2Session) {
+        unawaited(_loadInputDevicesFromJuce());
+      }
       return true;
     }
 
@@ -20812,6 +20959,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         await JuceAudioEngine.stopRecordingWithoutPlaybackRestore();
       } else {
         await JuceAudioEngine.stopRecording();
+      }
+      if (_isBluetoothV2Session && Platform.isMacOS) {
+        final restored = await _restoreMacV2PlaybackOnlyAfterRecording();
+        if (!restored) {
+          _v2RecordingRouteInvalidated = true;
+          if (mounted) {
+            _showSmallNotice(
+              'Recording stopped, but audio output could not be restored. Reopen the audio editor.',
+            );
+          }
+        }
       }
       _lastPreparedRecordingDevice = null;
       _lastPreparedRecordingInputOpenChannels = null;
@@ -44033,10 +44191,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _handleRecordPressed({required bool keepPlayingOnStop}) async {
     if (_isBluetoothV2Session) {
-      _showSmallNotice(
-        'Recording is not available in this Bluetooth 2.0 checkpoint.',
-      );
-      return;
+      if (!Platform.isMacOS) {
+        _showSmallNotice(
+          'Recording is not available in this Bluetooth 2.0 checkpoint.',
+        );
+        return;
+      }
+      if (_v2RecordingRouteInvalidated) {
+        _showSmallNotice(
+          'Audio output changed during recording. Reopen the audio editor to continue.',
+        );
+        return;
+      }
     }
     if (_recordStartVisualPending && !_isRecording) {
       _recordStartCancelRequested = true;

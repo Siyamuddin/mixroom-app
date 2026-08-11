@@ -2374,6 +2374,19 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
         juceStringFromNSString(outputDeviceName));
 }
 
++ (BOOL)reconfigureRecordingRouteV2ObjC:(NSString *)outputDeviceName
+                              inputName:(NSString *)inputDeviceName
+{
+    return JuceEngine::get().reconfigureRecordingRouteV2(
+        juceStringFromNSString(outputDeviceName),
+        juceStringFromNSString(inputDeviceName));
+}
+
++ (BOOL)validateRecordingRouteV2ObjC
+{
+    return JuceEngine::get().validateRecordingRouteV2();
+}
+
 + (NSString *)getAudioRouteImplementationObjC
 {
     const auto value = JuceEngine::get().getAudioRouteImplementationName();

@@ -5837,6 +5837,9 @@ public:
     bool initialisePlaybackV2(const juce::String &outputDeviceName);
     bool quiescePlaybackRouteV2(bool closeRemovedDevice);
     bool reconfigurePlaybackRouteV2(const juce::String &outputDeviceName);
+    bool reconfigureRecordingRouteV2(const juce::String &outputDeviceName,
+                                     const juce::String &inputDeviceName);
+    bool validateRecordingRouteV2() const;
     juce::String getAudioRouteImplementationName() const;
     bool isV2PlaybackSession() const noexcept;
     void loadTrack(int idx, const juce::File &file); // deprecated name (clip)
@@ -6264,6 +6267,8 @@ private:
         AudioRouteImplementation::none;
     bool v2PlaybackCallbackDetached = false;
     bool openPlaybackOutputOnlyV2(const juce::String &outputDeviceName);
+    bool openRecordingInputV2(const juce::String &outputDeviceName,
+                              const juce::String &inputDeviceName);
     juce::AudioFormatManager formatManager;
     juce::AudioPluginFormatManager pluginFormatManager;
     juce::AudioProcessorGraph graph;

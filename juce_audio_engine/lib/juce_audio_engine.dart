@@ -72,6 +72,18 @@ class MethodChannelAudioRouteAdapterV2 implements AudioRouteAdapterV2 {
   }
 
   @override
+  Future<AudioRouteTransitionResultV2> applyIntent(
+    AudioRouteIntentV2 intent,
+    int generation,
+  ) {
+    return JuceAudioEngine.setAudioRouteIntentV2(
+      intent,
+      generation: generation,
+      platformOverride: platformOverride,
+    );
+  }
+
+  @override
   Future<void> stopMonitoring() {
     return JuceAudioEngine.stopAudioRouteMonitoringV2(
       platformOverride: platformOverride,
@@ -478,6 +490,40 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<AudioRouteTransitionResultV2> setAudioRouteIntentV2(
+    AudioRouteIntentV2 intent, {
+    required int generation,
+    TargetPlatform? platformOverride,
+  }) async {
+    final platform = platformOverride ?? defaultTargetPlatform;
+    if (kIsWeb || platform != TargetPlatform.macOS) {
+      return _unavailableRouteTransitionV2(
+        generation,
+        'recording_route_unsupported',
+      );
+    }
+    try {
+      final raw = await _ch.invokeMethod<Map<dynamic, dynamic>>(
+        'setAudioRouteIntentV2',
+        <String, Object>{
+          'generation': generation,
+          'intent': intent.name,
+        },
+      );
+      if (raw == null) return _unavailableRouteTransitionV2(generation);
+      return AudioRouteTransitionResultV2.fromMap(
+        Map<String, dynamic>.from(raw),
+      );
+    } on MissingPluginException {
+      return _unavailableRouteTransitionV2(generation);
+    } on PlatformException catch (error) {
+      return _unavailableRouteTransitionV2(
+        generation,
+        error.code.isEmpty ? 'actual_state_unavailable' : error.code,
+      );
+    }
+  }
+
   static Future<void> stopAudioRouteMonitoringV2({
     TargetPlatform? platformOverride,
   }) async {
@@ -494,6 +540,20 @@ class JuceAudioEngine {
       return;
     } on PlatformException catch (error) {
       _logError('stopAudioRouteMonitoringV2', error);
+    }
+  }
+
+  static Future<void> abortRecordingV2({
+    TargetPlatform? platformOverride,
+  }) async {
+    final platform = platformOverride ?? defaultTargetPlatform;
+    if (kIsWeb || platform != TargetPlatform.macOS) return;
+    try {
+      await _ch.invokeMethod<void>('abortRecordingV2');
+    } on MissingPluginException {
+      return;
+    } on PlatformException catch (error) {
+      _logError('abortRecordingV2', error);
     }
   }
 
@@ -542,6 +602,8 @@ class JuceAudioEngine {
     final startup = _v2StartupSnapshot;
     if (startup == null || startup.outputs.length != 1) return false;
     final current = await getAudioRouteSnapshotV2();
+    final expectedInputChannels =
+        startup.intent == AudioRouteIntentV2.playbackOnly ? 0 : 1;
     if (current.implementation != BluetoothImplementationV2.v2 ||
         current.captureConsistency != AudioRouteCaptureConsistencyV2.stable ||
         current.juce.deviceOpen != true ||
@@ -552,12 +614,22 @@ class JuceAudioEngine {
                 current.session.mode != 'AVAudioSessionModeDefault')) ||
         (platform == TargetPlatform.iOS &&
             current.session.inputChannelCount != 0) ||
-        current.juce.activeInputChannels != 0 ||
+        current.juce.activeInputChannels != expectedInputChannels ||
         (current.juce.activeOutputChannels ?? 0) <= 0 ||
         (current.juce.sampleRateHz ?? 0) <= 0 ||
         (current.juce.bufferFrames ?? 0) <= 0 ||
         current.outputs.length != 1) {
       return false;
+    }
+    if (platform == TargetPlatform.macOS && expectedInputChannels == 1) {
+      if (startup.inputs.length != 1 ||
+          current.intent == AudioRouteIntentV2.playbackOnly ||
+          current.inputs.length != 1 ||
+          current.inputs.single.uid.isEmpty ||
+          current.inputs.single.normalizedKind != AudioRouteKindV2.builtIn ||
+          startup.inputs.single.uid != current.inputs.single.uid) {
+        return false;
+      }
     }
     final expected = startup.outputs.single;
     final actual = current.outputs.single;

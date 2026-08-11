@@ -34,6 +34,7 @@ class BluetoothRouteReportSerializerV2 {
       'transitionId': snapshot.transitionId,
       'coordinatorManaged': snapshot.coordinatorManaged,
       'captureConsistency': snapshot.captureConsistency.name,
+      'intent': snapshot.intent.name,
       'inputs': _sanitizeEndpoints(snapshot.inputs),
       'outputs': _sanitizeEndpoints(snapshot.outputs),
       'session': snapshot.session.toMap(),

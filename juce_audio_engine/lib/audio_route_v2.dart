@@ -311,6 +311,7 @@ class AudioRouteSnapshotV2 {
     required this.session,
     required this.juce,
     required this.unavailableReasons,
+    this.intent = AudioRouteIntentV2.playbackOnly,
     this.observation = const AudioRouteObservationFactsV2(),
   });
 
@@ -327,6 +328,7 @@ class AudioRouteSnapshotV2 {
   final AudioSessionFactsV2 session;
   final JuceRouteFactsV2 juce;
   final Map<String, String> unavailableReasons;
+  final AudioRouteIntentV2 intent;
   final AudioRouteObservationFactsV2 observation;
 
   bool get hasBluetoothOutput => outputs.any(
@@ -389,6 +391,11 @@ class AudioRouteSnapshotV2 {
       session: AudioSessionFactsV2.fromMap(nestedMap('session')),
       juce: JuceRouteFactsV2.fromMap(nestedMap('juce')),
       unavailableReasons: Map<String, String>.unmodifiable(unavailable),
+      intent: _enumFromWire(
+        AudioRouteIntentV2.values,
+        map['intent'],
+        AudioRouteIntentV2.playbackOnly,
+      ),
       observation: AudioRouteObservationFactsV2.fromMap(
         nestedMap('observation'),
       ),
@@ -409,6 +416,7 @@ class AudioRouteSnapshotV2 {
         'session': session.toMap(),
         'juce': juce.toMap(),
         'unavailableReasons': unavailableReasons,
+        'intent': _wireName(intent),
         'observation': observation.toMap(),
       };
 }

@@ -13,6 +13,7 @@ AudioRouteSnapshotV2 snapshot() {
     transitionId: null,
     coordinatorManaged: false,
     captureConsistency: AudioRouteCaptureConsistencyV2.stable,
+    intent: AudioRouteIntentV2.preparingRecording,
     inputs: const <AudioRouteEndpointV2>[
       AudioRouteEndpointV2(
         direction: AudioRouteDirectionV2.input,
@@ -82,6 +83,7 @@ void main() {
       (report['juce'] as Map<String, dynamic>)['routedDeviceToken'],
       startsWith('output-'),
     );
+    expect(report['intent'], 'preparingRecording');
   });
 
   test('endpoint tokens are stable only for the same session salt', () {

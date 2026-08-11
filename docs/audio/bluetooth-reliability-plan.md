@@ -943,6 +943,39 @@ Deliverables:
 Exit gate: every platform satisfies the recording gates below without adding
 new editor-level platform policy.
 
+#### Checkpoint 7A — macOS built-in recording foundation
+
+The first recording checkpoint is intentionally narrower than Bluetooth
+recording. With the built-in Mac output selected, V2 remains output-only until
+Record is pressed, then the shared coordinator changes intent to
+`preparingRecording`. The macOS adapter uniquely resolves a built-in Core
+Audio input, opens exactly one input channel alongside the verified output,
+and reads the actual JUCE state back before the WAV writer may start.
+
+The writer reuses the existing graph and clip-insertion path but cannot invoke
+Legacy device setup or repair. Stop finalizes the WAV before the coordinator
+returns to `playbackOnly` and verifies zero inputs. MIDI recording, input
+monitoring, external inputs, Bluetooth inputs, and recording on Android/iOS
+remain blocked. A meaningful output change during preparation or recording
+quiesces and finalizes the session, closes the device, and requires reopening
+the editor; automatic record-route recovery is deferred.
+
+Automated contract, coordinator, isolation, and build checks precede a short
+physical Mac gate. The checkpoint is committed only after built-in recording,
+input closure, clip playback, and Legacy regression checks pass.
+
+Physical acceptance evidence (2026-08-11, Mac built-in output and built-in
+microphone): the editor opened in `playbackOnly` with zero active inputs and no
+microphone indicator. Microphone permission and the single input were opened
+only when Record was pressed. Repeated Record/Stop cycles produced valid,
+audible mono clips through the existing graph, and the recording playhead and
+growing clip remained visible after the recording transport-readiness fix.
+Opening input causes one short, intentional pause while the output-only device
+is replaced; no input is kept warm to hide that transition. After Stop, the
+verified report returned to `playbackOnly` at 44.1 kHz and 512 frames with the
+callback attached, two active outputs, zero active inputs, `inputOpen: false`,
+and zero callback-budget overruns. The microphone indicator disappeared.
+
 ### Phase 8 — Complete A/B hardware validation
 
 Run Legacy and V2 with the same build, project, device, headset, actions, and
@@ -1091,7 +1124,7 @@ Each run records:
 
 ## Immediate next step
 
-Commit the accepted Checkpoint 6C.3 as one focused change while keeping Legacy
-the default. macOS, Android, and iOS then share the same verified playback
-contract. The next implementation checkpoint is intent-driven recording and
-input lifecycle; it must remain separate from playback recovery.
+Checkpoint 7A passed its automated and physical Mac gates. Commit it as one
+focused change. The following checkpoint permits preconnected Bluetooth media
+output while retaining the same verified, just-in-time built-in-microphone
+lifecycle; Bluetooth headset input remains forbidden.

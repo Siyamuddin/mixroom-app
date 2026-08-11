@@ -146,6 +146,39 @@ void main() {
               'captureConsistency': 'stable',
             },
           };
+        case 'setAudioRouteIntentV2':
+          final arguments =
+              Map<String, dynamic>.from(methodCall.arguments as Map);
+          final generation = (arguments['generation'] as num).toInt();
+          final intent = arguments['intent']?.toString() ?? 'playbackOnly';
+          final snapshot = _v2Snapshot();
+          snapshot['generation'] = generation;
+          snapshot['transitionId'] = 2;
+          snapshot['coordinatorManaged'] = true;
+          snapshot['intent'] = intent;
+          if (intent != 'playbackOnly') {
+            snapshot['inputs'] = <Map<String, dynamic>>[
+              <String, dynamic>{
+                'direction': 'input',
+                'nativePortType': 'builtIn',
+                'normalizedKind': 'builtIn',
+                'uid': 'built-in-input',
+                'name': 'Built-in Microphone',
+                'channelCount': 1,
+              },
+            ];
+            final juce = snapshot['juce']! as Map<String, dynamic>;
+            juce['activeInputChannels'] = 1;
+          }
+          return <String, dynamic>{
+            'status': 'success',
+            'generation': generation,
+            'transitionId': 2,
+            'diagnosticCode': 'ok',
+            'elapsedMs': 4,
+            'transportWasPlaying': false,
+            'snapshot': snapshot,
+          };
         case 'stopAudioRouteMonitoringV2':
           return null;
         case 'getInputDeviceInfos':
@@ -447,6 +480,35 @@ void main() {
       );
     });
   }
+
+  test('macOS V2 recording intent uses the isolated native contract', () async {
+    final result = await JuceAudioEngine.setAudioRouteIntentV2(
+      AudioRouteIntentV2.preparingRecording,
+      generation: 7,
+      platformOverride: TargetPlatform.macOS,
+    );
+
+    expect(result.succeeded, isTrue);
+    expect(result.snapshot.intent, AudioRouteIntentV2.preparingRecording);
+    expect(result.snapshot.juce.activeInputChannels, 1);
+    expect(calls.single.method, 'setAudioRouteIntentV2');
+    expect(
+      Map<String, dynamic>.from(calls.single.arguments as Map)['intent'],
+      'preparingRecording',
+    );
+  });
+
+  test('recording intent remains native-call-free off macOS', () async {
+    final result = await JuceAudioEngine.setAudioRouteIntentV2(
+      AudioRouteIntentV2.preparingRecording,
+      generation: 2,
+      platformOverride: TargetPlatform.iOS,
+    );
+
+    expect(result.succeeded, isFalse);
+    expect(result.diagnosticCode, 'recording_route_unsupported');
+    expect(calls, isEmpty);
+  });
 
   test('loadClip sends rowId + timeline payload', () async {
     await JuceAudioEngine.loadClip(
