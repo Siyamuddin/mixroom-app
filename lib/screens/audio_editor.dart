@@ -20550,7 +20550,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _showSmallNotice(
             result.diagnosticCode == 'bluetooth_input_forbidden'
                 ? 'Bluetooth microphones are not supported. Use the built-in Mac microphone.'
-                : 'Built-in Mac recording is unavailable for the current audio route.',
+                : 'Recording with the built-in Mac microphone is unavailable for the current output.',
           );
         }
         return false;

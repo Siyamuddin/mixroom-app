@@ -824,6 +824,30 @@ static BOOL MixroomOutputNameIsUnique(
     return MixroomExactDeviceMatches(inventory, target[@"name"], NO).count == 1;
 }
 
+static BOOL MixroomOutputSupportsV2Recording(
+    NSArray<NSDictionary<NSString *, id> *> *inventory,
+    NSDictionary<NSString *, id> *output
+) {
+    if (output == nil || [output[@"uid"] length] == 0 ||
+        !MixroomCoreAudioDeviceIsAlive([output[@"deviceID"] unsignedIntValue]) ||
+        !MixroomOutputNameIsUnique(inventory, output)) {
+        return NO;
+    }
+    NSNumber *channels = output[@"outputChannels"];
+    if ((id)channels == [NSNull null] || channels.integerValue <= 0) {
+        return NO;
+    }
+    const UInt32 transport = [output[@"transport"] unsignedIntValue];
+    if (transport == kAudioDeviceTransportTypeBuiltIn) {
+        return YES;
+    }
+    // Classic Bluetooth is the only Bluetooth recording-output combination
+    // covered by this checkpoint. Requiring stereo output also rejects the
+    // observable call-quality shape without guessing a profile from its name.
+    return transport == kAudioDeviceTransportTypeBluetooth &&
+        channels.integerValue >= 2;
+}
+
 static NSString *MixroomEffectiveOutputFingerprint(void) {
     AudioDeviceID deviceID = MixroomDefaultCoreAudioOutputDevice();
     NSArray<NSDictionary<NSString *, id> *> *inventory =
@@ -953,6 +977,47 @@ static NSDictionary<NSString *, id> *MixroomRouteEndpoint(
         @"channelCount": device[input ? @"inputChannels" : @"outputChannels"]
             ?: [NSNull null],
     };
+}
+
+static BOOL MixroomEndpointMatchesCoreAudioDevice(
+    NSDictionary<NSString *, id> *endpoint,
+    NSDictionary<NSString *, id> *device,
+    BOOL input
+) {
+    if (endpoint == nil || device == nil || [device[@"uid"] length] == 0) {
+        return NO;
+    }
+    NSString *expectedKind = MixroomNormalizedMacRouteKind(
+        [device[@"transport"] unsignedIntValue], input, NO);
+    return [endpoint[@"uid"] isEqualToString:device[@"uid"]] &&
+        [endpoint[@"nativePortType"] isEqualToString:device[@"rawTransport"]] &&
+        [endpoint[@"normalizedKind"] isEqualToString:expectedKind];
+}
+
+static BOOL MixroomSnapshotMatchesRecordingRoute(
+    NSDictionary<NSString *, id> *snapshot,
+    NSDictionary<NSString *, id> *input,
+    NSDictionary<NSString *, id> *output
+) {
+    NSArray *inputs = [snapshot[@"inputs"] isKindOfClass:[NSArray class]]
+        ? snapshot[@"inputs"] : @[];
+    NSArray *outputs = [snapshot[@"outputs"] isKindOfClass:[NSArray class]]
+        ? snapshot[@"outputs"] : @[];
+    NSDictionary *juce = [snapshot[@"juce"] isKindOfClass:[NSDictionary class]]
+        ? snapshot[@"juce"] : @{};
+    NSDictionary *actualInput = inputs.count == 1 ? inputs.firstObject : nil;
+    NSDictionary *actualOutput = outputs.count == 1 ? outputs.firstObject : nil;
+    return [snapshot[@"captureConsistency"] isEqualToString:@"stable"] &&
+        MixroomEndpointMatchesCoreAudioDevice(actualInput, input, YES) &&
+        MixroomEndpointMatchesCoreAudioDevice(actualOutput, output, NO) &&
+        [actualInput[@"normalizedKind"] isEqualToString:@"builtIn"] &&
+        ![actualOutput[@"normalizedKind"] isEqualToString:@"bluetoothDuplex"] &&
+        [juce[@"deviceOpen"] boolValue] &&
+        [juce[@"audioCallbackAttached"] boolValue] &&
+        [juce[@"activeInputChannels"] integerValue] == 1 &&
+        [juce[@"activeOutputChannels"] integerValue] > 0 &&
+        [juce[@"sampleRateHz"] doubleValue] > 1000.0 &&
+        [juce[@"bufferFrames"] integerValue] > 0;
 }
 #endif
 
@@ -1669,12 +1734,10 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         NSDictionary<NSString *, id> *output =
             MixroomOutputForDeviceID(inventory, defaultOutputID);
         NSString *expectedFingerprint = MixroomEffectiveOutputFingerprint();
-        const BOOL builtInOutput = output != nil &&
-            [output[@"transport"] unsignedIntValue] == kAudioDeviceTransportTypeBuiltIn &&
-            [output[@"uid"] length] > 0 &&
-            MixroomOutputNameIsUnique(inventory, output);
+        const BOOL supportedRecordingOutput =
+            MixroomOutputSupportsV2Recording(inventory, output);
 
-        if (!builtInOutput) {
+        if (!supportedRecordingOutput) {
             diagnosticCode = @"recording_route_unsupported";
         } else if ([intent isEqualToString:@"preparingRecording"]) {
             NSDictionary<NSString *, id> *input = MixroomUniqueBuiltInInput(inventory);
@@ -1691,36 +1754,34 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 diagnosticCode = @"juce_reopen_failed";
             } else {
                 NSDictionary *snapshot = [self buildAudioRouteSnapshotV2];
-                NSArray *inputs = [snapshot[@"inputs"] isKindOfClass:[NSArray class]]
-                    ? snapshot[@"inputs"] : @[];
-                NSArray *outputs = [snapshot[@"outputs"] isKindOfClass:[NSArray class]]
-                    ? snapshot[@"outputs"] : @[];
-                NSDictionary *juce = [snapshot[@"juce"] isKindOfClass:[NSDictionary class]]
-                    ? snapshot[@"juce"] : @{};
-                NSDictionary *actualInput = inputs.count == 1 ? inputs.firstObject : nil;
-                NSDictionary *actualOutput = outputs.count == 1 ? outputs.firstObject : nil;
                 if (generation != self.audioRouteGenerationV2 ||
                     ![MixroomEffectiveOutputFingerprint() isEqualToString:expectedFingerprint]) {
                     diagnosticCode = @"stale_generation";
                 } else if (![snapshot[@"captureConsistency"] isEqualToString:@"stable"]) {
                     diagnosticCode = @"route_unstable";
-                } else if (![juce[@"deviceOpen"] boolValue] ||
-                           [juce[@"audioCallbackAttached"] boolValue] == NO ||
-                           [juce[@"activeInputChannels"] integerValue] != 1 ||
-                           [juce[@"activeOutputChannels"] integerValue] <= 0 ||
-                           [juce[@"sampleRateHz"] doubleValue] <= 1000.0 ||
-                           [juce[@"bufferFrames"] integerValue] <= 0 ||
-                           ![actualInput[@"uid"] isEqualToString:input[@"uid"]] ||
-                           ![actualOutput[@"uid"] isEqualToString:output[@"uid"]]) {
+                } else if (!MixroomSnapshotMatchesRecordingRoute(
+                               snapshot, input, output)) {
                     diagnosticCode = @"actual_state_unavailable";
                 } else {
                     success = YES;
                 }
             }
         } else if ([intent isEqualToString:@"recording"]) {
-            success = [JuceBridge validateRecordingRouteV2ObjC] &&
-                [JuceBridge isRecordingObjC];
-            if (!success) diagnosticCode = @"actual_state_unavailable";
+            NSDictionary<NSString *, id> *input = MixroomUniqueBuiltInInput(inventory);
+            NSDictionary *snapshot = [self buildAudioRouteSnapshotV2];
+            if (generation != self.audioRouteGenerationV2) {
+                diagnosticCode = @"stale_generation";
+            } else if (![MixroomEffectiveOutputFingerprint()
+                           isEqualToString:expectedFingerprint] ||
+                       ![snapshot[@"captureConsistency"] isEqualToString:@"stable"]) {
+                diagnosticCode = @"route_unstable";
+            } else {
+                success = input != nil &&
+                    MixroomSnapshotMatchesRecordingRoute(snapshot, input, output) &&
+                    [JuceBridge validateRecordingRouteV2ObjC] &&
+                    [JuceBridge isRecordingObjC];
+                if (!success) diagnosticCode = @"actual_state_unavailable";
+            }
         } else {
             [JuceBridge stopRecordingObjC];
             success = [JuceBridge reconfigurePlaybackRouteV2ObjC:output[@"name"]];

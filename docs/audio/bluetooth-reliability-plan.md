@@ -976,6 +976,33 @@ verified report returned to `playbackOnly` at 44.1 kHz and 512 frames with the
 callback attached, two active outputs, zero active inputs, `inputOpen: false`,
 and zero callback-budget overruns. The microphone indicator disappeared.
 
+#### Checkpoint 7B — macOS Bluetooth output with built-in microphone
+
+The next recording combination reuses Checkpoint 7A without adding another
+route owner or recovery path. A stable, system-selected classic Bluetooth
+output may remain active while the coordinator opens exactly one built-in Mac
+input just in time. The native readback must retain the output UID, transport,
+and stereo shape, resolve the input as built-in, and report one active input.
+Bluetooth input, Bluetooth LE, external input, ambiguous identity, and duplex
+output remain unsupported.
+
+JUCE's existing separate Core Audio input/output path selects only a common
+native rate and buffer; Mixroom does not create a persistent macOS aggregate
+device or impose project hardware settings. Failure restores the same verified
+output-only route once. A route change during recording keeps the existing
+safe boundary and requires reopening the editor.
+
+Physical acceptance passed on 2026-08-12 with a WF-1000XM5. Playback-only used
+the classic Bluetooth stereo output at 44.1 kHz and 512 frames with zero active
+inputs, even though macOS exposed the headset microphone separately. Recording
+opened only the built-in Mac microphone as one mono input, retained the same
+Bluetooth output, kept the callback attached, and recorded a valid mono WAV.
+Stop restored the same output at 44.1 kHz and 512 frames with zero inputs and
+`inputOpen: false`. Playback remained clean and did not enter call-quality
+mode. Repeated Record/Stop, a quick cancellation, and Bluetooth disconnection
+during recording all passed; disconnection safely required an editor reopen
+without a crash or freeze.
+
 ### Phase 8 — Complete A/B hardware validation
 
 Run Legacy and V2 with the same build, project, device, headset, actions, and
@@ -1124,7 +1151,9 @@ Each run records:
 
 ## Immediate next step
 
-Checkpoint 7A passed its automated and physical Mac gates. Commit it as one
-focused change. The following checkpoint permits preconnected Bluetooth media
-output while retaining the same verified, just-in-time built-in-microphone
-lifecycle; Bluetooth headset input remains forbidden.
+Checkpoint 7B passed its automated and physical Mac gates. Commit it as one
+focused change. The following recording checkpoint should add explicit macOS
+input selection without weakening output-only playback: supported non-Bluetooth
+inputs first, then Bluetooth headset input as an intentional duplex/call-quality
+mode with a clear user notice and verified restoration to media-quality output
+after recording.
