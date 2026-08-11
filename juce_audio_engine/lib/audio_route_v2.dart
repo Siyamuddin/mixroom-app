@@ -507,45 +507,6 @@ class AudioRouteChangeEventV2 {
   }
 }
 
-class AudioRouteObservationEventV2 {
-  const AudioRouteObservationEventV2({
-    required this.generation,
-    required this.cause,
-    required this.transportWasPlaying,
-    required this.callbackDetached,
-    required this.deviceClosed,
-    required this.snapshot,
-  });
-
-  final int generation;
-  final String cause;
-  final bool transportWasPlaying;
-  final bool callbackDetached;
-  final bool deviceClosed;
-  final AudioRouteSnapshotV2 snapshot;
-
-  factory AudioRouteObservationEventV2.fromMap(Map<String, dynamic> map) {
-    final rawSnapshot = map['snapshot'];
-    return AudioRouteObservationEventV2(
-      generation: _nullableInt(map['generation']) ?? 0,
-      cause: map['cause']?.toString() ?? 'unknown',
-      transportWasPlaying: map['transportWasPlaying'] == true,
-      callbackDetached: map['callbackDetached'] == true,
-      deviceClosed: map['deviceClosed'] == true,
-      snapshot: AudioRouteSnapshotV2.fromMap(
-        rawSnapshot is Map
-            ? Map<String, dynamic>.from(rawSnapshot)
-            : <String, dynamic>{
-                'captureConsistency': 'unavailable',
-                'unavailableReasons': <String, String>{
-                  'observationEvent.snapshot': 'missingFromNativeEvent',
-                },
-              },
-      ),
-    );
-  }
-}
-
 class AudioRouteTransitionResultV2 {
   const AudioRouteTransitionResultV2({
     required this.status,

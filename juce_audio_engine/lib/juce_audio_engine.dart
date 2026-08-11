@@ -294,11 +294,6 @@ class JuceAudioEngine {
       .where((event) => event['event'] == 'audioRouteChangedV2')
       .map(AudioRouteChangeEventV2.fromMap);
 
-  static Stream<AudioRouteObservationEventV2>
-      get audioRouteObservationEventsV2 => _events
-          .where((event) => event['event'] == 'audioRouteObservedV2')
-          .map(AudioRouteObservationEventV2.fromMap);
-
   static void initialiseEventListeners() {
     try {
       _events.listen(
@@ -426,7 +421,8 @@ class JuceAudioEngine {
     final platform = platformOverride ?? defaultTargetPlatform;
     if (kIsWeb ||
         (platform != TargetPlatform.macOS &&
-            platform != TargetPlatform.android)) {
+            platform != TargetPlatform.android &&
+            platform != TargetPlatform.iOS)) {
       return _unavailableRouteSnapshotV2('platformMonitoringUnavailable');
     }
     try {
@@ -453,7 +449,8 @@ class JuceAudioEngine {
     final platform = platformOverride ?? defaultTargetPlatform;
     if (kIsWeb ||
         (platform != TargetPlatform.macOS &&
-            platform != TargetPlatform.android)) {
+            platform != TargetPlatform.android &&
+            platform != TargetPlatform.iOS)) {
       return _unavailableRouteTransitionV2(generation);
     }
     try {
@@ -487,7 +484,8 @@ class JuceAudioEngine {
     final platform = platformOverride ?? defaultTargetPlatform;
     if (kIsWeb ||
         (platform != TargetPlatform.macOS &&
-            platform != TargetPlatform.android)) {
+            platform != TargetPlatform.android &&
+            platform != TargetPlatform.iOS)) {
       return;
     }
     try {
@@ -3051,36 +3049,6 @@ class JuceAudioEngine {
 
   static Future<AudioRouteSnapshotV2> getAudioRouteSnapshotV2() {
     return _audioRouteSnapshotProviderV2.readSnapshot();
-  }
-
-  static Future<bool> startIOSAudioRouteObservationV2({
-    TargetPlatform? platformOverride,
-  }) async {
-    final platform = platformOverride ?? defaultTargetPlatform;
-    if (kIsWeb || platform != TargetPlatform.iOS) return false;
-    try {
-      return await _ch.invokeMethod<bool>('startAudioRouteObservationV2') ??
-          false;
-    } on MissingPluginException {
-      return false;
-    } on PlatformException catch (error) {
-      _logError('startIOSAudioRouteObservationV2', error);
-      return false;
-    }
-  }
-
-  static Future<void> stopIOSAudioRouteObservationV2({
-    TargetPlatform? platformOverride,
-  }) async {
-    final platform = platformOverride ?? defaultTargetPlatform;
-    if (kIsWeb || platform != TargetPlatform.iOS) return;
-    try {
-      await _ch.invokeMethod<void>('stopAudioRouteObservationV2');
-    } on MissingPluginException {
-      return;
-    } on PlatformException catch (error) {
-      _logError('stopIOSAudioRouteObservationV2', error);
-    }
   }
 
   static Future<void> setLiveInputMonitoringEnabled(bool enabled) async {

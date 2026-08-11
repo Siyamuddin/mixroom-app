@@ -2604,9 +2604,13 @@ bool JuceEngine::quiescePlaybackRouteV2(bool closeRemovedDevice)
 
 bool JuceEngine::reconfigurePlaybackRouteV2(const juce::String &outputDeviceName)
 {
-#if JUCE_MAC && !JUCE_IOS
-    if (!engineInitialized || !isV2PlaybackSession() || outputDeviceName.isEmpty())
+#if (JUCE_MAC && !JUCE_IOS) || JUCE_IOS
+    if (!engineInitialized || !isV2PlaybackSession())
         return false;
+#if JUCE_MAC && !JUCE_IOS
+    if (outputDeviceName.isEmpty())
+        return false;
+#endif
 
     quiescePlaybackRouteV2(false);
     if (!openPlaybackOutputOnlyV2(outputDeviceName))

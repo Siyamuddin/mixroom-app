@@ -5678,11 +5678,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   final Set<LogicalKeyboardKey> _desktopMidiHeldKeys = <LogicalKeyboardKey>{};
   Timer? _midiDevicePollTimer;
   StreamSubscription<Map<String, dynamic>>? _juceEngineEventSubscription;
-  StreamSubscription<AudioRouteObservationEventV2>?
-      _iosAudioRouteObservationSubscriptionV2;
   AudioRouteCoordinatorV2? _audioRouteCoordinatorV2;
-  int _lastIOSAudioRouteObservationGenerationV2 = 0;
-  bool _iosAudioRouteReopenRequiredV2 = false;
   StreamSubscription<List<DesktopFileDropItem>>? _desktopFinderDropSub;
   bool _midiDevicePollBusy = false;
   Map<String, String> _knownMidiDevicesById = <String, String>{};
@@ -9238,7 +9234,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _juceEngineEventSubscription ??= JuceAudioEngine.eventsStream.listen(
         _handleJuceEngineEvent,
       );
-      if (_isBluetoothV2Session && _usesLiveAudioRouteCoordinatorV2) {
+      if (_isBluetoothV2Session &&
+          _usesLiveAudioRouteCoordinatorV2 &&
+          !Platform.isIOS) {
         final coordinator = AudioRouteCoordinatorV2(
           adapter: const MethodChannelAudioRouteAdapterV2(),
           onStateChanged: _handleAudioRouteCoordinatorStateV2,
@@ -9289,15 +9287,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
       if (_isBluetoothV2Session && Platform.isIOS) {
-        _iosAudioRouteObservationSubscriptionV2 ??= JuceAudioEngine
-            .audioRouteObservationEventsV2
-            .listen(_handleIOSAudioRouteObservationV2);
-        final observationStarted =
-            await JuceAudioEngine.startIOSAudioRouteObservationV2();
-        if (!observationStarted) {
-          await _iosAudioRouteObservationSubscriptionV2?.cancel();
-          _iosAudioRouteObservationSubscriptionV2 = null;
-          debugPrint('iOS Bluetooth V2 route safety observation unavailable');
+        final coordinator = AudioRouteCoordinatorV2(
+          adapter: const MethodChannelAudioRouteAdapterV2(),
+          onStateChanged: _handleAudioRouteCoordinatorStateV2,
+          onTransition: _handleAudioRouteTransitionV2,
+        );
+        _audioRouteCoordinatorV2 = coordinator;
+        final initialRoute = await coordinator.start();
+        if (!mounted) {
+          await _shutdownAudioEngineV2Aware();
+          return;
+        }
+        if (initialRoute.captureConsistency ==
+            AudioRouteCaptureConsistencyV2.unavailable) {
+          await _shutdownAudioEngineV2Aware();
+          _showSmallNotice('Bluetooth 2.0 route monitoring is unavailable.');
+          setState(() => _isLoadingNextScreen = false);
+          return;
         }
       }
       if (!_isBluetoothV2Session) {
@@ -12462,12 +12468,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _shutdownAudioEngineV2Aware() async {
-    final iosObservationSubscription = _iosAudioRouteObservationSubscriptionV2;
-    _iosAudioRouteObservationSubscriptionV2 = null;
-    if (Platform.isIOS && _isBluetoothV2Session) {
-      await JuceAudioEngine.stopIOSAudioRouteObservationV2();
-    }
-    await iosObservationSubscription?.cancel();
     final coordinator = _audioRouteCoordinatorV2;
     _audioRouteCoordinatorV2 = null;
     await coordinator?.dispose();
@@ -12579,14 +12579,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<bool> _ensurePlaybackRouteReady({required String reason}) async {
     if (_isBluetoothV2Session) {
-      if (Platform.isIOS && _iosAudioRouteReopenRequiredV2) {
-        if (mounted) {
-          _showSmallNotice(
-            'Audio output changed. Reopen the audio editor to continue.',
-          );
-        }
-        return false;
-      }
       if (_usesLiveAudioRouteCoordinatorV2 &&
           _audioRouteCoordinatorV2?.state !=
               AudioRouteCoordinatorStateV2.stable) {
@@ -12600,6 +12592,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _showSmallNotice(
           Platform.isAndroid
               ? 'Bluetooth 2.0 audio output is unavailable. Reopen the audio editor.'
+              : Platform.isIOS
+              ? 'Audio output is unavailable. Check the iOS audio output.'
               : 'Bluetooth 2.0 route changed. Reopen the audio editor.',
         );
       }
@@ -12624,32 +12618,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return ok;
   }
 
-  void _handleIOSAudioRouteObservationV2(AudioRouteObservationEventV2 event) {
-    if (!mounted || !_isBluetoothV2Session || !Platform.isIOS) return;
-    if (event.generation <= _lastIOSAudioRouteObservationGenerationV2) return;
-    _lastIOSAudioRouteObservationGenerationV2 = event.generation;
-    if (_iosAudioRouteReopenRequiredV2) return;
-
-    final pausedPosition = _isPlaying
-        ? _estimateTransportClockFromSample()
-        : _globalAudioClock;
-    _iosAudioRouteReopenRequiredV2 = true;
-    _transportDesiredPlaying = false;
-    final commandSerial = ++_transportCommandSerial;
-    _transportTicker?.stop();
-    setState(() {
-      _isPlaying = false;
-      _syncTransportClock(pausedPosition, playing: false);
-    });
-    _stopMeterPolling();
-    unawaited(
-      _synchronizeIOSRouteSafetyPositionV2(commandSerial: commandSerial),
-    );
-    _showSmallNotice(
-      'Audio output changed. Reopen the audio editor to continue.',
-    );
-  }
-
   Future<void> _synchronizeIOSRouteSafetyPositionV2({
     required int commandSerial,
   }) async {
@@ -12671,13 +12639,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ? _estimateTransportClockFromSample()
         : _globalAudioClock;
     _transportDesiredPlaying = false;
-    _transportCommandSerial++;
+    final commandSerial = ++_transportCommandSerial;
     _transportTicker?.stop();
     setState(() {
       _isPlaying = false;
       _syncTransportClock(pausedPosition, playing: false);
     });
     _stopMeterPolling();
+    if (Platform.isIOS) {
+      unawaited(
+        _synchronizeIOSRouteSafetyPositionV2(commandSerial: commandSerial),
+      );
+    }
   }
 
   void _handleAudioRouteTransitionV2(AudioRouteTransitionResultV2 result) {
@@ -12686,6 +12659,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _showSmallNotice(
         Platform.isAndroid
             ? 'Audio output is unavailable. Choose an output in Android.'
+            : Platform.isIOS
+            ? 'Audio output is unavailable. Check the iOS audio output.'
             : 'Audio output is unavailable. Choose an output in macOS.',
       );
       return;
@@ -12696,6 +12671,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _showSmallNotice(
         Platform.isAndroid
             ? 'Bluetooth disconnected. Using phone speaker. Press Play to continue.'
+            : Platform.isIOS
+            ? 'Bluetooth disconnected. Using built-in speaker. Press Play to continue.'
             : 'Audio device disconnected. Using Mac speakers. Press Play to continue.',
       );
       return;
@@ -12706,6 +12683,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ? ''
         : result.snapshot.outputs.first.name.trim();
     if (Platform.isAndroid) {
+      _showSmallNotice('Audio output changed. Press Play to continue.');
+    } else if (Platform.isIOS) {
       _showSmallNotice('Audio output changed. Press Play to continue.');
     } else {
       final outputName = juceName.isNotEmpty
@@ -40472,7 +40451,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   bool get _usesLiveAudioRouteCoordinatorV2 =>
-      Platform.isMacOS || Platform.isAndroid;
+      Platform.isMacOS || Platform.isAndroid || Platform.isIOS;
 
   Widget _buildMobileBluetoothV2DebugControls() {
     final session = _bluetoothImplementationSessionV2;

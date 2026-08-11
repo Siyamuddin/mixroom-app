@@ -148,10 +148,6 @@ void main() {
           };
         case 'stopAudioRouteMonitoringV2':
           return null;
-        case 'startAudioRouteObservationV2':
-          return true;
-        case 'stopAudioRouteObservationV2':
-          return null;
         case 'getInputDeviceInfos':
           return <Map<String, dynamic>>[
             <String, dynamic>{
@@ -208,38 +204,6 @@ void main() {
     expect(result.snapshot.implementation, BluetoothImplementationV2.v2);
     expect(calls, hasLength(1));
     expect(calls.single.method, 'initialisePlaybackV2');
-  });
-
-  test('iOS read-only route observation uses its isolated native methods',
-      () async {
-    final started = await JuceAudioEngine.startIOSAudioRouteObservationV2(
-      platformOverride: TargetPlatform.iOS,
-    );
-    await JuceAudioEngine.stopIOSAudioRouteObservationV2(
-      platformOverride: TargetPlatform.iOS,
-    );
-
-    expect(started, isTrue);
-    expect(
-      calls.map((call) => call.method),
-      <String>[
-        'startAudioRouteObservationV2',
-        'stopAudioRouteObservationV2',
-      ],
-    );
-  });
-
-  test('iOS route observation stays native-call-free on other platforms',
-      () async {
-    final started = await JuceAudioEngine.startIOSAudioRouteObservationV2(
-      platformOverride: TargetPlatform.android,
-    );
-    await JuceAudioEngine.stopIOSAudioRouteObservationV2(
-      platformOverride: TargetPlatform.macOS,
-    );
-
-    expect(started, isFalse);
-    expect(calls, isEmpty);
   });
 
   test('V2 playback initialization uses its native method on Android',
@@ -451,6 +415,7 @@ void main() {
   for (final platform in <TargetPlatform>[
     TargetPlatform.macOS,
     TargetPlatform.android,
+    TargetPlatform.iOS,
   ]) {
     test('V2 route coordinator uses the isolated native contract on $platform',
         () async {
@@ -482,26 +447,6 @@ void main() {
       );
     });
   }
-
-  test('V2 route coordinator methods stay native-call-free on iOS', () async {
-    final initial = await JuceAudioEngine.startAudioRouteMonitoringV2(
-      platformOverride: TargetPlatform.iOS,
-    );
-    final result = await JuceAudioEngine.applyAudioRouteConfigurationV2(
-      4,
-      platformOverride: TargetPlatform.iOS,
-    );
-    await JuceAudioEngine.stopAudioRouteMonitoringV2(
-      platformOverride: TargetPlatform.iOS,
-    );
-
-    expect(
-      initial.captureConsistency,
-      AudioRouteCaptureConsistencyV2.unavailable,
-    );
-    expect(result.succeeded, isFalse);
-    expect(calls, isEmpty);
-  });
 
   test('loadClip sends rowId + timeline payload', () async {
     await JuceAudioEngine.loadClip(

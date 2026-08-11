@@ -894,6 +894,35 @@ debug session recorded no `NativeEffects.h:28` assertion, `SIGTRAP`, crash, or
 debugger stop. The earlier `SIGKILL` was traced to two competing `flutter run`
 install sessions and is excluded from Bluetooth evidence.
 
+Checkpoint 6C.3 replaces the temporary reopen-required path with the existing
+shared `AudioRouteCoordinatorV2`. The proven iOS observer remains the only
+native route owner and emits the shared generation event after quiescing. The
+coordinator starts only after project loading, uses its existing 100 ms
+settling window, and requests one atomic output-only reopen. iOS configures
+playback/default, accepts the single system-selected output, rejects HFP or
+missing identity, opens JUCE once with zero inputs and native rate/buffer, then
+validates the route identity, session, device, callback, channels, rate, and
+buffer. A system-selected Bluetooth-to-speaker transition is the only fallback
+result. Failure closes the partial device and waits for a new route event;
+there is no polling, retry, forced route, Legacy repair, or automatic resume.
+Physical iPad acceptance remains required before commit.
+
+Physical automatic-recovery evidence (2026-08-11, iPad on iOS 26.5): one
+same-editor session completed speaker → A2DP, A2DP → speaker, Bluetooth
+power-off during playback, Bluetooth power-off while backgrounded, and five
+additional speaker/Bluetooth changes. Generations and transition IDs advanced
+monotonically from `1` through `11`. Every captured result was stable,
+playback/default, output-only, and callback-attached after recovery. A2DP used
+the accepted 44.1 kHz/256-frame configuration; the built-in speaker used 48
+kHz/256 frames. No microphone input opened, the single historical callback
+overrun did not grow, and the attached console recorded no
+`NativeEffects.h:28` assertion, `SIGTRAP`, crash, or debugger stop. Audio and
+MIDI resumed only after explicit user Play. A small bounded UI hitch was
+visible during each synchronous device replacement; it did not persist or
+affect recovered playback and is retained as known transition behavior rather
+than adding asynchronous lifecycle complexity. Repeated AudioQueue sample-rate
+probe messages (`err = -50`) did not prevent any verified JUCE reopen.
+
 Exit gate: zero crashes in the iOS route-change stress run, no input open during
 playback, and deterministic verified recovery or a clear failed state.
 
@@ -1062,9 +1091,7 @@ Each run records:
 
 ## Immediate next step
 
-Run the Checkpoint 6C.2 physical iPad gate. Verify that one foreground route
-change and one background Bluetooth power-off pause and invalidate the current
-V2 session, detach its callback, close a removed output, preserve position, and
-leave the editor responsive. Reopening the editor must restore ordinary
-playback on the newly selected system output. Automatic device reopening is the
-following checkpoint and must not be added until this safety gate passes.
+Commit the accepted Checkpoint 6C.3 as one focused change while keeping Legacy
+the default. macOS, Android, and iOS then share the same verified playback
+contract. The next implementation checkpoint is intent-driven recording and
+input lifecycle; it must remain separate from playback recovery.

@@ -10,126 +10,141 @@ String objectiveCMethod(String source, String signature) {
 }
 
 void main() {
-  test('iOS route observer applies only the bounded safety action', () {
-    final source = File(
-      'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
-    ).readAsStringSync();
-    final start = objectiveCMethod(
-      source,
-      '- (BOOL)startIOSAudioRouteObservationV2 {',
-    );
-    final handler = objectiveCMethod(
-      source,
-      '- (void)handleIOSObservedRouteChangeV2:(NSNotification *)notification {',
-    );
-    final combined = '$start\n$handler';
+  test(
+    'iOS uses one event-driven route observer for the shared coordinator',
+    () {
+      final source = File(
+        'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
+      ).readAsStringSync();
+      final start = objectiveCMethod(
+        source,
+        '- (BOOL)startIOSAudioRouteMonitoringV2 {',
+      );
+      final handler = objectiveCMethod(
+        source,
+        '- (void)handleIOSAudioRouteChangeV2:(NSNotification *)notification {',
+      );
 
-    expect(start, contains('AVAudioSessionRouteChangeNotification'));
-    expect(handler, contains('audioRouteObservedV2'));
-    expect(
-      handler,
-      contains('AVAudioSessionRouteChangeReasonOldDeviceUnavailable'),
-    );
-    expect(handler, contains('quiescePlaybackRouteV2ObjC:removed'));
-    expect(handler, contains('@"transportWasPlaying"'));
-    expect(handler, contains('@"callbackDetached"'));
-    expect(handler, contains('@"deviceClosed"'));
-    expect(
-      handler.indexOf('quiescePlaybackRouteV2ObjC:removed'),
-      lessThan(handler.indexOf('self.eventSink(@{')),
-    );
-    for (final forbidden in <String>[
-      'reconfigurePlaybackRouteV2',
-      'shutdownEngine',
-      'setCategory:',
-      'setMode:',
-      'setActive:',
-      'setPreferredInput:',
-      'overrideOutputAudioPort:',
-    ]) {
-      expect(combined, isNot(contains(forbidden)));
-    }
+      expect(start, contains('AVAudioSessionRouteChangeNotification'));
+      expect(start, contains('UIApplicationDidBecomeActiveNotification'));
+      expect(handler, contains('audioRouteChangedV2'));
+      expect(handler, contains('quiescePlaybackRouteV2ObjC:removed'));
+      expect(handler, contains('self.audioRouteGenerationV2 += 1'));
+      expect(
+        handler.indexOf('quiescePlaybackRouteV2ObjC:removed'),
+        lessThan(handler.indexOf('self.eventSink(@{')),
+      );
+      for (final forbidden in <String>[
+        'reconfigurePlaybackRouteV2',
+        'setCategory:',
+        'setMode:',
+        'setPreferredInput:',
+        'overrideOutputAudioPort:',
+        'dispatch_after',
+      ]) {
+        expect(handler, isNot(contains(forbidden)));
+      }
+      expect(source, isNot(contains('audioRouteObservedV2')));
+      expect(source, isNot(contains('startAudioRouteObservationV2')));
+    },
+  );
 
-    expect(
-      source,
-      contains(
-        'else if ([call.method isEqualToString:'
-        '@"startAudioRouteObservationV2"])',
-      ),
-    );
-    expect(
-      source,
-      contains(
-        'else if ([call.method isEqualToString:'
-        '@"stopAudioRouteObservationV2"])',
-      ),
-    );
-  });
-
-  test('iOS observation subscribes after loading and before native start', () {
+  test('iOS coordinator starts after project loading', () {
     final source = File('lib/screens/audio_editor.dart').readAsStringSync();
     final projectLoad = source.indexOf('await _loadProjectIfAny();');
-    final observerSubscription = source.indexOf(
-      '.audioRouteObservationEventsV2',
+    final iosCoordinator = source.indexOf(
+      'if (_isBluetoothV2Session && Platform.isIOS)',
+      projectLoad,
     );
-    final observerStart = source.indexOf(
-      'await JuceAudioEngine.startIOSAudioRouteObservationV2();',
+    final coordinatorStart = source.indexOf(
+      'final initialRoute = await coordinator.start();',
+      iosCoordinator,
     );
 
     expect(projectLoad, isNonNegative);
-    expect(observerSubscription, greaterThan(projectLoad));
-    expect(observerStart, greaterThan(observerSubscription));
+    expect(iosCoordinator, greaterThan(projectLoad));
+    expect(coordinatorStart, greaterThan(iosCoordinator));
+    expect(source, isNot(contains('_iosAudioRouteReopenRequiredV2')));
+    expect(source, isNot(contains('audioRouteObservationEventsV2')));
   });
 
-  test('iOS safety invalidates transport and requires editor reopen', () {
+  test('iOS transition pauses UI and keeps manual resume policy', () {
     final source = File('lib/screens/audio_editor.dart').readAsStringSync();
-    final handlerStart = source.indexOf(
-      'void _handleIOSAudioRouteObservationV2(',
-    );
-    final handlerEnd = source.indexOf(
+    final stateStart = source.indexOf(
       'void _handleAudioRouteCoordinatorStateV2(',
-      handlerStart,
     );
-    expect(handlerStart, isNonNegative);
-    expect(handlerEnd, greaterThan(handlerStart));
-    final handler = source.substring(handlerStart, handlerEnd);
+    final transitionStart = source.indexOf(
+      'void _handleAudioRouteTransitionV2(',
+      stateStart,
+    );
+    final nextMethod = source.indexOf('\n  Future<', transitionStart);
+    final stateHandler = source.substring(stateStart, transitionStart);
+    final transitionHandler = source.substring(transitionStart, nextMethod);
 
-    expect(handler, contains('_iosAudioRouteReopenRequiredV2 = true'));
-    expect(handler, contains('_transportDesiredPlaying = false'));
-    expect(handler, contains('++_transportCommandSerial'));
-    expect(handler, contains('_transportTicker?.stop()'));
-    expect(handler, contains('_stopMeterPolling()'));
+    expect(stateHandler, contains('_transportDesiredPlaying = false'));
+    expect(stateHandler, contains('++_transportCommandSerial'));
+    expect(stateHandler, contains('_transportTicker?.stop()'));
+    expect(stateHandler, contains('_stopMeterPolling()'));
+    expect(stateHandler, contains('_synchronizeIOSRouteSafetyPositionV2'));
     expect(
-      source,
-      contains('Audio output changed. Reopen the audio editor to continue.'),
+      transitionHandler,
+      contains('Audio output changed. Press Play to continue.'),
     );
     expect(
-      source.indexOf('stopIOSAudioRouteObservationV2();'),
-      lessThan(source.indexOf('await JuceAudioEngine.shutdown();')),
+      transitionHandler,
+      contains(
+        'Bluetooth disconnected. Using built-in speaker. Press Play to continue.',
+      ),
     );
+    expect(transitionHandler, isNot(contains('_playAudio(')));
   });
 
-  test('shared quiesce helper supports iOS without reopening audio', () {
+  test('shared output-only reconfigure helper supports iOS', () {
     final source = File(
       'juce_audio_engine/ios/Classes/JuceEngine.cpp',
     ).readAsStringSync();
     final start = source.indexOf(
-      'bool JuceEngine::quiescePlaybackRouteV2(bool closeRemovedDevice)',
+      'bool JuceEngine::reconfigurePlaybackRouteV2(',
     );
     final end = source.indexOf(
-      'bool JuceEngine::reconfigurePlaybackRouteV2(',
+      'juce::String JuceEngine::getAudioRouteImplementationName()',
       start,
     );
-    expect(start, isNonNegative);
-    expect(end, greaterThan(start));
     final helper = source.substring(start, end);
 
     expect(helper, contains('JUCE_IOS'));
-    expect(helper, contains('pause();'));
-    expect(helper, contains('removeAudioCallback'));
-    expect(helper, contains('if (closeRemovedDevice)'));
-    expect(helper, contains('closeAudioDevice();'));
-    expect(helper, isNot(contains('openPlaybackOutputOnlyV2')));
-    expect(helper, isNot(contains('reconfigurePlaybackRouteV2')));
+    expect(helper, contains('quiescePlaybackRouteV2(false)'));
+    expect(helper, contains('openPlaybackOutputOnlyV2(outputDeviceName)'));
+    expect(helper, contains('prepareLiveClipProcessorsForCurrentDevice()'));
+    expect(helper, contains('addAudioCallback'));
+    expect(helper, isNot(contains('applyPreferredAudioDeviceSetup')));
+  });
+
+  test('iOS atomic apply validates one route and has no recovery chain', () {
+    final source = File(
+      'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
+    ).readAsStringSync();
+    final apply = objectiveCMethod(
+      source,
+      '- (NSDictionary<NSString *, id> *)applyAudioRouteConfigurationV2:(NSDictionary *)args {',
+    );
+
+    expect(apply, contains('MixroomConfigureIOSPlaybackSession'));
+    expect(apply, contains('MixroomIOSSingleOutputEndpoint'));
+    expect(apply, contains('MixroomIOSOutputIdentitiesMatch'));
+    expect(apply, contains('bluetooth_duplex_forbidden'));
+    expect(apply, contains('juce_reopen_failed'));
+    expect(apply, contains('fallback_succeeded'));
+    expect(apply, contains('reconfigurePlaybackRouteV2ObjC:@""'));
+    for (final forbidden in <String>[
+      'preparePlaybackRouteObjC',
+      'refreshAudioRouteObjC',
+      'setPreferredInput:',
+      'overrideOutputAudioPort:',
+      'dispatch_after',
+      'performSelector:afterDelay:',
+    ]) {
+      expect(apply, isNot(contains(forbidden)));
+    }
   });
 }
