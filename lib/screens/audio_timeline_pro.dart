@@ -38,13 +38,13 @@ class _QuantizePreset {
   });
 }
 
-class _SampleDropPlacement {
+class SampleDropPlacement {
   final int row;
   final double startMs;
   final double endMs;
   final bool allowed;
 
-  const _SampleDropPlacement({
+  const SampleDropPlacement({
     required this.row,
     required this.startMs,
     required this.endMs,
@@ -921,6 +921,11 @@ class AudioCanvasTimelineController {
   void Function(double deltaX)? _dragHorizontalScrollbarBy;
   VoidCallback? _endHorizontalScrollbarDrag;
   void Function(double localX)? _jumpHorizontalScrollbarTo;
+  void Function(Offset globalOffset, {SampleDragData? data})?
+      _updateExternalSampleDropPreview;
+  VoidCallback? _clearExternalSampleDropPreview;
+  SampleDropPlacement? Function(Offset globalOffset, {SampleDragData? data})?
+      _placementForExternalSampleDrop;
   final ValueNotifier<TimelineTopControlsState> _topControls =
       ValueNotifier<TimelineTopControlsState>(
     TimelineTopControlsState.initial,
@@ -956,6 +961,13 @@ class AudioCanvasTimelineController {
     required void Function(double deltaX) dragHorizontalScrollbarBy,
     required VoidCallback endHorizontalScrollbarDrag,
     required void Function(double localX) jumpHorizontalScrollbarTo,
+    required void Function(Offset globalOffset, {SampleDragData? data})
+        updateExternalSampleDropPreview,
+    required VoidCallback clearExternalSampleDropPreview,
+    required SampleDropPlacement? Function(
+      Offset globalOffset, {
+      SampleDragData? data,
+    }) placementForExternalSampleDrop,
   }) {
     _ensureRowExpanded = ensureRowExpanded;
     _showMasterAutomationLane = showMasterAutomationLane;
@@ -971,6 +983,9 @@ class AudioCanvasTimelineController {
     _dragHorizontalScrollbarBy = dragHorizontalScrollbarBy;
     _endHorizontalScrollbarDrag = endHorizontalScrollbarDrag;
     _jumpHorizontalScrollbarTo = jumpHorizontalScrollbarTo;
+    _updateExternalSampleDropPreview = updateExternalSampleDropPreview;
+    _clearExternalSampleDropPreview = clearExternalSampleDropPreview;
+    _placementForExternalSampleDrop = placementForExternalSampleDrop;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _publishTopControlsState?.call();
     });
@@ -991,6 +1006,13 @@ class AudioCanvasTimelineController {
     required void Function(double deltaX) dragHorizontalScrollbarBy,
     required VoidCallback endHorizontalScrollbarDrag,
     required void Function(double localX) jumpHorizontalScrollbarTo,
+    required void Function(Offset globalOffset, {SampleDragData? data})
+        updateExternalSampleDropPreview,
+    required VoidCallback clearExternalSampleDropPreview,
+    required SampleDropPlacement? Function(
+      Offset globalOffset, {
+      SampleDragData? data,
+    }) placementForExternalSampleDrop,
   }) {
     if (identical(_ensureRowExpanded, ensureRowExpanded)) {
       _ensureRowExpanded = null;
@@ -1039,6 +1061,24 @@ class AudioCanvasTimelineController {
     }
     if (identical(_jumpHorizontalScrollbarTo, jumpHorizontalScrollbarTo)) {
       _jumpHorizontalScrollbarTo = null;
+    }
+    if (identical(
+      _updateExternalSampleDropPreview,
+      updateExternalSampleDropPreview,
+    )) {
+      _updateExternalSampleDropPreview = null;
+    }
+    if (identical(
+      _clearExternalSampleDropPreview,
+      clearExternalSampleDropPreview,
+    )) {
+      _clearExternalSampleDropPreview = null;
+    }
+    if (identical(
+      _placementForExternalSampleDrop,
+      placementForExternalSampleDrop,
+    )) {
+      _placementForExternalSampleDrop = null;
     }
   }
 
@@ -1096,6 +1136,24 @@ class AudioCanvasTimelineController {
 
   void jumpHorizontalScrollbarTo(double localX) {
     _jumpHorizontalScrollbarTo?.call(localX);
+  }
+
+  void updateExternalSampleDropPreview(
+    Offset globalOffset, {
+    SampleDragData? data,
+  }) {
+    _updateExternalSampleDropPreview?.call(globalOffset, data: data);
+  }
+
+  void clearExternalSampleDropPreview() {
+    _clearExternalSampleDropPreview?.call();
+  }
+
+  SampleDropPlacement? placementForExternalSampleDrop(
+    Offset globalOffset, {
+    SampleDragData? data,
+  }) {
+    return _placementForExternalSampleDrop?.call(globalOffset, data: data);
   }
 
   void _setHorizontalScrollbarState(TimelineHorizontalScrollbarState state) {
@@ -4842,7 +4900,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     return 900.0;
   }
 
-  _SampleDropPlacement? _sampleDropPlacementForGlobalOffset(
+  SampleDropPlacement? _sampleDropPlacementForGlobalOffset(
     Offset globalOffset, {
     SampleDragData? data,
   }) {
@@ -4852,6 +4910,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (renderObject is! RenderBox || !renderObject.hasSize) {
       return null;
     }
+    // Finder drag locations are Flutter-view logical coordinates (top-left
+    // origin), which match DragTarget global coordinates on desktop.
     final local = renderObject.globalToLocal(globalOffset);
     if (local.dx < 0 ||
         local.dy < 0 ||
@@ -4866,7 +4926,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         .toDouble();
     final startMs = _magnetEnabled ? _segmentStartMsForTap(rawMs) : rawMs;
     final endMs = startMs + _sampleDropDurationMs(data);
-    return _SampleDropPlacement(
+    return SampleDropPlacement(
       row: row,
       startMs: startMs,
       endMs: endMs,
@@ -4902,6 +4962,17 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _externalSampleDropAllowed = placement.allowed;
     });
     return true;
+  }
+
+  void _updateExternalSampleDropPreviewForOsDrag(
+    Offset globalOffset, {
+    SampleDragData? data,
+  }) {
+    _updateExternalSampleDropPreview(
+      globalOffset,
+      data: data,
+      notifyEntered: true,
+    );
   }
 
   Rect? _currentSelectionRect() {
@@ -5479,6 +5550,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       dragHorizontalScrollbarBy: _dragHorizontalScrollbarByDelta,
       endHorizontalScrollbarDrag: _endHorizontalScrollbarDrag,
       jumpHorizontalScrollbarTo: _jumpHorizontalScrollbarToLocalX,
+      updateExternalSampleDropPreview: _updateExternalSampleDropPreviewForOsDrag,
+      clearExternalSampleDropPreview: _clearExternalSampleDropPreview,
+      placementForExternalSampleDrop: _sampleDropPlacementForGlobalOffset,
     );
     _syncRowUiState();
     _verticalScrollController.addListener(() {
@@ -5524,6 +5598,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         dragHorizontalScrollbarBy: _dragHorizontalScrollbarByDelta,
         endHorizontalScrollbarDrag: _endHorizontalScrollbarDrag,
         jumpHorizontalScrollbarTo: _jumpHorizontalScrollbarToLocalX,
+        updateExternalSampleDropPreview:
+            _updateExternalSampleDropPreviewForOsDrag,
+        clearExternalSampleDropPreview: _clearExternalSampleDropPreview,
+        placementForExternalSampleDrop: _sampleDropPlacementForGlobalOffset,
       );
       widget.controller?._bind(
         ensureRowExpanded: ensureRowExpanded,
@@ -5540,6 +5618,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         dragHorizontalScrollbarBy: _dragHorizontalScrollbarByDelta,
         endHorizontalScrollbarDrag: _endHorizontalScrollbarDrag,
         jumpHorizontalScrollbarTo: _jumpHorizontalScrollbarToLocalX,
+        updateExternalSampleDropPreview:
+            _updateExternalSampleDropPreviewForOsDrag,
+        clearExternalSampleDropPreview: _clearExternalSampleDropPreview,
+        placementForExternalSampleDrop: _sampleDropPlacementForGlobalOffset,
       );
     }
     if (oldWidget.clips.length != widget.clips.length) {
@@ -5659,6 +5741,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       dragHorizontalScrollbarBy: _dragHorizontalScrollbarByDelta,
       endHorizontalScrollbarDrag: _endHorizontalScrollbarDrag,
       jumpHorizontalScrollbarTo: _jumpHorizontalScrollbarToLocalX,
+      updateExternalSampleDropPreview: _updateExternalSampleDropPreviewForOsDrag,
+      clearExternalSampleDropPreview: _clearExternalSampleDropPreview,
+      placementForExternalSampleDrop: _sampleDropPlacementForGlobalOffset,
     );
     widget.controller?._setHorizontalScrollbarState(
       TimelineHorizontalScrollbarState.hidden,
