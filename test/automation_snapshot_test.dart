@@ -91,6 +91,20 @@ void main() {
               AutomationPoint(x: 0.0, volume: 1.0),
             ],
           ),
+          AutomationLaneSnapshot(
+            targetId:
+                'instrument:${Uri.encodeComponent('clip-vital-01')}:${Uri.encodeComponent('filter_cutoff')}',
+            label: 'Vital • Filter Cutoff',
+            effectIndex: 42,
+            paramId: 'filter_cutoff',
+            type: 'float',
+            min: 0.0,
+            max: 1.0,
+            points: <AutomationPoint>[
+              AutomationPoint(x: 0.0, volume: 0.25),
+              AutomationPoint(x: 1000.0, volume: 0.8),
+            ],
+          ),
         ],
         automationClips: <AutomationClipSnapshot>[
           AutomationClipSnapshot(
@@ -132,7 +146,12 @@ void main() {
       expect(restored.gain, closeTo(snapshot.gain, 0.001));
       expect(restored.pan, closeTo(snapshot.pan, 0.001));
       expect(restored.volumeAutomation, hasLength(2));
-      expect(restored.automationLanes, hasLength(1));
+      expect(restored.automationLanes, hasLength(2));
+      expect(
+        restored.automationLanes.last.targetId,
+        snapshot.automationLanes.last.targetId,
+      );
+      expect(restored.automationLanes.last.paramId, 'filter_cutoff');
       expect(restored.automationClips, hasLength(2));
       expect(restored.automationClips.first.targetId, 'master:gain');
       expect(restored.automationClips.first.patternId, 'pattern_gain');

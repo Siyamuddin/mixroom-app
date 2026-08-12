@@ -3757,6 +3757,99 @@ bool JuceEngine::openMidiClipPluginEditor(int clipId)
     return false;
 }
 
+void JuceEngine::setMidiClipPluginParameter(
+    int clipId,
+    const juce::String &paramId,
+    float normalizedValue)
+{
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    if (clips.empty() || clipId < 0 || clipId >= (int)clips.size())
+        return;
+    const auto &clip = clips[(size_t)clipId];
+    auto processor = liveProcessorSharedForClip(clip);
+    auto *hosted = processor != nullptr
+                       ? dynamic_cast<ExternalMidiPluginClipProcessor *>(processor.get())
+                       : nullptr;
+    auto *instrument = hosted != nullptr
+                           ? hosted->getHostedInstrumentProcessor()
+                           : nullptr;
+    if (!clip.alive || !clip.isMidi || instrument == nullptr)
+        return;
+
+    const auto trimmedId = paramId.trim();
+    for (auto *parameter : instrument->getParameters())
+    {
+        if (parameter == nullptr ||
+            !automationParameterMatches(*parameter, trimmedId))
+            continue;
+        parameter->setValueNotifyingHost(
+            juce::jlimit(0.0f, 1.0f, normalizedValue));
+        return;
+    }
+}
+
+void JuceEngine::setMidiClipPluginAutomationPoints(
+    int clipId,
+    const juce::String &paramId,
+    const std::vector<AutomationPoint> &points)
+{
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    if (clips.empty() || clipId < 0 || clipId >= (int)clips.size())
+        return;
+    if (!clips[(size_t)clipId].alive || !clips[(size_t)clipId].isMidi)
+        return;
+
+    const auto trimmedId = paramId.trim();
+    if (trimmedId.isEmpty())
+        return;
+    auto safePoints = points;
+    sanitiseAutomationPoints(safePoints, 1.0f);
+    auto laneIt = std::find_if(
+        midiClipPluginAutomationLanes.begin(),
+        midiClipPluginAutomationLanes.end(),
+        [&](const RowState::TrackEffectAutomationLane &lane)
+        {
+            return lane.effectIndex == clipId && lane.paramId == trimmedId;
+        });
+    if (safePoints.empty())
+    {
+        if (laneIt != midiClipPluginAutomationLanes.end())
+            midiClipPluginAutomationLanes.erase(laneIt);
+        publishAutomationSnapshotLocked();
+        return;
+    }
+    if (laneIt == midiClipPluginAutomationLanes.end())
+    {
+        RowState::TrackEffectAutomationLane lane;
+        lane.effectIndex = clipId;
+        lane.paramId = trimmedId;
+        lane.minValue = 0.0f;
+        lane.maxValue = 1.0f;
+        lane.points = std::move(safePoints);
+        midiClipPluginAutomationLanes.push_back(std::move(lane));
+    }
+    else
+    {
+        laneIt->points = std::move(safePoints);
+        laneIt->lastAppliedNormalized =
+            std::numeric_limits<float>::quiet_NaN();
+    }
+    publishAutomationSnapshotLocked();
+}
+
+void JuceEngine::clearMidiClipPluginAutomation(int clipId)
+{
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    midiClipPluginAutomationLanes.erase(
+        std::remove_if(
+            midiClipPluginAutomationLanes.begin(),
+            midiClipPluginAutomationLanes.end(),
+            [clipId](const RowState::TrackEffectAutomationLane &lane)
+            { return lane.effectIndex == clipId; }),
+        midiClipPluginAutomationLanes.end());
+    publishAutomationSnapshotLocked();
+}
+
 juce::String JuceEngine::getMidiClipPluginStateBase64(int clipId)
 {
     const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
@@ -4124,6 +4217,15 @@ bool JuceEngine::unloadClip(int clipId)
         if (!c.alive)
             return true;
 
+        midiClipPluginAutomationLanes.erase(
+            std::remove_if(
+                midiClipPluginAutomationLanes.begin(),
+                midiClipPluginAutomationLanes.end(),
+                [clipId](const RowState::TrackEffectAutomationLane &lane)
+                { return lane.effectIndex == clipId; }),
+            midiClipPluginAutomationLanes.end());
+        publishAutomationSnapshotLocked();
+
         const bool hadGraphNodes = !c.fxChain.isEmpty() || c.playerNode != nullptr;
         detachedProcessor = clearClipGraphNodes(clipId, kBatchGraphUpdate);
         if (hadGraphNodes)
@@ -4162,6 +4264,14 @@ int JuceEngine::unloadClips(const juce::Array<int> &clipIds)
             if (!clip.alive)
                 continue;
 
+            midiClipPluginAutomationLanes.erase(
+                std::remove_if(
+                    midiClipPluginAutomationLanes.begin(),
+                    midiClipPluginAutomationLanes.end(),
+                    [clipId](const RowState::TrackEffectAutomationLane &lane)
+                    { return lane.effectIndex == clipId; }),
+                midiClipPluginAutomationLanes.end());
+
             graphChanged = graphChanged ||
                            !clip.fxChain.isEmpty() ||
                            clip.playerNode != nullptr;
@@ -4170,6 +4280,9 @@ int JuceEngine::unloadClips(const juce::Array<int> &clipIds)
             ++removed;
         }
         endRoutedClipScheduleMutationLocked();
+
+        if (removed > 0)
+            publishAutomationSnapshotLocked();
 
         if (graphChanged)
             commitClipGraphMutationLocked();
@@ -4807,6 +4920,7 @@ struct ExportClipSnapshot
     juce::NamedValueSet midiParams;
     double midiSourceTempoBpm = 120.0;
     juce::MemoryBlock midiPluginState;
+    std::vector<ExportEffectAutomationLane> midiPluginAutomationLanes;
 };
 
 struct ExportRowSnapshot
@@ -6097,6 +6211,42 @@ void applyOfflineAutomationAtTimeSeconds(OfflineExportContext &context, double t
         }
     }
 
+    for (auto &clip : context.clips)
+    {
+        if (!clip.clip.isMidi || clip.playerNode == nullptr ||
+            clip.playerNode->getProcessor() == nullptr)
+            continue;
+        auto *hosted = dynamic_cast<ExternalMidiPluginClipProcessor *>(
+            clip.playerNode->getProcessor());
+        auto *instrument = hosted != nullptr
+                               ? hosted->getHostedInstrumentProcessor()
+                               : nullptr;
+        if (instrument == nullptr)
+            continue;
+        for (auto &lane : clip.clip.midiPluginAutomationLanes)
+        {
+            if (lane.paramId.trim().isEmpty() || lane.points.empty())
+                continue;
+            const float normalized = juce::jlimit(
+                0.0f,
+                1.0f,
+                (float)evaluateAutomationValueAtMs(lane.points, timeMs, 0.0));
+            if (std::isfinite(lane.lastAppliedNormalized) &&
+                std::abs(normalized - lane.lastAppliedNormalized) <=
+                    kAutomationEpsilon)
+                continue;
+            for (auto *parameter : instrument->getParameters())
+            {
+                if (parameter == nullptr ||
+                    getProcessorParameterIdentifier(parameter) != lane.paramId)
+                    continue;
+                parameter->setValue(normalized);
+                lane.lastAppliedNormalized = normalized;
+                break;
+            }
+        }
+    }
+
     if (!context.master.gainAutomationPoints.empty())
     {
         const float normalized = juce::jlimit(
@@ -6554,6 +6704,8 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
     };
 
     ExportProjectSnapshot snapshot;
+    std::unordered_map<int, std::vector<ExportEffectAutomationLane>>
+        midiAutomationByClipId;
     std::vector<ExportClipSnapshot> exportClipSnapshotsFromDart;
     {
         GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
@@ -6569,6 +6721,9 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
         snapshot.masterEffectAutomationLanes.reserve(masterEffectAutomationLanes.size());
         for (const auto &lane : masterEffectAutomationLanes)
             snapshot.masterEffectAutomationLanes.push_back(copyAutomationLane(lane));
+        for (const auto &lane : midiClipPluginAutomationLanes)
+            midiAutomationByClipId[lane.effectIndex].push_back(
+                copyAutomationLane(lane));
         if (masterEffectChain != nullptr)
         {
             for (int i = 0; i < masterEffectChain->size(); ++i)
@@ -6686,6 +6841,8 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
             clipSnapshot.midiParams = clip.midiParams;
             clipSnapshot.midiSourceTempoBpm = clip.midiSourceTempoBpm;
             clipSnapshot.midiPluginState = clip.midiPluginState;
+            clipSnapshot.midiPluginAutomationLanes =
+                midiAutomationByClipId[clip.clipId];
             snapshot.clips.push_back(std::move(clipSnapshot));
         }
     }
@@ -6709,6 +6866,9 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
             juceLogToFlutter(clipSnapshotError.toRawUTF8());
         return {};
     }
+    for (auto &clip : snapshot.clips)
+        clip.midiPluginAutomationLanes =
+            midiAutomationByClipId[clip.clipId];
 
     if (options.dryClipRender)
         applyDryClipRenderOptions(snapshot);
@@ -6933,6 +7093,10 @@ juce::String JuceEngine::exportTrack(int trackIndex,
 
             if (clip.clipId == trackIndex)
             {
+                for (const auto &lane : midiClipPluginAutomationLanes)
+                    if (lane.effectIndex == clip.clipId)
+                        clipSnapshot.midiPluginAutomationLanes.push_back(
+                            copyAutomationLane(lane));
                 targetLengthSeconds = clip.lengthSec;
                 foundTargetClip = true;
             }
@@ -8930,7 +9094,7 @@ void JuceEngine::requestHostedPluginEditorCloseForOwner(void *ownerHandle)
                 juce::Component::SafePointer<HostedPluginEditorWindow> safeWindow(
                     it->second.get());
                 if (safeWindow != nullptr)
-                    safeWindow->requestDestroyFromHost();
+                    safeWindow->requestCloseFromHost();
                 return;
             }
         });
@@ -9588,6 +9752,37 @@ JuceEngine::resolveMasterAutomationParameterTargetLocked(
     return target;
 }
 
+JuceEngine::AutomationParameterTarget
+JuceEngine::resolveMidiClipAutomationParameterTargetLocked(
+    int clipId,
+    const juce::String &paramId)
+{
+    AutomationParameterTarget target;
+    if (clips.empty() || clipId < 0 || clipId >= (int)clips.size())
+        return target;
+    const auto &clip = clips[(size_t)clipId];
+    auto processor = liveProcessorSharedForClip(clip);
+    auto *hosted = processor != nullptr
+                       ? dynamic_cast<ExternalMidiPluginClipProcessor *>(processor.get())
+                       : nullptr;
+    auto *instrument = hosted != nullptr
+                           ? hosted->getHostedInstrumentProcessor()
+                           : nullptr;
+    if (!clip.alive || !clip.isMidi || instrument == nullptr)
+        return target;
+
+    for (auto *parameter : instrument->getParameters())
+    {
+        if (parameter == nullptr ||
+            !automationParameterMatches(*parameter, paramId))
+            continue;
+        target.processorOwner = std::move(processor);
+        target.parameter = parameter;
+        return target;
+    }
+    return target;
+}
+
 void JuceEngine::applyAutomationParameterTarget(
     const AutomationParameterTarget &target,
     float value)
@@ -9745,6 +9940,30 @@ void JuceEngine::publishAutomationSnapshotLocked()
             laneSnapshot.latch->reset();
 
         next->masterEffectAutomationLanes.push_back(std::move(laneSnapshot));
+    }
+
+    next->midiClipPluginAutomationLanes.reserve(
+        midiClipPluginAutomationLanes.size());
+    for (const auto &lane : midiClipPluginAutomationLanes)
+    {
+        AutomationEffectLaneSnapshot laneSnapshot;
+        laneSnapshot.effectIndex = lane.effectIndex;
+        laneSnapshot.paramId = lane.paramId;
+        laneSnapshot.minValue = 0.0f;
+        laneSnapshot.maxValue = 1.0f;
+        laneSnapshot.points = lane.points;
+        laneSnapshot.target = resolveMidiClipAutomationParameterTargetLocked(
+            lane.effectIndex,
+            lane.paramId);
+        const auto key = std::string("midi:") +
+                         std::to_string(lane.effectIndex) + ":" +
+                         lane.paramId.toStdString();
+        activeLaneKeys.insert(key);
+        laneSnapshot.latch = automationLaneLatchLocked(key);
+        if (laneSnapshot.latch != nullptr)
+            laneSnapshot.latch->reset();
+        next->midiClipPluginAutomationLanes.push_back(
+            std::move(laneSnapshot));
     }
 
     for (auto it = rowAutomationLatches.begin(); it != rowAutomationLatches.end();)
@@ -9963,9 +10182,6 @@ void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
         }
     }
 
-    if (snapshot->masterEffectAutomationLanes.empty())
-        return;
-
     for (const auto &lane : snapshot->masterEffectAutomationLanes)
     {
         if (!lane.target.isValid())
@@ -9989,6 +10205,27 @@ void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
         applyAutomationParameterTarget(lane.target, value);
         if (lane.latch != nullptr)
             lane.latch->lastAppliedNormalized.store(normalized, std::memory_order_relaxed);
+    }
+
+    for (const auto &lane : snapshot->midiClipPluginAutomationLanes)
+    {
+        if (!lane.target.isValid() || lane.points.empty())
+            continue;
+        const float normalized = juce::jlimit(
+            0.0f,
+            1.0f,
+            (float)evaluateAutomationValueAtMs(lane.points, timeMs, 0.0));
+        const float lastApplied = lane.latch != nullptr
+                                      ? lane.latch->lastAppliedNormalized.load(
+                                            std::memory_order_relaxed)
+                                      : std::numeric_limits<float>::quiet_NaN();
+        if (std::isfinite(lastApplied) &&
+            std::abs(normalized - lastApplied) <= kAutomationEpsilon)
+            continue;
+        applyAutomationParameterTarget(lane.target, normalized);
+        if (lane.latch != nullptr)
+            lane.latch->lastAppliedNormalized.store(normalized,
+                                                     std::memory_order_relaxed);
     }
 }
 

@@ -1849,9 +1849,11 @@ class _MusicProfileDropdown extends StatelessWidget {
         anchorContext: anchorContext,
         child: Builder(
           builder: (menuContext) {
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: menuOptions
+            return SingleChildScrollView(
+              physics: const ClampingScrollPhysics(),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: menuOptions
                   .map((option) {
                     final isSelected = option.value == selectedMenuValue;
                     return GestureDetector(
@@ -1906,6 +1908,7 @@ class _MusicProfileDropdown extends StatelessWidget {
                     );
                   })
                   .toList(growable: false),
+              ),
             );
           },
         ),

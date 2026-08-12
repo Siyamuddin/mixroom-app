@@ -28229,8 +28229,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _startSecurityScopedAccessForPath(normalized);
     final persistentAccess =
         _pendingPickedSampleBrowserAccess?.path == normalized
-            ? _pendingPickedSampleBrowserAccess
-            : await SampleBrowserAccess.createPersistentAccess(normalized);
+        ? _pendingPickedSampleBrowserAccess
+        : await SampleBrowserAccess.createPersistentAccess(normalized);
     _pendingPickedSampleBrowserAccess = null;
     if (persistentAccess?.persistentToken != null) {
       _sampleBrowserPersistentTokens[normalized] =
@@ -54068,6 +54068,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return 'master:${_encodeAutomationIdComponent(paramId)}';
   }
 
+  String _midiPluginAutomationTargetId(String clipId, String paramId) {
+    return 'instrument:${_encodeAutomationIdComponent(clipId)}:${_encodeAutomationIdComponent(paramId)}';
+  }
+
   String _pluginAutomationEffectKey(String effectId, int ordinal) {
     final base = effectId.trim().isEmpty ? 'effect' : effectId.trim();
     final safeOrdinal = ordinal < 0 ? 0 : ordinal;
@@ -54157,6 +54161,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           legacyEffectIndex: -1,
           effectKey: _decodeAutomationIdComponent(encodedEffectKey),
           paramId: _decodeAutomationIdComponent(encodedParamId),
+        );
+      }
+    }
+
+    if (trimmed.startsWith('instrument:')) {
+      final payload = trimmed.substring('instrument:'.length);
+      final splitAt = payload.indexOf(':');
+      if (splitAt > 0) {
+        return _ParsedAutomationTargetId(
+          scope: 'instrument',
+          section: 'instrument',
+          isVolume: false,
+          legacyEffectIndex: -1,
+          effectKey: _decodeAutomationIdComponent(
+            payload.substring(0, splitAt),
+          ),
+          paramId: _decodeAutomationIdComponent(payload.substring(splitAt + 1)),
         );
       }
     }
@@ -54555,6 +54576,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
 
     await JuceAudioEngine.clearTrackEffectAutomationForRow(row);
+    final midiClipsForRow = _audioTracks.where(
+      (clip) => clip.isMidi && clip.rowIndex == row && clip.engineClipId >= 0,
+    );
+    for (final clip in midiClipsForRow) {
+      await JuceAudioEngine.clearMidiClipPluginAutomation(clip.engineClipId);
+    }
 
     final targets =
         _rowAutomationTargets[row] ?? const <String, _AutomationTargetMeta>{};
@@ -54566,6 +54593,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           targets[targetId] ?? _fallbackAutomationTargetMeta(targetId);
       if (target.isOrphan) continue;
       final parsed = _parseAutomationTargetId(targetId);
+      if (parsed.scope == 'instrument') {
+        final clipIndex = _audioTracks.indexWhere(
+          (clip) => clip.clipId == parsed.effectKey,
+        );
+        final engineClipId = clipIndex >= 0
+            ? _audioTracks[clipIndex].engineClipId
+            : -1;
+        if (engineClipId >= 0 && parsed.paramId.trim().isNotEmpty) {
+          final safePoints = _resolvedAutomationPointsForTarget(row, targetId);
+          await JuceAudioEngine.setMidiClipPluginAutomationPoints(
+            engineClipId,
+            parsed.paramId,
+            _toNormalizedAutomationMaps(safePoints),
+          );
+        }
+        continue;
+      }
       if (target.isVolume || parsed.isMaster || !parsed.isEffectParameter) {
         continue;
       }
@@ -55605,7 +55649,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       timeMs,
     ).clamp(0.0, 1.0);
     final value = _denormalizeAutomationValue(normalized, target);
-    if (parsed.isMaster) {
+    if (parsed.scope == 'instrument') {
+      final clipIndex = _audioTracks.indexWhere(
+        (clip) => clip.clipId == parsed.effectKey,
+      );
+      final engineClipId = clipIndex >= 0
+          ? _audioTracks[clipIndex].engineClipId
+          : -1;
+      if (engineClipId >= 0) {
+        await JuceAudioEngine.setMidiClipPluginParameter(
+          engineClipId,
+          parsed.paramId,
+          normalized.toDouble(),
+        );
+      }
+    } else if (parsed.isMaster) {
       if (parsed.isMixParameter) {
         switch (parsed.mixParamId.trim().toLowerCase()) {
           case 'gain':
@@ -56886,9 +56944,36 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               'Touch a control in $displayName before choosing Automate.',
             );
           } else {
-            _showSmallNotice(
-              'Synth plugin automation lanes are not wired yet. Parameter selected: $paramName.',
+            final row = clip?.rowIndex ?? -1;
+            if (clip == null || row < 0 || row >= _rowCount) {
+              _showSmallNotice('Could not resolve the synth plugin track.');
+              return;
+            }
+            final targetId = _midiPluginAutomationTargetId(
+              clip.clipId,
+              paramId,
             );
+            final rowTargets = _rowAutomationTargets.putIfAbsent(
+              row,
+              () => _defaultAutomationTargetsForRow(row),
+            );
+            rowTargets[targetId] = _AutomationTargetMeta(
+              targetId: targetId,
+              label: '$displayName • $paramName',
+              effectIndex: engineClipId,
+              paramId: paramId,
+              type: 'float',
+              min: 0.0,
+              max: 1.0,
+              initialNormalized: 0.5,
+            );
+            unawaited(() async {
+              await _ensureAutomationLaneForTarget(
+                row: row,
+                targetId: targetId,
+              );
+              if (mounted) _showSmallNotice('Automation lane ready.');
+            }());
           }
         }
         return;
@@ -64787,11 +64872,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           Localizations.localeOf(context).languageCode == 'en'
           ? executionSummariesByCommandId
           : const <String, List<String>>{};
-      final verifiedBundle =
-          aiV3BundleWithRuntimeAlreadySatisfiedReceipts(
-            bundle,
-            runtimeAlreadySatisfiedCommandIds,
-          );
+      final verifiedBundle = aiV3BundleWithRuntimeAlreadySatisfiedReceipts(
+        bundle,
+        runtimeAlreadySatisfiedCommandIds,
+      );
       final executionDetails = aiV3VerifiedExecutionDetails(
         verifiedBundle,
         executionSummariesByCommandId: localizedExecutionSummaries,
@@ -64814,8 +64898,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           'pre_state_digest': expectedDigest,
           'post_state_digest': _freshAiV3StateFingerprint(),
           'applied_action_count': transaction.captured.length,
-          'command_receipts':
-              verifiedBundle['receipts'] ?? const <Object>[],
+          'command_receipts': verifiedBundle['receipts'] ?? const <Object>[],
           'expected_mutations': expectations,
           'observed_mutations': transaction.observed,
           'verification': 'passed',

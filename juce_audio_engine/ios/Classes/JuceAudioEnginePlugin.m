@@ -932,6 +932,26 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"openMidiClipPluginEditor"]) {
         NSInteger clip = [args[@"clip"] integerValue];
         result(@([JuceBridge openMidiClipPluginEditorObjC:clip]));
+    } else if ([call.method isEqualToString:@"setMidiClipPluginParameter"]) {
+        NSInteger clip = [args[@"clip"] integerValue];
+        NSString *paramId = args[@"paramId"] ?: @"";
+        float value = [args[@"value"] floatValue];
+        [JuceBridge setMidiClipPluginParameterObjC:clip
+                                           paramId:paramId
+                                  normalizedValue:value];
+        result(nil);
+    } else if ([call.method isEqualToString:@"setMidiClipPluginAutomationPoints"]) {
+        NSInteger clip = [args[@"clip"] integerValue];
+        NSString *paramId = args[@"paramId"] ?: @"";
+        NSArray *points = args[@"points"] ?: @[];
+        [JuceBridge setMidiClipPluginAutomationPointsObjC:clip
+                                                   paramId:paramId
+                                                    points:points];
+        result(nil);
+    } else if ([call.method isEqualToString:@"clearMidiClipPluginAutomation"]) {
+        NSInteger clip = [args[@"clip"] integerValue];
+        [JuceBridge clearMidiClipPluginAutomationObjC:clip];
+        result(nil);
     } else if ([call.method isEqualToString:@"getMidiClipPluginState"]) {
         NSInteger clip = [args[@"clip"] integerValue];
         result([JuceBridge getMidiClipPluginStateObjC:clip]);
