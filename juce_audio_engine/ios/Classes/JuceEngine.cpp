@@ -9094,7 +9094,7 @@ void JuceEngine::requestHostedPluginEditorCloseForOwner(void *ownerHandle)
                 juce::Component::SafePointer<HostedPluginEditorWindow> safeWindow(
                     it->second.get());
                 if (safeWindow != nullptr)
-                    safeWindow->requestDestroyFromHost();
+                    safeWindow->requestCloseFromHost();
                 return;
             }
         });

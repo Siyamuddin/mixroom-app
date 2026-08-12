@@ -350,20 +350,20 @@ public:
         closeRequested = false;
 #if JUCE_MAC
         const auto generation = ++presentationGeneration;
-        setAlpha(0.0f);
         fitMacNativePluginEditorWindow();
 #endif
+        setAlpha(1.0f);
         setVisible(true);
 #if JUCE_MAC
+        toFront(true);
         juce::Component::SafePointer<HostedPluginEditorWindow> safeThis(this);
-        juce::Timer::callAfterDelay(180, [safeThis, generation]()
+        juce::Timer::callAfterDelay(16, [safeThis, generation]()
                                     {
             if (safeThis != nullptr &&
                 safeThis->presentationGeneration == generation &&
                 safeThis->isShowing())
             {
                 safeThis->fitMacNativePluginEditorWindow();
-                safeThis->setAlpha(1.0f);
                 safeThis->toFront(true);
             } });
         juce::Timer::callAfterDelay(160, [safeThis]()
@@ -382,7 +382,7 @@ public:
 
     void requestCloseFromHost()
     {
-        requestDestroyFromHost();
+        closeButtonPressed();
     }
 
     void requestDestroyFromHost()
@@ -407,9 +407,9 @@ public:
         closeRequested = true;
 #if JUCE_MAC
         ++presentationGeneration;
-        setAlpha(0.0f);
 #endif
-        releaseEmbeddedNativeChrome();
+        if (destroyOnClose)
+            releaseEmbeddedNativeChrome();
         setVisible(false);
         if (!destroyOnClose)
         {
