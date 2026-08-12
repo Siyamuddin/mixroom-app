@@ -21,12 +21,17 @@ const int maxNumEffects = 10;
 
 void _showPluginUpgradeDialog(
   BuildContext context, {
+  required String pluginName,
   VoidCallback? onUpgradeRequested,
 }) {
   unawaited(
     showAppUpgradeDialog(
       context: context,
-      title: 'Upgrade to use this plugin',
+      title: L10n.translateWithParams(
+        context,
+        'Upgrade to use {name}',
+        <String, String>{'name': L10n.translate(context, pluginName)},
+      ),
       message:
           'Additional Mixroom plugins are available on Starter and higher plans.',
       icon: Icons.extension_outlined,
@@ -414,6 +419,7 @@ Widget _buildMixroomFxCategoryList({
                           ? () => onInsert(name)
                           : () => _showPluginUpgradeDialog(
                                 context,
+                                pluginName: name,
                                 onUpgradeRequested: onUpgradeRequested,
                               ),
                       child: Padding(
@@ -453,7 +459,7 @@ Widget _buildMixroomFxCategoryList({
                             if (!isAllowed) ...[
                               const SizedBox(width: 8),
                               Text(
-                                L10n.translate(context, 'Starter'),
+                                L10n.translate(context, 'Upgrade plan'),
                                 style: TextStyle(
                                   color: Colors.white.withValues(alpha: 0.72),
                                   fontSize: 10.5,
@@ -5481,7 +5487,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
   // =========================
 
   ActionChip _buildPresetChip(String name) {
-    const lockedPresets = <String>[]; // you can re-lock LoFi / Heavy later
+    const lockedPresets = <String>{'LoFi Effect', 'Heavy Crunch'};
     final isLocked = _isBasicTier && lockedPresets.contains(name);
 
     return ActionChip(
@@ -5517,7 +5523,22 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
             ),
         ],
       ),
-      onPressed: isLocked ? null : () => _handlePresetLoading(context, name),
+      onPressed: isLocked
+          ? () => unawaited(
+              showAppUpgradeDialog(
+                context: context,
+                title: L10n.translateWithParams(
+                  context,
+                  'Upgrade to use {name}',
+                  <String, String>{'name': L10n.translate(context, name)},
+                ),
+                message:
+                    'Additional Mixroom presets are available on Starter and higher plans.',
+                icon: Icons.lock_outline_rounded,
+                onUpgrade: widget.onUpgradeRequested,
+              ),
+            )
+          : () => _handlePresetLoading(context, name),
     );
   }
 
@@ -8955,7 +8976,7 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
   // You can copy your existing _buildPresetChip, _buildEffectTile, etc.
 
   ActionChip _buildPresetChip(String name) {
-    const lockedPresets = <String>[]; // you can re-lock LoFi / Heavy later
+    const lockedPresets = <String>{'LoFi Effect', 'Heavy Crunch'};
     final isLocked = _isBasicTier && lockedPresets.contains(name);
 
     return ActionChip(
@@ -8991,7 +9012,22 @@ class _MasterEffectsPanelState extends State<MasterEffectsPanel> {
             ),
         ],
       ),
-      onPressed: isLocked ? null : () => _handlePresetLoading(context, name),
+      onPressed: isLocked
+          ? () => unawaited(
+              showAppUpgradeDialog(
+                context: context,
+                title: L10n.translateWithParams(
+                  context,
+                  'Upgrade to use {name}',
+                  <String, String>{'name': L10n.translate(context, name)},
+                ),
+                message:
+                    'Additional Mixroom presets are available on Starter and higher plans.',
+                icon: Icons.lock_outline_rounded,
+                onUpgrade: widget.onUpgradeRequested,
+              ),
+            )
+          : () => _handlePresetLoading(context, name),
     );
   }
 
