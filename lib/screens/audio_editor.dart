@@ -5668,7 +5668,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   final Set<LogicalKeyboardKey> _desktopMidiHeldKeys = <LogicalKeyboardKey>{};
   Timer? _midiDevicePollTimer;
   StreamSubscription<Map<String, dynamic>>? _juceEngineEventSubscription;
-  StreamSubscription<List<DesktopFileDropItem>>? _desktopFinderDropSub;
+  StreamSubscription<DesktopFileDragEvent>? _desktopFinderDropSub;
+  SampleDragData? _finderSampleDragData;
+  String? _finderSampleDragDurationPath;
   bool _midiDevicePollBusy = false;
   Map<String, String> _knownMidiDevicesById = <String, String>{};
   final Map<int, int> _midiClipEngineRefreshTokens = <int, int>{};
@@ -5943,8 +5945,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   String? _sampleBrowserUserDropFolderPath;
   String? _sampleBrowserProjectAudioFolderPath;
   final Set<String> _sampleBrowserBundledRootFolders = <String>{};
-  final List<List<DesktopFileDropItem>> _pendingDesktopFinderDropBatches =
-      <List<DesktopFileDropItem>>[];
+  final List<DesktopFileDragEvent> _pendingDesktopFinderDragEvents =
+      <DesktopFileDragEvent>[];
   final AccessingSecurityScopedResource _securityScopedResource =
       AccessingSecurityScopedResource();
   final Set<String> _startedSecurityScopeKeys = <String>{};
@@ -9171,18 +9173,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       });
     });
     if (PlatformCapabilities.current.isDesktop) {
-      _desktopFinderDropSub = DesktopFileIngressService.stream.listen((items) {
+      _desktopFinderDropSub =
+          DesktopFileIngressService.dragSession.listen((event) {
         if (_isProjectLoading || !_loadedOnce) {
-          _pendingDesktopFinderDropBatches.add(
-            List<DesktopFileDropItem>.from(items),
-          );
+          if (event.phase == DesktopFileDragPhase.dropped) {
+            _pendingDesktopFinderDragEvents.add(event);
+          }
           return;
         }
-        unawaited(_handleDesktopFinderDropBatch(items));
+        unawaited(_handleDesktopFinderDragEvent(event));
       });
-      _pendingDesktopFinderDropBatches.addAll(
-        DesktopFileIngressService.consumePendingBatches(),
+      _pendingDesktopFinderDragEvents.addAll(
+        DesktopFileIngressService.consumePendingDragEvents(),
       );
+      // Drops are also mirrored onto the legacy batch stream; discard them so
+      // projects-screen pending consumption remains the only batch consumer.
+      DesktopFileIngressService.consumePendingBatches();
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       setState(() {
@@ -12331,6 +12337,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _promptRateLimitRefreshTimer = null;
     _desktopFinderDropSub?.cancel();
     _desktopFinderDropSub = null;
+    _finderSampleDragData = null;
+    _finderSampleDragDurationPath = null;
+    _timelineController.clearExternalSampleDropPreview();
     _juceEngineEventSubscription?.cancel();
     _juceEngineEventSubscription = null;
     _samplePreviewStateSub?.cancel();
@@ -28594,28 +28603,147 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _flushPendingDesktopFinderDrops() async {
     if (!PlatformCapabilities.current.isDesktop ||
-        _pendingDesktopFinderDropBatches.isEmpty) {
+        _pendingDesktopFinderDragEvents.isEmpty) {
       return;
     }
-    final pending = List<List<DesktopFileDropItem>>.from(
-      _pendingDesktopFinderDropBatches,
+    final pending = List<DesktopFileDragEvent>.from(
+      _pendingDesktopFinderDragEvents,
     );
-    _pendingDesktopFinderDropBatches.clear();
-    for (final batch in pending) {
-      await _handleDesktopFinderDropBatch(batch);
+    _pendingDesktopFinderDragEvents.clear();
+    for (final event in pending) {
+      if (event.phase != DesktopFileDragPhase.dropped) continue;
+      await _handleDesktopFinderDragDrop(event);
     }
   }
 
+  Future<void> _handleDesktopFinderDragEvent(DesktopFileDragEvent event) async {
+    if (!mounted || !PlatformCapabilities.current.isDesktop) return;
+    assert(() {
+      debugPrint(
+        '[FinderDrop] ${event.phase.name} audio=${event.hasAudio} '
+        'loc=${event.location} items=${event.items.length}',
+      );
+      return true;
+    }());
+    switch (event.phase) {
+      case DesktopFileDragPhase.entered:
+      case DesktopFileDragPhase.updated:
+        _handleDesktopFinderDragHover(event);
+        return;
+      case DesktopFileDragPhase.exited:
+        _clearDesktopFinderDragPreview();
+        return;
+      case DesktopFileDragPhase.dropped:
+        await _handleDesktopFinderDragDrop(event);
+        return;
+    }
+  }
+
+  void _handleDesktopFinderDragHover(DesktopFileDragEvent event) {
+    if (!event.hasAudio || event.location == null) {
+      if (!event.hasAudio) {
+        _clearDesktopFinderDragPreview();
+      }
+      return;
+    }
+
+    final firstAudio = event.audioItems.first;
+    final existing = _finderSampleDragData;
+    if (existing == null || existing.filePath != firstAudio.path) {
+      _finderSampleDragData = SampleDragData(
+        filePath: firstAudio.path,
+        label: p.basename(firstAudio.path),
+      );
+      unawaited(_resolveFinderSampleDragDuration(firstAudio.path));
+    }
+
+    if (!_sampleDragActive) {
+      setState(() {
+        _sampleDragActive = true;
+      });
+    }
+
+    _timelineController.updateExternalSampleDropPreview(
+      event.location!,
+      data: _finderSampleDragData,
+    );
+  }
+
+  Future<void> _resolveFinderSampleDragDuration(String filePath) async {
+    _finderSampleDragDurationPath = filePath;
+    final duration = await _resolveSampleDuration(filePath);
+    if (!mounted) return;
+    if (_finderSampleDragDurationPath != filePath) return;
+    final current = _finderSampleDragData;
+    if (current == null || current.filePath != filePath) return;
+    if (duration == null || duration <= Duration.zero) return;
+    if (current.duration == duration) return;
+    setState(() {
+      _finderSampleDragData = SampleDragData(
+        filePath: current.filePath,
+        label: current.label,
+        duration: duration,
+      );
+    });
+  }
+
+  void _clearDesktopFinderDragPreview() {
+    _finderSampleDragDurationPath = null;
+    _finderSampleDragData = null;
+    _timelineController.clearExternalSampleDropPreview();
+    if (_sampleDragActive && mounted) {
+      setState(() {
+        _sampleDragActive = false;
+      });
+    } else {
+      _sampleDragActive = false;
+    }
+  }
+
+  Future<void> _handleDesktopFinderDragDrop(DesktopFileDragEvent event) async {
+    final dragData = _finderSampleDragData;
+    _clearDesktopFinderDragPreview();
+
+    SampleDropPlacement? placement;
+    if (event.location != null && event.hasAudio) {
+      placement = _timelineController.placementForExternalSampleDrop(
+        event.location!,
+        data: dragData ??
+            SampleDragData(
+              filePath: event.audioItems.first.path,
+              label: p.basename(event.audioItems.first.path),
+            ),
+      );
+    }
+
+    if (placement != null && !placement.allowed) {
+      await _handleDesktopFinderDropBatch(
+        event.items,
+        skipAudio: true,
+      );
+      return;
+    }
+
+    await _handleDesktopFinderDropBatch(
+      event.items,
+      dropRow: placement?.row,
+      dropTimeMs: placement?.startMs,
+    );
+  }
+
   Future<void> _handleDesktopFinderDropBatch(
-    List<DesktopFileDropItem> items,
-  ) async {
+    List<DesktopFileDropItem> items, {
+    int? dropRow,
+    double? dropTimeMs,
+    bool skipAudio = false,
+  }) async {
     if (!mounted || !PlatformCapabilities.current.isDesktop || items.isEmpty) {
       return;
     }
 
-    final audioItems = items
-        .where((item) => item.isAudio)
-        .toList(growable: false);
+    final audioItems = skipAudio
+        ? const <DesktopFileDropItem>[]
+        : items.where((item) => item.isAudio).toList(growable: false);
     final folderItems = items
         .where((item) => item.isFolder && !item.isMixroom)
         .toList(growable: false);
@@ -28636,8 +28764,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     var insertedAudioCount = 0;
-    var nextRow = _selectedRow;
-    final dropTimeMs = _globalAudioClock.inMilliseconds.toDouble();
+    var nextRow = dropRow ?? _selectedRow;
+    final resolvedDropTimeMs =
+        dropTimeMs ?? _globalAudioClock.inMilliseconds.toDouble();
     final batchAudioDrop = audioItems.length > 1;
     final affectedFadeRowIds = <int>{};
     if (batchAudioDrop) {
@@ -28648,7 +28777,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final inserted = await _insertAudioFileAtTimeline(
           item.path,
           row: nextRow,
-          timeMs: dropTimeMs,
+          timeMs: resolvedDropTimeMs,
           uploadMethod: 'finder_drop',
           showLoadingOverlay: !batchAudioDrop,
           notifyUi: !batchAudioDrop,

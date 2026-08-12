@@ -1,11 +1,59 @@
 import Cocoa
 import FlutterMacOS
 
+/// Transparent overlay that receives Finder file drags while letting normal
+/// mouse/trackpad events pass through to Flutter (`hitTest` returns nil).
+private final class FinderDropSurfaceView: NSView {
+  weak var owner: MainFlutterWindow?
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    wantsLayer = true
+    layer?.backgroundColor = NSColor.clear.cgColor
+    registerForDraggedTypes([.fileURL])
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    // Pointer events pass through to Flutter. AppKit still queries this view
+    // for drag destinations because it registered dragged types.
+    return nil
+  }
+
+  override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+    owner?.handleDraggingEntered(sender) ?? []
+  }
+
+  override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+    owner?.handleDraggingUpdated(sender) ?? []
+  }
+
+  override func draggingExited(_ sender: NSDraggingInfo?) {
+    owner?.handleDraggingExited(sender)
+  }
+
+  override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+    owner?.handlePrepareForDragOperation(sender) ?? false
+  }
+
+  override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+    owner?.handlePerformDragOperation(sender) ?? false
+  }
+}
+
 class MainFlutterWindow: NSWindow {
   private let finderDropChannelName = "mixroom/finder_drop"
   private let titleBarDragRegionHeight: CGFloat = 34
+  private weak var flutterViewController: FlutterViewController?
   private var finderDropChannel: FlutterMethodChannel?
   private var pendingFinderDropPayloads: [[String: Any]] = []
+  private var dropSurfaceView: FinderDropSurfaceView?
+  private var cachedDragItems: [[String: Any]] = []
+  private var lastDragUpdateUptime: TimeInterval = 0
   private let supportedAudioExtensions: Set<String> = [
     "wav",
     "wave",
@@ -21,6 +69,7 @@ class MainFlutterWindow: NSWindow {
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
+    self.flutterViewController = flutterViewController
     self.contentViewController = flutterViewController
     let minimumSize = NSSize(width: 1180, height: 720)
     self.minSize = minimumSize
@@ -39,8 +88,8 @@ class MainFlutterWindow: NSWindow {
     RegisterGeneratedPlugins(registry: flutterViewController)
 
     super.awakeFromNib()
-    registerForDraggedTypes([.fileURL])
     bindFinderDropChannelIfNeeded(flutterViewController: flutterViewController)
+    installFinderDropSurface(on: flutterViewController.view)
   }
 
   override func sendEvent(_ event: NSEvent) {
@@ -70,18 +119,81 @@ class MainFlutterWindow: NSWindow {
     location.y >= max(0, self.frame.height - titleBarDragRegionHeight)
   }
 
-  func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-    hasSupportedFinderDropItems(sender.draggingPasteboard) ? .copy : []
+  private func installFinderDropSurface(on flutterView: NSView) {
+    dropSurfaceView?.removeFromSuperview()
+    let surface = FinderDropSurfaceView(frame: flutterView.bounds)
+    surface.autoresizingMask = [.width, .height]
+    surface.owner = self
+    flutterView.addSubview(surface, positioned: .above, relativeTo: nil)
+    dropSurfaceView = surface
   }
 
-  func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
-    hasSupportedFinderDropItems(sender.draggingPasteboard)
+  func handleDraggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+    guard let items = buildFinderDropItems(from: sender.draggingPasteboard), !items.isEmpty else {
+      cachedDragItems = []
+      return []
+    }
+    cachedDragItems = items
+    if let payload = buildFinderDragPayload(items: items, sender: sender) {
+      invokeFinderMethod("finderDragEntered", arguments: payload)
+    }
+    return .copy
   }
 
-  func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-    guard let payload = buildFinderDropPayload(from: sender.draggingPasteboard) else {
+  func handleDraggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+    let items: [[String: Any]]
+    if !cachedDragItems.isEmpty {
+      items = cachedDragItems
+    } else if let built = buildFinderDropItems(from: sender.draggingPasteboard), !built.isEmpty {
+      cachedDragItems = built
+      items = built
+    } else {
+      return []
+    }
+
+    // Throttle Flutter updates so we don't flood the platform channel.
+    let now = ProcessInfo.processInfo.systemUptime
+    if now - lastDragUpdateUptime >= 0.016 {
+      lastDragUpdateUptime = now
+      if let payload = buildFinderDragPayload(items: items, sender: sender) {
+        invokeFinderMethod("finderDragUpdated", arguments: payload)
+      }
+    }
+    return .copy
+  }
+
+  func handleDraggingExited(_ sender: NSDraggingInfo?) {
+    cachedDragItems = []
+    lastDragUpdateUptime = 0
+    invokeFinderMethod(
+      "finderDragExited",
+      arguments: [
+        "source": "finder"
+      ]
+    )
+  }
+
+  func handlePrepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+    if !cachedDragItems.isEmpty {
+      return true
+    }
+    return !(buildFinderDropItems(from: sender.draggingPasteboard)?.isEmpty ?? true)
+  }
+
+  func handlePerformDragOperation(_ sender: NSDraggingInfo) -> Bool {
+    let items: [[String: Any]]
+    if !cachedDragItems.isEmpty {
+      items = cachedDragItems
+    } else if let built = buildFinderDropItems(from: sender.draggingPasteboard), !built.isEmpty {
+      items = built
+    } else {
       return false
     }
+    guard let payload = buildFinderDragPayload(items: items, sender: sender) else {
+      return false
+    }
+    cachedDragItems = []
+    lastDragUpdateUptime = 0
     deliverFinderDropPayload(payload)
     return true
   }
@@ -106,20 +218,32 @@ class MainFlutterWindow: NSWindow {
     finderDropChannel = channel
   }
 
-  private func hasSupportedFinderDropItems(_ pasteboard: NSPasteboard) -> Bool {
-    guard let items = buildFinderDropItems(from: pasteboard) else {
-      return false
-    }
-    return !items.isEmpty
-  }
-
-  private func buildFinderDropPayload(from pasteboard: NSPasteboard) -> [String: Any]? {
-    guard let items = buildFinderDropItems(from: pasteboard), !items.isEmpty else {
+  private func buildFinderDragPayload(
+    items: [[String: Any]],
+    sender: NSDraggingInfo
+  ) -> [String: Any]? {
+    if items.isEmpty {
       return nil
     }
-    return [
+    var payload: [String: Any] = [
       "source": "finder",
       "items": items
+    ]
+    if let location = flutterLocation(from: sender) {
+      payload["location"] = location
+    }
+    return payload
+  }
+
+  private func flutterLocation(from sender: NSDraggingInfo) -> [String: Double]? {
+    guard let view = flutterViewController?.view else {
+      return nil
+    }
+    let locationInView = view.convert(sender.draggingLocation, from: nil)
+    // AppKit origin is bottom-left; Flutter logical coords are top-left.
+    return [
+      "x": Double(locationInView.x),
+      "y": Double(view.bounds.height - locationInView.y)
     ]
   }
 
@@ -132,23 +256,32 @@ class MainFlutterWindow: NSWindow {
     }
 
     return urls.compactMap { url in
-      let path = url.path.trimmingCharacters(in: .whitespacesAndNewlines)
+      if url.isFileURL {
+        _ = url.startAccessingSecurityScopedResource()
+      }
+      let resolved = url.standardizedFileURL
+      let path = resolved.path.trimmingCharacters(in: .whitespacesAndNewlines)
       if path.isEmpty {
         return nil
       }
 
       var isDirectory: ObjCBool = false
       let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
-      if !exists {
+      // During drag, some providers briefly omit filesystem presence; still
+      // accept known audio / project extensions so the cursor stays as copy.
+      let ext = resolved.pathExtension.lowercased()
+      let looksLikeMixroom = path.lowercased().hasSuffix(".mixroom")
+      let looksLikeAudio = supportedAudioExtensions.contains(ext)
+      if !exists && !looksLikeMixroom && !looksLikeAudio && !isDirectory.boolValue {
         return nil
       }
 
       let kind: String
-      if path.lowercased().hasSuffix(".mixroom") {
+      if looksLikeMixroom {
         kind = "mixroom"
-      } else if isDirectory.boolValue {
+      } else if exists && isDirectory.boolValue {
         kind = "folder"
-      } else if supportedAudioExtensions.contains(url.pathExtension.lowercased()) {
+      } else if looksLikeAudio {
         kind = "audio"
       } else {
         return nil
@@ -157,7 +290,7 @@ class MainFlutterWindow: NSWindow {
       return [
         "path": path,
         "kind": kind,
-        "isDirectory": isDirectory.boolValue
+        "isDirectory": exists && isDirectory.boolValue
       ]
     }
   }
@@ -168,5 +301,9 @@ class MainFlutterWindow: NSWindow {
     } else {
       pendingFinderDropPayloads.append(payload)
     }
+  }
+
+  private func invokeFinderMethod(_ method: String, arguments: [String: Any]) {
+    finderDropChannel?.invokeMethod(method, arguments: arguments)
   }
 }
