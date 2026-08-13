@@ -13577,8 +13577,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     final lockedEffects = <String>{};
     void collectEffects(Object? raw) {
-      if (raw is! List) return;
-      for (final item in raw) {
+      final effects = raw is List
+          ? raw
+          : raw is Map
+          ? raw['effects']
+          : null;
+      if (effects is! List) return;
+      for (final item in effects) {
         if (item is! Map) continue;
         final name = (item['pathOrName'] ?? item['name'] ?? item['effectId'])
             .toString()
