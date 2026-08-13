@@ -4,11 +4,13 @@
 
 + (void)initialiseEngineObjC;
 + (BOOL)initialisePlaybackV2ObjC:(NSString * _Nonnull)outputDeviceName;
++ (BOOL)pausePlaybackForRouteChangeV2ObjC;
 + (BOOL)quiescePlaybackRouteV2ObjC:(BOOL)closeRemovedDevice;
 + (BOOL)reconfigurePlaybackRouteV2ObjC:(NSString * _Nonnull)outputDeviceName;
 + (BOOL)reconfigureRecordingRouteV2ObjC:(NSString * _Nonnull)outputDeviceName
                               inputName:(NSString * _Nonnull)inputDeviceName;
 + (BOOL)validateRecordingRouteV2ObjC;
++ (NSDictionary<NSString *, id> * _Nonnull)getIOSAudioSessionPolicyFactsObjC;
 + (NSString * _Nonnull)getAudioRouteImplementationObjC;
 + (void)initializeMessageManager;
 + (void)shutdownEngineObjC;

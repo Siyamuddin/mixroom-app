@@ -546,6 +546,7 @@ class JuceAudioEngine {
 
   static Future<void> abortRecordingV2({
     TargetPlatform? platformOverride,
+    bool restorePlayback = true,
   }) async {
     final platform = platformOverride ?? defaultTargetPlatform;
     if (kIsWeb ||
@@ -553,7 +554,9 @@ class JuceAudioEngine {
       return;
     }
     try {
-      await _ch.invokeMethod<void>('abortRecordingV2');
+      await _ch.invokeMethod<void>('abortRecordingV2', <String, dynamic>{
+        'restorePlayback': restorePlayback,
+      });
     } on MissingPluginException {
       return;
     } on PlatformException catch (error) {

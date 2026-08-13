@@ -1,4 +1,7 @@
 #include "JuceEngine.h"
+#if JUCE_IOS
+#include "MixroomIOSAudioSessionPolicy.h"
+#endif
 #include <algorithm>
 #include <cmath>
 #include <unordered_set>
@@ -2511,6 +2514,10 @@ bool JuceEngine::initialisePlaybackV2(const juce::String &outputDeviceName)
     initialiseEngine(outputDeviceName);
     if (!engineInitialized)
     {
+#if JUCE_IOS
+        mixroomIOSSetAudioSessionPolicy(
+            MixroomIOSAudioSessionPolicy::legacyManaged);
+#endif
         audioRouteImplementation = AudioRouteImplementation::none;
         return false;
     }
@@ -2531,7 +2538,13 @@ bool JuceEngine::openPlaybackOutputOnlyV2(const juce::String &outputDeviceName)
         return false;
 #endif
 
+    // Close under the currently installed policy before selecting the policy
+    // that will own the next device/session open.
     deviceManager.closeAudioDevice();
+#if JUCE_IOS
+    mixroomIOSSetAudioSessionPolicy(
+        MixroomIOSAudioSessionPolicy::v2PlaybackOnly);
+#endif
 #if JUCE_MAC && !JUCE_IOS
     juce::AudioDeviceManager::AudioDeviceSetup setup;
     setup.inputDeviceName = {};
@@ -2593,7 +2606,12 @@ bool JuceEngine::openRecordingInputV2(const juce::String &outputDeviceName,
     juce::ignoreUnused(outputDeviceName, inputDeviceName);
 #endif
 
+    // Closing the old device must execute the old policy's teardown.
     deviceManager.closeAudioDevice();
+#if JUCE_IOS
+    mixroomIOSSetAudioSessionPolicy(
+        MixroomIOSAudioSessionPolicy::v2BuiltInDuplex);
+#endif
 #if JUCE_MAC && !JUCE_IOS
     juce::AudioDeviceManager::AudioDeviceSetup setup;
     setup.inputDeviceName = inputDeviceName;
@@ -2650,6 +2668,20 @@ bool JuceEngine::quiescePlaybackRouteV2(bool closeRemovedDevice)
     return wasPlaying;
 #else
     juce::ignoreUnused(closeRemovedDevice);
+    return false;
+#endif
+}
+
+bool JuceEngine::pausePlaybackForRouteChangeV2()
+{
+#if JUCE_IOS
+    if (!engineInitialized || !isV2PlaybackSession())
+        return false;
+
+    const bool wasPlaying = isPlayingAtomic.load(std::memory_order_relaxed);
+    pause();
+    return wasPlaying;
+#else
     return false;
 #endif
 }
@@ -2755,6 +2787,10 @@ void JuceEngine::shutdownEngine()
     if (!engineInitialized)
     {
         juceLogToFlutter("... skipped — engine not initialized yet.");
+#if JUCE_IOS
+        mixroomIOSSetAudioSessionPolicy(
+            MixroomIOSAudioSessionPolicy::legacyManaged);
+#endif
         audioRouteImplementation = AudioRouteImplementation::none;
         return;
     }
@@ -2771,6 +2807,10 @@ void JuceEngine::shutdownEngine()
     GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
     audioPlayer.setProcessor(nullptr);
     deviceManager.closeAudioDevice();
+#if JUCE_IOS
+    mixroomIOSSetAudioSessionPolicy(
+        MixroomIOSAudioSessionPolicy::legacyManaged);
+#endif
 
     graph.clear();
 

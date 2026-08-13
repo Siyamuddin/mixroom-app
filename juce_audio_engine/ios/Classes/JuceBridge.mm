@@ -9,6 +9,9 @@
 #include <vector>
 #import "JuceBridge.h"
 #import "JuceEngine.h"
+#if JUCE_IOS
+#include "MixroomIOSAudioSessionPolicy.h"
+#endif
 #include "InstrumentRenderers.h"
 #include "JuceHeader.h"
 #import "JuceAudioEnginePlugin.h" // To access debugLogChannel
@@ -2363,6 +2366,11 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
         juceStringFromNSString(outputDeviceName));
 }
 
++ (BOOL)pausePlaybackForRouteChangeV2ObjC
+{
+    return JuceEngine::get().pausePlaybackForRouteChangeV2();
+}
+
 + (BOOL)quiescePlaybackRouteV2ObjC:(BOOL)closeRemovedDevice
 {
     return JuceEngine::get().quiescePlaybackRouteV2(closeRemovedDevice);
@@ -2387,6 +2395,49 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     return JuceEngine::get().validateRecordingRouteV2();
 }
 
++ (NSDictionary<NSString *, id> * _Nonnull)getIOSAudioSessionPolicyFactsObjC
+{
+#if JUCE_IOS
+    const auto facts = mixroomIOSGetAudioSessionPolicyFacts();
+    NSString *policy = @"legacyManaged";
+    switch (facts.policy)
+    {
+    case MixroomIOSAudioSessionPolicy::v2PlaybackOnly:
+        policy = @"v2PlaybackOnly";
+        break;
+    case MixroomIOSAudioSessionPolicy::v2BuiltInDuplex:
+        policy = @"v2BuiltInDuplex";
+        break;
+    case MixroomIOSAudioSessionPolicy::legacyManaged:
+        break;
+    }
+
+    NSString *diagnosticCode = @"ok";
+    switch (facts.status)
+    {
+    case MixroomIOSAudioSessionPolicyStatus::noInput:
+        diagnosticCode = @"no_input";
+        break;
+    case MixroomIOSAudioSessionPolicyStatus::sessionConfigurationFailed:
+    case MixroomIOSAudioSessionPolicyStatus::sessionActivationFailed:
+    case MixroomIOSAudioSessionPolicyStatus::ambiguousInput:
+    case MixroomIOSAudioSessionPolicyStatus::preferredInputFailed:
+        diagnosticCode = @"actual_state_unavailable";
+        break;
+    case MixroomIOSAudioSessionPolicyStatus::ok:
+        break;
+    }
+    return @{
+        @"policy": policy,
+        @"diagnosticCode": diagnosticCode,
+        @"activationCount": @(facts.activationCount),
+        @"sessionMutationElapsedMs": @(facts.mutationElapsedMilliseconds),
+    };
+#else
+    return @{};
+#endif
+}
+
 + (NSString *)getAudioRouteImplementationObjC
 {
     const auto value = JuceEngine::get().getAudioRouteImplementationName();
@@ -2406,7 +2457,6 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 + (void)shutdownEngineObjC
 {
     // juceLogToFlutter("🔻 JuceBridge: shutdownEngineObjC called");
-#if JUCE_MAC && !JUCE_IOS
     if (auto *messageManager = juce::MessageManager::getInstance())
     {
         if (messageManager->isThisTheMessageThread())
@@ -2418,9 +2468,6 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     {
         JuceEngine::get().shutdownEngine();
     }
-#else
-    juce::MessageManager::callAsync([] { JuceEngine::get().shutdownEngine(); });
-#endif
 }
 
 // DEPRECATED: use loadClipObjC:rowId:path:startSec:lengthSec:inFileOffsetSec: instead

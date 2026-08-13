@@ -1,0 +1,333 @@
+--- a/juce_audio_devices/native/juce_Audio_ios.cpp
++++ b/juce_audio_devices/native/juce_Audio_ios.cpp
+@@ -32,7 +32,59 @@
+   ==============================================================================
+ */
+ 
+-namespace juce
++#include "MixroomIOSAudioSessionPolicy.h"
++
++#include <chrono>
++#include <mutex>
++
++namespace
++{
++std::mutex mixroomIOSPolicyMutex;
++MixroomIOSAudioSessionPolicyFacts mixroomIOSPolicyFacts{
++    MixroomIOSAudioSessionPolicy::legacyManaged,
++    MixroomIOSAudioSessionPolicyStatus::ok,
++    0,
++    0.0,
++};
++
++MixroomIOSAudioSessionPolicy mixroomIOSCurrentPolicy() noexcept
++{
++    const std::lock_guard<std::mutex> lock(mixroomIOSPolicyMutex);
++    return mixroomIOSPolicyFacts.policy;
++}
++
++void mixroomIOSUpdatePolicyFacts(
++    MixroomIOSAudioSessionPolicyStatus status,
++    int activationCount,
++    double elapsedMilliseconds) noexcept
++{
++    const std::lock_guard<std::mutex> lock(mixroomIOSPolicyMutex);
++    mixroomIOSPolicyFacts.status = status;
++    mixroomIOSPolicyFacts.activationCount = activationCount;
++    mixroomIOSPolicyFacts.mutationElapsedMilliseconds = elapsedMilliseconds;
++}
++}
++
++extern "C" void mixroomIOSSetAudioSessionPolicy(
++    MixroomIOSAudioSessionPolicy policy) noexcept
++{
++    const std::lock_guard<std::mutex> lock(mixroomIOSPolicyMutex);
++    mixroomIOSPolicyFacts = {
++        policy,
++        MixroomIOSAudioSessionPolicyStatus::ok,
++        0,
++        0.0,
++    };
++}
++
++extern "C" MixroomIOSAudioSessionPolicyFacts
++mixroomIOSGetAudioSessionPolicyFacts() noexcept
++{
++    const std::lock_guard<std::mutex> lock(mixroomIOSPolicyMutex);
++    return mixroomIOSPolicyFacts;
++}
++
++namespace juce
+ {
+ 
+     class iOSAudioIODevice;
+@@ -355,15 +407,23 @@
+         {
+             JUCE_IOS_AUDIO_LOG("Creating iOS audio device");
+ 
+-            // We need to activate the audio session here to obtain the available sample rates and buffer sizes,
+-            // but if we don't set a category first then background audio will always be stopped. This category
+-            // may be changed later.
+-            setAudioSessionCategory(AVAudioSessionCategoryPlayAndRecord);
+-
+-            setAudioSessionActive(true);
+-            updateHardwareInfo();
+-            channelData.reconfigure({}, {});
+-            setAudioSessionActive(false);
++            if (mixroomIOSCurrentPolicy() == MixroomIOSAudioSessionPolicy::legacyManaged)
++            {
++                // Preserve JUCE's original Legacy discovery lifecycle exactly.
++                setAudioSessionCategory(AVAudioSessionCategoryPlayAndRecord);
++                setAudioSessionActive(true);
++                updateHardwareInfo();
++                channelData.reconfigure({}, {});
++                setAudioSessionActive(false);
++            }
++            else
++            {
++                // V2 retains this activation for the immediately following open.
++                v2SessionActive = configureV2Session();
++                if (v2SessionActive)
++                    updateHardwareInfo();
++                channelData.reconfigure({}, {});
++            }
+ 
+             sessionHolder->activeDevices.add(this);
+         }
+@@ -393,7 +453,7 @@
+                                                                       error:&error]);
+         }
+ 
+-        static void setAudioSessionActive(bool enabled)
++        static void setAudioSessionActive(bool enabled)
+         {
+             JUCE_NSERROR_CHECK([[AVAudioSession sharedInstance] setActive:enabled
+                                                                     error:&error]);
+@@ -636,7 +696,93 @@
+             JUCE_IOS_AUDIO_LOG ("Sample rate after detecting available sample rates: " << sampleRate);
+ 
+             availableSampleRates = sampleRates;
++        }
++
++        bool configureV2Session()
++        {
++            const auto startedAt = std::chrono::steady_clock::now();
++            const auto policy = mixroomIOSCurrentPolicy();
++            int activationCount = 0;
++            auto session = [AVAudioSession sharedInstance];
++            NSError *error = nil;
++
++            const auto finish = [&](MixroomIOSAudioSessionPolicyStatus finalStatus)
++            {
++                const auto elapsed = std::chrono::duration<double, std::milli>(
++                    std::chrono::steady_clock::now() - startedAt).count();
++                mixroomIOSUpdatePolicyFacts(finalStatus, activationCount, elapsed);
++                return finalStatus == MixroomIOSAudioSessionPolicyStatus::ok;
++            };
++
++            if (policy == MixroomIOSAudioSessionPolicy::legacyManaged)
++                return finish(MixroomIOSAudioSessionPolicyStatus::sessionConfigurationFailed);
++
++            const BOOL wantsInput = policy == MixroomIOSAudioSessionPolicy::v2BuiltInDuplex;
++            const auto category = wantsInput
++                ? AVAudioSessionCategoryPlayAndRecord
++                : AVAudioSessionCategoryPlayback;
++            AVAudioSessionCategoryOptions options = AVAudioSessionCategoryOptionMixWithOthers;
++            if (wantsInput)
++                options |= AVAudioSessionCategoryOptionDefaultToSpeaker;
++
++            if (![session setCategory:category withOptions:options error:&error] ||
++                ![session setMode:AVAudioSessionModeDefault error:&error])
++                return finish(MixroomIOSAudioSessionPolicyStatus::sessionConfigurationFailed);
++
++            if (![session setActive:YES error:&error])
++                return finish(MixroomIOSAudioSessionPolicyStatus::sessionActivationFailed);
++            activationCount = 1;
++
++            if (@available(ios 18, *))
++            {
++                SubstituteAudioUnit au;
++                if (!au.waitForAudioCallback())
++                {
++                    [session setActive:NO error:nil];
++                    return finish(MixroomIOSAudioSessionPolicyStatus::sessionActivationFailed);
++                }
++            }
++
++            if (wantsInput)
++            {
++                NSMutableArray<AVAudioSessionPortDescription *> *builtInInputs =
++                    [NSMutableArray array];
++                for (AVAudioSessionPortDescription *port in session.availableInputs ?: @[])
++                    if ([port.portType isEqualToString:AVAudioSessionPortBuiltInMic] &&
++                        port.UID.length > 0)
++                        [builtInInputs addObject:port];
++
++                if (builtInInputs.count == 0)
++                {
++                    [session setActive:NO error:nil];
++                    return finish(MixroomIOSAudioSessionPolicyStatus::noInput);
++                }
++                if (builtInInputs.count != 1)
++                {
++                    [session setActive:NO error:nil];
++                    return finish(MixroomIOSAudioSessionPolicyStatus::ambiguousInput);
++                }
++                if (![session setPreferredInput:builtInInputs.firstObject error:&error])
++                {
++                    [session setActive:NO error:nil];
++                    return finish(MixroomIOSAudioSessionPolicyStatus::preferredInputFailed);
++                }
++            }
++
++            return finish(MixroomIOSAudioSessionPolicyStatus::ok);
+         }
++
++        void deactivateV2Session()
++        {
++            if (!v2SessionActive)
++                return;
++
++            auto session = [AVAudioSession sharedInstance];
++            if (mixroomIOSCurrentPolicy() == MixroomIOSAudioSessionPolicy::v2BuiltInDuplex)
++                [session setPreferredInput:nil error:nil];
++            [session setActive:NO error:nil];
++            v2SessionActive = false;
++        }
+ 
+         void updateHardwareInfo(bool forceUpdate = false)
+         {
+@@ -663,11 +809,15 @@
+             JUCE_IOS_AUDIO_LOG("Actual buffer size: " << bufferSize);
+         }
+ 
+-        String open(const BigInteger &inputChannelsWanted,
++        String open(const BigInteger &inputChannelsWanted,
+                     const BigInteger &outputChannelsWanted,
+                     double sampleRateWanted, int bufferSizeWanted)
+         {
+-            close();
++            const auto policy = mixroomIOSCurrentPolicy();
++            const bool isV2 = policy != MixroomIOSAudioSessionPolicy::legacyManaged;
++            const bool preservePreparedV2Session = isV2 && !isRunning && v2SessionActive;
++            if (!preservePreparedV2Session)
++                close();
+ 
+             firstHostTime = true;
+             lastNumFrames = 0;
+@@ -685,13 +835,37 @@
+                                << ", targetSampleRate: " << targetSampleRate
+                                << ", targetBufferSize: " << targetBufferSize);
+ 
+-            setAudioSessionActive(true);
+-            setAudioSessionCategory(requestedInputChannels > 0 ? AVAudioSessionCategoryPlayAndRecord
+-                                                               : AVAudioSessionCategoryPlayback);
+-            channelData.reconfigure(requestedInputChannels, requestedOutputChannels);
+-            setTargetSampleRateAndBufferSize();
+-            updateHardwareInfo(true);
+-            fixAudioRouteIfSetToReceiver();
++            if (isV2)
++            {
++                const bool channelPolicyMatches =
++                    (policy == MixroomIOSAudioSessionPolicy::v2PlaybackOnly &&
++                     requestedInputChannels.isZero()) ||
++                    (policy == MixroomIOSAudioSessionPolicy::v2BuiltInDuplex &&
++                     requestedInputChannels.countNumberOfSetBits() == 1);
++                if (!channelPolicyMatches)
++                {
++                    lastError = "V2 audio-session policy does not match requested channels";
++                    return lastError;
++                }
++                if (!v2SessionActive)
++                    v2SessionActive = configureV2Session();
++                if (!v2SessionActive)
++                {
++                    lastError = "V2 audio-session policy failed";
++                    return lastError;
++                }
++            }
++            else
++            {
++                setAudioSessionActive(true);
++                setAudioSessionCategory(requestedInputChannels > 0 ? AVAudioSessionCategoryPlayAndRecord
++                                                                   : AVAudioSessionCategoryPlayback);
++            }
++            channelData.reconfigure(requestedInputChannels, requestedOutputChannels);
++            setTargetSampleRateAndBufferSize();
++            updateHardwareInfo(true);
++            if (!isV2)
++                fixAudioRouteIfSetToReceiver();
+ 
+             isRunning = true;
+ 
+@@ -726,8 +900,12 @@
+                     audioUnit = nullptr;
+                 }
+ 
+-                setAudioSessionActive(false);
+-            }
++                if (mixroomIOSCurrentPolicy() == MixroomIOSAudioSessionPolicy::legacyManaged)
++                    setAudioSessionActive(false);
++            }
++
++            if (mixroomIOSCurrentPolicy() != MixroomIOSAudioSessionPolicy::legacyManaged)
++                deactivateV2Session();
+         }
+ 
+         void start(AudioIODeviceCallback *newCallback)
+@@ -962,17 +1140,30 @@
+             const ScopedLock myScopedLock(callbackLock);
+ 
+             JUCE_IOS_AUDIO_LOG("handleStatusChange: enabled: " << (int)enabled << ", reason: " << reason);
+-
+-            isRunning = enabled;
+-            setAudioSessionActive(enabled);
+-
+-            if (enabled)
+-                AudioOutputUnitStart(audioUnit);
+-            else
+-                AudioOutputUnitStop(audioUnit);
+ 
+-            if (!enabled)
+-                invokeAudioDeviceErrorCallback(reason);
++            isRunning = enabled;
++            if (mixroomIOSCurrentPolicy() == MixroomIOSAudioSessionPolicy::legacyManaged)
++            {
++                setAudioSessionActive(enabled);
++            }
++            else if (enabled)
++            {
++                v2SessionActive = configureV2Session();
++                if (!v2SessionActive)
++                    isRunning = false;
++            }
++            else
++            {
++                deactivateV2Session();
++            }
++
++            if (isRunning)
++                AudioOutputUnitStart(audioUnit);
++            else
++                AudioOutputUnitStop(audioUnit);
++
++            if (!isRunning)
++                invokeAudioDeviceErrorCallback(reason);
+         }
+ 
+         void handleRouteChange(AVAudioSessionRouteChangeReason reason)
+@@ -1567,10 +1758,11 @@
+ 
+         BigInteger requestedInputChannels, requestedOutputChannels;
+ 
+-        bool isRunning = false;
++        bool isRunning = false;
++        bool v2SessionActive = false;
++
++        AudioIODeviceCallback *callback = nullptr;
+ 
+-        AudioIODeviceCallback *callback = nullptr;
+-
+         String lastError;
+ 
+ #if TARGET_IPHONE_SIMULATOR

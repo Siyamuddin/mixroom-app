@@ -27,37 +27,23 @@ void main() {
     );
     final intent = plugin.substring(intentStart, intentEnd);
 
-    expect(intent, contains('MixroomConfigureIOSRecordingSession'));
-    expect(intent, contains('MixroomIOSBuiltInInputs'));
-    expect(intent, contains('setPreferredInput:inputPort'));
     expect(intent, contains('reconfigureRecordingRouteV2ObjC:@""'));
+    expect(intent, contains('getIOSAudioSessionPolicyFactsObjC'));
+    expect(intent, contains('v2BuiltInDuplex'));
     expect(intent, contains('MixroomIOSInputIsBuiltInMicrophone'));
     expect(intent, contains('AVAudioSessionCategoryPlayAndRecord'));
-    expect(intent, contains('setPreferredInput:nil'));
-    expect(intent, contains('MixroomConfigureIOSPlaybackSession'));
     expect(intent, contains('reconfigurePlaybackRouteV2ObjC:@""'));
     final stopIndex = intent.indexOf('[JuceBridge stopRecordingObjC]');
-    final closeIndex = intent.indexOf(
-      '[JuceBridge quiescePlaybackRouteV2ObjC:YES]',
-      stopIndex,
-    );
-    final clearInputIndex = intent.indexOf(
-      '[session setPreferredInput:nil',
-      closeIndex,
-    );
-    final playbackSessionIndex = intent.indexOf(
-      'MixroomConfigureIOSPlaybackSession',
-      clearInputIndex,
-    );
     final reopenIndex = intent.indexOf(
       'reconfigurePlaybackRouteV2ObjC:@""',
-      playbackSessionIndex,
+      stopIndex,
     );
     expect(stopIndex, greaterThanOrEqualTo(0));
-    expect(closeIndex, greaterThan(stopIndex));
-    expect(clearInputIndex, greaterThan(closeIndex));
-    expect(playbackSessionIndex, greaterThan(clearInputIndex));
-    expect(reopenIndex, greaterThan(playbackSessionIndex));
+    expect(reopenIndex, greaterThan(stopIndex));
+    expect(intent, isNot(contains('setPreferredInput:')));
+    expect(intent, isNot(contains('setCategory:')));
+    expect(intent, isNot(contains('setMode:')));
+    expect(intent, isNot(contains('setActive:')));
     expect(intent, isNot(contains('refreshAudioRouteObjC')));
     expect(intent, isNot(contains('dispatch_after')));
   });
@@ -117,7 +103,34 @@ void main() {
     );
   });
 
-  test('iOS V2 abort finalizes recording and closes the device', () {
+  test('iOS A2DP recording rejects before permission or route mutation', () {
+    final preflightStart = editor.indexOf(
+      'Future<bool> _prepareAudioRecordingStartPreflight()',
+    );
+    final permissionIndex = editor.indexOf(
+      '_ensureMicrophonePermissionForRecording()',
+      preflightStart,
+    );
+    final snapshotIndex = editor.indexOf(
+      'JuceAudioEngine.getAudioRouteSnapshotV2()',
+      preflightStart,
+    );
+    final rejectionIndex = editor.indexOf(
+      'Recording is unavailable while Bluetooth is the audio output.',
+      preflightStart,
+    );
+    final intentIndex = editor.indexOf(
+      'AudioRouteIntentV2.preparingRecording',
+      preflightStart,
+    );
+
+    expect(snapshotIndex, greaterThan(preflightStart));
+    expect(rejectionIndex, greaterThan(snapshotIndex));
+    expect(rejectionIndex, lessThan(permissionIndex));
+    expect(permissionIndex, lessThan(intentIndex));
+  });
+
+  test('iOS V2 route invalidation performs terminal cleanup', () {
     final abortStart = plugin.indexOf(
       'else if ([call.method isEqualToString:@"abortRecordingV2"])',
     );
@@ -128,12 +141,23 @@ void main() {
     final abort = plugin.substring(abortStart, abortEnd);
 
     expect(abort, contains('[JuceBridge stopRecordingObjC]'));
-    expect(abort, contains('[session setPreferredInput:nil'));
-    expect(abort, contains('MixroomConfigureIOSPlaybackSession'));
+    expect(abort, contains('restorePlayback'));
+    expect(abort, contains('if (restorePlayback &&'));
+    expect(abort, contains('reconfigurePlaybackRouteV2ObjC:@""'));
     expect(abort, contains('[JuceBridge quiescePlaybackRouteV2ObjC:YES]'));
-    expect(
-      abort.indexOf('[JuceBridge quiescePlaybackRouteV2ObjC:YES]'),
-      lessThan(abort.indexOf('[session setPreferredInput:nil')),
+    expect(abort, isNot(contains('setPreferredInput:')));
+    expect(abort, isNot(contains('setActive:')));
+
+    final invalidationStart = editor.indexOf(
+      'Future<void> _abortRecordingV2AfterRouteChange()',
     );
+    final invalidationEnd = editor.indexOf(
+      'Future<void> _synchronizeIOSRouteSafetyPositionV2',
+      invalidationStart,
+    );
+    final invalidation = editor.substring(invalidationStart, invalidationEnd);
+    expect(invalidation, contains('abortRecordingV2(restorePlayback: false)'));
+    expect(invalidation, contains('await coordinator?.dispose()'));
+    expect(invalidation, contains('await JuceAudioEngine.shutdown()'));
   });
 }

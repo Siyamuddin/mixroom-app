@@ -5835,6 +5835,7 @@ public:
 
     void initialiseEngine(const juce::String &v2OutputDeviceName = {});
     bool initialisePlaybackV2(const juce::String &outputDeviceName);
+    bool pausePlaybackForRouteChangeV2();
     bool quiescePlaybackRouteV2(bool closeRemovedDevice);
     bool reconfigurePlaybackRouteV2(const juce::String &outputDeviceName);
     bool reconfigureRecordingRouteV2(const juce::String &outputDeviceName,

@@ -12587,9 +12587,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<bool> _ensurePlaybackRouteReady({required String reason}) async {
     if (_isBluetoothV2Session) {
+      final coordinator = _audioRouteCoordinatorV2;
       if (_usesLiveAudioRouteCoordinatorV2 &&
-          _audioRouteCoordinatorV2?.state !=
-              AudioRouteCoordinatorStateV2.stable) {
+          coordinator != null &&
+          coordinator.state != AudioRouteCoordinatorStateV2.stable) {
         if (mounted) {
           _showSmallNotice('Bluetooth 2.0 audio output is not ready yet.');
         }
@@ -12632,6 +12633,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         !_isBluetoothV2Session) {
       return;
     }
+    if (_v2RecordingRouteInvalidated) return;
     final pausedPosition = _isPlaying
         ? _estimateTransportClockFromSample()
         : _globalAudioClock;
@@ -12654,7 +12656,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _abortRecordingV2AfterRouteChange() async {
-    await JuceAudioEngine.abortRecordingV2();
+    await JuceAudioEngine.abortRecordingV2(restorePlayback: false);
+    final coordinator = _audioRouteCoordinatorV2;
+    _audioRouteCoordinatorV2 = null;
+    await coordinator?.dispose();
+    await JuceAudioEngine.shutdown();
     if (!mounted) return;
     _showSmallNotice(
       'Audio output changed during recording. Reopen the audio editor to continue.',
@@ -20491,12 +20497,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _startRecordingJuce() async {
     if (_isBluetoothV2Session) {
-      if ((!Platform.isMacOS && !Platform.isIOS) ||
-          _selectedRow < 0 ||
+      if (!Platform.isMacOS && !Platform.isIOS) {
+        _showSmallNotice(
+          'Only audio recording with the built-in device microphone is available in this Bluetooth 2.0 checkpoint.',
+        );
+        return;
+      }
+      if (_selectedRow < 0 ||
           _selectedRow >= _rows.length ||
           _rows[_selectedRow].kind == TimelineRowKind.instrument) {
         _showSmallNotice(
-          'Only audio recording with the built-in device microphone is available in this Bluetooth 2.0 checkpoint.',
+          'Select an audio row to record. MIDI recording is not available in this Bluetooth 2.0 checkpoint.',
         );
         return;
       }
@@ -20523,6 +20534,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<bool> _prepareAudioRecordingStartPreflight() async {
+    if (_isBluetoothV2Session && Platform.isIOS) {
+      final snapshot = await JuceAudioEngine.getAudioRouteSnapshotV2();
+      if (!mounted) return false;
+      if (snapshot.outputs.length == 1 &&
+          snapshot.outputs.single.normalizedKind ==
+              AudioRouteKindV2.bluetoothMedia) {
+        _showSmallNotice(
+          'Recording is unavailable while Bluetooth is the audio output.',
+        );
+        return false;
+      }
+    }
     if (!await _ensureMicrophonePermissionForRecording()) {
       return false;
     }

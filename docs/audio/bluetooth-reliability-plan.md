@@ -6,7 +6,10 @@
   Android Legacy baseline, Android V2 built-in-speaker foundation, and Android
   V2 preconnected Bluetooth media playback have passed their initial
   physical-device gates. Android live-output coordination has also passed its
-  focused Samsung/Sony hardware gate.
+  focused Samsung/Sony hardware gate. iOS V2 output-only playback, live output
+  recovery, disconnect safety, and built-in recording have passed their iPad
+  gates. iOS Bluetooth recording is not implemented; two experiments failed
+  their gates and were removed.
 - Applies to: Android, iOS, and macOS.
 - Excludes: Windows and every other unsupported platform.
 - Current production implementation: Legacy Bluetooth only.
@@ -40,6 +43,63 @@ The product should accept normal Bluetooth transport latency. It should not add
 a universal 300 ms application delay. Clean, stable audio and crash safety are
 more important than low latency on Bluetooth.
 
+## Current V2 state and iOS ownership decision
+
+The accepted implementation boundary as of 2026-08-13 is:
+
+| Platform | Playback | Live output changes | V2 audio recording |
+| --- | --- | --- | --- |
+| macOS | Built-in and Bluetooth media verified | Verified | Built-in microphone with built-in or Bluetooth media output verified |
+| Android | Built-in and Bluetooth media verified | Verified | Not implemented |
+| iOS | Built-in and A2DP verified | Verified, including disconnect recovery | Built-in speaker and built-in microphone verified; Bluetooth output recording rejected before mutation |
+
+Legacy remains the default on every platform. macOS and Android do not require
+an audio-session ownership correction. Their working V2 paths receive only
+regression coverage while the iOS boundary below is changed.
+
+### Confirmed iOS Bluetooth-recording failure
+
+The failed iOS Bluetooth-recording work exposed one concrete ownership defect,
+not a general failure of the iOS playback implementation. The plugin configured
+the process-wide `AVAudioSession` category, mode, activation, and preferred
+input. JUCE then configured and activated that same session again while opening
+its iOS device. JUCE's recording category enabled speaker, HFP, A2DP, and
+AirPlay options together, and its iOS 18 activation path synchronously waited
+for a temporary Audio Unit callback. The expected HFP route did not settle,
+validation failed, and the combined open/restoration work caused an
+unacceptable multi-second UI stall.
+
+Moving only the plugin's session setters off the UI thread could not correct
+the failure because the conflicting mutation and blocking activation remained
+inside JUCE device opening. The unaccepted HFP transaction code was therefore
+removed rather than patched with delays or retries.
+
+### Single-owner rule for iOS V2
+
+There must be one product-policy owner and one native mutation executor:
+
+- `AudioRoutePolicyV2` chooses the desired route intent and capabilities.
+- `AudioRouteCoordinatorV2` serializes route and intent transitions.
+- The JUCE iOS audio backend is the sole executor of V2 `AVAudioSession`
+  category, mode, options, activation/deactivation, preferred-input, Audio Unit
+  open, and Audio Unit close operations.
+- The iOS plugin requests a policy, observes route events, and verifies the
+  returned actual state. It must not perform a competing session mutation for
+  a JUCE-managed V2 device transition.
+- Flutter owns user intent and presentation only.
+
+This is an internal ownership seam, not another coordinator or public state
+machine. The first migration supports only `legacyManaged`,
+`v2PlaybackOnly`, and `v2BuiltInDuplex`. A future
+`v2BluetoothHfpDuplex` policy is forbidden until the accepted playback and
+built-in-recording paths pass again under single ownership.
+
+JUCE must retain the session work it legitimately needs for device discovery,
+interruption handling, actual hardware facts, and shutdown. The correction
+must not make JUCE broadly session-blind. Instead, Mixroom supplies the V2
+policy and JUCE applies that policy exactly once in the correct device
+lifecycle. Legacy continues through the unmodified JUCE behavior.
+
 ## Goals
 
 1. Clean Bluetooth playback without persistent crackling, jitter, or dropouts.
@@ -48,8 +108,8 @@ more important than low latency on Bluetooth.
 3. High-quality media output during ordinary playback; no silent switch to a
    call-quality headset profile.
 4. Input closed during ordinary editing and playback.
-5. Safe recording with a verified non-Bluetooth input when Bluetooth output is
-   active.
+5. Safe recording with a verified platform-supported input/output combination;
+   unsupported Bluetooth combinations fail before capture or session mutation.
 6. The same user-facing contract on Android, iOS, and macOS where that improves
    reliability.
 7. Legacy and Bluetooth 2.0 available side by side for controlled A/B testing.
@@ -62,7 +122,8 @@ more important than low latency on Bluetooth.
   transport.
 - Eliminating Bluetooth's inherent latency.
 - Making live Bluetooth monitoring feel like wired monitoring.
-- Supporting Bluetooth headset microphones in the initial V2 release.
+- Supporting Bluetooth headset microphones before the single-owner iOS and
+  equivalent Android recording foundations pass their hardware gates.
 - Forcing identical native settings on different operating systems.
 - Automatically creating macOS aggregate/combiner devices.
 - Changing project or export sample rates when the hardware route changes.
@@ -80,10 +141,10 @@ calls or buffer values.
 | Bluetooth playback | Prefer high-quality media route | Prefer A2DP/media output | Use selected Core Audio Bluetooth output |
 | Normal Bluetooth latency | Accepted | Accepted | Accepted |
 | Live monitoring | Off by default | Off by default | Off by default |
-| Bluetooth headset microphone | Rejected initially | Rejected initially | Rejected initially |
-| Recording with Bluetooth output | Prefer built-in/default non-Bluetooth mic | Prefer built-in mic | Prefer built-in/default non-Bluetooth mic |
+| Bluetooth headset microphone | Deferred until Android recording foundation | Deferred until a writer-free HFP route gate passes | Rejected; built-in mic is the verified path |
+| Recording with Bluetooth output | Not implemented yet | Currently rejected before mutation | Verified with built-in microphone |
 | Unsupported duplex combination | Mute simultaneous playback or fail clearly | Mute simultaneous playback or fail clearly | Mute simultaneous playback or fail clearly |
-| Disconnect | Quiesce, fall back, verify, resume if safe | Quiesce, fall back, verify, resume if safe | Quiesce, fall back, verify, resume if safe |
+| Disconnect | Quiesce, follow system fallback, verify, remain paused | Quiesce, follow system fallback, verify, remain paused | Quiesce, follow system/default fallback, verify, remain paused |
 
 ## Current Legacy implementation
 
@@ -199,7 +260,8 @@ between the editor and native/JUCE layers.
 3. Input opens only for `preparingRecording`, `recording`, or deliberate
    supported `monitoring` intent.
 4. Input closes immediately when none of those intents remains.
-5. Bluetooth headset microphones are disabled on all three platforms initially.
+5. Bluetooth headset microphones remain disabled unless a platform-specific,
+   separately approved duplex checkpoint passes its hardware gate.
 6. Bluetooth live monitoring is disabled by default and has no V2 override in
    the initial release.
 7. Project/export rate remains independent from active hardware rate.
@@ -332,20 +394,19 @@ One native `apply` is atomic from Flutter's perspective:
 | Intent and route | Input | Hardware-rate policy | Buffer policy | Monitoring |
 | --- | --- | --- | --- | --- |
 | Playback, built-in/wired/USB | Closed | Use actual native-supported rate | Route-native/supported | Off |
-| Playback, Bluetooth (profile known or unavailable)/LE | Closed | Prefer 48 kHz, accept/read actual | Conservative, bounded, route-supported | Off |
-| Preparing/recording with Bluetooth output | Mandatory safe non-Bluetooth input | Verify actual after reopen | Stability-oriented and bounded | Off |
+| Playback, Bluetooth (profile known or unavailable)/LE | Closed | Use native/unspecified supported rate and read actual | Conservative, bounded, route-supported | Off |
+| Preparing/recording with Bluetooth output | Platform-supported verified input; otherwise reject before capture | Verify actual after reopen | Stability-oriented and bounded | Off |
 | Preparing/recording without Bluetooth | Selected safe input | Verify actual | Route-supported | Off unless explicitly supported |
 | Monitoring without Bluetooth | Selected safe input | Verify actual | Route-supported | Explicit intent only |
 | Monitoring with Bluetooth | Unsupported initially | — | — | Off |
 
-The first diagnostic default for Bluetooth should be 48 kHz and at least a
-1024-frame application/JUCE buffer, because it is conservative and directly
-tests the current underrun hypothesis. It is not a universal final constant.
-Adapters must select supported values, observe native burst/capacity data where
-available, and record the actual accepted settings. Any upper bound must be
-defined before implementation and validated on hardware; a provisional 2048
-frames is a test ceiling, not a promise that every platform exposes that exact
-buffer.
+There is no universal Bluetooth sample rate or buffer. Adapters request
+native/unspecified values where supported, apply only a bounded policy proven
+for that platform and route, and record the actual accepted settings. The
+verified implementations currently include 44.1 and 48 kHz routes and buffers
+that differ by platform. Project/export settings never become hardware-route
+settings. A 48 kHz/1024-frame combination may be used as a diagnostic
+experiment, but it is not a product default or acceptance requirement.
 
 If xruns grow after stabilization, the native adapter may grow buffering in
 native burst-sized steps within the approved bound. It must not repeatedly
@@ -357,13 +418,15 @@ reopen a stable route or impose an artificial 300 ms delay.
 - Request microphone permission without opening an audio input stream.
 - Open input immediately before record preparation/count-in, not merely because
   a track exists or the editor is open.
-- Prefer the built-in microphone, then a verified non-Bluetooth external input.
+- Prefer only input/output combinations explicitly supported and verified by
+  the platform adapter. Current verified recording uses a built-in microphone.
 - Never select an input by display-name guessing when native transport metadata
   is available.
-- After input opens, verify that output remains a high-quality media route.
-- If opening safe input forces HFP/SCO/call-quality output, close input and
-  either mute simultaneous playback during capture or fail before capture with
-  a clear explanation.
+- After input opens, verify the complete input/output route and expected
+  profile. Ordinary playback must remain on a high-quality media route.
+- A future explicit Bluetooth-headset recording intent may temporarily use a
+  verified duplex/HFP route with a disclosed quality reduction. An accidental
+  duplex route remains a failure.
 - After recording/monitoring ends, close input, restore playback-only platform
   configuration, and verify the effective output profile.
 
@@ -447,10 +510,17 @@ Questions that Android diagnostics must answer before tuning:
 ### iOS
 
 - Observe `AVAudioSessionRouteChangeNotification` directly.
-- Invalidate and quiesce an unavailable device before asynchronous rebuilding.
+- On an ordinary output change, pause transport and preserve position without
+  detaching callbacks, closing the device, or reopening JUCE from the plugin.
+- Let JUCE's native iOS route handler perform the single RemoteIO restart, then
+  verify the settled route and engine state through the shared coordinator.
 - Use an explicit playback category/mode for output-only intent.
-- Use an explicit recording category/mode with A2DP allowed and built-in input
-  preferred only during recording preparation/recording.
+- Express V2 session behavior as an internal JUCE policy. JUCE is the sole
+  executor of category, mode, options, activation, preferred input, and Audio
+  Unit lifecycle for an accepted V2 device transition; the plugin observes and
+  verifies but does not repeat those mutations.
+- Migrate only the already-proven output-only and built-in-duplex policies
+  first. Do not introduce HFP during that migration.
 - Remove transient and project-load input prewarming in V2.
 - Read actual sample rate, IO buffer duration, route, and channels after session
   activation.
@@ -934,7 +1004,8 @@ Deliverables:
 
 - remove V2 project-load input prewarming;
 - open safe input just in time;
-- reject Bluetooth headset microphone selection;
+- reject Bluetooth headset microphone selection unless an explicit,
+  separately gated duplex-recording policy is active;
 - verify high-quality output after input opens;
 - safely mute simultaneous playback or fail if the combination is unsupported;
 - finalize recordings safely when a route disappears; and
@@ -1032,6 +1103,90 @@ resolved it. Repeated recording then succeeded without reopening the editor;
 the final report showed `playbackOnly`, zero inputs, `inputOpen: false`, and an
 attached 48 kHz/256-frame output callback. Recording-start cancellation and a
 Legacy Record/Stop regression check also passed.
+
+#### Checkpoint 7D evidence — iOS Bluetooth recording deferred
+
+Two bounded Bluetooth-recording experiments failed their physical iPad gate.
+A2DP output plus the built-in microphone changed the duplex engine to a 16 kHz
+one-input/one-output route and blocked the editor while opening and restoring
+audio. A subsequent classic-Bluetooth transaction explicitly selected the
+headset HFP input by native port identity, but iOS still did not establish a
+usable duplex route before JUCE validation and the system transition produced
+an unacceptable multi-second UI stall. Moving AVAudioSession mutation to a
+private serial lane and correcting a stale route-read boundary did not make the
+hardware behavior acceptable.
+
+The unaccepted HFP implementation was removed in full. iOS V2 retains the
+proven output-only A2DP playback, live switching, disconnect safety, and
+built-in speaker/microphone recording paths. When A2DP is the active output,
+Record now fails immediately after one read-only snapshot and before requesting
+permission or changing AVAudioSession/JUCE. No forced rate, delay, retry,
+polling, device-name match, or headset-specific workaround was added.
+
+#### Checkpoint 7E evidence — iOS V2 session-ownership correction
+
+This checkpoint changes no user-facing capability. It introduces one narrow
+policy seam in the vendored JUCE iOS backend and migrates only the accepted
+`v2PlaybackOnly` and `v2BuiltInDuplex` paths. The plugin stops independently
+setting category, mode, activation, preferred input, or deactivation for those
+JUCE device transitions. JUCE applies the requested V2 policy once, opens or
+closes its Audio Unit, and exposes actual state for the existing plugin
+verification. Legacy retains its current JUCE-managed behavior.
+
+The migration must preserve output-only speaker/A2DP playback, live route
+switching, disconnect recovery, background/resume, built-in recording,
+repeated Record/Stop, graph contents, transport position, and zero inputs
+outside recording. It adds no HFP route, recording-writer change, coordinator
+state, retry, polling, delay, buffer tuning, Android behavior, or macOS
+behavior. JUCE's iOS 18 compatibility activation may remain, but a V2
+transition must not activate redundantly; activation count and transition
+elapsed time are verified in tests and on hardware.
+
+The iPad gate passed on 2026-08-13 for built-in playback, A2DP playback,
+speaker/A2DP switching, background/resume, built-in Record/Stop and recording
+cancellation. A2DP Record remained an immediate read-only rejection with no
+permission request, microphone activation, route mutation, or freeze.
+
+#### Checkpoint 7F evidence — JUCE-owned ordinary route recovery
+
+The remaining disconnect assertion came from two recovery owners reacting to
+one physical iOS route change: JUCE's native route handler restarted RemoteIO
+while the Mixroom observer detached/closed it and the coordinator reopened it
+again. The temporary `deviceCallbackActive` workaround and effect stack logger
+did not correct that ownership conflict and were removed.
+
+Ordinary iOS route recovery now has one mutation owner. The Mixroom observer
+only records whether transport was playing, pauses at the preserved position,
+increments the native generation, and emits the route event. The coordinator's
+iOS apply is verification-only: after the existing 100 ms settling window it
+requires the event fingerprint, current AVAudioSession output, JUCE callback,
+channels, rate, buffer, and zero-input state to agree. It performs no callback
+detach, device close/open, AVAudioSession mutation, retry, polling, or delay.
+JUCE alone performs its built-in iOS RemoteIO route restart.
+
+The physical iPad gate passed three Bluetooth-disconnect cycles during
+playback without the prior `NativeEffects.h:28` assertion, freeze, crash, or
+microphone activation. Every cycle paused Mixroom, preserved position,
+recovered the system-selected speaker, and resumed only after user action.
+Background/resume passed on speaker and A2DP. Built-in Record/Stop passed three
+times plus cancellation. Final reports verified:
+
+- speaker: stable `playback/default`, 48 kHz, 256 frames, attached callback,
+  two outputs, zero inputs, and `inputOpen: false`;
+- A2DP: stable `playback/default`, 44.1 kHz, 256 frames, attached callback,
+  two outputs, zero inputs, and `inputOpen: false`.
+
+Route invalidation during iOS recording now owns terminal cleanup: it stops the
+writer and monitoring, shuts down V2 once, preserves project/transport state,
+and requires reopening the editor. It does not attempt playback restoration
+from the invalidated recording-abort path. Ordinary recording Stop continues
+to use the explicit output-only restoration path.
+
+After this checkpoint, the next separate experiment is writer-free:
+open a verified A2DP route, transition once to verified HFP duplex, immediately
+close it, and restore the exact original A2DP identity. Recording and clip
+insertion remain disabled until that route-only experiment is responsive,
+cancellable, and repeatable on hardware.
 
 ### Phase 8 — Complete A/B hardware validation
 
@@ -1142,6 +1297,7 @@ Each run records:
 | Risk | Control |
 | --- | --- |
 | V2 accidentally affects Legacy | Build guard, session-fixed owner, isolation tests |
+| iOS plugin and JUCE both mutate `AVAudioSession` | One V2 policy request; JUCE is the only device-transition mutation executor |
 | Route-event loop | Compare effective facts, debounce duplicates, one queue |
 | Disconnect use-after-free/crash | Generation invalidation before teardown, late-callback tests |
 | Bluetooth output falls to HFP/SCO | Keep input closed, verify profile after opening input |
@@ -1159,8 +1315,8 @@ Each run records:
    hardware becomes available? Redacted Bluetooth reports are clipboard-only
    by default and may be committed under
    `docs/audio/evidence/bluetooth-v2/reports/`.
-3. Is muted playback during unsupported Bluetooth-output recording acceptable,
-   or should V2 always fail before recording on that combination?
+3. Which future recording combinations should be exposed after their separate
+   hardware gates: A2DP plus built-in input, HFP duplex, or both?
 4. What exact buffer upper bounds are supported and useful on each platform?
 5. Which Android Oboe statistics are available through the current JUCE version
    without modifying vendored JUCE code?
@@ -1178,9 +1334,24 @@ Each run records:
 - [Apple route-change guidance](https://developer.apple.com/documentation/avfaudio/responding-to-audio-route-changes)
 - [Apple preferred hardware settings](https://developer.apple.com/library/archive/qa/qa1631/_index.html)
 - [Apple AVAudioSession route description](https://developer.apple.com/documentation/avfaudio/avaudiosessionroutedescription)
+- [Apple AVAudioSession](https://developer.apple.com/documentation/avfaudio/avaudiosession)
+- [Apple preferred input](https://developer.apple.com/documentation/avfaudio/avaudiosession/setpreferredinput(_:))
+- [Apple A2DP category option](https://developer.apple.com/documentation/avfaudio/avaudiosession/categoryoptions-swift.struct/allowbluetootha2dp)
+- [JUCE iOS audio backend](https://github.com/juce-framework/JUCE/blob/master/modules/juce_audio_devices/native/juce_Audio_ios.cpp)
+
+## Repository hygiene for the next checkpoint
+
+- Generated `ios/Podfile.lock` checksum churn from local build/install work is
+  unrelated to Bluetooth behavior and must not be included in the checkpoint.
+- Existing unrelated engineering-document changes remain user-owned and are
+  not modified or bundled with Bluetooth work.
+- The session-ownership correction is reviewed and committed independently
+  only after its existing-behavior hardware gate passes.
 
 ## Immediate next step
 
-Checkpoint 7C is accepted. The next checkpoint keeps this lifecycle and permits
-preconnected iOS Bluetooth media output with the built-in device microphone,
-without enabling Bluetooth headset input or adding another coordinator.
+Review and approve Checkpoint 7E as the next code boundary. Then migrate the
+already-working iOS V2 playback-only and built-in-duplex paths to one JUCE
+session-mutation executor and rerun their existing acceptance gates. Bluetooth
+recording remains rejected. No HFP code is added until the ownership migration
+passes.

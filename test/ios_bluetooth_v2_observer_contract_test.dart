@@ -28,13 +28,14 @@ void main() {
       expect(start, contains('AVAudioSessionRouteChangeNotification'));
       expect(start, contains('UIApplicationDidBecomeActiveNotification'));
       expect(handler, contains('audioRouteChangedV2'));
-      expect(handler, contains('quiescePlaybackRouteV2ObjC:removed'));
+      expect(handler, contains('pausePlaybackForRouteChangeV2ObjC'));
       expect(handler, contains('self.audioRouteGenerationV2 += 1'));
       expect(
-        handler.indexOf('quiescePlaybackRouteV2ObjC:removed'),
+        handler.indexOf('pausePlaybackForRouteChangeV2ObjC'),
         lessThan(handler.indexOf('self.eventSink(@{')),
       );
       for (final forbidden in <String>[
+        'quiescePlaybackRouteV2',
         'reconfigurePlaybackRouteV2',
         'setCategory:',
         'setMode:',
@@ -66,6 +67,16 @@ void main() {
     expect(coordinatorStart, greaterThan(iosCoordinator));
     expect(source, isNot(contains('_iosAudioRouteReopenRequiredV2')));
     expect(source, isNot(contains('audioRouteObservationEventsV2')));
+    expect(source, contains('coordinator != null &&'));
+    expect(
+      source,
+      isNot(
+        contains(
+          '_audioRouteCoordinatorV2?.state !=\n'
+          '              AudioRouteCoordinatorStateV2.stable',
+        ),
+      ),
+    );
   });
 
   test('iOS transition pauses UI and keeps manual resume policy', () {
@@ -99,7 +110,7 @@ void main() {
     expect(transitionHandler, isNot(contains('_playAudio(')));
   });
 
-  test('shared output-only reconfigure helper supports iOS', () {
+  test('explicit output-only reconfigure helper remains available for iOS', () {
     final source = File(
       'juce_audio_engine/ios/Classes/JuceEngine.cpp',
     ).readAsStringSync();
@@ -120,7 +131,7 @@ void main() {
     expect(helper, isNot(contains('applyPreferredAudioDeviceSetup')));
   });
 
-  test('iOS atomic apply validates one route and has no recovery chain', () {
+  test('iOS coordinator apply only verifies the settled JUCE route', () {
     final source = File(
       'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
     ).readAsStringSync();
@@ -128,15 +139,22 @@ void main() {
       source,
       '- (NSDictionary<NSString *, id> *)applyAudioRouteConfigurationV2:(NSDictionary *)args {',
     );
+    final iosStart = apply.indexOf(
+      '#else\n    const double startedAtMs = MixroomIOSMonotonicMilliseconds()',
+    );
+    expect(iosStart, isNonNegative);
+    final iosApply = apply.substring(iosStart);
 
-    expect(apply, contains('MixroomConfigureIOSPlaybackSession'));
-    expect(apply, contains('MixroomIOSSingleOutputEndpoint'));
-    expect(apply, contains('MixroomIOSOutputIdentitiesMatch'));
-    expect(apply, contains('bluetooth_duplex_forbidden'));
-    expect(apply, contains('juce_reopen_failed'));
-    expect(apply, contains('fallback_succeeded'));
-    expect(apply, contains('reconfigurePlaybackRouteV2ObjC:@""'));
+    expect(iosApply, contains('getIOSAudioSessionPolicyFactsObjC'));
+    expect(iosApply, contains('v2PlaybackOnly'));
+    expect(iosApply, contains('MixroomIOSSingleOutputEndpoint'));
+    expect(iosApply, contains('MixroomIOSOutputIdentitiesMatch'));
+    expect(iosApply, contains('eventFingerprint'));
+    expect(iosApply, contains('bluetooth_duplex_forbidden'));
+    expect(iosApply, contains('fallback_succeeded'));
     for (final forbidden in <String>[
+      'reconfigurePlaybackRouteV2ObjC',
+      'quiescePlaybackRouteV2ObjC',
       'preparePlaybackRouteObjC',
       'refreshAudioRouteObjC',
       'setPreferredInput:',
@@ -144,7 +162,20 @@ void main() {
       'dispatch_after',
       'performSelector:afterDelay:',
     ]) {
-      expect(apply, isNot(contains(forbidden)));
+      expect(iosApply, isNot(contains(forbidden)));
     }
+  });
+
+  test('failed callback workaround and effect stack logging are absent', () {
+    final header = File(
+      'juce_audio_engine/ios/Classes/JuceEngine.h',
+    ).readAsStringSync();
+    final effects = File(
+      'juce_audio_engine/android/src/main/cpp/NativeEffects.h',
+    ).readAsStringSync();
+
+    expect(header, isNot(contains('deviceCallbackActive')));
+    expect(effects, isNot(contains('Mixroom effect scratch overflow')));
+    expect(effects, isNot(contains('getStackBacktrace')));
   });
 }
