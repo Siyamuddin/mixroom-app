@@ -27,10 +27,11 @@ void main() {
     ).readAsStringSync();
   });
 
-  test('private policy seam has only the three accepted ownership modes', () {
+  test('private policy seam includes the writer-free HFP probe mode', () {
     expect(policyHeader, contains('legacyManaged = 0'));
     expect(policyHeader, contains('v2PlaybackOnly = 1'));
     expect(policyHeader, contains('v2BuiltInDuplex = 2'));
+    expect(policyHeader, contains('v2BluetoothHfpDuplex = 3'));
     expect(policyHeader, contains('activationCount'));
     expect(policyHeader, contains('mutationElapsedMilliseconds'));
     expect(policyHeader, isNot(contains('FlutterMethodChannel')));
@@ -54,7 +55,7 @@ void main() {
     expect(policy, contains('AVAudioSessionCategoryOptionDefaultToSpeaker'));
     expect(
       policy,
-      isNot(contains('AVAudioSessionCategoryOptionAllowBluetooth')),
+      isNot(contains('AVAudioSessionCategoryOptionAllowBluetoothA2DP')),
     );
   });
 
@@ -75,6 +76,7 @@ void main() {
     }
     expect(playback, contains('v2PlaybackOnly'));
     expect(duplex, contains('v2BuiltInDuplex'));
+    expect(duplex, contains('v2BluetoothHfpDuplex'));
   });
 
   test('accepted V2 plugin transitions contain no session setters', () {

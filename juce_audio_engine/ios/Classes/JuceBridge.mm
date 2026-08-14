@@ -2399,9 +2399,44 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
         juceStringFromNSString(inputDeviceName));
 }
 
++ (BOOL)reconfigureBluetoothDuplexRouteV2ObjC
+{
+    return JuceEngine::get().reconfigureBluetoothDuplexRouteV2();
+}
+
++ (BOOL)prepareBluetoothDuplexSessionV2ObjC
+{
+    return JuceEngine::get().prepareBluetoothDuplexSessionV2();
+}
+
++ (BOOL)openPreparedBluetoothDuplexRouteV2ObjC
+{
+    return JuceEngine::get().openPreparedBluetoothDuplexRouteV2();
+}
+
 + (BOOL)validateRecordingRouteV2ObjC
 {
     return JuceEngine::get().validateRecordingRouteV2();
+}
+
++ (void)beginIOSIntentOperationV2ObjC
+{
+    JuceEngine::get().beginIOSIntentOperationV2();
+}
+
++ (void)endIOSIntentOperationV2ObjC
+{
+    JuceEngine::get().endIOSIntentOperationV2();
+}
+
++ (void)markIOSIntentRouteInvalidatedV2ObjC
+{
+    JuceEngine::get().markIOSIntentRouteInvalidatedV2();
+}
+
++ (BOOL)isIOSIntentRouteInvalidatedV2ObjC
+{
+    return JuceEngine::get().isIOSIntentRouteInvalidatedV2();
 }
 
 + (NSDictionary<NSString *, id> * _Nonnull)getIOSAudioSessionPolicyFactsObjC
@@ -2416,6 +2451,9 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
         break;
     case MixroomIOSAudioSessionPolicy::v2BuiltInDuplex:
         policy = @"v2BuiltInDuplex";
+        break;
+    case MixroomIOSAudioSessionPolicy::v2BluetoothHfpDuplex:
+        policy = @"v2BluetoothHfpDuplex";
         break;
     case MixroomIOSAudioSessionPolicy::legacyManaged:
         break;

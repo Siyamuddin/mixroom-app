@@ -45,7 +45,7 @@ void main() {
     expect(intent, isNot(contains('setMode:')));
     expect(intent, isNot(contains('setActive:')));
     expect(intent, isNot(contains('refreshAudioRouteObjC')));
-    expect(intent, isNot(contains('dispatch_after')));
+    expect('dispatch_after'.allMatches(intent), hasLength(1));
   });
 
   test('iOS V2 native writer requires an already prepared mono route', () {
@@ -62,7 +62,8 @@ void main() {
     );
     final writer = engine.substring(writerStart, writerEnd);
 
-    expect(open, contains('deviceManager.initialise(1, 2, nullptr, true)'));
+    expect(open, contains('const auto error = deviceManager.initialise('));
+    expect(open, contains('bluetoothHfp ? 1 : 2'));
     expect(open, contains('desiredInputOpenChannels.store(1'));
     expect(writer, contains('validateRecordingRouteV2()'));
     expect(writer, contains('channelStart != 0'));
@@ -142,7 +143,7 @@ void main() {
 
     expect(abort, contains('[JuceBridge stopRecordingObjC]'));
     expect(abort, contains('restorePlayback'));
-    expect(abort, contains('if (restorePlayback &&'));
+    expect(abort, contains('if (terminal || !restored)'));
     expect(abort, contains('reconfigurePlaybackRouteV2ObjC:@""'));
     expect(abort, contains('[JuceBridge quiescePlaybackRouteV2ObjC:YES]'));
     expect(abort, isNot(contains('setPreferredInput:')));

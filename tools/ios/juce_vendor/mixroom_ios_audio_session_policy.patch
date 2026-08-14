@@ -1,6 +1,6 @@
 --- a/juce_audio_devices/native/juce_Audio_ios.cpp
 +++ b/juce_audio_devices/native/juce_Audio_ios.cpp
-@@ -32,7 +32,59 @@
+@@ -32,7 +32,90 @@
    ==============================================================================
  */
  
@@ -19,6 +19,9 @@
 +    0,
 +    0.0,
 +};
++bool mixroomIOSPreparedSessionActive = false;
++MixroomIOSAudioSessionPolicy mixroomIOSPreparedSessionPolicy =
++    MixroomIOSAudioSessionPolicy::legacyManaged;
 +
 +MixroomIOSAudioSessionPolicy mixroomIOSCurrentPolicy() noexcept
 +{
@@ -36,12 +39,40 @@
 +    mixroomIOSPolicyFacts.activationCount = activationCount;
 +    mixroomIOSPolicyFacts.mutationElapsedMilliseconds = elapsedMilliseconds;
 +}
++
++void mixroomIOSMarkPreparedSession(
++    MixroomIOSAudioSessionPolicy policy) noexcept
++{
++    const std::lock_guard<std::mutex> lock(mixroomIOSPolicyMutex);
++    mixroomIOSPreparedSessionPolicy = policy;
++    mixroomIOSPreparedSessionActive = true;
++}
++
++bool mixroomIOSConsumePreparedSession(
++    MixroomIOSAudioSessionPolicy policy) noexcept
++{
++    const std::lock_guard<std::mutex> lock(mixroomIOSPolicyMutex);
++    if (!mixroomIOSPreparedSessionActive ||
++        mixroomIOSPreparedSessionPolicy != policy)
++        return false;
++    mixroomIOSPreparedSessionActive = false;
++    return true;
++}
++
++void mixroomIOSClearPreparedSession() noexcept
++{
++    const std::lock_guard<std::mutex> lock(mixroomIOSPolicyMutex);
++    mixroomIOSPreparedSessionActive = false;
++    mixroomIOSPreparedSessionPolicy =
++        MixroomIOSAudioSessionPolicy::legacyManaged;
++}
 +}
 +
 +extern "C" void mixroomIOSSetAudioSessionPolicy(
 +    MixroomIOSAudioSessionPolicy policy) noexcept
 +{
 +    const std::lock_guard<std::mutex> lock(mixroomIOSPolicyMutex);
++    mixroomIOSPreparedSessionActive = false;
 +    mixroomIOSPolicyFacts = {
 +        policy,
 +        MixroomIOSAudioSessionPolicyStatus::ok,
@@ -61,7 +92,98 @@
  {
  
      class iOSAudioIODevice;
-@@ -355,15 +407,23 @@
+@@ -345,5 +428,90 @@
+         AudioUnit audioUnit{};
+         WaitableEvent audioCallbackOccurred;
+     };
++
++    extern "C" bool mixroomIOSPrepareAudioSessionPolicy() noexcept
++    {
++        const auto startedAt = std::chrono::steady_clock::now();
++        const auto policy = mixroomIOSCurrentPolicy();
++        int activationCount = 0;
++        auto session = [AVAudioSession sharedInstance];
++        NSError *error = nil;
++
++        const auto finish = [&](MixroomIOSAudioSessionPolicyStatus status)
++        {
++            const auto elapsed = std::chrono::duration<double, std::milli>(
++                std::chrono::steady_clock::now() - startedAt).count();
++            mixroomIOSUpdatePolicyFacts(status, activationCount, elapsed);
++            if (status == MixroomIOSAudioSessionPolicyStatus::ok)
++                mixroomIOSMarkPreparedSession(policy);
++            else
++                mixroomIOSClearPreparedSession();
++            return status == MixroomIOSAudioSessionPolicyStatus::ok;
++        };
++
++        const BOOL wantsBuiltInInput =
++            policy == MixroomIOSAudioSessionPolicy::v2BuiltInDuplex;
++        const BOOL wantsHfpInput =
++            policy == MixroomIOSAudioSessionPolicy::v2BluetoothHfpDuplex;
++        if (!wantsBuiltInInput && !wantsHfpInput)
++            return finish(
++                MixroomIOSAudioSessionPolicyStatus::sessionConfigurationFailed);
++
++        AVAudioSessionCategoryOptions options =
++            AVAudioSessionCategoryOptionMixWithOthers;
++        if (wantsBuiltInInput)
++            options |= AVAudioSessionCategoryOptionDefaultToSpeaker;
++        else
++            options |= AVAudioSessionCategoryOptionAllowBluetoothHFP;
++
++        if (![session setCategory:AVAudioSessionCategoryPlayAndRecord
++                       withOptions:options
++                             error:&error] ||
++            ![session setMode:AVAudioSessionModeDefault error:&error])
++            return finish(
++                MixroomIOSAudioSessionPolicyStatus::sessionConfigurationFailed);
++        if (![session setActive:YES error:&error])
++            return finish(
++                MixroomIOSAudioSessionPolicyStatus::sessionActivationFailed);
++        activationCount = 1;
++
++        if (@available(ios 18, *))
++        {
++            SubstituteAudioUnit au;
++            if (!au.waitForAudioCallback())
++            {
++                [session setActive:NO error:nil];
++                return finish(
++                    MixroomIOSAudioSessionPolicyStatus::sessionActivationFailed);
++            }
++        }
++
++        NSMutableArray<AVAudioSessionPortDescription *> *matchingInputs =
++            [NSMutableArray array];
++        for (AVAudioSessionPortDescription *port in session.availableInputs ?: @[])
++            if ([port.portType isEqualToString:(wantsHfpInput
++                    ? AVAudioSessionPortBluetoothHFP
++                    : AVAudioSessionPortBuiltInMic)] &&
++                port.UID.length > 0)
++                [matchingInputs addObject:port];
++
++        if (matchingInputs.count == 0)
++        {
++            [session setActive:NO error:nil];
++            return finish(MixroomIOSAudioSessionPolicyStatus::noInput);
++        }
++        if (matchingInputs.count != 1)
++        {
++            [session setActive:NO error:nil];
++            return finish(MixroomIOSAudioSessionPolicyStatus::ambiguousInput);
++        }
++        if (![session setPreferredInput:matchingInputs.firstObject error:&error])
++        {
++            [session setActive:NO error:nil];
++            return finish(
++                MixroomIOSAudioSessionPolicyStatus::preferredInputFailed);
++        }
++        return finish(MixroomIOSAudioSessionPolicyStatus::ok);
++    }
+     //==============================================================================
+     struct iOSAudioIODevice::Pimpl final : public AsyncUpdater
+@@ -355,15 +523,23 @@
          {
              JUCE_IOS_AUDIO_LOG("Creating iOS audio device");
  
@@ -94,7 +216,7 @@
  
              sessionHolder->activeDevices.add(this);
          }
-@@ -393,7 +453,7 @@
+@@ -393,7 +569,7 @@
                                                                        error:&error]);
          }
  
@@ -103,7 +225,7 @@
          {
              JUCE_NSERROR_CHECK([[AVAudioSession sharedInstance] setActive:enabled
                                                                      error:&error]);
-@@ -636,7 +696,93 @@
+@@ -636,7 +812,105 @@
              JUCE_IOS_AUDIO_LOG ("Sample rate after detecting available sample rates: " << sampleRate);
  
              availableSampleRates = sampleRates;
@@ -113,6 +235,8 @@
 +        {
 +            const auto startedAt = std::chrono::steady_clock::now();
 +            const auto policy = mixroomIOSCurrentPolicy();
++            if (mixroomIOSConsumePreparedSession(policy))
++                return true;
 +            int activationCount = 0;
 +            auto session = [AVAudioSession sharedInstance];
 +            NSError *error = nil;
@@ -128,13 +252,19 @@
 +            if (policy == MixroomIOSAudioSessionPolicy::legacyManaged)
 +                return finish(MixroomIOSAudioSessionPolicyStatus::sessionConfigurationFailed);
 +
-+            const BOOL wantsInput = policy == MixroomIOSAudioSessionPolicy::v2BuiltInDuplex;
++            const BOOL wantsBuiltInInput =
++                policy == MixroomIOSAudioSessionPolicy::v2BuiltInDuplex;
++            const BOOL wantsHfpInput =
++                policy == MixroomIOSAudioSessionPolicy::v2BluetoothHfpDuplex;
++            const BOOL wantsInput = wantsBuiltInInput || wantsHfpInput;
 +            const auto category = wantsInput
 +                ? AVAudioSessionCategoryPlayAndRecord
 +                : AVAudioSessionCategoryPlayback;
 +            AVAudioSessionCategoryOptions options = AVAudioSessionCategoryOptionMixWithOthers;
-+            if (wantsInput)
++            if (wantsBuiltInInput)
 +                options |= AVAudioSessionCategoryOptionDefaultToSpeaker;
++            else if (wantsHfpInput)
++                options |= AVAudioSessionCategoryOptionAllowBluetoothHFP;
 +
 +            if (![session setCategory:category withOptions:options error:&error] ||
 +                ![session setMode:AVAudioSessionModeDefault error:&error])
@@ -156,24 +286,26 @@
 +
 +            if (wantsInput)
 +            {
-+                NSMutableArray<AVAudioSessionPortDescription *> *builtInInputs =
++                NSMutableArray<AVAudioSessionPortDescription *> *matchingInputs =
 +                    [NSMutableArray array];
 +                for (AVAudioSessionPortDescription *port in session.availableInputs ?: @[])
-+                    if ([port.portType isEqualToString:AVAudioSessionPortBuiltInMic] &&
++                    if ([port.portType isEqualToString:(wantsHfpInput
++                            ? AVAudioSessionPortBluetoothHFP
++                            : AVAudioSessionPortBuiltInMic)] &&
 +                        port.UID.length > 0)
-+                        [builtInInputs addObject:port];
++                        [matchingInputs addObject:port];
 +
-+                if (builtInInputs.count == 0)
++                if (matchingInputs.count == 0)
 +                {
 +                    [session setActive:NO error:nil];
 +                    return finish(MixroomIOSAudioSessionPolicyStatus::noInput);
 +                }
-+                if (builtInInputs.count != 1)
++                if (matchingInputs.count != 1)
 +                {
 +                    [session setActive:NO error:nil];
 +                    return finish(MixroomIOSAudioSessionPolicyStatus::ambiguousInput);
 +                }
-+                if (![session setPreferredInput:builtInInputs.firstObject error:&error])
++                if (![session setPreferredInput:matchingInputs.firstObject error:&error])
 +                {
 +                    [session setActive:NO error:nil];
 +                    return finish(MixroomIOSAudioSessionPolicyStatus::preferredInputFailed);
@@ -189,15 +321,17 @@
 +                return;
 +
 +            auto session = [AVAudioSession sharedInstance];
-+            if (mixroomIOSCurrentPolicy() == MixroomIOSAudioSessionPolicy::v2BuiltInDuplex)
++            if (mixroomIOSCurrentPolicy() == MixroomIOSAudioSessionPolicy::v2BuiltInDuplex ||
++                mixroomIOSCurrentPolicy() == MixroomIOSAudioSessionPolicy::v2BluetoothHfpDuplex)
 +                [session setPreferredInput:nil error:nil];
 +            [session setActive:NO error:nil];
++            mixroomIOSClearPreparedSession();
 +            v2SessionActive = false;
 +        }
  
          void updateHardwareInfo(bool forceUpdate = false)
          {
-@@ -663,11 +809,15 @@
+@@ -663,11 +928,15 @@
              JUCE_IOS_AUDIO_LOG("Actual buffer size: " << bufferSize);
          }
  
@@ -215,7 +349,7 @@
  
              firstHostTime = true;
              lastNumFrames = 0;
-@@ -685,13 +835,37 @@
+@@ -685,13 +963,38 @@
                                 << ", targetSampleRate: " << targetSampleRate
                                 << ", targetBufferSize: " << targetBufferSize);
  
@@ -231,7 +365,8 @@
 +                const bool channelPolicyMatches =
 +                    (policy == MixroomIOSAudioSessionPolicy::v2PlaybackOnly &&
 +                     requestedInputChannels.isZero()) ||
-+                    (policy == MixroomIOSAudioSessionPolicy::v2BuiltInDuplex &&
++                    ((policy == MixroomIOSAudioSessionPolicy::v2BuiltInDuplex ||
++                      policy == MixroomIOSAudioSessionPolicy::v2BluetoothHfpDuplex) &&
 +                     requestedInputChannels.countNumberOfSetBits() == 1);
 +                if (!channelPolicyMatches)
 +                {
@@ -260,7 +395,7 @@
  
              isRunning = true;
  
-@@ -726,8 +900,12 @@
+@@ -726,8 +1019,12 @@
                      audioUnit = nullptr;
                  }
  
@@ -275,7 +410,7 @@
          }
  
          void start(AudioIODeviceCallback *newCallback)
-@@ -962,17 +1140,30 @@
+@@ -962,17 +1259,30 @@
              const ScopedLock myScopedLock(callbackLock);
  
              JUCE_IOS_AUDIO_LOG("handleStatusChange: enabled: " << (int)enabled << ", reason: " << reason);
@@ -316,7 +451,7 @@
          }
  
          void handleRouteChange(AVAudioSessionRouteChangeReason reason)
-@@ -1567,10 +1758,11 @@
+@@ -1567,10 +1877,11 @@
  
          BigInteger requestedInputChannels, requestedOutputChannels;
  

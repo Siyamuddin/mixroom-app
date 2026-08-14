@@ -41,6 +41,31 @@ class BluetoothRouteReportSerializerV2 {
       'juce': juce,
       'unavailableReasons': snapshot.unavailableReasons,
       'observation': snapshot.observation.toMap(),
+      'duplexProbe': _sanitizeDuplexProbe(snapshot.duplexProbe),
+    };
+  }
+
+  Map<String, dynamic>? _sanitizeDuplexProbe(
+    AudioRouteDuplexProbeFactsV2? probe,
+  ) {
+    if (probe == null) return null;
+    Map<String, dynamic>? endpoint(AudioRouteEndpointV2? value, int index) =>
+        value == null ? null : _sanitizeEndpoint(value, index);
+    return <String, dynamic>{
+      'status': probe.status,
+      'diagnosticCode': probe.diagnosticCode,
+      'validationStage': probe.validationStage,
+      'categoryOptions': probe.categoryOptions,
+      'phase': probe.phase,
+      'terminalCause': probe.terminalCause,
+      'actualCallbackCount': probe.actualCallbackCount,
+      'cleanupOutcome': probe.cleanupOutcome,
+      'operationId': probe.operationId,
+      'elapsedMs': probe.elapsedMs,
+      'sourceOutput': endpoint(probe.sourceOutput, 0),
+      'duplexInput': endpoint(probe.duplexInput, 0),
+      'duplexOutput': endpoint(probe.duplexOutput, 1),
+      'restoredOutput': endpoint(probe.restoredOutput, 2),
     };
   }
 

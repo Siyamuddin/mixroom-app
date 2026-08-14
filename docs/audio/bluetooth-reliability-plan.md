@@ -1188,6 +1188,78 @@ close it, and restore the exact original A2DP identity. Recording and clip
 insertion remain disabled until that route-only experiment is responsive,
 cancellable, and repeatable on hardware.
 
+#### Checkpoint 7G — writer-free iOS HFP duplex proof
+
+The next implementation isolates the only unproven iOS recording primitive
+from the writer and recording UI. A debug-only probe starts on one verified
+A2DP output, asks the JUCE-owned session policy for exactly one observable HFP
+input, verifies the resulting HFP input/output route and active callback, then
+immediately restores the exact original A2DP endpoint with zero inputs.
+
+JUCE remains the sole executor of AVAudioSession and Audio Unit mutations. The
+plugin owns only a bounded source/target operation record and actual-state
+verification. Notifications are consumed as intentional only when the complete
+input/output fingerprint matches the operation's exact source or verified
+target; disconnects, interruptions, missing routes, and unrelated routes retain
+the normal failure boundary. There is no writer, monitoring, retry, polling,
+delay, forced rate, fixed buffer, or device-name matching in this checkpoint.
+Ordinary A2DP Record remains an immediate read-only rejection.
+
+On iOS 26.5 hardware, the public category-options readback normalized to
+`mixWithOthers` after the explicitly configured HFP input was selected, while
+the actual route contained one HFP input and one HFP output. Validation therefore
+requires the successful JUCE HFP policy result and the complete actual HFP
+route. It still rejects A2DP-recording and default-speaker options during the
+duplex phase; the normalized absence of the enabling bit is not treated as a
+route failure after HFP has demonstrably become active.
+
+The physical gate requires five responsive A2DP → HFP → exact A2DP round trips,
+one cancellation, and one disconnect failure. Until that gate passes, HFP is a
+diagnostic capability only and Bluetooth recording remains unsupported.
+
+Five ordinary round trips passed on the iPad, proving the JUCE-owned transition
+from stereo A2DP to native mono HFP duplex and back to the exact source A2DP
+identity. Removing the headset during the probe exposed a separate callback
+admission race: a transitional callback could reach graph effects after the
+device stop had cleared its prepared block and channel facts, producing the
+`NativeEffects.h:28` assertion.
+
+The disconnect-safety boundary therefore lives at the shared JUCE callback, not
+inside effects or Bluetooth timing. A callback is admitted only after device and
+graph preparation publishes an exact block capacity and channel shape; teardown
+closes that gate before stopping the player. Invalid or stale callbacks clear
+available output and return before capture, transport, graph, effects, meters,
+metronome, or writer work. Physical removal or interruption also marks the
+one-shot intent terminal before main-thread observation, so the probe closes the
+partial engine and requires an editor reopen instead of forcing A2DP restoration.
+No retry, delay, polling, scratch-buffer enlargement, or callback-thread device
+operation is introduced. Post-correction disconnect evidence remains pending the
+physical iPad gate.
+
+#### Checkpoint 7H — asynchronous single-owner duplex lifecycle
+
+The remaining disconnect freeze was traced to explicit AVAudioSession and JUCE
+device transitions executing inside Flutter's platform-thread method handler.
+The writer-free proof now uses one private serial iOS lifecycle lane. Flutter
+receives the result asynchronously, while ordinary iOS output changes remain
+owned by JUCE's native route handling.
+
+The operation retains its exact A2DP source, coordinator generation, complete
+route fingerprints, lifecycle phase, and one cleanup claim. A matching HFP
+route notification can wake the transition without polling. Physical removal,
+interruption, missing routes, and unrelated routes atomically invalidate the
+operation and close it without forcing A2DP restoration. Ordinary validation
+failure may restore the exact source once. Abort and shutdown serialize behind
+the same owner, so late native work cannot race disposal.
+
+HFP readiness now requires at least one valid callback with the prepared mono
+input/output shape; `audioDeviceAboutToStart` alone is not accepted. A one-second
+event wait bounds callback proof, and one two-second operation deadline only
+terminates an uncompleted check—it never retries or initiates recovery. Reports
+remain schema-version 1 and add nullable phase, callback-count, terminal-cause,
+and cleanup-outcome evidence. Bluetooth recording and the realtime WAV writer
+remain disconnected from this proof.
+
 ### Phase 8 — Complete A/B hardware validation
 
 Run Legacy and V2 with the same build, project, device, headset, actions, and
@@ -1350,8 +1422,7 @@ Each run records:
 
 ## Immediate next step
 
-Review and approve Checkpoint 7E as the next code boundary. Then migrate the
-already-working iOS V2 playback-only and built-in-duplex paths to one JUCE
-session-mutation executor and rerun their existing acceptance gates. Bluetooth
-recording remains rejected. No HFP code is added until the ownership migration
-passes.
+Complete the Checkpoint 7H physical disconnect gate. After it passes, correct
+the WAV capture path so realtime callbacks never allocate, lock, or write to
+disk. Only then attach recording and clip insertion to the already-verified HFP
+duplex lifecycle.

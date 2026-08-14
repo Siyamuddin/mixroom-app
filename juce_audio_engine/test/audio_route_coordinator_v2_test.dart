@@ -36,10 +36,14 @@ AudioRouteSnapshotV2 _snapshot({
   });
 }
 
-AudioRouteChangeEventV2 _event(int generation, String fingerprint) {
+AudioRouteChangeEventV2 _event(
+  int generation,
+  String fingerprint, {
+  String cause = 'defaultOutputChanged',
+}) {
   return AudioRouteChangeEventV2(
     generation: generation,
-    cause: 'defaultOutputChanged',
+    cause: cause,
     fingerprint: fingerprint,
     transportWasPlaying: true,
     snapshot: _snapshot(generation: generation),
@@ -141,8 +145,31 @@ void main() {
     await _flush();
     await _flush();
 
-    expect(adapter.appliedGenerations, <int>[1]);
+    expect(adapter.appliedGenerations, <int>[2]);
     expect(transitions, hasLength(1));
+    await coordinator.dispose();
+  });
+
+  test('same-fingerprint terminal events are never suppressed', () async {
+    final adapter = _FakeAdapter();
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+
+    adapter.controller.add(_event(1, 'same'));
+    await _flush();
+    await _flush();
+    adapter.controller.add(_event(
+      2,
+      'same',
+      cause: 'oldDeviceUnavailable',
+    ));
+    await _flush();
+    await _flush();
+
+    expect(adapter.appliedGenerations, <int>[1, 2]);
     await coordinator.dispose();
   });
 

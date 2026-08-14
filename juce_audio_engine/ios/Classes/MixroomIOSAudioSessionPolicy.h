@@ -7,6 +7,7 @@ enum class MixroomIOSAudioSessionPolicy : std::int32_t
     legacyManaged = 0,
     v2PlaybackOnly = 1,
     v2BuiltInDuplex = 2,
+    v2BluetoothHfpDuplex = 3,
 };
 
 enum class MixroomIOSAudioSessionPolicyStatus : std::int32_t
@@ -29,6 +30,8 @@ struct MixroomIOSAudioSessionPolicyFacts
 
 extern "C" void mixroomIOSSetAudioSessionPolicy(
     MixroomIOSAudioSessionPolicy policy) noexcept;
+
+extern "C" bool mixroomIOSPrepareAudioSessionPolicy() noexcept;
 
 extern "C" MixroomIOSAudioSessionPolicyFacts
 mixroomIOSGetAudioSessionPolicyFacts() noexcept;

@@ -2594,7 +2594,8 @@ bool JuceEngine::openPlaybackOutputOnlyV2(const juce::String &outputDeviceName)
 }
 
 bool JuceEngine::openRecordingInputV2(const juce::String &outputDeviceName,
-                                      const juce::String &inputDeviceName)
+                                      const juce::String &inputDeviceName,
+                                      bool bluetoothHfp)
 {
 #if (JUCE_MAC && !JUCE_IOS) || JUCE_IOS
 #if JUCE_MAC && !JUCE_IOS
@@ -2610,7 +2611,9 @@ bool JuceEngine::openRecordingInputV2(const juce::String &outputDeviceName,
     deviceManager.closeAudioDevice();
 #if JUCE_IOS
     mixroomIOSSetAudioSessionPolicy(
-        MixroomIOSAudioSessionPolicy::v2BuiltInDuplex);
+        bluetoothHfp
+            ? MixroomIOSAudioSessionPolicy::v2BluetoothHfpDuplex
+            : MixroomIOSAudioSessionPolicy::v2BuiltInDuplex);
 #endif
 #if JUCE_MAC && !JUCE_IOS
     juce::AudioDeviceManager::AudioDeviceSetup setup;
@@ -2624,7 +2627,11 @@ bool JuceEngine::openRecordingInputV2(const juce::String &outputDeviceName,
     setup.useDefaultOutputChannels = true;
     const auto error = deviceManager.initialise(1, 2, nullptr, false, {}, &setup);
 #else
-    const auto error = deviceManager.initialise(1, 2, nullptr, true);
+    const auto error = deviceManager.initialise(
+        1,
+        bluetoothHfp ? 1 : 2,
+        nullptr,
+        true);
 #endif
     if (error.isNotEmpty())
     {
@@ -2645,7 +2652,7 @@ bool JuceEngine::openRecordingInputV2(const juce::String &outputDeviceName,
         deviceManager.closeAudioDevice();
     return valid;
 #else
-    juce::ignoreUnused(outputDeviceName, inputDeviceName);
+    juce::ignoreUnused(outputDeviceName, inputDeviceName, bluetoothHfp);
     return false;
 #endif
 }
@@ -2658,6 +2665,9 @@ bool JuceEngine::quiescePlaybackRouteV2(bool closeRemovedDevice)
 
     const bool wasPlaying = isPlayingAtomic.load(std::memory_order_relaxed);
     pause();
+#if JUCE_IOS
+    detachIOSBluetoothDuplexProbeCallback();
+#endif
     if (!v2PlaybackCallbackDetached && metronomeCallback != nullptr)
     {
         deviceManager.removeAudioCallback(metronomeCallback.get());
@@ -2745,10 +2755,96 @@ bool JuceEngine::reconfigureRecordingRouteV2(const juce::String &outputDeviceNam
 #endif
 }
 
+bool JuceEngine::prepareBluetoothDuplexSessionV2()
+{
+#if JUCE_IOS
+    if (!engineInitialized || !isV2PlaybackSession())
+        return false;
+    quiescePlaybackRouteV2(false);
+    deviceManager.closeAudioDevice();
+    mixroomIOSSetAudioSessionPolicy(
+        MixroomIOSAudioSessionPolicy::v2BluetoothHfpDuplex);
+    return mixroomIOSPrepareAudioSessionPolicy();
+#else
+    return false;
+#endif
+}
+
+bool JuceEngine::openPreparedBluetoothDuplexRouteV2()
+{
+#if JUCE_IOS
+    if (!engineInitialized || !isV2PlaybackSession() ||
+        isIOSIntentRouteInvalidatedV2())
+        return false;
+
+    const auto error = deviceManager.initialise(1, 1, nullptr, true);
+    if (error.isNotEmpty())
+    {
+        deviceManager.closeAudioDevice();
+        return false;
+    }
+    desiredInputOpenChannels.store(1, std::memory_order_relaxed);
+    liveInputMonitoringEnabled = false;
+    auto *device = deviceManager.getCurrentAudioDevice();
+    if (device == nullptr ||
+        device->getActiveInputChannels().countNumberOfSetBits() != 1 ||
+        device->getActiveOutputChannels().countNumberOfSetBits() <= 0 ||
+        device->getCurrentSampleRate() <= 1000.0 ||
+        device->getCurrentBufferSizeSamples() <= 0)
+    {
+        deviceManager.closeAudioDevice();
+        return false;
+    }
+    if (isIOSIntentRouteInvalidatedV2())
+    {
+        deviceManager.closeAudioDevice();
+        return false;
+    }
+
+    if (iosBluetoothDuplexProbeCallback == nullptr)
+        iosBluetoothDuplexProbeCallback =
+            std::make_unique<IOSBluetoothDuplexProbeCallback>();
+    deviceManager.addAudioCallback(iosBluetoothDuplexProbeCallback.get());
+    iosBluetoothDuplexProbeCallbackAttached = true;
+    if (!iosBluetoothDuplexProbeCallback->waitForFirstValidCallback(1000))
+    {
+        detachIOSBluetoothDuplexProbeCallback();
+        deviceManager.closeAudioDevice();
+        return false;
+    }
+    if (isIOSIntentRouteInvalidatedV2())
+    {
+        detachIOSBluetoothDuplexProbeCallback();
+        deviceManager.closeAudioDevice();
+        return false;
+    }
+    logCurrentAudioDeviceState("v2-bluetooth-hfp-duplex-probe");
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool JuceEngine::reconfigureBluetoothDuplexRouteV2()
+{
+#if JUCE_IOS
+    return prepareBluetoothDuplexSessionV2() &&
+        openPreparedBluetoothDuplexRouteV2();
+#else
+    return false;
+#endif
+}
+
 bool JuceEngine::validateRecordingRouteV2() const
 {
 #if (JUCE_MAC && !JUCE_IOS) || JUCE_IOS
-    if (!engineInitialized || !isV2PlaybackSession() || v2PlaybackCallbackDetached)
+    bool callbackReady = !v2PlaybackCallbackDetached;
+#if JUCE_IOS
+    if (iosBluetoothDuplexProbeCallbackAttached)
+        callbackReady = iosBluetoothDuplexProbeCallback != nullptr &&
+            iosBluetoothDuplexProbeCallback->hasCompletedValidCallback();
+#endif
+    if (!engineInitialized || !isV2PlaybackSession() || !callbackReady)
         return false;
     auto *device = deviceManager.getCurrentAudioDevice();
     return device != nullptr &&
@@ -2756,6 +2852,62 @@ bool JuceEngine::validateRecordingRouteV2() const
         device->getActiveOutputChannels().countNumberOfSetBits() > 0 &&
         device->getCurrentSampleRate() > 1000.0 &&
         device->getCurrentBufferSizeSamples() > 0;
+#else
+    return false;
+#endif
+}
+
+void JuceEngine::beginIOSIntentOperationV2() noexcept
+{
+#if JUCE_IOS
+    iosIntentRouteInvalidatedV2.store(false, std::memory_order_release);
+    iosIntentOperationActiveV2.store(true, std::memory_order_release);
+#endif
+}
+
+void JuceEngine::endIOSIntentOperationV2() noexcept
+{
+#if JUCE_IOS
+    iosIntentRouteInvalidatedV2.store(false, std::memory_order_release);
+    iosIntentOperationActiveV2.store(false, std::memory_order_release);
+#endif
+}
+
+void JuceEngine::detachIOSBluetoothDuplexProbeCallback() noexcept
+{
+#if JUCE_IOS
+    if (iosBluetoothDuplexProbeCallbackAttached &&
+        iosBluetoothDuplexProbeCallback != nullptr)
+    {
+        deviceManager.removeAudioCallback(
+            iosBluetoothDuplexProbeCallback.get());
+    }
+    iosBluetoothDuplexProbeCallbackAttached = false;
+#endif
+}
+
+void JuceEngine::markIOSIntentRouteInvalidatedV2() noexcept
+{
+#if JUCE_IOS
+    if (iosIntentOperationActiveV2.load(std::memory_order_acquire))
+        iosIntentRouteInvalidatedV2.store(true, std::memory_order_release);
+#endif
+}
+
+bool JuceEngine::isIOSIntentRouteInvalidatedV2() const noexcept
+{
+#if JUCE_IOS
+    return iosIntentOperationActiveV2.load(std::memory_order_acquire) &&
+        iosIntentRouteInvalidatedV2.load(std::memory_order_acquire);
+#else
+    return false;
+#endif
+}
+
+bool JuceEngine::isIOSIntentOperationActiveV2() const noexcept
+{
+#if JUCE_IOS
+    return iosIntentOperationActiveV2.load(std::memory_order_acquire);
 #else
     return false;
 #endif
@@ -2784,12 +2936,17 @@ void JuceEngine::shutdownEngine()
 {
     juceLogToFlutter("JuceEngine::shutdownEngine called");
 
+#if JUCE_IOS
+    detachIOSBluetoothDuplexProbeCallback();
+#endif
+
     if (!engineInitialized)
     {
         juceLogToFlutter("... skipped — engine not initialized yet.");
 #if JUCE_IOS
         mixroomIOSSetAudioSessionPolicy(
             MixroomIOSAudioSessionPolicy::legacyManaged);
+        iosBluetoothDuplexProbeCallback.reset();
 #endif
         audioRouteImplementation = AudioRouteImplementation::none;
         return;
@@ -2800,6 +2957,9 @@ void JuceEngine::shutdownEngine()
         deviceManager.removeAudioCallback(metronomeCallback.get());
         metronomeCallback.reset();
     }
+#if JUCE_IOS
+    iosBluetoothDuplexProbeCallback.reset();
+#endif
     deviceManager.removeChangeListener(this);
     clearMidiInputCallbacks();
     closeAllHostedPluginEditorWindows();
@@ -2902,6 +3062,7 @@ void JuceEngine::shutdownEngine()
     busGraphInitialised = false;
     engineInitialized = false;
     v2PlaybackCallbackDetached = false;
+    iosBluetoothDuplexProbeCallbackAttached = false;
     audioRouteImplementation = AudioRouteImplementation::none;
 }
 
@@ -7784,9 +7945,23 @@ juce::NamedValueSet JuceEngine::getEngineDiagnostics()
     const auto bufferSize = getKnownDeviceBufferSize(deviceManager, 512);
 
     out.set("deviceOpen", device != nullptr);
-    out.set("audioCallbackAttached",
-            engineInitialized && metronomeCallback != nullptr &&
-                (!isV2PlaybackSession() || !v2PlaybackCallbackDetached));
+    bool audioCallbackAttached =
+        engineInitialized && metronomeCallback != nullptr &&
+        (!isV2PlaybackSession() || !v2PlaybackCallbackDetached);
+#if JUCE_IOS
+    audioCallbackAttached = audioCallbackAttached ||
+        (engineInitialized && iosBluetoothDuplexProbeCallbackAttached &&
+         iosBluetoothDuplexProbeCallback != nullptr &&
+         iosBluetoothDuplexProbeCallback->hasCompletedValidCallback());
+#endif
+    out.set("audioCallbackAttached", audioCallbackAttached);
+#if JUCE_IOS
+    out.set(
+        "duplexProbeCallbackCount",
+        juce::var((juce::int64)(iosBluetoothDuplexProbeCallback != nullptr
+            ? iosBluetoothDuplexProbeCallback->getCallbackCount()
+            : 0)));
+#endif
     out.set("sampleRate", sampleRate);
     out.set("bufferSize", bufferSize);
     out.set("cpuUsage", deviceManager.getCpuUsage());

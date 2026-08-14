@@ -70,6 +70,7 @@ extern "C" void mixroomAdoptHostedPluginAuxiliaryWindows(int scopeKind,
                                                           void *ownerHandle);
 
 class MetronomeAudioCallback;
+class IOSBluetoothDuplexProbeCallback;
 
 class RoutedClipSource
 {
@@ -5883,7 +5884,15 @@ public:
     bool reconfigurePlaybackRouteV2(const juce::String &outputDeviceName);
     bool reconfigureRecordingRouteV2(const juce::String &outputDeviceName,
                                      const juce::String &inputDeviceName);
+    bool prepareBluetoothDuplexSessionV2();
+    bool openPreparedBluetoothDuplexRouteV2();
+    bool reconfigureBluetoothDuplexRouteV2();
     bool validateRecordingRouteV2() const;
+    void beginIOSIntentOperationV2() noexcept;
+    void endIOSIntentOperationV2() noexcept;
+    void markIOSIntentRouteInvalidatedV2() noexcept;
+    bool isIOSIntentOperationActiveV2() const noexcept;
+    bool isIOSIntentRouteInvalidatedV2() const noexcept;
     juce::String getAudioRouteImplementationName() const;
     bool isV2PlaybackSession() const noexcept;
     void loadTrack(int idx, const juce::File &file); // deprecated name (clip)
@@ -6318,9 +6327,16 @@ private:
     AudioRouteImplementation audioRouteImplementation =
         AudioRouteImplementation::none;
     bool v2PlaybackCallbackDetached = false;
+    std::atomic<bool> iosIntentOperationActiveV2{false};
+    std::atomic<bool> iosIntentRouteInvalidatedV2{false};
+    std::unique_ptr<IOSBluetoothDuplexProbeCallback>
+        iosBluetoothDuplexProbeCallback;
+    bool iosBluetoothDuplexProbeCallbackAttached = false;
+    void detachIOSBluetoothDuplexProbeCallback() noexcept;
     bool openPlaybackOutputOnlyV2(const juce::String &outputDeviceName);
     bool openRecordingInputV2(const juce::String &outputDeviceName,
-                              const juce::String &inputDeviceName);
+                              const juce::String &inputDeviceName,
+                              bool bluetoothHfp = false);
     juce::AudioFormatManager formatManager;
     juce::AudioPluginFormatManager pluginFormatManager;
     juce::AudioProcessorGraph graph;
@@ -7042,23 +7058,33 @@ public:
     // ===== AudioIODeviceCallback =====
     void audioDeviceAboutToStart(juce::AudioIODevice *device) override
     {
+        callbackReady.store(false, std::memory_order_release);
         sampleRate = device->getCurrentSampleRate();
-        expectedBlockSize = device->getCurrentBufferSizeSamples();
-        expectedInputChannels = device->getActiveInputChannels().countNumberOfSetBits();
-        expectedOutputChannels = device->getActiveOutputChannels().countNumberOfSetBits();
+        const int preparedBlockCapacity = device->getCurrentBufferSizeSamples();
+        const int preparedInputChannels =
+            device->getActiveInputChannels().countNumberOfSetBits();
+        const int preparedOutputChannels =
+            device->getActiveOutputChannels().countNumberOfSetBits();
         updateMsPerBeat();
         clickPhaseInc = juce::MathConstants<double>::twoPi * clickFrequency / sampleRate;
         engine.setBlockPlayingState(false);
         player.audioDeviceAboutToStart(device);
         engine.prepareLiveClipProcessorsForCurrentDevice();
         alignToTransport();
+        expectedBlockCapacity.store(preparedBlockCapacity, std::memory_order_relaxed);
+        expectedInputChannels.store(preparedInputChannels, std::memory_order_relaxed);
+        expectedOutputChannels.store(preparedOutputChannels, std::memory_order_relaxed);
+        callbackReady.store(
+            preparedBlockCapacity > 0 && preparedOutputChannels > 0,
+            std::memory_order_release);
     }
 
     void audioDeviceStopped() override
     {
-        expectedBlockSize = 0;
-        expectedInputChannels = 0;
-        expectedOutputChannels = 0;
+        callbackReady.store(false, std::memory_order_release);
+        expectedBlockCapacity.store(0, std::memory_order_relaxed);
+        expectedInputChannels.store(0, std::memory_order_relaxed);
+        expectedOutputChannels.store(0, std::memory_order_relaxed);
         player.audioDeviceStopped();
     }
 
@@ -7070,25 +7096,35 @@ public:
         int numSamples,
         const juce::AudioIODeviceCallbackContext &context) override
     {
-        const int knownBlockSize = expectedBlockSize;
-        const int knownInputs = expectedInputChannels;
-        const int knownOutputs = expectedOutputChannels;
+        const bool ready = callbackReady.load(std::memory_order_acquire);
+        const int knownBlockCapacity =
+            expectedBlockCapacity.load(std::memory_order_relaxed);
+        const int knownInputs =
+            expectedInputChannels.load(std::memory_order_relaxed);
+        const int knownOutputs =
+            expectedOutputChannels.load(std::memory_order_relaxed);
         const bool unexpectedCallbackShape =
+            !ready ||
+            numSamples <= 0 ||
             (numInputChannels > 0 && inputChannelData == nullptr) ||
             (numOutputChannels > 0 && outputChannelData == nullptr) ||
-            (knownBlockSize > 0 && numSamples > knownBlockSize) ||
-            (knownInputs > 0 && numInputChannels != knownInputs) ||
-            (knownOutputs > 0 && numOutputChannels != knownOutputs);
+            numSamples > knownBlockCapacity ||
+            numInputChannels != knownInputs ||
+            numOutputChannels != knownOutputs;
 
         if (unexpectedCallbackShape)
         {
-            for (int ch = 0; ch < numOutputChannels; ++ch)
+            if (outputChannelData != nullptr && numSamples > 0)
             {
-                if (outputChannelData[ch] != nullptr)
-                    juce::FloatVectorOperations::clear(outputChannelData[ch], numSamples);
+                for (int ch = 0; ch < numOutputChannels; ++ch)
+                {
+                    if (outputChannelData[ch] != nullptr)
+                        juce::FloatVectorOperations::clear(outputChannelData[ch], numSamples);
+                }
             }
 
-            engine.requestAudioDeviceRefreshAsync("unexpected-callback-shape");
+            if (!engine.isV2PlaybackSession())
+                engine.requestAudioDeviceRefreshAsync("unexpected-callback-shape");
             return;
         }
 
@@ -7248,9 +7284,10 @@ public:
 private:
     juce::AudioProcessorPlayer &player;
     JuceEngine &engine;
-    int expectedBlockSize = 0;
-    int expectedInputChannels = 0;
-    int expectedOutputChannels = 0;
+    std::atomic<bool> callbackReady{false};
+    std::atomic<int> expectedBlockCapacity{0};
+    std::atomic<int> expectedInputChannels{0};
+    std::atomic<int> expectedOutputChannels{0};
 
     bool enabled = false;
     bool isPlaying = false;
@@ -7318,4 +7355,112 @@ private:
         currentBeat = (int)std::floor(beatIndex) % beatsPerBar;
         nextBeatMs = (std::floor(beatIndex) + 1.0) * msPerBeat;
     }
+};
+
+class IOSBluetoothDuplexProbeCallback final
+    : public juce::AudioIODeviceCallback
+{
+public:
+    void audioDeviceAboutToStart(juce::AudioIODevice *device) override
+    {
+        ready.store(false, std::memory_order_release);
+        callbackCount.store(0, std::memory_order_relaxed);
+        firstValidCallback.reset();
+        if (device == nullptr)
+            return;
+
+        const int blockCapacity = device->getCurrentBufferSizeSamples();
+        const int inputChannels =
+            device->getActiveInputChannels().countNumberOfSetBits();
+        const int outputChannels =
+            device->getActiveOutputChannels().countNumberOfSetBits();
+        expectedBlockCapacity.store(blockCapacity, std::memory_order_relaxed);
+        expectedInputChannels.store(inputChannels, std::memory_order_relaxed);
+        expectedOutputChannels.store(outputChannels, std::memory_order_relaxed);
+        ready.store(
+            device->getCurrentSampleRate() > 1000.0 &&
+                blockCapacity > 0 && inputChannels == 1 &&
+                outputChannels > 0,
+            std::memory_order_release);
+    }
+
+    void audioDeviceStopped() override
+    {
+        ready.store(false, std::memory_order_release);
+        expectedBlockCapacity.store(0, std::memory_order_relaxed);
+        expectedInputChannels.store(0, std::memory_order_relaxed);
+        expectedOutputChannels.store(0, std::memory_order_relaxed);
+        firstValidCallback.signal();
+    }
+
+    void audioDeviceIOCallbackWithContext(
+        const float *const *inputChannelData,
+        int numInputChannels,
+        float *const *outputChannelData,
+        int numOutputChannels,
+        int numSamples,
+        const juce::AudioIODeviceCallbackContext &) override
+    {
+        if (outputChannelData != nullptr && numSamples > 0)
+        {
+            for (int ch = 0; ch < numOutputChannels; ++ch)
+                if (outputChannelData[ch] != nullptr)
+                    juce::FloatVectorOperations::clear(
+                        outputChannelData[ch], numSamples);
+        }
+
+        bool pointersValid = inputChannelData != nullptr &&
+            outputChannelData != nullptr;
+        for (int ch = 0; pointersValid && ch < numInputChannels; ++ch)
+            pointersValid = inputChannelData[ch] != nullptr;
+        for (int ch = 0; pointersValid && ch < numOutputChannels; ++ch)
+            pointersValid = outputChannelData[ch] != nullptr;
+
+        const bool valid = ready.load(std::memory_order_acquire) &&
+            numSamples > 0 &&
+            numSamples <= expectedBlockCapacity.load(
+                std::memory_order_relaxed) &&
+            numInputChannels == expectedInputChannels.load(
+                std::memory_order_relaxed) &&
+            numOutputChannels == expectedOutputChannels.load(
+                std::memory_order_relaxed) &&
+            pointersValid;
+        if (valid)
+        {
+            callbackCount.fetch_add(1, std::memory_order_relaxed);
+            firstValidCallback.signal();
+        }
+    }
+
+    bool isReady() const noexcept
+    {
+        return ready.load(std::memory_order_acquire);
+    }
+
+    bool hasCompletedValidCallback() const noexcept
+    {
+        return isReady() &&
+            callbackCount.load(std::memory_order_acquire) > 0;
+    }
+
+    bool waitForFirstValidCallback(int timeoutMilliseconds) noexcept
+    {
+        if (hasCompletedValidCallback())
+            return true;
+        return firstValidCallback.wait(timeoutMilliseconds) &&
+            hasCompletedValidCallback();
+    }
+
+    std::uint64_t getCallbackCount() const noexcept
+    {
+        return callbackCount.load(std::memory_order_acquire);
+    }
+
+private:
+    std::atomic<bool> ready{false};
+    std::atomic<int> expectedBlockCapacity{0};
+    std::atomic<int> expectedInputChannels{0};
+    std::atomic<int> expectedOutputChannels{0};
+    std::atomic<std::uint64_t> callbackCount{0};
+    juce::WaitableEvent firstValidCallback;
 };

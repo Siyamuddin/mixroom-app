@@ -110,6 +110,7 @@ class AudioSessionFactsV2 {
   const AudioSessionFactsV2({
     this.category,
     this.mode,
+    this.categoryOptions = const <String>[],
     this.sampleRateHz,
     this.ioBufferDurationSeconds,
     this.inputChannelCount,
@@ -123,6 +124,7 @@ class AudioSessionFactsV2 {
 
   final String? category;
   final String? mode;
+  final List<String> categoryOptions;
   final double? sampleRateHz;
   final double? ioBufferDurationSeconds;
   final int? inputChannelCount;
@@ -137,6 +139,11 @@ class AudioSessionFactsV2 {
     return AudioSessionFactsV2(
       category: map['category']?.toString(),
       mode: map['mode']?.toString(),
+      categoryOptions: map['categoryOptions'] is List
+          ? List<String>.unmodifiable(
+              (map['categoryOptions'] as List).map((value) => value.toString()),
+            )
+          : const <String>[],
       sampleRateHz: _nullableDouble(map['sampleRateHz']),
       ioBufferDurationSeconds: _nullableDouble(map['ioBufferDurationSeconds']),
       inputChannelCount: _nullableInt(map['inputChannelCount']),
@@ -153,6 +160,7 @@ class AudioSessionFactsV2 {
   Map<String, dynamic> toMap() => <String, dynamic>{
         'category': category,
         'mode': mode,
+        'categoryOptions': categoryOptions,
         'sampleRateHz': sampleRateHz,
         'ioBufferDurationSeconds': ioBufferDurationSeconds,
         'inputChannelCount': inputChannelCount,
@@ -313,6 +321,7 @@ class AudioRouteSnapshotV2 {
     required this.unavailableReasons,
     this.intent = AudioRouteIntentV2.playbackOnly,
     this.observation = const AudioRouteObservationFactsV2(),
+    this.duplexProbe,
   });
 
   final int schemaVersion;
@@ -330,6 +339,7 @@ class AudioRouteSnapshotV2 {
   final Map<String, String> unavailableReasons;
   final AudioRouteIntentV2 intent;
   final AudioRouteObservationFactsV2 observation;
+  final AudioRouteDuplexProbeFactsV2? duplexProbe;
 
   bool get hasBluetoothOutput => outputs.any(
         (endpoint) => <AudioRouteKindV2>{
@@ -399,6 +409,9 @@ class AudioRouteSnapshotV2 {
       observation: AudioRouteObservationFactsV2.fromMap(
         nestedMap('observation'),
       ),
+      duplexProbe: map['duplexProbe'] is Map
+          ? AudioRouteDuplexProbeFactsV2.fromMap(nestedMap('duplexProbe'))
+          : null,
     );
   }
 
@@ -418,6 +431,88 @@ class AudioRouteSnapshotV2 {
         'unavailableReasons': unavailableReasons,
         'intent': _wireName(intent),
         'observation': observation.toMap(),
+        'duplexProbe': duplexProbe?.toRawMap(),
+      };
+}
+
+class AudioRouteDuplexProbeFactsV2 {
+  const AudioRouteDuplexProbeFactsV2({
+    required this.status,
+    required this.diagnosticCode,
+    required this.validationStage,
+    required this.categoryOptions,
+    this.phase,
+    this.terminalCause,
+    this.actualCallbackCount,
+    this.cleanupOutcome,
+    required this.operationId,
+    required this.elapsedMs,
+    this.sourceOutput,
+    this.duplexInput,
+    this.duplexOutput,
+    this.restoredOutput,
+  });
+
+  final String status;
+  final String diagnosticCode;
+  final String validationStage;
+  final List<String> categoryOptions;
+  final String? phase;
+  final String? terminalCause;
+  final int? actualCallbackCount;
+  final String? cleanupOutcome;
+  final int? operationId;
+  final int? elapsedMs;
+  final AudioRouteEndpointV2? sourceOutput;
+  final AudioRouteEndpointV2? duplexInput;
+  final AudioRouteEndpointV2? duplexOutput;
+  final AudioRouteEndpointV2? restoredOutput;
+
+  factory AudioRouteDuplexProbeFactsV2.fromMap(Map<String, dynamic> map) {
+    AudioRouteEndpointV2? endpoint(String key) {
+      final raw = map[key];
+      return raw is Map
+          ? AudioRouteEndpointV2.fromMap(Map<String, dynamic>.from(raw))
+          : null;
+    }
+
+    return AudioRouteDuplexProbeFactsV2(
+      status: map['status']?.toString() ?? '',
+      diagnosticCode: map['diagnosticCode']?.toString() ?? '',
+      validationStage: map['validationStage']?.toString() ?? '',
+      categoryOptions: map['categoryOptions'] is List
+          ? List<String>.unmodifiable(
+              (map['categoryOptions'] as List).map((value) => value.toString()),
+            )
+          : const <String>[],
+      phase: map['phase']?.toString(),
+      terminalCause: map['terminalCause']?.toString(),
+      actualCallbackCount: _nullableInt(map['actualCallbackCount']),
+      cleanupOutcome: map['cleanupOutcome']?.toString(),
+      operationId: _nullableInt(map['operationId']),
+      elapsedMs: _nullableInt(map['elapsedMs']),
+      sourceOutput: endpoint('sourceOutput'),
+      duplexInput: endpoint('duplexInput'),
+      duplexOutput: endpoint('duplexOutput'),
+      restoredOutput: endpoint('restoredOutput'),
+    );
+  }
+
+  Map<String, dynamic> toRawMap() => <String, dynamic>{
+        'status': status,
+        'diagnosticCode': diagnosticCode,
+        'validationStage': validationStage,
+        'categoryOptions': categoryOptions,
+        'phase': phase,
+        'terminalCause': terminalCause,
+        'actualCallbackCount': actualCallbackCount,
+        'cleanupOutcome': cleanupOutcome,
+        'operationId': operationId,
+        'elapsedMs': elapsedMs,
+        'sourceOutput': sourceOutput?.toRawMap(),
+        'duplexInput': duplexInput?.toRawMap(),
+        'duplexOutput': duplexOutput?.toRawMap(),
+        'restoredOutput': restoredOutput?.toRawMap(),
       };
 }
 

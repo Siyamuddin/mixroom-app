@@ -66,10 +66,16 @@ class AudioRouteCoordinatorV2 {
 
   void _receive(AudioRouteChangeEventV2 event) {
     if (_disposed || event.generation <= _latestGeneration) return;
-    if (event.fingerprint.isNotEmpty && event.fingerprint == _lastFingerprint) {
+    _latestGeneration = event.generation;
+    final terminalEvent = event.cause == 'oldDeviceUnavailable' ||
+        event.cause == 'audioInterrupted' ||
+        event.cause == 'noSuitableRoute';
+    if (!terminalEvent &&
+        event.fingerprint.isNotEmpty &&
+        event.fingerprint == _lastFingerprint) {
+      if (_pending != null) _pending = event;
       return;
     }
-    _latestGeneration = event.generation;
     _lastFingerprint = event.fingerprint;
     final effectiveIntent = _transitioningIntent ?? _intent;
     if (effectiveIntent != AudioRouteIntentV2.playbackOnly) {
@@ -114,7 +120,7 @@ class AudioRouteCoordinatorV2 {
     if (_disposed) return;
     final stale = result.generation != event.generation ||
         result.diagnosticCode == 'stale_generation' ||
-        _latestGeneration > result.generation;
+        (_latestGeneration > result.generation && _pending != null);
     if (!stale) {
       _setState(result.succeeded
           ? AudioRouteCoordinatorStateV2.stable

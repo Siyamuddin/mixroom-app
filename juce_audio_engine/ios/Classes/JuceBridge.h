@@ -9,7 +9,14 @@
 + (BOOL)reconfigurePlaybackRouteV2ObjC:(NSString * _Nonnull)outputDeviceName;
 + (BOOL)reconfigureRecordingRouteV2ObjC:(NSString * _Nonnull)outputDeviceName
                               inputName:(NSString * _Nonnull)inputDeviceName;
++ (BOOL)prepareBluetoothDuplexSessionV2ObjC;
++ (BOOL)openPreparedBluetoothDuplexRouteV2ObjC;
++ (BOOL)reconfigureBluetoothDuplexRouteV2ObjC;
 + (BOOL)validateRecordingRouteV2ObjC;
++ (void)beginIOSIntentOperationV2ObjC;
++ (void)endIOSIntentOperationV2ObjC;
++ (void)markIOSIntentRouteInvalidatedV2ObjC;
++ (BOOL)isIOSIntentRouteInvalidatedV2ObjC;
 + (NSDictionary<NSString *, id> * _Nonnull)getIOSAudioSessionPolicyFactsObjC;
 + (NSString * _Nonnull)getAudioRouteImplementationObjC;
 + (void)initializeMessageManager;
